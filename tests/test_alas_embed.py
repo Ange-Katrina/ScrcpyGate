@@ -17,6 +17,7 @@ from app.alas_embed import (
     proxy_decision,
     resolve_base_url,
     runtime_url_candidates,
+    websocket_message_allowed,
 )
 
 
@@ -264,6 +265,22 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
+
+
+class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
+    """验证 WebSocket 消息权限兜底。"""
+
+    def test_message_with_other_config_is_denied(self):
+        """包含其它配置名的 WebSocket 文本消息会被拒绝。"""
+        self.assertFalse(websocket_message_allowed('{"config":"其它"}', "挂机-云"))
+
+    def test_message_with_bound_config_is_allowed(self):
+        """包含绑定配置名的 WebSocket 文本消息会被允许。"""
+        self.assertTrue(websocket_message_allowed('{"config":"挂机-云"}', "挂机-云"))
+
+    def test_non_json_message_is_allowed(self):
+        """非 JSON WebSocket 文本消息不做配置拦截。"""
+        self.assertTrue(websocket_message_allowed("ping", "挂机-云"))
 
 
 if __name__ == "__main__":

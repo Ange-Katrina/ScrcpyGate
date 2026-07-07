@@ -610,6 +610,38 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision)
 
 
+@app.websocket("/alas/embed/proxy")
+@app.websocket("/alas/embed/proxy/{path:path}")
+async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
+    """执行 ALAS WebSocket 代理入口权限检查并返回占位结果。"""
+    user = security.get_current_user(websocket)
+    if not user:
+        await websocket.close(code=1008)
+        return
+    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+    query_params = {key: websocket.query_params.getlist(key) for key in websocket.query_params.keys()}
+    decision = alas_embed.proxy_decision(user, binding, path, query_params)
+    if not decision.allowed:
+        storage.audit(user["username"], "alas_embed_ws_denied", decision.reason)
+        await websocket.close(code=1008)
+        return
+    settings = alas.public_settings()
+    raw_enabled = storage.get_setting("alas_enabled", "false")
+    raw_base_url = storage.get_setting("alas_base_url", "")
+    if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
+        storage.audit(user["username"], "alas_embed_ws_denied", "ALAS control is disabled")
+        await websocket.close(code=1011)
+        return
+    if not raw_base_url.strip():
+        storage.audit(user["username"], "alas_embed_ws_denied", "ALAS Runtime is not configured")
+        await websocket.close(code=1011)
+        return
+    storage.audit(user["username"], "alas_embed_ws_skeleton", path or "/")
+    await websocket.accept()
+    await websocket.send_text("ALAS websocket proxy is not implemented")
+    await websocket.close(code=1000)
+
+
 @app.get("/api/admin/overview")
 async def admin_overview(request: Request):
     user = security.require_admin(request)

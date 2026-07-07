@@ -3,6 +3,7 @@
 
 import html as html_utils
 import ipaddress
+import json
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
@@ -327,6 +328,21 @@ def rewrite_location_header(location: str, base_url: str) -> str:
     if parsed.fragment:
         rewritten = f"{rewritten}#{parsed.fragment}"
     return rewritten
+
+
+def websocket_message_allowed(message: str, config_name: str) -> bool:
+    """检查 WebSocket 文本消息是否试图访问其它配置。"""
+    try:
+        payload = json.loads(message)
+    except Exception:
+        return True
+    if not isinstance(payload, dict):
+        return True
+    for key in CONFIG_QUERY_KEYS:
+        value = str(payload.get(key) or "").strip()
+        if value and value != config_name:
+            return False
+    return True
 
 
 def _content_type_media_type(content_type: str) -> str:

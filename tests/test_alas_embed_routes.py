@@ -411,6 +411,75 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(res.status_code, 502)
 
+    def websocket_close_code(self, path):
+        """连接 WebSocket 并返回服务端关闭码。"""
+        try:
+            with self.client.websocket_connect(path) as websocket:
+                message = websocket.receive()
+                return message.get("code")
+        except Exception as exc:
+            return getattr(exc, "code", None) or getattr(exc, "status_code", None)
+
+    def test_websocket_denies_unbound_user(self):
+        """未绑定普通用户连接 WebSocket 代理时被策略拒绝。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        self.assertEqual(self.websocket_close_code("/alas/embed/proxy/ws"), 1008)
+
+    def test_websocket_allows_bound_user_into_skeleton(self):
+        """已绑定普通用户可通过 WebSocket 权限检查进入占位骨架。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            self.assertEqual(websocket.receive_text(), "ALAS websocket proxy is not implemented")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+
+    def test_websocket_denies_other_config_for_bound_user(self):
+        """普通用户通过查询参数请求其它配置时 WebSocket 代理拒绝连接。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+
+        self.assertEqual(self.websocket_close_code("/alas/embed/proxy/ws?config=其它"), 1008)
+
+    def test_websocket_allows_admin_into_skeleton(self):
+        """管理员可通过 WebSocket 权限检查进入占位骨架。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=其它") as websocket:
+            self.assertEqual(websocket.receive_text(), "ALAS websocket proxy is not implemented")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+
+    def test_websocket_denies_when_alas_disabled(self):
+        """ALAS 未启用时 WebSocket 代理拒绝连接。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "false")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        self.assertEqual(self.websocket_close_code("/alas/embed/proxy/ws"), 1011)
+
+    def test_websocket_denies_when_base_url_missing(self):
+        """ALAS Runtime 未配置时 WebSocket 代理拒绝连接。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "")
+
+        self.assertEqual(self.websocket_close_code("/alas/embed/proxy/ws"), 1011)
+
 
 if __name__ == "__main__":
     unittest.main()
