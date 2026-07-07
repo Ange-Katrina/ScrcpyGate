@@ -4,6 +4,7 @@
 import html as html_utils
 import ipaddress
 from dataclasses import dataclass
+from html import escape
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, build_opener, ProxyHandler
@@ -15,33 +16,6 @@ MANAGEMENT_MARKERS = ("管理", "Manage", "Settings.Admin", "alas.config_list")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 
 
-def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
-    """生成 ALAS 嵌入入口页面的完整 HTML 外壳。"""
-    safe_title = html_utils.escape(str(title or ""), quote=True)
-    safe_iframe_src = html_utils.escape(str(iframe_src or ""), quote=True)
-    safe_message = html_utils.escape(str(message or ""), quote=True)
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{safe_title}</title>
-  <style>
-    html, body {{ margin: 0; height: 100%; background: #0f172a; color: #e5e7eb; font-family: system-ui, sans-serif; }}
-    .bar {{ box-sizing: border-box; min-height: 48px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; background: #111827; border-bottom: 1px solid #334155; }}
-    .title {{ font-weight: 700; }}
-    .message {{ color: #cbd5e1; font-size: 14px; }}
-    .home {{ margin-left: auto; color: #93c5fd; text-decoration: none; }}
-    iframe {{ display: block; width: 100%; height: calc(100vh - 49px); border: 0; background: #ffffff; }}
-  </style>
-</head>
-<body>
-  <div class="bar"><span class="title">{safe_title}</span><span class="message">{safe_message}</span><a class="home" href="/">ScrcpyGate</a></div>
-  <iframe src="{safe_iframe_src}" title="{safe_title}"></iframe>
-</body>
-</html>"""
-
-
 @dataclass(frozen=True)
 class ProxyDecision:
     """表示 ALAS 嵌入代理访问判定结果。"""
@@ -51,6 +25,32 @@ class ProxyDecision:
     config_name: str = ""
     filtered: bool = False
     reason: str = ""
+
+
+def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
+    """生成 ScrcpyGate ALAS iframe 外壳页面。"""
+    safe_title = escape(title)
+    safe_src = escape(iframe_src, quote=True)
+    safe_message = escape(message)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    html, body {{ margin:0; height:100%; background:#0c0f14; color:#f3f6fb; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+    .bar {{ min-height:44px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 14px; background:#111722; border-bottom:1px solid #394254; }}
+    .bar a {{ color:#86b4ff; text-decoration:none; }}
+    iframe {{ width:100%; height:calc(100vh - 45px); border:0; display:block; background:#202635; }}
+    .msg {{ color:#9aa6ba; font-size:13px; }}
+  </style>
+</head>
+<body>
+  <div class="bar"><strong>{safe_title}</strong><span class="msg">{safe_message}</span><a href="/">返回 ScrcpyGate</a></div>
+  <iframe src="{safe_src}" title="{safe_title}"></iframe>
+</body>
+</html>"""
 
 
 def _query_values(query, key):

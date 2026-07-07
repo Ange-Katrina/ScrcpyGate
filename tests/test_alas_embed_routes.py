@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
+"""ALAS 嵌入路由测试。"""
 
 import importlib
 import os
@@ -17,73 +18,71 @@ if str(ROOT) not in sys.path:
 
 
 class AlasEmbedRouteTests(unittest.TestCase):
-    def clear_app_modules(self):
-        for module_name in (
-            "app.main",
-            "app.storage",
-            "app.alas",
-            "app.alas_embed",
-            "app.security",
-        ):
-            sys.modules.pop(module_name, None)
-        app_package = sys.modules.get("app")
-        if app_package:
-            for attribute_name in ("main", "storage", "alas", "alas_embed", "security"):
-                if hasattr(app_package, attribute_name):
-                    delattr(app_package, attribute_name)
+    """验证 ALAS 嵌入 HTTP 路由。"""
 
     def setUp(self):
-        self.data_dir = tempfile.mkdtemp(prefix="scrcpygate-alas-embed-")
-        os.environ["WEB_SCRCPY_DATA_DIR"] = self.data_dir
+        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-alas-embed-routes-"))
+        os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver"
         os.environ["SESSION_COOKIE_SECURE"] = "false"
-        self.clear_app_modules()
+        for name in ["app.config", "app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"]:
+            sys.modules.pop(name, None)
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.main = importlib.import_module("app.main")
+        self.current_user = None
+        self.main.security.get_current_user = lambda request: self.current_user
         self.client = TestClient(self.main.app)
-        self.session_cookie = None
 
     def tearDown(self):
-        self.client.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
         os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
         os.environ.pop("ALLOWED_HOSTS", None)
         os.environ.pop("SESSION_COOKIE_SECURE", None)
-        shutil.rmtree(self.data_dir, ignore_errors=True)
-        self.clear_app_modules()
 
-    def login(self, username, password, role):
+    def login(self, username="admin", password="password123456", role="admin"):
+        """创建指定用户并设置当前测试用户。"""
         self.storage.upsert_user(username, password, role)
-        response = self.client.post(
-            "/login",
-            data={"username": username, "password": password},
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 302)
-        self.session_cookie = response.cookies.get("wsid")
-        self.assertTrue(self.session_cookie)
-        return response
+        user = self.storage.get_user(username)
+        self.current_user = dict(user)
 
     def test_embed_requires_login(self):
-        response = self.client.get("/alas/embed/", follow_redirects=False)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/login", response.headers.get("location", ""))
-
-    def test_user_without_binding_gets_403(self):
-        self.login("alice", "UserPassword123!@#", "user")
-
-        response = self.client.get("/alas/embed/", follow_redirects=False)
-
-        self.assertEqual(response.status_code, 403)
+        """未登录访问嵌入入口时重定向到登录页。"""
+        res = self.client.get("/alas/embed/", follow_redirects=False)
+        self.assertEqual(res.status_code, 302)
+        self.assertIn("/login", res.headers.get("location", ""))
 
     def test_admin_embed_page_loads(self):
-        self.login("admin", "AdminPassword123!", "admin")
+        """管理员可以打开完整 ALAS 嵌入入口。"""
+        self.login("admin", "password123456", "admin")
+        res = self.client.get("/alas/embed/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("ALAS 原页面", res.text)
+        self.assertIn("/alas/embed/proxy/", res.text)
+        self.assertIn("管理员完整访问", res.text)
 
-        response = self.client.get("/alas/embed/", follow_redirects=False)
+    def test_user_with_binding_embed_page_loads(self):
+        """已绑定配置的普通用户可以打开绑定配置入口。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        res = self.client.get("/alas/embed/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("ALAS - 挂机-云", res.text)
+        self.assertIn("/alas/embed/proxy/?config=挂机-云", res.text)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("ALAS", response.text)
+    def test_user_without_binding_gets_403(self):
+        """未绑定 ALAS 配置的普通用户访问入口时被拒绝。"""
+        self.login("alice", "password123456", "user")
+        res = self.client.get("/alas/embed/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_proxy_denies_other_config_for_bound_user(self):
+        """代理骨架拒绝普通用户访问非绑定配置。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        res = self.client.get("/alas/embed/proxy/?config=其它")
+        self.assertEqual(res.status_code, 403)
 
 
 if __name__ == "__main__":

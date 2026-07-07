@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import logging
 import os
@@ -563,21 +563,57 @@ async def api_alas_toggle(request: Request):
     return {"ok": True, "action": result.get("action"), "config": binding["config_name"], "alas": result.get("alas")}
 
 
-@app.get("/alas/embed/")
+@app.get("/alas/embed")
+@app.get("/alas/embed/", response_class=HTMLResponse)
 async def alas_embed_page(request: Request):
+    """返回 ALAS 原页面 iframe 外壳入口。"""
     redirect = redirect_to_login(request)
     if redirect:
         return redirect
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
-    if not binding:
+    if user.get("role") != "admin" and not binding:
         raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
     if user.get("role") == "admin":
         storage.audit(user["username"], "alas_embed_open", "admin")
         return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", "/alas/embed/proxy/", "管理员完整访问"))
     config_name = alas.sanitize_config_name(binding.get("config_name"))
     storage.audit(user["username"], "alas_embed_open", config_name)
-    return HTMLResponse(alas_embed.embed_shell_html(f"ALAS - {config_name}", f"/alas/embed/proxy/?config={config_name}", f"当前仅允许访问绑定配置：{config_name}"))
+    return HTMLResponse(
+        alas_embed.embed_shell_html(
+            f"ALAS - {config_name}",
+            f"/alas/embed/proxy/?config={config_name}",
+            f"当前仅允许访问绑定配置：{config_name}",
+        )
+    )
+
+
+@app.api_route("/alas/embed/proxy", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+@app.api_route("/alas/embed/proxy/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+async def alas_embed_proxy(request: Request, path: str = ""):
+    """执行 ALAS HTTP 代理骨架权限检查并返回占位响应。"""
+    user = security.require_user(request)
+    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+    decision = alas_embed.proxy_decision(user, binding, path, dict(request.query_params))
+    if not decision.allowed:
+        storage.audit(user["username"], "alas_embed_proxy_denied", decision.reason)
+        raise HTTPException(status_code=decision.status_code, detail=decision.reason or "ALAS proxy denied")
+    settings = alas.public_settings()
+    if not settings.get("enabled"):
+        raise HTTPException(status_code=400, detail="ALAS control is disabled")
+    if not settings.get("base_url"):
+        raise HTTPException(status_code=502, detail="ALAS Runtime is not configured")
+    return JSONResponse(
+        {
+            "ok": False,
+            "status": "not_implemented",
+            "detail": "ALAS HTTP proxy forwarding is not implemented yet",
+            "base_url": settings.get("base_url"),
+            "config": decision.config_name,
+            "filtered": decision.filtered,
+        },
+        status_code=501,
+    )
 
 
 @app.get("/api/admin/overview")
