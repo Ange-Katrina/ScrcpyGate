@@ -39,6 +39,10 @@ class AlasEmbedTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runtime_url_candidates("http://user:pass@192.168.5.18:22267")
 
+    def test_url_with_params_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            runtime_url_candidates("http://example.com/;x")
+
 
 if __name__ == "__main__":
     unittest.main()

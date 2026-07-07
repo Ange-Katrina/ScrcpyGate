@@ -44,8 +44,8 @@ def runtime_url_candidates(raw_url: str) -> list[str]:
         raise ValueError("invalid ALAS runtime URL host")
     if parsed.username or parsed.password:
         raise ValueError("ALAS runtime URL must not include credentials")
-    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-        raise ValueError("ALAS runtime URL must not include path, query or fragment")
+    if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("ALAS runtime URL must not include path, params, query or fragment")
 
     try:
         port = parsed.port
