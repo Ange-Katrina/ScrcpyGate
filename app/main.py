@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -582,7 +582,7 @@ async def alas_embed_page(request: Request):
     return HTMLResponse(
         alas_embed.embed_shell_html(
             f"ALAS - {config_name}",
-            f"/alas/embed/proxy/?config={config_name}",
+            f"/alas/embed/proxy/?{urlencode({'config': config_name})}",
             f"当前仅允许访问绑定配置：{config_name}",
         )
     )
@@ -594,7 +594,8 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     """执行 ALAS HTTP 代理骨架权限检查并返回占位响应。"""
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
-    decision = alas_embed.proxy_decision(user, binding, path, dict(request.query_params))
+    query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
+    decision = alas_embed.proxy_decision(user, binding, path, query_params)
     if not decision.allowed:
         storage.audit(user["username"], "alas_embed_proxy_denied", decision.reason)
         raise HTTPException(status_code=decision.status_code, detail=decision.reason or "ALAS proxy denied")

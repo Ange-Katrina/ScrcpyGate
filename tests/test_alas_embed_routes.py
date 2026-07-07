@@ -68,7 +68,16 @@ class AlasEmbedRouteTests(unittest.TestCase):
         res = self.client.get("/alas/embed/")
         self.assertEqual(res.status_code, 200)
         self.assertIn("ALAS - 挂机-云", res.text)
-        self.assertIn("/alas/embed/proxy/?config=挂机-云", res.text)
+        self.assertIn("/alas/embed/proxy/?config=%E6%8C%82%E6%9C%BA-%E4%BA%91", res.text)
+
+    def test_user_binding_embed_page_encodes_config_query(self):
+        """绑定配置名包含特殊字符时 iframe 查询参数会被 URL 编码。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_user_alas_config("alice", "挂机 A&B", True, True)
+        res = self.client.get("/alas/embed/")
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn("config=挂机 A&B", res.text)
+        self.assertIn("config=%E6%8C%82%E6%9C%BA+A%26B", res.text)
 
     def test_user_without_binding_gets_403(self):
         """未绑定 ALAS 配置的普通用户访问入口时被拒绝。"""
@@ -82,6 +91,22 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
         res = self.client.get("/alas/embed/proxy/?config=其它")
+        self.assertEqual(res.status_code, 403)
+
+    def test_proxy_denies_repeated_config_when_other_config_first(self):
+        """代理骨架拒绝普通用户通过重复 config 混入非绑定配置。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        res = self.client.get("/alas/embed/proxy/?config=其它&config=挂机-云")
+        self.assertEqual(res.status_code, 403)
+
+    def test_proxy_denies_repeated_config_when_other_config_last(self):
+        """代理骨架拒绝普通用户在重复 config 尾部混入非绑定配置。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        res = self.client.get("/alas/embed/proxy/?config=挂机-云&config=其它")
         self.assertEqual(res.status_code, 403)
 
 
