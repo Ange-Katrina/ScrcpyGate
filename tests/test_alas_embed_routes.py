@@ -465,6 +465,19 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, 1008)
 
+    def test_websocket_denies_nested_other_config_path_for_bound_user(self):
+        """普通用户路径中后续配置切换时 WebSocket 代理拒绝连接。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+
+        with self.assertRaises(WebSocketDisconnect) as context:
+            with self.client.websocket_connect("/alas/embed/proxy/config/挂机-云/nested/config/其它"):
+                pass
+
+        self.assertEqual(context.exception.code, 1008)
+
     def test_websocket_allows_admin_into_skeleton(self):
         """管理员可通过 WebSocket 权限检查进入占位骨架。"""
         self.login("admin", "password123456", "admin")

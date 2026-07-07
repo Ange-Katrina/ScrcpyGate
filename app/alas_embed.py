@@ -90,7 +90,9 @@ def _path_switches_config(path: str, config_name: str) -> bool:
     for index, part in enumerate(parts[:-1]):
         if part.lower() != "config":
             continue
-        return parts[index + 1] != config_name
+        requested_config = parts[index + 1]
+        if requested_config and requested_config != config_name:
+            return True
     return False
 
 

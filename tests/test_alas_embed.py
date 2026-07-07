@@ -220,6 +220,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 403)
 
+    def test_user_nested_other_config_path_denied(self):
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云"},
+            "config/挂机-云/nested/config/其它",
+            {},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+
     def test_user_repeated_query_with_other_config_denied(self):
         decision = proxy_decision(
             {"role": "user"},
