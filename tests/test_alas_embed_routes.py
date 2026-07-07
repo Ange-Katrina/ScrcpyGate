@@ -23,7 +23,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-alas-embed-routes-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
-        os.environ["ALLOWED_HOSTS"] = "testserver"
+        os.environ["ALLOWED_HOSTS"] = "testserver,alas.test:22267"
         os.environ["SESSION_COOKIE_SECURE"] = "false"
         for name in ["app.config", "app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"]:
             sys.modules.pop(name, None)
@@ -32,6 +32,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.main = importlib.import_module("app.main")
         self.current_user = None
         self.main.security.get_current_user = lambda request: self.current_user
+        self.main.security.allowed_hosts = lambda: {"testserver", "alas.test"}
         self.client = TestClient(self.main.app)
 
     def tearDown(self):
@@ -108,6 +109,226 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
         res = self.client.get("/alas/embed/proxy/?config=挂机-云&config=其它")
         self.assertEqual(res.status_code, 403)
+
+    def install_fake_upstream(self, status=200, headers=None, body=b""):
+        """安装测试用上游 HTTP 客户端并记录转发请求。"""
+        captured = []
+
+        class FakeResponse:
+            """模拟 urllib 响应对象。"""
+
+            def __init__(self):
+                self.headers = headers or {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def getcode(self):
+                return status
+
+            def read(self):
+                return body
+
+        class FakeOpener:
+            """模拟 urllib opener 对象。"""
+
+            def open(self, req, timeout=0):
+                captured.append(
+                    {
+                        "url": req.full_url,
+                        "method": req.get_method(),
+                        "data": req.data,
+                        "headers": dict(req.header_items()),
+                        "timeout": timeout,
+                    }
+                )
+                return FakeResponse()
+
+        self.main.alas_embed.build_opener = lambda *handlers: FakeOpener()
+        self.main.alas.public_settings = lambda: {
+            "enabled": True,
+            "base_url": "http://alas.test:22267",
+            "current_config": "alas",
+            "token_set": False,
+        }
+        self.current_user = dict(self.current_user)
+        return captured
+
+    def test_proxy_forwards_get_to_upstream_url_with_query(self):
+        """代理路由将 GET 请求按路径和重复查询参数转发到上游。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(
+            headers={"Content-Type": "application/json"},
+            body=b'{"ok": true}',
+        )
+
+        res = self.client.get("/alas/embed/proxy/api/state?config=a&config=b&x=1")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.content, b'{"ok": true}')
+        self.assertEqual(captured[0]["method"], "GET")
+        self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/state?config=a&config=b&x=1")
+
+    def test_proxy_forwards_post_body_to_upstream(self):
+        """代理路由将 POST 请求正文和 Content-Type 转发到上游。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(
+            headers={"Content-Type": "application/json"},
+            body=b'{"ok": true}',
+        )
+
+        res = self.client.post(
+            "/alas/embed/proxy/api/run?config=a",
+            content=b'{"task":"start"}',
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["method"], "POST")
+        self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/run?config=a")
+        self.assertEqual(captured[0]["data"], b'{"task":"start"}')
+        self.assertEqual(captured[0]["headers"].get("Content-type"), "application/json")
+
+    def test_proxy_rewrites_upstream_location_to_embed_proxy(self):
+        """上游 Location 响应头会改写到嵌入代理路径下。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.install_fake_upstream(
+            status=302,
+            headers={"Location": "http://alas.test:22267/dashboard?x=1", "Content-Type": "text/plain"},
+            body=b"redirect",
+        )
+
+        res = self.client.get("/alas/embed/proxy/login", follow_redirects=False)
+
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.headers.get("location"), "/alas/embed/proxy/dashboard?x=1")
+
+    def test_proxy_passes_through_upstream_error_status(self):
+        """上游 HTTP 错误状态和正文会透传给客户端。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.install_fake_upstream(
+            status=404,
+            headers={"Content-Type": "text/plain"},
+            body=b"missing",
+        )
+
+        res = self.client.get("/alas/embed/proxy/missing")
+
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.text, "missing")
+
+    def test_proxy_rejects_upgrade_requests(self):
+        """HTTP 代理明确拒绝 Upgrade/WebSocket 请求。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get(
+            "/alas/embed/proxy/ws",
+            headers={"Connection": "Upgrade", "Upgrade": "websocket"},
+        )
+
+        self.assertEqual(res.status_code, 501)
+        self.assertEqual(captured, [])
+
+    def test_proxy_rejects_absolute_url_path(self):
+        """代理路径不能被绝对 URL 逃逸到非 ALAS 上游。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get("/alas/embed/proxy/http://evil.test/path")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(captured, [])
+
+    def test_proxy_filters_user_html_response(self):
+        """普通用户访问 HTML 响应时会过滤管理入口。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        self.install_fake_upstream(
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            body="<main>挂机-云 其它配置 管理入口</main>".encode("utf-8"),
+        )
+
+        res = self.client.get("/alas/embed/proxy/?config=挂机-云")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("挂机-云", res.text)
+        self.assertNotIn("其它配置", res.text)
+        self.assertNotIn("管理入口", res.text)
+
+    def test_proxy_does_not_filter_admin_html_response(self):
+        """管理员访问 HTML 响应时保持上游内容不变。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.install_fake_upstream(
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            body="<main>其它配置 管理入口</main>".encode("utf-8"),
+        )
+
+        res = self.client.get("/alas/embed/proxy/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("其它配置", res.text)
+        self.assertIn("管理入口", res.text)
+
+    def test_proxy_passes_through_non_html_body_and_content_type(self):
+        """非 HTML 响应透传正文和 Content-Type。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.install_fake_upstream(
+            headers={"Content-Type": "image/png"},
+            body=b"\x89PNG\r\n",
+        )
+
+        res = self.client.get("/alas/embed/proxy/static/logo.png")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get("content-type"), "image/png")
+        self.assertEqual(res.content, b"\x89PNG\r\n")
+
+    def test_proxy_returns_502_when_upstream_unreachable(self):
+        """上游不可达时代理路由返回 502。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        class BrokenOpener:
+            """模拟不可达的 urllib opener 对象。"""
+
+            def open(self, req, timeout=0):
+                raise OSError("boom")
+
+        self.main.alas_embed.build_opener = lambda *handlers: BrokenOpener()
+        self.main.alas.public_settings = lambda: {
+            "enabled": True,
+            "base_url": "http://alas.test:22267",
+            "current_config": "alas",
+            "token_set": False,
+        }
+        self.current_user = dict(self.current_user)
+
+        res = self.client.get("/alas/embed/proxy/")
+
+        self.assertEqual(res.status_code, 502)
 
 
 if __name__ == "__main__":

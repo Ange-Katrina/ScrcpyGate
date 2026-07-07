@@ -6,14 +6,28 @@ import ipaddress
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, build_opener, ProxyHandler
+
+from fastapi import HTTPException, Request as FastAPIRequest
+from fastapi.responses import Response
 
 ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
 DOMAIN_FALLBACK_PORTS = (80, 443, 22267)
 MANAGEMENT_MARKERS = ("管理", "Manage", "Settings.Admin", "alas.config_list")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+OMITTED_RESPONSE_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "content-encoding"}
 
 
 @dataclass(frozen=True)
@@ -199,3 +213,124 @@ def resolve_base_url(raw_url: str, probe=probe_runtime_url) -> str:
         if probe(candidate, timeout=2.0):
             return candidate
     raise ValueError(f"ALAS Runtime unreachable: {', '.join(candidates)}")
+
+
+def build_upstream_url(base_url: str, path: str, query_items) -> str:
+    """按基础地址、代理路径和查询参数安全构造上游请求 URL。"""
+    parsed_base = urlparse(str(base_url or "").rstrip("/") + "/")
+    if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+        raise ValueError("invalid ALAS upstream URL")
+    raw_path = str(path or "").replace("\\", "/")
+    parsed_path = urlparse(raw_path)
+    if parsed_path.scheme or parsed_path.netloc or "\x00" in raw_path:
+        raise ValueError("invalid ALAS proxy path")
+    safe_parts = []
+    for part in raw_path.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ValueError("invalid ALAS proxy path")
+        safe_parts.append(quote(part, safe="!$&'()*+,;=:@"))
+    upstream_path = "/".join(safe_parts)
+    clean_base = f"{parsed_base.scheme}://{parsed_base.netloc}/"
+    url = urljoin(clean_base, upstream_path)
+    params = []
+    if hasattr(query_items, "multi_items"):
+        params = list(query_items.multi_items())
+    elif isinstance(query_items, dict):
+        for key, value in query_items.items():
+            if isinstance(value, (list, tuple)):
+                params.extend((key, item) for item in value)
+            else:
+                params.append((key, value))
+    else:
+        params = list(query_items or [])
+    if params:
+        url = f"{url}?{urlencode(params, doseq=True)}"
+    return url
+
+
+def _proxy_request_headers(headers) -> dict:
+    """过滤客户端请求头，移除逐跳头与 Host。"""
+    result = {}
+    for key, value in headers.items():
+        lowered = key.lower()
+        if lowered not in HOP_BY_HOP_HEADERS and lowered != "host":
+            result[key] = value
+    return result
+
+
+def _proxy_response_headers(headers, base_url: str) -> dict:
+    """过滤上游响应头，并将 Location 改写为嵌入代理路径。"""
+    result = {}
+    for key, value in headers.items():
+        lowered = key.lower()
+        if lowered in OMITTED_RESPONSE_HEADERS:
+            continue
+        if lowered == "location":
+            value = rewrite_location_header(str(value), base_url)
+        result[key] = value
+    return result
+
+
+def rewrite_location_header(location: str, base_url: str) -> str:
+    """将上游重定向 Location 改写到 /alas/embed/proxy/ 下。"""
+    parsed = urlparse(str(location or ""))
+    if parsed.scheme or parsed.netloc:
+        base = urlparse(str(base_url or ""))
+        if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+            return location
+        path = parsed.path.lstrip("/")
+    else:
+        path = str(location or "").lstrip("/")
+    if not path:
+        rewritten = f"{ALAS_EMBED_PREFIX}/proxy/"
+    else:
+        rewritten = f"{ALAS_EMBED_PREFIX}/proxy/{path}"
+    if parsed.query:
+        rewritten = f"{rewritten}?{parsed.query}"
+    if parsed.fragment:
+        rewritten = f"{rewritten}#{parsed.fragment}"
+    return rewritten
+
+
+async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision) -> Response:
+    """转发 HTTP 请求到 ALAS Runtime，并按权限策略过滤 HTML 响应。"""
+    if request.headers.get("upgrade") or "upgrade" in request.headers.get("connection", "").lower():
+        raise HTTPException(status_code=501, detail="ALAS websocket proxy is not implemented")
+    method = request.method.upper()
+    body = await request.body()
+    data = None if method in ("GET", "HEAD") else body
+    try:
+        target = build_upstream_url(base_url, path, request.query_params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    req = Request(
+        target,
+        data=data,
+        headers=_proxy_request_headers(request.headers),
+        method=method,
+    )
+    opener = build_opener(ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=15.0) as resp:
+            raw = resp.read()
+            status = resp.getcode()
+            out_headers = _proxy_response_headers(resp.headers, base_url)
+    except HTTPError as exc:
+        raw = exc.read()
+        status = exc.code
+        out_headers = _proxy_response_headers(exc.headers, base_url)
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(status_code=502, detail="ALAS Runtime unreachable") from exc
+
+    content_type = ""
+    for key, value in out_headers.items():
+        if key.lower() == "content-type":
+            content_type = value
+            break
+    if decision.filtered and "html" in content_type.lower():
+        text = raw.decode("utf-8", errors="replace")
+        raw = filter_user_html(text, decision.config_name).encode("utf-8")
+        out_headers["Content-Type"] = "text/html; charset=utf-8"
+    return Response(content=raw, status_code=status, headers=out_headers)
