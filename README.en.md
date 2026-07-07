@@ -21,7 +21,6 @@ It is not a thin page that simply exposes ADB. It is a lightweight management ga
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Development Checks](#development-checks)
-- [Publishing to GitHub](#publishing-to-github)
 - [License](#license)
 
 ## Use Cases
@@ -422,23 +421,6 @@ Sensitive data scan example:
 ```bash
 rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
 ```
-
-## Publishing to GitHub
-
-Upload only the files in this project. Do not upload runtime data, deployment secrets, or logs.
-
-Before publishing, confirm that:
-
-- `.env` is not committed
-- `data/` is not committed
-- `webscrcpy.db` is not committed
-- `initial_admin_password.txt` is not committed
-- logs are not committed
-- real ADB addresses, domains, tokens, and passwords are not committed
-- unit tests have been run
-- resolution safety scan has been run
-- [LICENSE](LICENSE) is included
-- [THIRD_PARTY.md](THIRD_PARTY.md) is included
 
 ## License
 

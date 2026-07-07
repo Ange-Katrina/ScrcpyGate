@@ -21,7 +21,6 @@ ScrcpyGate 是一个基于 FastAPI、原生 WebSocket 和 scrcpy 的浏览器投
 - [配置项](#配置项)
 - [故障排查](#故障排查)
 - [开发检查](#开发检查)
-- [发布到 GitHub](#发布到-github)
 - [许可证](#许可证)
 
 ## 适用场景
@@ -421,23 +420,6 @@ rg -n "wm size|wm density|modifydev|Physical size|Override size" .
 ```bash
 rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
 ```
-
-## 发布到 GitHub
-
-只上传本项目目录内的文件。不要把你的运行数据、部署环境或日志一起上传。
-
-发布前确认：
-
-- 未提交 `.env`
-- 未提交 `data/`
-- 未提交 `webscrcpy.db`
-- 未提交 `initial_admin_password.txt`
-- 未提交日志文件
-- 未提交真实 ADB 地址、域名、Token 或密码
-- 已运行单元测试
-- 已运行分辨率安全扫描
-- 已保留 [LICENSE](LICENSE)
-- 已保留 [THIRD_PARTY.md](THIRD_PARTY.md)
 
 ## 许可证
 
