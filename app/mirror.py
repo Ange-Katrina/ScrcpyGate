@@ -427,6 +427,20 @@ class MirrorManager:
         await self.broadcast({"type": "mirror_status", "device_id": device_id, "running": False, "session": session.snapshot()})
         return ok
 
+    async def stop_other_no_client_sessions(self, keep_device_id: str, allowed_device_ids: list[str]) -> list[str]:
+        allowed = set(allowed_device_ids)
+        stopped: list[str] = []
+        for device_id, session in list(self.sessions.items()):
+            if device_id == keep_device_id or device_id not in allowed:
+                continue
+            if not session.running or session.clients:
+                continue
+            ok = await session.stop()
+            if ok:
+                stopped.append(device_id)
+                await self.broadcast({"type": "mirror_status", "device_id": device_id, "running": False, "session": session.snapshot(), "reason": "switch"})
+        return stopped
+
     async def stop_if_no_clients(self, device_id: str, wait_seconds: float = 0) -> bool:
         session = await self.get_or_create(device_id)
         deadline = time.monotonic() + max(0, wait_seconds)

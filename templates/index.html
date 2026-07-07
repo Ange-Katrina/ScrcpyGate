@@ -251,10 +251,22 @@ function normalizeSelection(){
 }
 function selectDevice(id){
   if (!id || id === state.selectedDeviceId) return;
-  if (state.videoWs || state.controlWs) closeVideo();
+  const oldActive = state.activeDeviceId;
+  if (state.videoWs || state.controlWs) {
+    closeVideo();
+    if (oldActive && oldActive !== id) stopSwitchedMirror(oldActive).catch(()=>{});
+  }
   state.selectedDeviceId=id;
   localStorage.setItem(SELECTED_KEY, id);
   closeSidebar();
+  render();
+}
+async function stopSwitchedMirror(id){
+  const session = state.sessions[id];
+  if (!session || !session.running) return;
+  await new Promise(resolve=>setTimeout(resolve, 250));
+  const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:'switch_device'}});
+  state.sessions = result.sessions || state.sessions;
   render();
 }
 function mergeSessions(devices, sessions){
@@ -351,10 +363,11 @@ function renderDevices(){
     const id=getDeviceId(device); const session=state.sessions[id] || device.session; const active=id===state.selectedDeviceId;
     const adbState = device.adb_state || 'unknown';
     const adbBlocked = adbState === 'offline' || adbState === 'unauthorized';
+    const mirrorVisible = !!(session && session.running && (Number(session.clients || 0) > 0 || (id === state.activeDeviceId && state.videoConnected)));
     const btn=document.createElement('button'); btn.className='device-card' + (active?' active':''); btn.type='button'; btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
     const title=document.createElement('div'); title.className='device-title';
     const name=document.createElement('strong'); name.textContent=deviceLabel(device);
-    const status=chip(session && session.running ? '投屏中' : (device.enabled ? (adbState === 'online' ? '在线' : adbState) : '禁用'), session && session.running ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
+    const status=chip(mirrorVisible ? '投屏中' : (device.enabled ? (adbState === 'online' ? '在线' : adbState) : '禁用'), mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
     title.append(name, status);
     const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
     const meta=document.createElement('div'); meta.className='chips';
@@ -389,6 +402,7 @@ function renderStatus(){
   renderAlasPanel();
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
+  $('empty').textContent = device ? (session && session.running ? '点击开始投屏连接画面' : '点击开始投屏') : '选择设备后开始投屏';
   $('empty').style.display = state.videoConnected ? 'none' : 'grid';
   $('phoneVideo').style.objectFit = 'contain';
   layoutVideo();

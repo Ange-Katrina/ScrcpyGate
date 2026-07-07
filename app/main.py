@@ -420,8 +420,8 @@ async def api_mirror_start(device_id: str, request: Request):
         storage.set_user_video_preference(user["username"], options)
     ok = await manager.start(real_device_id, options)
     storage.audit(user["username"], "mirror_start", real_device_id)
-    sessions = await public_sessions_for_user(user)
     if not ok:
+        sessions = await public_sessions_for_user(user)
         session = (await manager.snapshot()).get(real_device_id) or {}
         adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
         return {
@@ -432,7 +432,11 @@ async def api_mirror_start(device_id: str, request: Request):
             "detail": adb_status.get("detail") or session.get("last_error") or "",
             "sessions": sessions,
         }
-    return {"ok": ok, "sessions": sessions}
+    visible_devices = storage.list_devices_for_user(user["username"], user["role"] == "admin")
+    stopped = await manager.stop_other_no_client_sessions(real_device_id, [str(device["id"]) for device in visible_devices])
+    if stopped:
+        storage.audit(user["username"], "mirror_switch_cleanup", f"keep={real_device_id}; stopped={','.join(stopped)}")
+    return {"ok": ok, "sessions": await public_sessions_for_user(user), "stopped": len(stopped)}
 
 
 @app.put("/api/devices/{device_id}/mirror/settings")
