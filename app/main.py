@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from adb_manager import ADBManager
 
-from . import alas, security, storage
+from . import alas, alas_embed, security, storage
 from .adb_monitor import adb_monitor, adb_state_label
 from .devices import devices_payload, sessions_payload
 from .logging_config import setup_logging, tail_log
@@ -561,6 +561,23 @@ async def api_alas_toggle(request: Request):
         result["alas"] = public_alas_status(result["alas"], binding)
     storage.audit(user["username"], "alas_toggle", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
     return {"ok": True, "action": result.get("action"), "config": binding["config_name"], "alas": result.get("alas")}
+
+
+@app.get("/alas/embed/")
+async def alas_embed_page(request: Request):
+    redirect = redirect_to_login(request)
+    if redirect:
+        return redirect
+    user = security.require_user(request)
+    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+    if not binding:
+        raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
+    if user.get("role") == "admin":
+        storage.audit(user["username"], "alas_embed_open", "admin")
+        return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", "/alas/embed/proxy/", "管理员完整访问"))
+    config_name = alas.sanitize_config_name(binding.get("config_name"))
+    storage.audit(user["username"], "alas_embed_open", config_name)
+    return HTMLResponse(alas_embed.embed_shell_html(f"ALAS - {config_name}", f"/alas/embed/proxy/?config={config_name}", f"当前仅允许访问绑定配置：{config_name}"))
 
 
 @app.get("/api/admin/overview")

@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.alas_embed import (
+    embed_shell_html,
     filter_user_html,
     proxy_decision,
     resolve_base_url,
@@ -18,6 +19,19 @@ from app.alas_embed import (
 
 
 class AlasEmbedTests(unittest.TestCase):
+    def test_embed_shell_html_escapes_inputs_and_links_back(self):
+        result = embed_shell_html(
+            "ALAS <原页面>",
+            '/alas/embed/proxy/?config="x"',
+            "当前 <仅允许>",
+        )
+
+        self.assertIn("ALAS &lt;原页面&gt;", result)
+        self.assertIn('/alas/embed/proxy/?config=&quot;x&quot;', result)
+        self.assertIn("当前 &lt;仅允许&gt;", result)
+        self.assertIn('href="/"', result)
+        self.assertNotIn("ALAS <原页面>", result)
+
     def test_ip_without_port_uses_default_runtime_port(self):
         self.assertEqual(
             runtime_url_candidates("192.168.5.18"),
