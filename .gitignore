@@ -27,3 +27,16 @@ dist/
 .idea/
 *.tmp
 *.temp
+
+*.zip
+*.exe
+*.log
+*.txt
+/*.yaml
+/*.yml
+gpt*.md
+ds*.md
+logs/
+log/
+/.trae/
+docs/superpowers/
