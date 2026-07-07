@@ -16,9 +16,10 @@ def _parse_runtime_url(raw_url: str):
     value = str(raw_url or "").strip()
     if not value:
         raise ValueError("invalid ALAS runtime URL")
-    if "://" not in value:
+    has_explicit_scheme = "://" in value
+    if not has_explicit_scheme:
         value = f"http://{value}"
-    return urlparse(value)
+    return urlparse(value), has_explicit_scheme
 
 
 def _is_ip_address(hostname: str) -> bool:
@@ -39,7 +40,7 @@ def _format_host(hostname: str) -> str:
 
 def runtime_url_candidates(raw_url: str) -> list[str]:
     """根据用户输入生成 ALAS 运行时访问地址候选列表。"""
-    parsed = _parse_runtime_url(raw_url)
+    parsed, has_explicit_scheme = _parse_runtime_url(raw_url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError("invalid ALAS runtime URL scheme")
     if not parsed.hostname:
@@ -60,6 +61,13 @@ def runtime_url_candidates(raw_url: str) -> list[str]:
 
     if _is_ip_address(parsed.hostname) or "." not in parsed.hostname:
         return [f"{parsed.scheme}://{host}:{ALAS_DEFAULT_PORT}"]
+
+    if has_explicit_scheme:
+        default_port = 443 if parsed.scheme == "https" else 80
+        return [
+            f"{parsed.scheme}://{host}:{default_port}",
+            f"{parsed.scheme}://{host}:{ALAS_DEFAULT_PORT}",
+        ]
 
     return [
         f"http://{host}:{DOMAIN_FALLBACK_PORTS[0]}",

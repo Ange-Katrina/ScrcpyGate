@@ -29,6 +29,24 @@ class AlasEmbedTests(unittest.TestCase):
             ],
         )
 
+    def test_explicit_https_domain_without_port_only_uses_https_candidates(self):
+        self.assertEqual(
+            runtime_url_candidates("https://alas.example.test"),
+            [
+                "https://alas.example.test:443",
+                "https://alas.example.test:22267",
+            ],
+        )
+
+    def test_explicit_http_domain_without_port_only_uses_http_candidates(self):
+        self.assertEqual(
+            runtime_url_candidates("http://alas.example.test"),
+            [
+                "http://alas.example.test:80",
+                "http://alas.example.test:22267",
+            ],
+        )
+
     def test_full_url_with_port_normalizes_root_path(self):
         self.assertEqual(
             runtime_url_candidates("http://192.168.5.18:22267/"),
