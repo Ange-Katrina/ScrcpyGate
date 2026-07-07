@@ -2,6 +2,7 @@
 # -_- coding: utf-8 -_-
 """ALAS 嵌入路由测试。"""
 
+import gzip
 import importlib
 import os
 import shutil
@@ -46,6 +47,9 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.upsert_user(username, password, role)
         user = self.storage.get_user(username)
         self.current_user = dict(user)
+        session = self.storage.create_session(username)
+        self.main.security.get_current_session = lambda request: session
+        return session
 
     def test_embed_requires_login(self):
         """未登录访问嵌入入口时重定向到登录页。"""
@@ -176,7 +180,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
     def test_proxy_forwards_post_body_to_upstream(self):
         """代理路由将 POST 请求正文和 Content-Type 转发到上游。"""
-        self.login("admin", "password123456", "admin")
+        session = self.login("admin", "password123456", "admin")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         captured = self.install_fake_upstream(
@@ -184,10 +188,11 @@ class AlasEmbedRouteTests(unittest.TestCase):
             body=b'{"ok": true}',
         )
 
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
         res = self.client.post(
             "/alas/embed/proxy/api/run?config=a",
             content=b'{"task":"start"}',
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-CSRF-Token": session["csrf_token"]},
         )
 
         self.assertEqual(res.status_code, 200)
@@ -272,6 +277,82 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertIn("挂机-云", res.text)
         self.assertNotIn("其它配置", res.text)
         self.assertNotIn("管理入口", res.text)
+
+    def test_proxy_filters_connection_declared_hop_headers(self):
+        """Connection 声明的扩展逐跳头不会转发或返回。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(
+            headers={
+                "Connection": "X-Upstream",
+                "X-Upstream": "secret",
+                "Content-Type": "text/plain",
+            },
+            body=b"ok",
+        )
+
+        res = self.client.get(
+            "/alas/embed/proxy/api/state",
+            headers={"Connection": "X-Secret", "X-Secret": "secret"},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn("X-secret", captured[0]["headers"])
+        self.assertIsNone(res.headers.get("x-upstream"))
+
+    def test_proxy_strips_request_content_length(self):
+        """请求 Content-Length 不会作为普通请求头转发。"""
+        session = self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(
+            headers={"Content-Type": "application/json"},
+            body=b'{"ok": true}',
+        )
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/run",
+            content=b'{"task":"start"}',
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn("Content-length", captured[0]["headers"])
+
+    def test_proxy_keeps_gzip_html_body_unfiltered(self):
+        """带 Content-Encoding 的 HTML 响应不会被解码过滤而破坏 gzip 正文。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        gzip_body = gzip.compress("<main>挂机-云 其它配置 管理入口</main>".encode("utf-8"))
+        self.install_fake_upstream(
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Encoding": "gzip",
+            },
+            body=gzip_body,
+        )
+
+        res = self.client.get("/alas/embed/proxy/?config=挂机-云")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.text, "<main>挂机-云 其它配置 管理入口</main>")
+        self.assertEqual(res.headers.get("content-encoding"), "gzip")
+
+    def test_proxy_requires_csrf_for_post(self):
+        """非安全方法代理请求必须通过既有 CSRF 校验。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.post("/alas/embed/proxy/api/run", content=b"{}")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(captured, [])
 
     def test_proxy_does_not_filter_admin_html_response(self):
         """管理员访问 HTML 响应时保持上游内容不变。"""

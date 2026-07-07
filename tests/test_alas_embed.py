@@ -10,12 +10,51 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.alas_embed import (
+    build_upstream_url,
     embed_shell_html,
     filter_user_html,
+    rewrite_location_header,
     proxy_decision,
     resolve_base_url,
     runtime_url_candidates,
 )
+
+
+class AlasEmbedUrlTests(unittest.TestCase):
+    def test_build_upstream_url_preserves_base_path(self):
+        result = build_upstream_url(
+            "http://alas.test:22267/base/",
+            "api/state",
+            [],
+        )
+
+        self.assertEqual(result, "http://alas.test:22267/base/api/state")
+
+    def test_rewrite_location_header_rewrites_relative_under_base_path(self):
+        cases = {
+            "../api/state": "/alas/embed/proxy/api/state",
+            "./next": "/alas/embed/proxy/next",
+            "child": "/alas/embed/proxy/child",
+            "/base/root": "/alas/embed/proxy/root",
+        }
+        for location, expected in cases.items():
+            with self.subTest(location=location):
+                self.assertEqual(
+                    rewrite_location_header(
+                        location,
+                        "http://alas.test:22267/base/current/page",
+                    ),
+                    expected,
+                )
+
+    def test_rewrite_location_header_does_not_expose_external_location(self):
+        result = rewrite_location_header(
+            "https://evil.test/login",
+            "http://alas.test:22267/base/current/page",
+        )
+
+        self.assertNotIn("evil.test", result)
+        self.assertEqual(result, "/alas/embed/proxy/")
 
 
 class AlasEmbedTests(unittest.TestCase):

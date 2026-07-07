@@ -6,7 +6,7 @@ import ipaddress
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, build_opener, ProxyHandler
 
 from fastapi import HTTPException, Request as FastAPIRequest
@@ -27,7 +27,9 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
-OMITTED_RESPONSE_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "content-encoding"}
+OMITTED_RESPONSE_HEADERS = HOP_BY_HOP_HEADERS | {"content-length"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 
 
 @dataclass(frozen=True)
@@ -231,9 +233,9 @@ def build_upstream_url(base_url: str, path: str, query_items) -> str:
         if part == "..":
             raise ValueError("invalid ALAS proxy path")
         safe_parts.append(quote(part, safe="!$&'()*+,;=:@"))
-    upstream_path = "/".join(safe_parts)
-    clean_base = f"{parsed_base.scheme}://{parsed_base.netloc}/"
-    url = urljoin(clean_base, upstream_path)
+    base_path = parsed_base.path.rstrip("/")
+    upstream_path = "/".join(part for part in (base_path.lstrip("/"), "/".join(safe_parts)) if part)
+    url = urlunparse((parsed_base.scheme, parsed_base.netloc, f"/{upstream_path}" if upstream_path else "/", "", "", ""))
     params = []
     if hasattr(query_items, "multi_items"):
         params = list(query_items.multi_items())
@@ -250,48 +252,85 @@ def build_upstream_url(base_url: str, path: str, query_items) -> str:
     return url
 
 
-def _proxy_request_headers(headers) -> dict:
-    """过滤客户端请求头，移除逐跳头与 Host。"""
-    result = {}
+def _connection_header_names(headers) -> set[str]:
+    """解析 Connection 头中声明的扩展逐跳头名称。"""
+    names = set()
+    connection_value = ""
     for key, value in headers.items():
-        lowered = key.lower()
-        if lowered not in HOP_BY_HOP_HEADERS and lowered != "host":
+        if key.lower() == "connection":
+            connection_value = str(value or "")
+            break
+    for item in connection_value.split(","):
+        name = item.strip().lower()
+        if name:
+            names.add(name)
+    return names
+
+
+def _proxy_request_headers(headers) -> dict:
+    """过滤客户端请求头，移除逐跳头、Host、Content-Length 与压缩协商。"""
+    result = {}
+    omitted = HOP_BY_HOP_HEADERS | _connection_header_names(headers)
+    omitted.update({"host", "content-length", "accept-encoding"})
+    for key, value in headers.items():
+        if key.lower() not in omitted:
             result[key] = value
     return result
 
 
-def _proxy_response_headers(headers, base_url: str) -> dict:
+def _proxy_response_headers(headers, request_url: str) -> dict:
     """过滤上游响应头，并将 Location 改写为嵌入代理路径。"""
     result = {}
+    omitted = OMITTED_RESPONSE_HEADERS | _connection_header_names(headers)
     for key, value in headers.items():
         lowered = key.lower()
-        if lowered in OMITTED_RESPONSE_HEADERS:
+        if lowered in omitted:
             continue
         if lowered == "location":
-            value = rewrite_location_header(str(value), base_url)
+            value = rewrite_location_header(str(value), request_url)
         result[key] = value
     return result
 
 
 def rewrite_location_header(location: str, base_url: str) -> str:
-    """将上游重定向 Location 改写到 /alas/embed/proxy/ 下。"""
-    parsed = urlparse(str(location or ""))
-    if parsed.scheme or parsed.netloc:
-        base = urlparse(str(base_url or ""))
-        if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
-            return location
-        path = parsed.path.lstrip("/")
-    else:
-        path = str(location or "").lstrip("/")
-    if not path:
-        rewritten = f"{ALAS_EMBED_PREFIX}/proxy/"
-    else:
-        rewritten = f"{ALAS_EMBED_PREFIX}/proxy/{path}"
+    """将同源且位于上游基础路径下的 Location 改写到嵌入代理路径。"""
+    request_url = str(base_url or "")
+    resolved = urljoin(request_url, str(location or ""))
+    parsed = urlparse(resolved)
+    base = urlparse(request_url)
+    if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+        return f"{ALAS_EMBED_PREFIX}/proxy/"
+
+    proxy_base_path = base.path if base.path.endswith("/") else base.path.rsplit("/", 1)[0] + "/"
+    path = parsed.path.lstrip("/")
+    for index in range(len(proxy_base_path.strip("/").split("/")), -1, -1):
+        candidate = "/".join(proxy_base_path.strip("/").split("/")[:index])
+        prefix = f"/{candidate}/" if candidate else "/"
+        if parsed.path.startswith(prefix):
+            path = parsed.path[len(prefix):].lstrip("/")
+            break
+    rewritten = f"{ALAS_EMBED_PREFIX}/proxy/"
+    if path:
+        rewritten = f"{rewritten}{path}"
     if parsed.query:
         rewritten = f"{rewritten}?{parsed.query}"
     if parsed.fragment:
         rewritten = f"{rewritten}#{parsed.fragment}"
     return rewritten
+
+
+def _content_type_media_type(content_type: str) -> str:
+    """提取 Content-Type 媒体类型并统一为小写。"""
+    return str(content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _content_type_charset(content_type: str) -> str:
+    """从 Content-Type 提取 charset，缺省时使用 UTF-8。"""
+    for item in str(content_type or "").split(";")[1:]:
+        key, separator, value = item.strip().partition("=")
+        if separator and key.strip().lower() == "charset" and value.strip():
+            return value.strip().strip('"')
+    return "utf-8"
 
 
 async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision) -> Response:
@@ -316,21 +355,30 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         with opener.open(req, timeout=15.0) as resp:
             raw = resp.read()
             status = resp.getcode()
-            out_headers = _proxy_response_headers(resp.headers, base_url)
+            out_headers = _proxy_response_headers(resp.headers, target)
     except HTTPError as exc:
         raw = exc.read()
         status = exc.code
-        out_headers = _proxy_response_headers(exc.headers, base_url)
+        out_headers = _proxy_response_headers(exc.headers, target)
     except (URLError, TimeoutError, OSError) as exc:
         raise HTTPException(status_code=502, detail="ALAS Runtime unreachable") from exc
 
     content_type = ""
+    content_encoding = ""
     for key, value in out_headers.items():
-        if key.lower() == "content-type":
+        lowered = key.lower()
+        if lowered == "content-type":
             content_type = value
-            break
-    if decision.filtered and "html" in content_type.lower():
-        text = raw.decode("utf-8", errors="replace")
-        raw = filter_user_html(text, decision.config_name).encode("utf-8")
-        out_headers["Content-Type"] = "text/html; charset=utf-8"
+        if lowered == "content-encoding":
+            content_encoding = value
+    should_filter = (
+        decision.filtered
+        and not content_encoding
+        and _content_type_media_type(content_type) in HTML_CONTENT_TYPES
+    )
+    if should_filter:
+        charset = _content_type_charset(content_type)
+        text = raw.decode(charset, errors="replace")
+        raw = filter_user_html(text, decision.config_name).encode(charset, errors="xmlcharrefreplace")
+        out_headers["Content-Type"] = f"{_content_type_media_type(content_type)}; charset={charset}"
     return Response(content=raw, status_code=status, headers=out_headers)

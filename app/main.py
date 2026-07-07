@@ -592,6 +592,8 @@ async def alas_embed_page(request: Request):
 @app.api_route("/alas/embed/proxy/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
 async def alas_embed_proxy(request: Request, path: str = ""):
     """执行 ALAS HTTP 代理权限检查并转发到 Runtime。"""
+    if request.method.upper() not in alas_embed.SAFE_METHODS:
+        security.verify_csrf(request)
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
