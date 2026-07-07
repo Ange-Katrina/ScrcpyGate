@@ -1,0 +1,22 @@
+* text=auto eol=lf
+
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.md text eol=lf
+
+adb/linux/adb binary
+adb/linux/fastboot binary
+adb/linux/etc1tool binary
+adb/linux/hprof-conv binary
+adb/linux/make_f2fs binary
+adb/linux/make_f2fs_casefold binary
+adb/linux/mke2fs binary
+adb/linux/sqlite3 binary
+adb/linux/lib64/libc++.so binary
+scrcpy-server binary

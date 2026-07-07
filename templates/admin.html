@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ScrcpyGate 后台</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f1218; --surface:#171c26; --panel:#202735; --panel-soft:#252d3d; --line:#3a4355; --text:#f3f6fb; --muted:#9aa6ba; --primary:#2f7df6; --teal:#23b7a8; --ok:#28c982; --warn:#f0b84b; --danger:#ff6b6b; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button, input, select, textarea { font:inherit; }
+    a { color:#86b4ff; text-decoration:none; }
+    .shell { width:min(1220px, calc(100vw - 28px)); margin:0 auto; padding:22px 0 44px; }
+    header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
+    h1 { margin:0 0 8px; font-size:26px; }
+    h2 { margin:0 0 14px; color:#86b4ff; font-size:18px; }
+    .muted { color:var(--muted); }
+    .top-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .logout { background:transparent; border:0; color:#86b4ff; cursor:pointer; padding:0; }
+    .tabs { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; padding:10px 0; background:rgba(15,18,24,.95); backdrop-filter:blur(10px); }
+    .tabs button { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:8px; min-height:40px; padding:0 14px; cursor:pointer; }
+    .tabs button.active { border-color:var(--primary); background:rgba(47,125,246,.16); }
+    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; }
+    .card { grid-column:span 6; border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:18px; min-width:0; }
+    .card.full { grid-column:1 / -1; }
+    .card.third { grid-column:span 4; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    label { display:block; color:var(--muted); font-size:13px; margin:10px 0 6px; }
+    input, select, textarea { width:100%; min-height:40px; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; padding:8px 10px; outline:none; }
+    input:focus, select:focus, textarea:focus { border-color:var(--primary); }
+    textarea { min-height:360px; resize:vertical; font-family:Consolas,Monaco,monospace; line-height:1.5; font-size:13px; }
+    .form-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:12px; align-items:end; }
+    .col-2 { grid-column:span 2; } .col-3 { grid-column:span 3; } .col-4 { grid-column:span 4; } .col-5 { grid-column:span 5; } .col-6 { grid-column:span 6; } .col-8 { grid-column:span 8; } .col-12 { grid-column:1 / -1; }
+    .btn { border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; min-height:38px; padding:0 12px; font-weight:700; cursor:pointer; }
+    .btn.primary { border-color:transparent; background:var(--primary); color:white; }
+    .btn.danger { border-color:rgba(255,107,107,.55); background:rgba(255,107,107,.1); color:#ffd7d7; }
+    .btn.warn { border-color:rgba(240,184,75,.55); background:rgba(240,184,75,.1); color:#ffe8ad; }
+    .btn.ghost { background:transparent; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; }
+    .chip { display:inline-flex; align-items:center; min-height:28px; padding:4px 9px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:13px; max-width:100%; }
+    .chip.ok { color:#ccffe8; border-color:rgba(40,201,130,.45); background:rgba(40,201,130,.1); }
+    .chip.warn { color:#ffe8ad; border-color:rgba(240,184,75,.45); background:rgba(240,184,75,.1); }
+    .chip.danger { color:#ffd7d7; border-color:rgba(255,107,107,.45); background:rgba(255,107,107,.1); }
+    .device-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:12px; }
+    .device-card { border:1px solid var(--line); border-radius:8px; background:var(--panel-soft); padding:14px; display:grid; gap:10px; }
+    .device-card h3 { margin:0; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .device-address { color:var(--muted); font-size:13px; word-break:break-all; }
+    .guide-list { margin:0; padding-left:20px; color:var(--text); line-height:1.75; }
+    .guide-list li { margin:6px 0; }
+    .guide-list code { padding:2px 5px; border:1px solid var(--line); border-radius:5px; background:var(--panel); color:#dce6f6; }
+    .guide-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:8px; }
+    table { width:100%; min-width:720px; border-collapse:collapse; }
+    th, td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
+    th { color:var(--muted); background:#202735; font-weight:650; }
+    tr:last-child td { border-bottom:0; }
+    .notice { position:fixed; left:50%; top:18px; transform:translateX(-50%); z-index:20; display:none; width:min(620px, calc(100vw - 28px)); padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:rgba(32,39,53,.98); box-shadow:0 18px 50px rgba(0,0,0,.4); }
+    .notice.show { display:block; }
+    @media (max-width: 860px) {
+      .shell { width:calc(100vw - 18px); padding-top:12px; }
+      header { display:block; }
+      .top-actions { margin-top:10px; }
+      .tabs { flex-wrap:nowrap; overflow-x:auto; }
+      .tabs button { flex:0 0 auto; }
+      .card, .card.third { grid-column:1 / -1; padding:14px; }
+      .form-grid { grid-template-columns:1fr; }
+      .col-2, .col-3, .col-4, .col-5, .col-6, .col-8, .col-12 { grid-column:1; }
+      textarea { min-height:300px; }
+    }
+  </style>
+</head>
+<body>
+<div id="notice" class="notice"></div>
+<div class="shell">
+  <header>
+    <div>
+      <h1>后台管理</h1>
+      <div class="chips"><span class="chip ok">{{ user.username }}</span><span id="summaryMirror" class="chip">投屏 0</span><span id="summaryAlas" class="chip">ALAS</span></div>
+    </div>
+    <div class="top-actions"><a href="/">返回投屏页</a><form method="post" action="/logout"><button class="logout" type="submit">退出登录</button></form></div>
+  </header>
+  <nav class="tabs">
+    <button data-tab="overview" class="active" type="button">总览</button>
+    <button data-tab="devices" type="button">设备</button>
+    <button data-tab="users" type="button">用户权限</button>
+    <button data-tab="alas" type="button">ALAS</button>
+    <button data-tab="logs" type="button">安全日志</button>
+    <button data-tab="video" type="button">画质</button>
+  </nav>
+
+  <section id="overview" class="panel active">
+    <div class="grid">
+      <div class="card third"><h2>设备</h2><div id="overviewDevices" class="chips"></div></div>
+      <div class="card third"><h2>投屏</h2><div id="overviewMirror" class="chips"></div></div>
+      <div class="card third"><h2>ALAS</h2><div id="overviewAlas" class="chips"></div></div>
+      <div class="card full"><h2>快速操作</h2><div class="actions"><button id="reloadAll" class="btn primary" type="button">刷新数据</button><a class="btn" href="/">打开投屏页</a></div></div>
+    </div>
+  </section>
+
+  <section id="devices" class="panel">
+    <div class="grid">
+      <div class="card full"><h2>设备列表</h2><div id="deviceCards" class="device-grid"></div></div>
+      <div class="card"><h2>保存设备</h2><div class="form-grid"><div class="col-6"><label>设备 ID</label><input id="deviceId" placeholder="emulator-1"></div><div class="col-6"><label>名称</label><input id="deviceName" placeholder="模拟器 1"></div><div class="col-8"><label>ADB 地址</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT"></div><div class="col-4"><label>状态</label><select id="deviceEnabled"><option value="true">启用</option><option value="false">禁用</option></select></div><div class="col-12 actions"><button id="saveDevice" class="btn primary" type="button">保存设备</button><button id="clearDeviceForm" class="btn" type="button">清空</button></div></div><p class="muted">设备 ID 建议使用别名；ADB 地址填写实际连接地址，仅管理员后台可见。</p></div>
+    </div>
+  </section>
+
+  <section id="video" class="panel">
+    <div class="grid">
+      <div class="card full">
+        <h2>画质默认值</h2>
+        <div class="form-grid">
+          <div class="col-3"><label>默认预设</label><select id="videoProfile"><option value="smooth">流畅</option><option value="balanced">稳定</option><option value="sharp">高清</option><option value="low_latency">低延迟</option></select></div>
+          <div class="col-3"><label>默认流模式</label><select id="videoStreamMode"><option value="raw">raw</option><option value="protocol">protocol</option><option value="legacy">legacy 诊断</option></select></div>
+          <div class="col-3"><label>自动停止分钟</label><input id="videoAutoStop" type="number" min="0" max="1440" step="1" placeholder="15"></div>
+          <div class="col-3"><button id="saveVideo" class="btn primary" type="button">保存画质设置</button></div>
+          <div class="col-12"><label>启用 scrcpy 流模式</label><div id="streamModeToggles" class="actions"></div></div>
+        </div>
+        <p class="muted">页面失焦或没有观看端超过此时间会自动停流，0 表示关闭。网页画质只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+      </div>
+      <div class="card full">
+        <h2>预设参数</h2>
+        <div class="actions" id="bandwidthPresetActions" style="margin-bottom:12px"></div>
+        <div class="table-wrap"><table><thead><tr><th>预设</th><th>码率 bps</th><th>输出尺寸</th><th>帧率</th><th>建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
+        <p class="muted">点击 2/5/10/20Mbps 会自动填入推荐值；不用推荐就直接手动输入每个选项。上行有限时优先调低码率，其次输出尺寸；帧率建议保持 20-30，输出尺寸最低 480。</p>
+      </div>
+      <div class="card full">
+        <h2>专属画质设定</h2>
+        <div class="form-grid">
+          <div class="col-3"><label>档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
+          <div class="col-3"><label>显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
+          <div class="col-2"><label>码率 bps</label><input id="customProfileBitrate" type="number" min="100000" step="100000" value="900000"></div>
+          <div class="col-2"><label>输出尺寸</label><input id="customProfileSize" type="number" min="480" step="1" value="480"></div>
+          <div class="col-2"><label>帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
+          <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加专属设定</button></div>
+        </div>
+        <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>ID</th><th>名称</th><th>码率</th><th>输出尺寸</th><th>帧率</th><th>操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="users" class="panel">
+    <div class="grid">
+      <div class="card full"><h2>用户列表</h2><div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="userRows"></tbody></table></div></div>
+      <div class="card"><h2>保存用户</h2><div class="form-grid"><div class="col-5"><label>用户名</label><input id="newUsername"></div><div class="col-4"><label>密码</label><input id="newPassword" type="password" placeholder="至少12位"></div><div class="col-3"><label>角色</label><select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div><div class="col-12"><button id="saveUser" class="btn primary" type="button">保存用户</button></div></div></div>
+      <div class="card"><h2>设备权限</h2><div class="form-grid"><div class="col-4"><label>用户</label><select id="permUser"></select></div><div class="col-4"><label>设备</label><select id="permDevice"></select></div><div class="col-2"><label>查看</label><select id="permView"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-2"><label>控制</label><select id="permControl"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-12"><button id="savePermission" class="btn primary" type="button">保存权限</button></div></div><div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>用户</th><th>设备</th><th>查看</th><th>控制</th></tr></thead><tbody id="permissionRows"></tbody></table></div></div>
+    </div>
+  </section>
+
+  <section id="alas" class="panel">
+    <div class="grid">
+      <div class="card full">
+        <h2>ALAS 使用教程</h2>
+        <ol class="guide-list">
+          <li>必须先安装并启动 <strong>Alas-Gyre 的 Overlay Runtime</strong>。只有 Overlay 正常运行后，ScrcpyGate 才能使用 ALAS 的启动、停止、重启功能。</li>
+          <li>ScrcpyGate 只是代理控制入口，不会直接运行 ALAS，也不会替代 Overlay。普通用户前台只调用自己绑定配置的启动/停止/重启。</li>
+          <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code>、访问 <code>Token</code> 和当前 ALAS 配置名，然后保存。</li>
+          <li>如果状态显示 token 未配置、连接失败或 ALAS control is disabled，先检查 Overlay 是否已启动、URL 是否能从服务器访问、Token 是否一致。</li>
+          <li>用户绑定配置后，用户只能操作绑定的单个配置；不会在前台暴露全部配置列表、配置内容和 Runtime Token。</li>
+        </ol>
+        <div class="guide-links">
+          <a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">ALAS 官方仓库</a>
+          <a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">Alas-Gyre Overlay 仓库</a>
+        </div>
+        <p class="muted">默认 Runtime 地址通常类似 <code>http://127.0.0.1:22267</code>。如果 ScrcpyGate 在 Docker 或另一台服务器上，需填写容器/服务器可访问的 Overlay 地址。</p>
+      </div>
+      <div class="card"><h2>连接设置</h2><div class="form-grid"><div class="col-12"><label>Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267"></div><div class="col-6"><label>当前配置名</label><input id="alasConfig" placeholder="alas"></div><div class="col-6"><label>访问 Token</label><input id="alasToken" type="password"></div><div class="col-12"><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button></div></div></div>
+      <div class="card"><h2>运行状态</h2><div id="alasStatus" class="chips"></div><div class="actions" style="margin-top:16px"><button id="toggleAlas" class="btn warn" type="button">启动/重启 ALAS</button><button id="reloadAlas" class="btn" type="button">刷新 ALAS</button></div></div>
+      <div class="card full"><h2>用户 ALAS 配置绑定</h2><div class="form-grid"><div class="col-4"><label>用户</label><select id="alasBindUser"></select></div><div class="col-4"><label>绑定配置名</label><input id="alasBindConfig" placeholder="Current"></div><div class="col-2"><label>运行</label><select id="alasBindRun"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-2"><label>绑定</label><select id="alasBindEnabled"><option value="true">启用</option><option value="false">取消</option></select></div><div class="col-12 actions"><button id="saveAlasBinding" class="btn primary" type="button">保存绑定</button></div></div><p class="muted">普通用户只能启动/停止这里绑定的单个配置；前台不会暴露配置列表、配置内容和 Runtime Token。</p><div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>用户</th><th>角色</th><th>配置</th><th>运行</th><th>操作</th></tr></thead><tbody id="alasBindRows"></tbody></table></div></div>
+      <div class="card full"><h2>当前配置编辑</h2><div class="form-grid"><div class="col-5"><label>源配置</label><input id="configSource" readonly></div><div class="col-5"><label>保存目标(Current config)</label><input id="configTarget" readonly></div><div class="col-2"><button id="loadConfig" class="btn" type="button">读取</button></div><div class="col-12"><textarea id="configEditor" spellcheck="false" placeholder="读取当前配置后编辑 JSON"></textarea></div><div class="col-12"><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div></div><p class="muted">运行中拒绝保存；idle/error 状态允许保存。</p></div>
+    </div>
+  </section>
+
+  <section id="logs" class="panel"><div class="grid"><div class="card full"><h2>运行日志</h2><pre id="runtimeLogs" style="white-space:pre-wrap;max-height:460px;overflow:auto;margin:0;color:#dce6f6;background:#0b0f16;border:1px solid var(--line);border-radius:8px;padding:12px"></pre></div><div class="card full"><h2>最近审计日志</h2><div class="table-wrap"><table><thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th></tr></thead><tbody id="logRows"></tbody></table></div></div></div></section>
+</div>
+<script>
+const csrfToken = "{{ csrf_token }}";
+const state = { overview:null, users:[], devices:[], permissions:[], logs:[], runtimeLogs:[], video:{}, alas:null };
+const profileLabels = {smooth:'\u6d41\u7545', balanced:'\u7a33\u5b9a', sharp:'\u9ad8\u6e05', low_latency:'\u4f4e\u5ef6\u8fdf'};
+const profileHints = {smooth:'\u6700\u4f4e\u4e0a\u884c\u8d1f\u8f7d', balanced:'\u65e5\u5e38\u9ed8\u8ba4', sharp:'\u753b\u9762\u66f4\u6e05\u6670', low_latency:'\u64cd\u4f5c\u4f18\u5148'};
+const customProfiles = {};
+const $ = (id)=>document.getElementById(id);
+function getDeviceId(device){ return String((device && (device.device_id || device.id || device.address)) || '').trim(); }
+function show(message){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),3200); }
+async function api(url, options={}){ const opts=Object.assign({headers:{}}, options); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`); return data; }
+function clear(el){ el.textContent=''; }
+function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
+function td(text){ const cell=document.createElement('td'); cell.textContent=text == null ? '' : String(text); return cell; }
+function btn(text, cls, fn){ const b=document.createElement('button'); b.className=`btn ${cls||''}`.trim(); b.type='button'; b.textContent=text; b.onclick=fn; return b; }
+function ts(value){ return value ? new Date(value * 1000).toLocaleString() : ''; }
+function actionText(action){ return ({login_success:'登录成功', login_failed:'登录失败', logout:'退出登录', password_change:'修改密码', page_index:'进入投屏页', page_admin:'进入后台', mirror_start:'开始投屏', mirror_stop:'停止投屏', mirror_settings:'画质设置', user_upsert:'保存用户', user_delete:'删除用户', permission_set:'设备权限', device_upsert:'保存设备', device_delete:'删除设备', alas_toggle:'ALAS 操作', alas_admin_toggle:'后台 ALAS 操作', alas_settings:'ALAS 设置', alas_binding_set:'ALAS 绑定', alas_binding_delete:'取消 ALAS 绑定'})[action] || action; }
+function activeSessions(){ return state.devices.filter(d => d.session && d.session.running).length; }
+function renderOverview(){ $('summaryMirror').textContent=`投屏 ${activeSessions()}`; $('summaryMirror').className='chip ' + (activeSessions()?'ok':''); const alasStatus=(state.alas && state.alas.status && state.alas.status.status) || (state.overview && state.overview.alas && state.overview.alas.status) || 'unknown'; $('summaryAlas').textContent=`ALAS ${alasStatus}`; $('summaryAlas').className='chip ' + (alasStatus==='running'?'ok':alasStatus==='error'?'warn':''); const od=$('overviewDevices'); clear(od); state.devices.forEach(d=>od.appendChild(chip(`${d.name || getDeviceId(d)}: ${d.enabled ? '启用' : '禁用'}`, d.enabled?'ok':'warn'))); if(!state.devices.length) od.appendChild(chip('暂无设备','warn')); const om=$('overviewMirror'); clear(om); state.devices.forEach(d=>om.appendChild(chip(`${d.name || getDeviceId(d)}: ${d.session&&d.session.running?'投屏中':'未投屏'}`, d.session&&d.session.running?'ok':''))); const oa=$('overviewAlas'); clear(oa); if(state.overview && state.overview.alas){ const a=state.overview.alas; oa.appendChild(chip(a.enabled?'已启用':'未启用', a.enabled?'ok':'warn')); oa.appendChild(chip(a.status || 'unknown', a.status==='running'?'ok':a.status==='error'?'warn':'')); if(a.config) oa.appendChild(chip(`配置 ${a.config}`)); } }
+function renderDevices(){ const box=$('deviceCards'); clear(box); if(!state.devices.length){ box.appendChild(chip('暂无设备','warn')); return; } state.devices.forEach(d=>{ const id=getDeviceId(d); const card=document.createElement('div'); card.className='device-card'; const title=document.createElement('h3'); title.textContent=d.name || id; const address=document.createElement('div'); address.className='device-address'; address.textContent=d.address || id; const chips=document.createElement('div'); chips.className='chips'; chips.appendChild(chip(d.enabled?'启用':'禁用', d.enabled?'ok':'warn')); chips.appendChild(chip(d.session&&d.session.running?'投屏中':'未投屏', d.session&&d.session.running?'ok':'')); if(d.session&&d.session.control_lock) chips.appendChild(chip(`控制: ${d.session.control_lock.username}`, 'warn')); const actions=document.createElement('div'); actions.className='actions'; actions.append(btn('编辑','',()=>editDevice(d)), btn('测试 ADB','',()=>testDevice(id)), btn(d.session&&d.session.running?'停止投屏':'开始投屏', d.session&&d.session.running?'danger':'primary', ()=>d.session&&d.session.running?stopDevice(id):startDevice(id)), btn('删除','danger',()=>deleteDevice(id))); card.append(title,address,chips,actions); box.appendChild(card); }); }
+function presetInput(profile, field, value){ const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : value; input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='100000'; input.step='100000'; } else if(field==='max_size'){ input.min='480'; input.step='1'; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
+function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(input) input.value=value; }
+function renderBandwidthActions(recommendations){ const box=$('bandwidthPresetActions'); if(!box) return; clear(box); Object.keys(recommendations).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(name=>box.appendChild(btn(name.toUpperCase(), 'warn', ()=>applyBandwidthRecommendation(name)))); }
+function applyBandwidthRecommendation(name){ const rec=((state.video || {}).bandwidth_recommendations || {})[name]; if(!rec) return; Object.entries(rec).forEach(([profile, values])=>['video_bit_rate','max_size','max_fps'].forEach(field=>setPresetValue(profile, field, values[field]))); show(`${name.toUpperCase()} \u63a8\u8350\u503c\u5df2\u586b\u5165\uff0c\u786e\u8ba4\u540e\u70b9\u4fdd\u5b58`); }
+function renderCustomProfiles(){ const rows=$('customProfileRows'); if(!rows) return; clear(rows); Object.keys(customProfiles).sort().forEach(id=>{ const p=customProfiles[id] || {}; const tr=document.createElement('tr'); tr.append(td(id), td(p.label || id), td(p.video_bit_rate), td(p.max_size), td(p.max_fps)); const act=document.createElement('td'); act.className='actions'; act.append(btn('\u7f16\u8f91','',()=>{ $('customProfileId').value=id; $('customProfileLabel').value=p.label || id; $('customProfileBitrate').value=p.video_bit_rate || 900000; $('customProfileSize').value=p.max_size || 480; $('customProfileFps').value=p.max_fps || 24; }), btn('\u5220\u9664','danger',()=>{ delete customProfiles[id]; renderCustomProfiles(); show('\u4e13\u5c5e\u8bbe\u5b9a\u5df2\u79fb\u9664\uff0c\u786e\u8ba4\u540e\u70b9\u4fdd\u5b58'); })); tr.appendChild(act); rows.appendChild(tr); }); }
+function streamModeLabel(mode){ return mode === 'legacy' ? 'legacy 诊断' : mode; }
+function renderVideoStreamModes(data, selected){ const modes=data.stream_modes || ['raw','protocol','legacy']; const enabled=new Set(data.enabled_stream_modes || ['raw']); enabled.add('raw'); const toggles=$('streamModeToggles'); if(toggles){ clear(toggles); modes.forEach(mode=>{ const label=document.createElement('label'); label.style.margin='0'; label.style.display='inline-flex'; label.style.alignItems='center'; label.style.gap='6px'; const input=document.createElement('input'); input.type='checkbox'; input.value=mode; input.checked=enabled.has(mode); input.disabled=mode==='raw'; input.dataset.streamModeToggle='1'; input.style.width='auto'; input.style.minHeight='0'; label.append(input, document.createTextNode(streamModeLabel(mode))); toggles.appendChild(label); }); } const select=$('videoStreamMode'); if(select){ clear(select); modes.filter(mode=>enabled.has(mode)).forEach(mode=>{ const option=document.createElement('option'); option.value=mode; option.textContent=streamModeLabel(mode); select.appendChild(option); }); select.value=enabled.has(selected) ? selected : 'raw'; } }
+function collectEnabledStreamModes(){ const modes=['raw']; document.querySelectorAll('[data-stream-mode-toggle]').forEach(input=>{ if(input.checked && !modes.includes(input.value)) modes.push(input.value); }); return modes; }
+function renderVideo(){ const data=state.video || {}; const settings=data.settings || {}; const defaults=data.defaults || {}; const labels=data.profile_labels || {}; Object.keys(customProfiles).forEach(k=>delete customProfiles[k]); Object.assign(customProfiles, data.custom_profiles || {}); if($('videoProfile')){ clear($('videoProfile')); ['smooth','balanced','sharp','low_latency'].concat(Object.keys(customProfiles).sort()).forEach(name=>{ const o=document.createElement('option'); o.value=name; o.textContent=labels[name] || profileLabels[name] || name; $('videoProfile').appendChild(o); }); $('videoProfile').value=settings.video_profile || defaults.profile || 'balanced'; } renderVideoStreamModes(data, settings.scrcpy_stream_mode || data.stream_mode || defaults.scrcpy_stream_mode || 'raw'); if($('videoAutoStop')) $('videoAutoStop').value=settings.auto_stop_minutes || '15'; renderBandwidthActions(data.bandwidth_recommendations || {}); const rows=$('videoPresetRows'); if(rows){ clear(rows); const profiles=data.profiles || {}; ['smooth','balanced','sharp','low_latency'].forEach(name=>{ const p=profiles[name] || {}; const tr=document.createElement('tr'); tr.append(td(labels[name] || profileLabels[name] || name)); ['video_bit_rate','max_size','max_fps'].forEach(field=>{ const cell=document.createElement('td'); cell.appendChild(presetInput(name, field, p[field])); tr.appendChild(cell); }); tr.append(td(profileHints[name] || '')); rows.appendChild(tr); }); } renderCustomProfiles(); }
+function editDevice(d){ $('deviceId').value=getDeviceId(d); $('deviceName').value=d.name || getDeviceId(d); $('deviceAddress').value=d.address || getDeviceId(d); $('deviceEnabled').value=d.enabled ? 'true' : 'false'; }
+function clearDeviceForm(){ $('deviceId').value=''; $('deviceName').value=''; $('deviceAddress').value=''; $('deviceEnabled').value='true'; }
+function renderUsers(){ const rows=$('userRows'); clear(rows); state.users.forEach(u=>{ const tr=document.createElement('tr'); tr.append(td(u.username), td(u.role==='admin'?'管理员':'普通用户'), td(u.created_at)); const act=document.createElement('td'); act.className='actions'; act.append(btn('编辑','',()=>{ $('newUsername').value=u.username; $('newPassword').value=''; $('newRole').value=u.role; })); if(u.username !== '{{ user.username }}') act.append(btn('删除','danger',()=>deleteUser(u.username))); tr.appendChild(act); rows.appendChild(tr); }); }
+function fillSelect(sel, values, label){ clear(sel); values.forEach(v=>{ const o=document.createElement('option'); o.value=v.value; o.textContent=label(v); sel.appendChild(o); }); }
+function renderPermissions(){ fillSelect($('permUser'), state.users.map(u=>({value:u.username, text:u.username})), v=>v.text); fillSelect($('permDevice'), state.devices.map(d=>({value:getDeviceId(d), text:d.name || getDeviceId(d)})), v=>v.text); const rows=$('permissionRows'); clear(rows); state.permissions.forEach(p=>{ const tr=document.createElement('tr'); tr.append(td(p.username), td(p.device_id), td(p.can_view?'允许':'拒绝'), td(p.can_control?'允许':'拒绝')); rows.appendChild(tr); }); }
+function alasBindings(){ return (state.alas && state.alas.bindings) || []; }
+function currentAlasBinding(username){ return alasBindings().find(b=>b.username===username) || null; }
+function fillAlasBindingForm(binding){ const b=binding || currentAlasBinding($('alasBindUser').value) || {}; $('alasBindUser').value=b.username || $('alasBindUser').value || ''; $('alasBindConfig').value=b.config_name || ''; $('alasBindRun').value=b.can_run ? 'true' : 'false'; $('alasBindEnabled').value=b.config_name ? 'true' : 'false'; }
+function renderAlas(){ const a=state.alas || {}; const settings=a.settings || {}; const status=a.status || {}; $('alasBaseUrl').value=settings.base_url || ''; $('alasConfig').value=settings.current_config || ''; $('alasToken').value=''; $('configTarget').value=settings.current_config || status.config || ''; const box=$('alasStatus'); clear(box); box.appendChild(chip(settings.enabled?'启用':'未启用', settings.enabled?'ok':'warn')); box.appendChild(chip(status.status || 'unknown', status.status==='running'?'ok':status.status==='error'?'warn':'')); if(status.config) box.appendChild(chip(`当前 ${status.config}`)); if(status.error) box.appendChild(chip(status.error, 'danger')); $('toggleAlas').textContent=status.status==='error'?'重启 ALAS':status.status==='running'?'停止 ALAS':'启动 ALAS'; fillSelect($('alasBindUser'), state.users.map(u=>({value:u.username, text:u.username})), v=>v.text); if(!$('alasBindUser').value && state.users[0]) $('alasBindUser').value=state.users[0].username; fillAlasBindingForm(currentAlasBinding($('alasBindUser').value)); const rows=$('alasBindRows'); clear(rows); alasBindings().forEach(b=>{ const tr=document.createElement('tr'); tr.append(td(b.username), td(b.role==='admin'?'管理员':'普通用户'), td(b.config_name || '未绑定'), td(b.can_run?'允许':'拒绝')); const act=document.createElement('td'); act.className='actions'; act.append(btn('编辑','',()=>fillAlasBindingForm(b))); if(b.config_name) act.append(btn('取消绑定','danger',async()=>{ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:b.username, enabled:false}}); show('ALAS 绑定已取消'); await loadAll(); })); tr.appendChild(act); rows.appendChild(tr); }); }
+function renderLogs(){ $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n'); const rows=$('logRows'); clear(rows); [...state.logs].reverse().forEach(l=>{ const tr=document.createElement('tr'); tr.append(td(ts(l.ts)), td(l.username), td(actionText(l.action)), td(l.detail)); rows.appendChild(tr); }); }
+function render(){ renderOverview(); renderDevices(); renderVideo(); renderUsers(); renderPermissions(); renderAlas(); renderLogs(); }
+async function loadAll(){ state.overview=await api('/api/admin/overview'); state.users=state.overview.users || []; state.devices=state.overview.devices || []; state.alas={settings:{}, status:state.overview.alas || {}}; const perms=await api('/api/admin/permissions'); state.permissions=perms.permissions || []; try{ state.video=await api('/api/admin/video'); }catch(_){ state.video={}; } const alasResp=await api('/api/admin/alas'); state.alas=alasResp; const logs=await api('/api/admin/logs'); state.logs=logs.logs || []; try{ const runtime=await api('/api/admin/runtime-logs?lines=400'); state.runtimeLogs=runtime.logs || []; }catch(_){ state.runtimeLogs=[]; } render(); }
+async function saveUser(){ await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value}}); show('用户已保存'); await loadAll(); }
+async function deleteUser(username){ if(!confirm(`删除用户 ${username}?`)) return; await api(`/api/admin/users/${encodeURIComponent(username)}`,{method:'DELETE'}); show('用户已删除'); await loadAll(); }
+async function saveDevice(){ const id=$('deviceId').value.trim(); await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}}); show('设备已保存'); clearDeviceForm(); await loadAll(); }
+async function deleteDevice(id){ if(!confirm(`删除设备 ${id}?`)) return; await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'}); show('设备已删除'); await loadAll(); }
+async function testDevice(id){ const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'}); show(`ADB ${id}: ${result.state}${result.detail ? ' - ' + result.detail : ''}`, 5200); }
+async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await loadAll(); }
+async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await loadAll(); }
+async function savePermission(){ await api('/api/admin/permissions',{method:'PUT', body:{username:$('permUser').value, device_id:$('permDevice').value, can_view:$('permView').value==='true', can_control:$('permControl').value==='true'}}); show('权限已保存'); await loadAll(); }
+function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=Number(input.value); }); return presets; }
+function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:Number($('customProfileBitrate').value || 900000), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
+async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; const result=await api('/api/admin/video',{method:'PUT', body:payload}); state.video=result; show('画质设置已保存'); await loadAll(); }
+async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, current_config:$('alasConfig').value, api_token:$('alasToken').value}}); show('ALAS 设置已保存'); await loadAll(); }
+async function reloadAlas(){ state.alas=await api('/api/admin/alas'); renderAlas(); }
+async function toggleAlas(){ await api('/api/admin/alas/toggle',{method:'POST'}); show('ALAS 状态已更新'); await loadAll(); }
+async function loadConfig(){ const data=await api('/api/admin/alas/config'); $('configSource').value=data.source || data.config || ''; $('configTarget').value=data.target || $('alasConfig').value || data.config || ''; $('configEditor').value=JSON.stringify(data.data || {}, null, 2); show('配置已读取'); }
+async function saveConfig(){ let data; try{ data=JSON.parse($('configEditor').value); }catch(e){ show('JSON 格式错误'); return; } await api('/api/admin/alas/config',{method:'PUT', body:{source:$('configSource').value, target:$('configTarget').value || $('alasConfig').value, data}}); show('配置已保存'); await loadAll(); }
+async function saveAlasBinding(){ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:$('alasBindUser').value, config_name:$('alasBindConfig').value, enabled:$('alasBindEnabled').value==='true', can_run:$('alasBindRun').value==='true', can_edit:false}}); show('ALAS 绑定已保存'); await loadAll(); }
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active', x===b)); document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active', p.id===b.dataset.tab)); });
+$('reloadAll').onclick=()=>loadAll().catch(e=>show(e.message)); $('saveUser').onclick=()=>saveUser().catch(e=>show(e.message)); $('saveDevice').onclick=()=>saveDevice().catch(e=>show(e.message)); $('clearDeviceForm').onclick=()=>clearDeviceForm(); $('savePermission').onclick=()=>savePermission().catch(e=>show(e.message)); $('saveVideo').onclick=()=>saveVideo().catch(e=>show(e.message)); $('addCustomProfile').onclick=()=>addCustomProfile(); $('saveAlas').onclick=()=>saveAlas().catch(e=>show(e.message)); $('reloadAlas').onclick=()=>reloadAlas().catch(e=>show(e.message)); $('toggleAlas').onclick=()=>toggleAlas().catch(e=>show(e.message)); $('loadConfig').onclick=()=>loadConfig().catch(e=>show(e.message)); $('saveConfig').onclick=()=>saveConfig().catch(e=>show(e.message)); $('saveAlasBinding').onclick=()=>saveAlasBinding().catch(e=>show(e.message)); $('alasBindUser').onchange=()=>fillAlasBindingForm();
+loadAll().catch(e=>show(e.message));
+</script>
+</body>
+</html>

@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ScrcpyGate</title>
+  <script src="/static/js/jmuxer.min.js"></script>
+  <script src="/static/js/input.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0c0f14; --surface:#171b24; --panel:#202635; --panel-soft:#252b3a;
+      --line:#394254; --text:#f3f6fb; --muted:#9aa6ba; --primary:#2f7df6;
+      --teal:#23b7a8; --ok:#28c982; --warn:#f0b84b; --danger:#ff6b6b; --dock:74px;
+    }
+    * { box-sizing:border-box; }
+    html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overflow:hidden; }
+    button, input, select, textarea { font:inherit; }
+    button { cursor:pointer; }
+    .app { height:100vh; height:100dvh; display:grid; grid-template-columns:340px minmax(0,1fr); }
+    .sidebar { min-height:0; overflow:auto; border-right:1px solid var(--line); background:#121720; padding:18px; }
+    .brand-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:18px; }
+    .brand { font-size:20px; font-weight:800; line-height:1.2; }
+    .muted { color:var(--muted); }
+    .link-btn, .logout { color:#86b4ff; background:transparent; border:0; text-decoration:none; padding:0; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 0 10px; }
+    .section-title { color:#86b4ff; font-weight:750; }
+    .sidebar-menu { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:16px 0 6px; }
+    .device-list { display:grid; gap:10px; }
+    .device-card { width:100%; text-align:left; border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:8px; padding:12px; display:grid; gap:8px; }
+    .device-card.active { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
+    .device-card[disabled] { opacity:.55; cursor:not-allowed; }
+    .device-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .device-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .device-meta { color:var(--muted); font-size:13px; }
+    .side-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+    .side-actions .wide { grid-column:1 / -1; }
+    .btn { border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:8px; min-height:42px; padding:0 14px; font-weight:700; }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+    .btn.primary { border-color:transparent; background:var(--primary); color:white; }
+    .btn.danger { border-color:rgba(255,107,107,.55); background:rgba(255,107,107,.1); color:#ffd7d7; }
+    .btn.ghost { background:transparent; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; }
+    .chip { display:inline-flex; align-items:center; min-height:28px; padding:4px 9px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:13px; max-width:100%; }
+    .chip.ok { color:#ccffe8; border-color:rgba(40,201,130,.45); background:rgba(40,201,130,.1); }
+    .chip.warn { color:#ffe8ad; border-color:rgba(240,184,75,.45); background:rgba(240,184,75,.1); }
+    .chip.danger { color:#ffd7d7; border-color:rgba(255,107,107,.45); background:rgba(255,107,107,.1); }
+    .viewer { min-width:0; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); background:#07090d; position:relative; }
+    .viewer-top { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 16px; border-bottom:1px solid var(--line); background:#111722; }
+    .selected-title { font-size:18px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .selected-meta { margin-top:3px; color:var(--muted); font-size:13px; }
+    .top-left { min-width:0; display:flex; align-items:center; gap:10px; }
+    .top-copy { min-width:0; }
+    .top-menu-btn { display:none; min-height:34px; padding:0 10px; }
+    .top-status { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+    .stage { position:relative; min-width:0; min-height:0; overflow:hidden; padding:12px 12px calc(var(--dock) + 12px + env(safe-area-inset-bottom)); display:grid; place-items:center; }
+    .video-wrap { display:grid; place-items:center; overflow:hidden; background:#05070a; border:1px solid #151b25; width:100%; height:100%; }
+    video { width:100%; height:100%; object-fit:contain; outline:none; background:#05070a; touch-action:none; }
+    .empty { position:absolute; inset:12px 12px calc(var(--dock) + 12px + env(safe-area-inset-bottom)); display:grid; place-items:center; color:var(--muted); text-align:center; line-height:1.7; pointer-events:none; }
+    .notice { position:absolute; top:72px; left:50%; transform:translateX(-50%); z-index:8; max-width:min(760px, calc(100vw - 28px)); padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:rgba(32,38,53,.96); color:var(--text); display:none; box-shadow:0 18px 50px rgba(0,0,0,.38); }
+    .notice.show { display:block; }
+    .tools { display:none; margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:8px; background:rgba(23,27,36,.98); box-shadow:0 18px 50px rgba(0,0,0,.24); }
+    .tools.open { display:block; }
+    .tools-title { font-size:15px; font-weight:800; margin-bottom:12px; color:#dce7ff; }
+    .setting-group { display:grid; gap:8px; padding:10px; border:1px solid rgba(57,66,84,.72); border-radius:8px; background:rgba(12,15,20,.28); }
+    .setting-group + .setting-group { margin-top:10px; }
+    .setting-group-title { display:flex; align-items:baseline; justify-content:space-between; gap:8px; color:#dce7ff; font-size:13px; font-weight:800; }
+    .setting-group-help { color:var(--muted); font-size:12px; font-weight:500; line-height:1.45; }
+    .tool-row { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
+    .tool-row.two { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .tool-row .btn { min-height:36px; padding:0 10px; font-weight:650; }
+    .tool-row .btn.active, .quality-grid .btn.active { border-color:var(--teal); color:#d9fffb; background:rgba(35,183,168,.14); }
+    .quality-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+    .quality-grid label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+    .quality-grid input, .quality-grid select { width:100%; min-height:38px; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; padding:7px 9px; outline:none; }
+    .quality-grid .wide { grid-column:1 / -1; }
+    .quality-note { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
+    .alas-panel .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .alas-panel .actions .btn { min-height:36px; }
+    .account-grid { display:grid; gap:10px; }
+    .account-grid label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
+    .account-grid input { width:100%; min-height:38px; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; padding:7px 9px; outline:none; }
+    .account-grid input:focus { border-color:var(--primary); }
+    .dock { position:absolute; left:0; right:0; bottom:0; z-index:4; min-height:var(--dock); padding:10px 14px calc(10px + env(safe-area-inset-bottom)); display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(12,15,20,.95); border-top:1px solid var(--line); backdrop-filter:blur(12px); }
+    .dock .btn { min-width:70px; height:44px; padding:0 12px; }
+    .sidebar-backdrop { display:none; }
+    @media (max-width: 900px) {
+      :root { --dock:68px; }
+      .app { grid-template-columns:1fr; }
+      .sidebar { position:absolute; z-index:10; left:10px; top:10px; width:min(380px, calc(100vw - 20px)); max-height:calc(100vh - var(--dock) - 26px); border:1px solid var(--line); border-radius:8px; transform:translateY(calc(-100% - 24px)); transition:transform .18s ease; box-shadow:0 24px 60px rgba(0,0,0,.48); }
+      .sidebar.open { transform:translateY(0); }
+      .sidebar-backdrop.open { display:block; position:absolute; inset:0; z-index:9; background:rgba(0,0,0,.34); }
+      .viewer-top { display:block; padding:10px 12px; }
+      .top-left { align-items:flex-start; }
+      .top-menu-btn { display:inline-flex; align-items:center; }
+      .top-status { justify-content:flex-start; margin-top:8px; }
+      .stage { padding:6px 6px calc(var(--dock) + 8px + env(safe-area-inset-bottom)); }
+      .empty { inset:6px 6px calc(var(--dock) + 8px + env(safe-area-inset-bottom)); }
+      .dock { justify-content:center; overflow:hidden; padding-left:8px; padding-right:8px; }
+      .dock .btn { flex:0 0 auto; min-width:72px; height:42px; }
+      .quality-grid { grid-template-columns:1fr; }
+      .quality-grid .wide { grid-column:1; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside id="sidebar" class="sidebar">
+    <div class="brand-row">
+      <div>
+        <div class="brand">ScrcpyGate</div>
+        <div class="chips" style="margin-top:10px"><span class="chip">{{ user.username }}</span><span id="roleChip" class="chip"></span></div>
+      </div>
+      <form method="post" action="/logout"><button class="logout" type="submit">退出</button></form>
+    </div>
+    <a id="adminLink" class="link-btn" href="/admin" hidden>后台管理</a>
+    <div class="sidebar-menu">
+      <button id="toolBtn" class="btn" type="button">画面设置</button>
+      <button id="alasBtn" class="btn" type="button">ALAS</button>
+      <button id="accountBtn" class="btn" type="button">账户</button>
+    </div>
+    <div class="section-head"><div class="section-title">设备</div><button id="refreshBtn" class="link-btn" type="button">刷新</button></div>
+    <div id="devices" class="device-list"></div>
+    <div class="side-actions">
+      <button id="startBtn" class="btn primary wide" type="button">开始投屏</button>
+      <button id="controlBtn" class="btn" type="button">获取控制</button>
+      <button id="stopBtn" class="btn danger" type="button">停止投屏</button>
+    </div>
+    <div id="tools" class="tools">
+      <div class="tools-title">画面设置</div>
+      <div class="setting-group">
+        <div class="setting-group-title">
+          <span>画面大小</span>
+          <span class="setting-group-help">只影响网页显示</span>
+        </div>
+        <div class="tool-row">
+          <button class="btn" data-fit="contain" type="button">适应窗口</button>
+          <button class="btn" data-fit="original" type="button">原始大小</button>
+        </div>
+      </div>
+      <div class="setting-group">
+        <div class="setting-group-title">
+          <span>投屏画质</span>
+          <span class="setting-group-help">应用后会重启投屏流</span>
+        </div>
+        <div class="quality-grid" id="qualityProfiles">
+          <button class="btn" data-profile="smooth" type="button">流畅</button>
+          <button class="btn" data-profile="balanced" type="button">稳定</button>
+          <button class="btn" data-profile="sharp" type="button">高清</button>
+          <button class="btn" data-profile="low_latency" type="button">低延迟</button>
+          <label class="wide">scrcpy 流模式
+            <select id="qualityStreamMode">
+              <option value="raw">raw</option>
+              <option value="protocol">protocol</option>
+              <option value="legacy">legacy 诊断</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <p class="quality-note">点击预设会立即保存并应用到当前投屏；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+    </div>
+    <div id="alasTools" class="tools alas-panel">
+      <div class="tools-title">ALAS</div>
+      <div id="alasPanelStatus" class="chips"></div>
+      <div class="actions" style="margin-top:12px">
+        <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
+        <button id="alasReload" class="btn" type="button">刷新</button>
+      </div>
+      <p class="quality-note">配置名由后台绑定决定；这里只提供启动、停止和重启，不显示或编辑配置内容。</p>
+    </div>
+    <div id="accountTools" class="tools">
+      <div class="tools-title">账户设置</div>
+      <div id="accountInfo" class="chips"></div>
+      <div class="setting-group">
+        <div class="setting-group-title">
+          <span>修改密码</span>
+          <span class="setting-group-help">至少 12 位</span>
+        </div>
+        <div class="account-grid">
+          <label>当前密码
+            <input id="currentPassword" type="password" autocomplete="current-password">
+          </label>
+          <label>新密码
+            <input id="newPassword" type="password" autocomplete="new-password">
+          </label>
+          <label>确认新密码
+            <input id="confirmPassword" type="password" autocomplete="new-password">
+          </label>
+          <button id="changePasswordBtn" class="btn primary" type="button">保存新密码</button>
+        </div>
+      </div>
+      <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
+    </div>
+  </aside>
+  <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+  <main class="viewer">
+    <div class="viewer-top">
+      <div class="top-left">
+        <button id="menuBtn" class="btn top-menu-btn" type="button">菜单</button>
+        <div class="top-copy">
+          <div id="selectedTitle" class="selected-title">未选择设备</div>
+          <div id="selectedMeta" class="selected-meta">从设备列表选择一个设备后开始投屏</div>
+        </div>
+      </div>
+      <div id="topStatus" class="top-status"></div>
+    </div>
+    <div id="notice" class="notice"></div>
+    <div id="stage" class="stage">
+      <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
+      <div id="empty" class="empty">选择设备后开始投屏</div>
+      <nav class="dock">
+        <button id="backBtn" class="btn" type="button">返回</button>
+        <button id="homeBtn" class="btn" type="button">主页</button>
+        <button id="recentBtn" class="btn" type="button">菜单</button>
+      </nav>
+    </div>
+  </main>
+</div>
+<script>
+const csrfToken = "{{ csrf_token }}";
+const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
+const state = {
+  user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
+  videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
+  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null,
+  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced'
+};
+const $ = (id) => document.getElementById(id);
+function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
+function getDeviceId(device){ return String((device && (device.device_id || device.id)) || '').trim(); }
+function currentDevice(){ return state.devices.find(d => getDeviceId(d) === state.selectedDeviceId) || null; }
+function selectedSession(){ const id=state.selectedDeviceId; const device=currentDevice(); return id ? (state.sessions[id] || (device && device.session) || null) : null; }
+function deviceLabel(device){ return device ? (device.display_name || device.name || '设备') : '未选择设备'; }
+function show(message, ms=3200){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),ms); }
+function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
+async function fetchJson(url, options={}){
+  const opts = Object.assign({headers:{}}, options);
+  if (opts.body && typeof opts.body !== 'string') { opts.headers['content-type']='application/json'; opts.body = JSON.stringify(opts.body); }
+  if (!['GET','HEAD'].includes((opts.method || 'GET').toUpperCase())) opts.headers['x-csrf-token'] = csrfToken;
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  let data = {}; try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {detail:text}; }
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+function normalizeSelection(){
+  const ids = state.devices.map(getDeviceId).filter(Boolean);
+  if (!ids.length) { state.selectedDeviceId=''; localStorage.removeItem(SELECTED_KEY); return; }
+  if (!state.selectedDeviceId || !ids.includes(state.selectedDeviceId)) state.selectedDeviceId = ids[0];
+  localStorage.setItem(SELECTED_KEY, state.selectedDeviceId);
+}
+function selectDevice(id){
+  if (!id || id === state.selectedDeviceId) return;
+  if (state.videoWs || state.controlWs) closeVideo();
+  state.selectedDeviceId=id;
+  localStorage.setItem(SELECTED_KEY, id);
+  closeSidebar();
+  render();
+}
+function mergeSessions(devices, sessions){
+  const merged = Object.assign({}, sessions || {});
+  devices.forEach(d => { const id=getDeviceId(d); if (id && d.session) merged[id]=d.session; });
+  return merged;
+}
+function socketLive(ws){
+  return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
+}
+function qualitySummary(){
+  const q = qualityPayload();
+  const size = q.max_size > 0 ? q.max_size : '原始';
+  const fps = q.max_fps > 0 ? q.max_fps : '不限';
+  return `输出 ${size} / ${Math.round(q.video_bit_rate / 100000) / 10}Mbps / ${fps}fps / ${q.scrcpy_stream_mode || 'raw'}`;
+}
+function enabledStreamModes(){
+  const modes = state.videoPrefs && state.videoPrefs.enabled_stream_modes;
+  return Array.isArray(modes) && modes.length ? modes : ['raw'];
+}
+function streamModeLabel(mode){ return mode === 'legacy' ? 'legacy 诊断' : mode; }
+function renderQualityStreamMode(selected){
+  const select = $('qualityStreamMode');
+  if (!select) return;
+  const modes = enabledStreamModes();
+  select.textContent = '';
+  modes.forEach(mode=>{
+    const option=document.createElement('option');
+    option.value=mode;
+    option.textContent=streamModeLabel(mode);
+    select.appendChild(option);
+  });
+  select.value = modes.includes(selected) ? selected : modes[0];
+}
+function qualityPayload(){
+  const profile = state.qualityProfile || 'balanced';
+  const presets = state.videoPrefs && state.videoPrefs.profiles;
+  const preset = (presets && presets[profile]) || (presets && presets.balanced) || {video_bit_rate:900000, max_size:540, max_fps:24};
+  const modes = enabledStreamModes();
+  return {
+    profile,
+    adaptive:false,
+    video_bit_rate:Number(preset.video_bit_rate || 900000),
+    max_size:Number(preset.max_size == null ? 540 : preset.max_size),
+    max_fps:Number(preset.max_fps == null ? 24 : preset.max_fps),
+    scrcpy_stream_mode:modes.includes($('qualityStreamMode').value) ? $('qualityStreamMode').value : modes[0]
+  };
+}
+function applyQualityToForm(options){
+  const q = options || (state.videoPrefs && state.videoPrefs.effective) || {profile:'balanced', adaptive:false, video_bit_rate:900000, max_size:540, max_fps:24};
+  const profiles = (state.videoPrefs && state.videoPrefs.profiles) || {};
+  state.qualityProfile = profiles[q.profile] ? q.profile : 'balanced';
+  renderQualityStreamMode(q.scrcpy_stream_mode || 'raw');
+  renderQualityButtons();
+}
+function qualityProfileOrder(){
+  const profiles = (state.videoPrefs && state.videoPrefs.profiles) || {};
+  const base = ['smooth','balanced','sharp','low_latency'].filter(name=>profiles[name] || ['smooth','balanced','sharp','low_latency'].includes(name));
+  const custom = Object.keys(profiles).filter(name=>!base.includes(name)).sort();
+  return base.concat(custom);
+}
+function qualityProfileLabel(profile){
+  const labels = (state.videoPrefs && state.videoPrefs.profile_labels) || {};
+  return labels[profile] || ({smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'}[profile]) || profile;
+}
+function ensureQualityButtons(){
+  const grid = $('qualityProfiles');
+  if (!grid) return;
+  const label = grid.querySelector('label');
+  grid.querySelectorAll('[data-profile]').forEach(btn=>btn.remove());
+  qualityProfileOrder().forEach(profile=>{
+    const button=document.createElement('button');
+    button.className='btn';
+    button.dataset.profile=profile;
+    button.type='button';
+    button.textContent=qualityProfileLabel(profile);
+    button.onclick=()=>chooseQualityProfile(profile).catch(e=>show(e.message));
+    grid.insertBefore(button, label);
+  });
+}
+function renderQualityButtons(){
+  ensureQualityButtons();
+  document.querySelectorAll('[data-profile]').forEach(btn=>btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile));
+}
+async function chooseQualityProfile(profile){
+  state.qualityProfile = profile;
+  renderQualityButtons();
+  await saveOrApplyQuality();
+}
+function renderDevices(){
+  const box=$('devices'); box.textContent='';
+  if (!state.devices.length) { box.appendChild(chip('暂无可用设备','warn')); return; }
+  state.devices.forEach(device => {
+    const id=getDeviceId(device); const session=state.sessions[id] || device.session; const active=id===state.selectedDeviceId;
+    const adbState = device.adb_state || 'unknown';
+    const adbBlocked = adbState === 'offline' || adbState === 'unauthorized';
+    const btn=document.createElement('button'); btn.className='device-card' + (active?' active':''); btn.type='button'; btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
+    const title=document.createElement('div'); title.className='device-title';
+    const name=document.createElement('strong'); name.textContent=deviceLabel(device);
+    const status=chip(session && session.running ? '投屏中' : (device.enabled ? (adbState === 'online' ? '在线' : adbState) : '禁用'), session && session.running ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
+    title.append(name, status);
+    const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
+    const meta=document.createElement('div'); meta.className='chips';
+    meta.appendChild(chip(device.can_control ? '可控制' : '只观看', device.can_control ? 'ok' : 'warn'));
+    meta.appendChild(chip(`ADB: ${adbState}`, adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'));
+    if (session && session.clients) meta.appendChild(chip(`${session.clients} 个观看端`));
+    btn.append(title, metaText, meta);
+    btn.onclick=()=>selectDevice(id);
+    box.appendChild(btn);
+  });
+}
+function renderStatus(){
+  const device=currentDevice(); const session=selectedSession();
+  $('selectedTitle').textContent = deviceLabel(device);
+  $('selectedMeta').textContent = device ? qualitySummary() : '从设备列表选择一个设备后开始投屏';
+  const topStatus=$('topStatus'); topStatus.textContent='';
+  const items=[];
+  items.push(chip(device ? deviceLabel(device) : '未选择', device ? '' : 'warn'));
+  items.push(chip(session && session.running ? '投屏中' : '未投屏', session && session.running ? 'ok' : 'warn'));
+  items.push(chip(state.videoConnected ? '视频已连接' : '视频未连接', state.videoConnected ? 'ok' : 'warn'));
+  items.push(chip(state.controlConnected ? '控制通道已连接' : '控制通道未连接', state.controlConnected ? 'ok' : 'warn'));
+  if (session && session.control_lock) items.push(chip(`控制: ${session.control_lock.username}`, session.control_lock.username === (state.user && state.user.username) ? 'ok' : 'warn'));
+  else items.push(chip('控制空闲'));
+  if (session && session.video) items.push(chip(`流: ${session.video.max_size || '原始'} / ${session.video.max_fps || '不限'}fps`));
+  if (session && session.stream_mode) items.push(chip(`流模式: ${session.stream_mode}/${session.stream_health || 'unknown'}`, session.stream_health === 'healthy' ? 'ok' : 'warn'));
+  if (device && device.adb_state) items.push(chip(`ADB: ${device.adb_state}`, device.adb_state === 'online' ? 'ok' : 'warn'));
+  if (state.alas) items.push(chip(`ALAS: ${state.alas.status || 'unknown'}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
+  items.forEach(item=>topStatus.appendChild(item));
+  $('startBtn').disabled = state.starting;
+  $('controlBtn').textContent = state.hasControl ? '释放控制' : '获取控制';
+  $('alasBtn').textContent = 'ALAS';
+  renderAlasPanel();
+  document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
+  renderQualityButtons();
+  $('empty').style.display = state.videoConnected ? 'none' : 'grid';
+  $('phoneVideo').style.objectFit = 'contain';
+  layoutVideo();
+}
+function render(){ renderDevices(); renderStatus(); renderAccountPanel(); $('roleChip').textContent = state.user && state.user.is_admin ? '管理员' : '普通用户'; $('adminLink').hidden = !(state.user && state.user.is_admin); }
+function renderAlasPanel(){
+  const box=$('alasPanelStatus'); if(!box) return; box.textContent='';
+  const a=state.alas || {};
+  box.appendChild(chip(a.config ? `配置 ${a.config}` : '未绑定', a.config ? 'ok' : 'warn'));
+  box.appendChild(chip(a.status || 'unknown', a.status === 'running' ? 'ok' : a.status === 'error' ? 'warn' : ''));
+  box.appendChild(chip(a.can_run ? '可运行' : '不可运行', a.can_run ? 'ok' : 'warn'));
+  if(a.error) box.appendChild(chip(a.error, 'danger'));
+  $('alasToggleRun').textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';
+  $('alasToggleRun').disabled = !a.can_run;
+}
+function renderAccountPanel(){
+  const box=$('accountInfo'); if(!box) return; box.textContent='';
+  const user=state.user || {};
+  box.appendChild(chip(user.username || '未登录', 'ok'));
+  box.appendChild(chip(user.is_admin ? '管理员' : '普通用户'));
+}
+function closeToolPanels(exceptId){
+  ['tools','alasTools','accountTools'].forEach(id=>{
+    const el=$(id);
+    if (el && id !== exceptId) el.classList.remove('open');
+  });
+}
+function toggleToolPanel(id){
+  const el=$(id);
+  if (!el) return;
+  const willOpen = !el.classList.contains('open');
+  closeToolPanels(id);
+  el.classList.toggle('open', willOpen);
+}
+function clearPasswordForm(){
+  ['currentPassword','newPassword','confirmPassword'].forEach(id=>{ if($(id)) $(id).value=''; });
+}
+async function changePassword(){
+  const payload={
+    current_password:$('currentPassword').value,
+    new_password:$('newPassword').value,
+    confirm_password:$('confirmPassword').value
+  };
+  if (!payload.current_password || !payload.new_password || !payload.confirm_password) return show('请完整填写密码');
+  if (payload.new_password !== payload.confirm_password) return show('两次输入的新密码不一致');
+  const result = await fetchJson('/api/account/password', {method:'PUT', body:payload});
+  clearPasswordForm();
+  show(result.other_sessions_removed ? `密码已修改，已清理 ${result.other_sessions_removed} 个其它会话` : '密码已修改');
+}
+async function loadAll(){
+  const me = await fetchJson('/api/me'); state.user = me.user;
+  const dev = await fetchJson('/api/devices'); state.devices=dev.devices || []; state.sessions=mergeSessions(state.devices, dev.sessions || {});
+  normalizeSelection();
+  try { state.videoPrefs = await fetchJson('/api/video/preferences'); applyQualityToForm(state.videoPrefs.effective); } catch (_) {}
+  try { state.alas = await fetchJson('/api/alas/status'); } catch (_) { state.alas = null; }
+  render();
+}
+async function startMirror(){
+  const id=state.selectedDeviceId;
+  if (!id) return show('请先选择设备');
+  if (state.starting) return show('投屏正在启动，请稍等');
+  const now = Date.now();
+  if (now - state.lastStartAt < 1200) return show('操作过快，请稍等');
+  state.lastStartAt = now;
+  state.starting = true;
+  render();
+  try {
+    const data = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/start`, {method:'POST', body:qualityPayload()});
+    state.sessions = data.sessions || state.sessions;
+    if (data.ok === false) return show(data.detail || data.error || '投屏启动失败，请检查 ADB 连接', 5200);
+    if (state.activeDeviceId === id && socketLive(state.videoWs)) {
+      schedulePlayerReset();
+      if (!socketLive(state.controlWs)) openControl(id);
+      show('投屏已在运行，已刷新播放器');
+      return;
+    }
+    reconnectSockets(id);
+  } finally {
+    state.starting = false;
+    render();
+  }
+}
+async function stopMirror(){
+  const id=state.selectedDeviceId;
+  if (!id) return show('请先选择设备');
+  await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
+  closeVideo(); state.hasControl=false; await loadAll();
+}
+async function saveOrApplyQuality(){
+  const id=state.selectedDeviceId;
+  const payload = qualityPayload();
+  if (!id) {
+    const saved = await fetchJson('/api/video/preferences', {method:'PUT', body:payload});
+    state.videoPrefs = Object.assign({}, state.videoPrefs || {}, saved);
+    show('画质偏好已保存');
+    render();
+    return;
+  }
+  const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/settings`, {method:'PUT', body:payload});
+  if (result.ok === false) {
+    state.sessions = result.sessions || state.sessions;
+    show(result.detail || result.error || '画质应用失败，投屏未恢复', 5200);
+    render();
+    return;
+  }
+  state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
+  state.sessions = result.sessions || state.sessions;
+  if (result.restarted) {
+    reconnectSockets(id);
+    show('画质已应用，投屏已按新参数重启');
+  } else {
+    show('画质偏好已保存，下次启动投屏生效');
+  }
+  render();
+}
+function closeVideoSocket(){
+  state.videoSeq += 1;
+  const ws = state.videoWs;
+  state.videoWs = null;
+  state.videoConnected = false;
+  if (ws) { try { ws.close(); } catch(_){} }
+  if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; }
+  resetVideoElement();
+  if (state.playerResetTimer) { clearTimeout(state.playerResetTimer); state.playerResetTimer=null; }
+}
+function closeControlSocket(){
+  state.controlSeq += 1;
+  const ws = state.controlWs;
+  state.controlWs = null;
+  state.controlConnected = false;
+  state.hasControl = false;
+  state.input = null;
+  if (ws) { try { ws.close(); } catch(_){} }
+}
+function closeVideo(){
+  cancelInactiveStop();
+  closeVideoSocket();
+  closeControlSocket();
+  state.activeDeviceId='';
+}
+function autoStopDelayMs(){
+  const minutes = Number((state.videoPrefs && state.videoPrefs.auto_stop_minutes) || 15);
+  return minutes > 0 ? minutes * 60 * 1000 : 0;
+}
+function cancelInactiveStop(){
+  if (state.idleStopTimer) clearTimeout(state.idleStopTimer);
+  state.idleStopTimer = null;
+  state.idleStopReason = '';
+}
+function scheduleInactiveStop(reason){
+  cancelInactiveStop();
+  const delay = autoStopDelayMs();
+  if (delay <= 0 || !socketLive(state.videoWs)) return;
+  state.idleStopReason = reason || 'inactive';
+  const minutes = Math.round(delay / 60000);
+  show(`页面未聚焦，${minutes} 分钟后自动停止本浏览器观看以节省上行`, 4200);
+  state.idleStopTimer = setTimeout(()=>idleStopMirror(state.idleStopReason).catch(()=>{}), delay);
+}
+async function idleStopMirror(reason){
+  const id = state.activeDeviceId || state.selectedDeviceId;
+  if (!id) return;
+  closeVideoSocket();
+  closeControlSocket();
+  state.activeDeviceId = '';
+  await new Promise(resolve=>setTimeout(resolve, 300));
+  const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:reason || 'inactive'}});
+  state.sessions = result.sessions || state.sessions;
+  show(result.stopped ? '页面长时间未聚焦，投屏已自动停止' : '页面长时间未聚焦，已停止本浏览器观看');
+  render();
+}
+function reconnectSockets(id){
+  closeVideo();
+  state.activeDeviceId=id;
+  openVideo(id, {force:true});
+  openControl(id, {force:true});
+}
+function sendPlayerReset(){
+  const msg=JSON.stringify({type:'player_reset'});
+  if (state.videoWs && state.videoWs.readyState === WebSocket.OPEN) { try { state.videoWs.send(msg); } catch(_){} }
+}
+function requestVideoPrime(ws){
+  const target = ws || state.videoWs;
+  if (target && target.readyState === WebSocket.OPEN) {
+    try { target.send(JSON.stringify({type:'player_reset'})); } catch(_) {}
+  }
+}
+function resetVideoElement(){
+  const video = $('phoneVideo');
+  if (!video) return;
+  try { video.pause(); } catch(_) {}
+  try { video.removeAttribute('src'); video.load(); } catch(_) {}
+}
+function jmuxerConfig(video){
+  return {node: video, mode:'video', flushingTime:33, maxDelay:150, fps:30, clearBuffer:true, onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); }};
+}
+function completeAnnexBChunk(data){
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const out = new Uint8Array(bytes.length + 4);
+  out.set(bytes, 0);
+  out.set([0, 0, 0, 1], bytes.length);
+  return out;
+}
+function schedulePlayerReset(){
+  if (state.playerResetTimer) return;
+  state.playerResetTimer=setTimeout(()=>{
+    state.playerResetTimer=null;
+    const video=$('phoneVideo');
+    if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} }
+    resetVideoElement();
+    state.jmuxer = new JMuxer(jmuxerConfig(video));
+    sendPlayerReset();
+  }, 250);
+}
+function openVideo(id, options={}){
+  if (!options.force && state.activeDeviceId === id && socketLive(state.videoWs)) return state.videoWs;
+  closeVideoSocket();
+  state.activeDeviceId=id;
+  const token = ++state.videoSeq;
+  const video=$('phoneVideo');
+  state.jmuxer = new JMuxer(jmuxerConfig(video));
+  const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/video`));
+  state.videoWs = ws;
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; render(); requestVideoPrime(ws); setTimeout(()=>{ if (state.videoSeq === token && state.videoWs === ws) requestVideoPrime(ws); }, 450); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
+  ws.onmessage = async (event) => {
+    if (state.videoSeq !== token || state.videoWs !== ws) return;
+    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) state.sessions[id]=msg.session; render(); requestVideoPrime(ws); return; }
+    const buf = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
+    if (state.videoSeq !== token || state.videoWs !== ws) return;
+    if (!state.jmuxer) return; state.jmuxer.feed({video:completeAnnexBChunk(buf), duration:33}); if (video.paused) video.play().catch(()=>{});
+  };
+  ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) show('视频通道连接失败'); };
+  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; render(); };
+  video.onloadedmetadata = () => updateInputSize();
+  return ws;
+}
+function openControl(id, options={}){
+  if (!options.force && state.activeDeviceId === id && socketLive(state.controlWs)) return state.controlWs;
+  closeControlSocket();
+  state.activeDeviceId=id;
+  const token = ++state.controlSeq;
+  const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/control`));
+  state.controlWs = ws;
+  ws.binaryType='arraybuffer';
+  ws.onopen = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=true; setupInput(); render(); };
+  ws.onmessage = (event) => {
+    if (state.controlSeq !== token || state.controlWs !== ws) return;
+    if (typeof event.data !== 'string') return;
+    const msg=JSON.parse(event.data);
+    if (msg.type === 'hello' && msg.lock && state.sessions[id]) state.sessions[id].control_lock = msg.lock;
+    if (msg.type === 'control_lock') { if (msg.ok !== undefined) state.hasControl = !!msg.ok; if (msg.lock && state.sessions[id]) state.sessions[id].control_lock = msg.lock; }
+    if (msg.type === 'control_released') state.hasControl=false;
+    if (msg.type === 'control_error') show(msg.error || '控制失败');
+    render();
+  };
+  ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) show('控制通道连接失败'); };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; state.hasControl=false; render(); };
+  return ws;
+}
+function updateInputSize(){
+  const video=$('phoneVideo');
+  const w=video.videoWidth || state.screen.w;
+  const h=video.videoHeight || state.screen.h;
+  state.screen={w,h};
+  if (state.input && state.input.resizeScreen) state.input.resizeScreen(w,h);
+  layoutVideo();
+}
+function layoutVideo(){
+  const stage=$('stage'); const wrap=$('videoWrap'); if (!stage || !wrap) return;
+  const style=getComputedStyle(stage);
+  const availW=stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const availH=stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const aspect=(state.screen.w || 1280) / Math.max(1, state.screen.h || 720);
+  let width=availW; let height=width / aspect;
+  if (state.fit === 'original') {
+    const naturalW = state.screen.w || 1280;
+    const naturalH = state.screen.h || 720;
+    const scale = Math.min(1, availW / naturalW, availH / naturalH);
+    width = naturalW * scale;
+    height = naturalH * scale;
+  } else if (height > availH) {
+    height=availH; width=height * aspect;
+  }
+  wrap.style.width=`${Math.max(1, Math.floor(width))}px`;
+  wrap.style.height=`${Math.max(1, Math.floor(height))}px`;
+}
+function setupInput(){
+  const video=$('phoneVideo');
+  updateInputSize();
+  state.input = new ScrcpyInput((data) => {
+    if (!state.hasControl || !state.controlWs || state.controlWs.readyState !== WebSocket.OPEN) return;
+    state.controlWs.send(data);
+  }, video, state.screen.w, state.screen.h);
+}
+async function toggleControl(){
+  const id=state.selectedDeviceId; if (!id) return show('请先选择设备');
+  const ws = openControl(id);
+  const send = () => {
+    if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({type: state.hasControl ? 'release_control' : 'acquire_control', force:false}));
+  };
+  if (ws.readyState === WebSocket.OPEN) send();
+  else ws.addEventListener('open', send, {once:true});
+}
+function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
+async function reloadAlas(){ state.alas = await fetchJson('/api/alas/status'); render(); }
+async function toggleAlas(){ const result = await fetchJson('/api/alas/toggle', {method:'POST'}); if(result.ok === false) return show(result.error || 'ALAS 操作失败'); state.alas = result.alas || result; render(); show(state.alas.status === 'running' ? 'ALAS 已启动' : 'ALAS 状态已更新'); }
+function scheduleRefresh(){ clearTimeout(state.eventRefreshTimer); state.eventRefreshTimer=setTimeout(()=>loadAll().catch(()=>{}), 300); }
+function openEvents(){
+  state.eventWs = new WebSocket(wsUrl('/ws/events'));
+  state.eventWs.onmessage = (event) => {
+    const msg=JSON.parse(event.data);
+    if (msg.sessions) state.sessions=msg.sessions;
+    if (msg.type === 'mirror_status' || msg.type === 'control_lock') scheduleRefresh();
+    render();
+  };
+  state.eventWs.onclose = () => setTimeout(openEvents, 2500);
+}
+function openSidebar(){ $('sidebar').classList.add('open'); $('sidebarBackdrop').classList.add('open'); }
+function closeSidebar(){ $('sidebar').classList.remove('open'); $('sidebarBackdrop').classList.remove('open'); }
+$('startBtn').onclick=()=>startMirror().catch(e=>show(e.message));
+$('stopBtn').onclick=()=>stopMirror().catch(e=>show(e.message));
+$('controlBtn').onclick=()=>toggleControl().catch(e=>show(e.message));
+$('refreshBtn').onclick=()=>loadAll().catch(e=>show(e.message));
+$('menuBtn').onclick=()=>openSidebar();
+$('sidebarBackdrop').onclick=()=>closeSidebar();
+$('toolBtn').onclick=()=>toggleToolPanel('tools');
+$('backBtn').onclick=()=>sendKey(4);
+$('homeBtn').onclick=()=>sendKey(3);
+$('recentBtn').onclick=()=>sendKey(187);
+$('alasBtn').onclick=()=>toggleToolPanel('alasTools');
+$('accountBtn').onclick=()=>toggleToolPanel('accountTools');
+$('changePasswordBtn').onclick=()=>changePassword().catch(e=>show(e.message));
+$('alasToggleRun').onclick=()=>toggleAlas().catch(e=>show(e.message));
+$('alasReload').onclick=()=>reloadAlas().catch(e=>show(e.message));
+$('qualityStreamMode').onchange=()=>saveOrApplyQuality().catch(e=>show(e.message));
+document.querySelectorAll('[data-fit]').forEach(btn=>btn.onclick=()=>{ state.fit=btn.dataset.fit; render(); });
+window.addEventListener('resize', layoutVideo);
+window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
+window.addEventListener('focus', ()=>cancelInactiveStop());
+document.addEventListener('visibilitychange', ()=>{ if (document.hidden) scheduleInactiveStop('document_hidden'); else cancelInactiveStop(); });
+loadAll().then(openEvents).catch(e=>show(e.message));
+setInterval(()=>loadAll().catch(()=>{}), 15000);
+</script>
+</body>
+</html>
