@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.mirror import MirrorManager
+from app.mirror import ClientSession, MirrorManager
 
 
 class FakeMirrorSession:
@@ -54,6 +54,26 @@ class MirrorManagerTests(unittest.TestCase):
             self.assertEqual(broadcasts[0]["reason"], "switch")
 
         asyncio.run(run())
+
+    def test_client_queue_soft_limit_drops_until_next_keyframe(self):
+        client = ClientSession("client", "user", None)
+        client.queue = asyncio.Queue(maxsize=4)
+        client.needs_keyframe = False
+
+        client.push_frame(b"p1")
+        client.push_frame(b"p2")
+        client.push_frame(b"p3")
+        client.push_frame(b"p4")
+        self.assertEqual(client.drops, 1)
+        self.assertTrue(client.needs_keyframe)
+        self.assertEqual(client.queue.qsize(), 0)
+
+        client.push_frame(b"p5")
+        self.assertEqual(client.queue.qsize(), 0)
+
+        client.push_frame(b"idr", keyframe=True, config=b"cfg")
+        self.assertFalse(client.needs_keyframe)
+        self.assertEqual(client.queue.get_nowait(), b"cfgidr")
 
 
 if __name__ == "__main__":

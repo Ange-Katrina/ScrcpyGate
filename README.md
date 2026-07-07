@@ -316,7 +316,8 @@ curl -fsS http://127.0.0.1:5000/healthz
 | `ADB_RECONNECT_BACKOFF` | `5` | ADB 重连退避秒数 |
 | `SCRCPY_STREAM_MODE` | `raw` | 默认 scrcpy 流模式 |
 | `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | 视频流健康检测超时 |
-| `VIDEO_QUEUE_MAXSIZE` | `200` | 单客户端视频队列大小 |
+| `VIDEO_QUEUE_MAXSIZE` | `60` | 单客户端视频队列硬上限 |
+| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | 单客户端视频队列软上限，超过后等待关键帧恢复 |
 | `LOG_LEVEL` | `INFO` | 日志级别 |
 
 更多示例见 [.env.example](.env.example)。

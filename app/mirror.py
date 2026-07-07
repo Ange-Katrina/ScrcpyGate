@@ -28,7 +28,8 @@ from .h264 import (
 from .scrcpy_demuxer import ScrcpyProtocolDemuxer, ScrcpyPacket
 from .video_options import enabled_stream_modes_value, public_video_options, settings_to_video_options, signature, stream_mode_or_default
 
-VIDEO_QUEUE_MAXSIZE = int(os.environ.get("VIDEO_QUEUE_MAXSIZE", "120") or "120")
+VIDEO_QUEUE_MAXSIZE = max(8, int(os.environ.get("VIDEO_QUEUE_MAXSIZE", "60") or "60"))
+VIDEO_QUEUE_SOFT_LIMIT = int(os.environ.get("VIDEO_QUEUE_SOFT_LIMIT", str(max(8, int(VIDEO_QUEUE_MAXSIZE * 0.75)))) or "0")
 SCRCPY_STREAM_MODE = os.environ.get("SCRCPY_STREAM_MODE", "raw").strip().lower() or "raw"
 STREAM_HEALTH_TIMEOUT = float(os.environ.get("SCRCPY_STREAM_HEALTH_TIMEOUT", "5") or "5")
 _start_lock = threading.Lock()
@@ -63,10 +64,18 @@ class ClientSession:
             except asyncio.QueueEmpty:
                 break
 
+    def soft_limit(self) -> int:
+        maxsize = self.queue.maxsize or VIDEO_QUEUE_MAXSIZE
+        if VIDEO_QUEUE_SOFT_LIMIT <= 0:
+            return maxsize
+        if VIDEO_QUEUE_SOFT_LIMIT >= maxsize:
+            return max(1, int(maxsize * 0.75))
+        return max(1, VIDEO_QUEUE_SOFT_LIMIT)
+
     def push_frame(self, frame: bytes, keyframe: bool = False, config: bytes = b"") -> None:
         if self.needs_keyframe and not keyframe:
             return
-        if self.queue.full():
+        if self.queue.qsize() >= self.soft_limit():
             self.clear_queue()
             self.drops += 1
             self.needs_keyframe = True
@@ -117,6 +126,7 @@ class MirrorSession:
             "running": self.running,
             "clients": len(self.clients),
             "client_drops": sum(client.drops for client in self.clients.values()),
+            "queue_soft_limit": VIDEO_QUEUE_SOFT_LIMIT,
             "last_error": self.last_error,
             "stream_mode": self.effective_stream_mode,
             "stream_health": self.stream_health,

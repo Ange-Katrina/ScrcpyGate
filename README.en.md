@@ -317,7 +317,8 @@ Common environment variables:
 | `ADB_RECONNECT_BACKOFF` | `5` | ADB reconnect backoff in seconds |
 | `SCRCPY_STREAM_MODE` | `raw` | Default scrcpy stream mode |
 | `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | Video stream health timeout |
-| `VIDEO_QUEUE_MAXSIZE` | `200` | Per-client video queue size |
+| `VIDEO_QUEUE_MAXSIZE` | `60` | Per-client video queue hard limit |
+| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | Per-client video queue soft limit; waits for a keyframe after dropping stale frames |
 | `LOG_LEVEL` | `INFO` | Log level |
 
 See [.env.example](.env.example) for more options.

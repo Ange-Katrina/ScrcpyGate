@@ -131,7 +131,7 @@ class Scrcpy:
                 self.video_socket.recv(1)
             while not self.stop:
                 try:
-                    data = self.video_socket.recv(20480)
+                    data = self.video_socket.recv(65536)
                     if not data:
                         break
                     self.video_callback(data)
@@ -213,11 +213,13 @@ class Scrcpy:
         try:
             # video connection
             self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.video_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
             self.video_socket.connect(('localhost', self.local_port))
             log.info("SCRCPY_VIDEO_SOCKET_CONNECTED target=%s port=%s", self._adb_target, self.local_port)
 
             # control connection
             self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.control_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.control_socket.connect(('localhost', self.local_port))
             log.info("SCRCPY_CONTROL_SOCKET_CONNECTED target=%s port=%s", self._adb_target, self.local_port)
 

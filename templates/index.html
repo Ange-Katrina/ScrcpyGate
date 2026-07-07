@@ -222,7 +222,7 @@ const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
 const state = {
   user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
-  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null,
+  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0,
   idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced'
 };
 const $ = (id) => document.getElementById(id);
@@ -596,7 +596,17 @@ function resetVideoElement(){
   try { video.removeAttribute('src'); video.load(); } catch(_) {}
 }
 function jmuxerConfig(video){
-  return {node: video, mode:'video', flushingTime:33, maxDelay:150, fps:30, clearBuffer:true, onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); }};
+  const q = qualityPayload();
+  const fps = q.max_fps > 0 ? q.max_fps : 24;
+  return {
+    node: video,
+    mode:'video',
+    flushingTime: Math.max(33, Math.round(1000 / fps)),
+    maxDelay:220,
+    fps,
+    clearBuffer:true,
+    onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); }
+  };
 }
 function completeAnnexBChunk(data){
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -607,6 +617,12 @@ function completeAnnexBChunk(data){
 }
 function schedulePlayerReset(){
   if (state.playerResetTimer) return;
+  const now = Date.now();
+  if (now - state.lastPlayerResetAt < 1400) {
+    requestVideoPrime();
+    return;
+  }
+  state.lastPlayerResetAt = now;
   state.playerResetTimer=setTimeout(()=>{
     state.playerResetTimer=null;
     const video=$('phoneVideo');
@@ -614,7 +630,24 @@ function schedulePlayerReset(){
     resetVideoElement();
     state.jmuxer = new JMuxer(jmuxerConfig(video));
     sendPlayerReset();
-  }, 250);
+  }, 350);
+}
+function trimPlaybackDelay(video){
+  try {
+    const now = Date.now();
+    if (now - state.lastDelayTrimAt < 800) return;
+    if (!video || !video.buffered || !video.buffered.length) return;
+    const end = video.buffered.end(video.buffered.length - 1);
+    const delay = end - video.currentTime;
+    if (delay > 0.45) {
+      state.lastDelayTrimAt = now;
+      video.currentTime = Math.max(0, end - 0.18);
+    }
+  } catch (_) {}
+}
+function frameDurationMs(){
+  const fps = Number(qualityPayload().max_fps || 24);
+  return Math.round(1000 / Math.max(1, fps));
 }
 function openVideo(id, options={}){
   if (!options.force && state.activeDeviceId === id && socketLive(state.videoWs)) return state.videoWs;
@@ -632,7 +665,10 @@ function openVideo(id, options={}){
     if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) state.sessions[id]=msg.session; render(); requestVideoPrime(ws); return; }
     const buf = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
     if (state.videoSeq !== token || state.videoWs !== ws) return;
-    if (!state.jmuxer) return; state.jmuxer.feed({video:completeAnnexBChunk(buf), duration:33}); if (video.paused) video.play().catch(()=>{});
+    if (!state.jmuxer) return;
+    state.jmuxer.feed({video:completeAnnexBChunk(buf), duration:frameDurationMs()});
+    trimPlaybackDelay(video);
+    if (video.paused) video.play().catch(()=>{});
   };
   ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) show('视频通道连接失败'); };
   ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; render(); };
