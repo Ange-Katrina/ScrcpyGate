@@ -673,6 +673,7 @@ function openVideo(id, options={}){
   ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) show('视频通道连接失败'); };
   ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; render(); };
   video.onloadedmetadata = () => updateInputSize();
+  video.onresize = () => updateInputSize();
   return ws;
 }
 function openControl(id, options={}){
@@ -724,12 +725,20 @@ function layoutVideo(){
   }
   wrap.style.width=`${Math.max(1, Math.floor(width))}px`;
   wrap.style.height=`${Math.max(1, Math.floor(height))}px`;
+  if (state.input && state.input.invalidateGeometry) state.input.invalidateGeometry();
+}
+function handleViewportResize(){
+  layoutVideo();
+  if (state.input && state.input.invalidateGeometry) state.input.invalidateGeometry();
 }
 function setupInput(){
   const video=$('phoneVideo');
   updateInputSize();
   state.input = new ScrcpyInput((data) => {
     if (!state.hasControl || !state.controlWs || state.controlWs.readyState !== WebSocket.OPEN) return;
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+    const isTouchMove = bytes && bytes[0] === 2 && bytes[1] === 2;
+    if (isTouchMove && state.controlWs.bufferedAmount > 32768) return;
     state.controlWs.send(data);
   }, video, state.screen.w, state.screen.h);
 }
@@ -775,8 +784,16 @@ $('changePasswordBtn').onclick=()=>changePassword().catch(e=>show(e.message));
 $('alasToggleRun').onclick=()=>toggleAlas().catch(e=>show(e.message));
 $('alasReload').onclick=()=>reloadAlas().catch(e=>show(e.message));
 $('qualityStreamMode').onchange=()=>saveOrApplyQuality().catch(e=>show(e.message));
-document.querySelectorAll('[data-fit]').forEach(btn=>btn.onclick=()=>{ state.fit=btn.dataset.fit; render(); });
-window.addEventListener('resize', layoutVideo);
+document.querySelectorAll('[data-fit]').forEach(btn=>btn.onclick=()=>{ state.fit=btn.dataset.fit; handleViewportResize(); render(); });
+window.addEventListener('resize', handleViewportResize);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', handleViewportResize);
+  window.visualViewport.addEventListener('scroll', handleViewportResize);
+}
+if (window.ResizeObserver) {
+  const stageResizeObserver = new ResizeObserver(handleViewportResize);
+  stageResizeObserver.observe($('stage'));
+}
 window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
 window.addEventListener('focus', ()=>cancelInactiveStop());
 document.addEventListener('visibilitychange', ()=>{ if (document.hidden) scheduleInactiveStop('document_hidden'); else cancelInactiveStop(); });

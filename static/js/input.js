@@ -7,6 +7,11 @@ class ScrcpyInput {
         this.videoElement = videoElement
         this.keyboardActive = false
         this._isComposingText = false
+        this._geometry = null
+        this._geometryKey = ''
+        this._pendingMoveData = null
+        this._moveFlushTimer = null
+        this._moveIntervalMs = 16
         this._keyboardProxy = this.createKeyboardProxy();
         this._onMobileBeforeInput = null;
         this._onMobileInput = null;
@@ -80,8 +85,7 @@ class ScrcpyInput {
                     mouseX = point.x;
                     mouseY = point.y;
 
-                    let data = this.createTouchProtocolData(0, mouseX, mouseY, this.width, this.height, 0, 0, 65535);
-                    this.callback(data);
+                    this.sendControlData(this.createTouchProtocolData(0, mouseX, mouseY, this.width, this.height, 0, 0, 65535));
                     event.preventDefault();
                 } else if (event.button === 2) {
                     rightButtonIsPressed = true;
@@ -109,8 +113,7 @@ class ScrcpyInput {
                 }
 
                 if (mouseX !== null && mouseY !== null) {
-                    let data = this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0);
-                    this.callback(data);
+                    this.sendControlData(this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0));
                     event.preventDefault();
                 }
 
@@ -136,8 +139,7 @@ class ScrcpyInput {
             mouseX = point.x;
             mouseY = point.y;
 
-            let data = this.createTouchProtocolData(2, mouseX, mouseY, this.width, this.height, 0, 0, 65535);
-            this.callback(data);
+            this.sendMoveData(this.createTouchProtocolData(2, mouseX, mouseY, this.width, this.height, 0, 0, 65535));
             event.preventDefault();
         };
         document.addEventListener('mousemove', this._onMouseMove);
@@ -177,8 +179,7 @@ class ScrcpyInput {
             //     default:
             //         deltaModeValue.textContent = 'unknown';
             // }
-            let data = this.createScrollProtocolData(point.x, point.y, this.width, this.height, hScroll, vScroll, button);
-            this.callback(data);
+            this.sendControlData(this.createScrollProtocolData(point.x, point.y, this.width, this.height, hScroll, vScroll, button));
         };
         videoElement.addEventListener('wheel', this._onWheel);
 
@@ -195,8 +196,8 @@ class ScrcpyInput {
             mouseX = point.x;
             mouseY = point.y;
 
-            let data = this.createTouchProtocolData(0, mouseX, mouseY, this.width, this.height, 0, 0, 65535);
-            this.callback(data);
+            this.sendControlData(this.createTouchProtocolData(0, mouseX, mouseY, this.width, this.height, 0, 0, 65535));
+            event.preventDefault();
         };
         videoElement.addEventListener('touchstart', this._onTouchStart, { passive: false });
 
@@ -209,8 +210,7 @@ class ScrcpyInput {
 
             mouseX = point.x;
             mouseY = point.y;
-            let data = this.createTouchProtocolData(2, mouseX, mouseY, this.width, this.height, 0, 0, 65535);
-            this.callback(data);
+            this.sendMoveData(this.createTouchProtocolData(2, mouseX, mouseY, this.width, this.height, 0, 0, 65535));
             event.preventDefault();
         };
         videoElement.addEventListener('touchmove', this._onTouchMove, { passive: false });
@@ -230,8 +230,7 @@ class ScrcpyInput {
             activeTouchIdentifier = null;
             suppressMouseUntil = Date.now() + 700;
             if (mouseX !== null && mouseY !== null) {
-                let data = this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0);
-                this.callback(data);
+                this.sendControlData(this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0));
             }
             event.preventDefault();
         };
@@ -243,8 +242,7 @@ class ScrcpyInput {
             activeTouchIdentifier = null;
             suppressMouseUntil = Date.now() + 700;
             if (mouseX !== null && mouseY !== null) {
-                let data = this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0);
-                this.callback(data);
+                this.sendControlData(this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0));
             }
             event.preventDefault();
         };
@@ -261,7 +259,7 @@ class ScrcpyInput {
 
             if (!event.ctrlKey && !event.altKey && !event.metaKey && event.key && event.key.length === 1) {
                 if (!event.repeat) {
-                    this.callback(this.createTextProtocolData(event.key));
+                    this.sendControlData(this.createTextProtocolData(event.key));
                 }
                 event.preventDefault();
                 return;
@@ -293,7 +291,7 @@ class ScrcpyInput {
             if (!this.keyboardActive && document.activeElement !== videoElement) return;
             const text = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
             if (text) {
-                this.callback(this.createTextProtocolData(text));
+                this.sendControlData(this.createTextProtocolData(text));
                 event.preventDefault();
             }
         };
@@ -308,7 +306,7 @@ class ScrcpyInput {
                 if (inputType === 'insertText' || inputType === 'insertReplacementText' || inputType === 'insertFromPaste' || inputType === 'insertFromDrop') {
                     const text = event.data || '';
                     if (text) {
-                        this.callback(this.createTextProtocolData(text));
+                        this.sendControlData(this.createTextProtocolData(text));
                         event.preventDefault();
                         this.resetKeyboardProxy();
                     }
@@ -341,7 +339,7 @@ class ScrcpyInput {
                 if (!this.keyboardActive || this._isComposingText) return;
                 const text = this._keyboardProxy.value || '';
                 if (text) {
-                    this.callback(this.createTextProtocolData(text));
+                    this.sendControlData(this.createTextProtocolData(text));
                     this.resetKeyboardProxy();
                 }
             };
@@ -378,7 +376,7 @@ class ScrcpyInput {
                 if (!this.keyboardActive) return;
                 const text = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
                 if (text) {
-                    this.callback(this.createTextProtocolData(text));
+                    this.sendControlData(this.createTextProtocolData(text));
                     event.preventDefault();
                     this.resetKeyboardProxy();
                 }
@@ -394,7 +392,7 @@ class ScrcpyInput {
                 this._isComposingText = false;
                 const text = event.data || this._keyboardProxy.value || '';
                 if (text) {
-                    this.callback(this.createTextProtocolData(text));
+                    this.sendControlData(this.createTextProtocolData(text));
                 }
                 this.resetKeyboardProxy();
             };
@@ -467,16 +465,55 @@ class ScrcpyInput {
         this.snedKeyCode(keyEvent, 1, keycode);
     }
 
+    sendControlData(data) {
+        if (this._moveFlushTimer) {
+            clearTimeout(this._moveFlushTimer);
+            this._moveFlushTimer = null;
+        }
+        this.flushPendingMove();
+        this.callback(data);
+    }
+
+    sendMoveData(data) {
+        this._pendingMoveData = data;
+        if (this._moveFlushTimer) return;
+        this._moveFlushTimer = setTimeout(() => {
+            this._moveFlushTimer = null;
+            this.flushPendingMove();
+        }, this._moveIntervalMs);
+    }
+
+    flushPendingMove() {
+        if (!this._pendingMoveData) return;
+        const data = this._pendingMoveData;
+        this._pendingMoveData = null;
+        this.callback(data);
+    }
+
+    invalidateGeometry() {
+        this._geometry = null;
+        this._geometryKey = '';
+    }
+
     getRenderedVideoRect() {
         const rect = this.videoElement.getBoundingClientRect();
         const elementWidth = rect.width || (rect.right - rect.left);
         const elementHeight = rect.height || (rect.bottom - rect.top);
-        if (!elementWidth || !elementHeight || !this.width || !this.height) {
-            return { rect, left: 0, top: 0, width: elementWidth, height: elementHeight };
-        }
-
         const style = window.getComputedStyle ? window.getComputedStyle(this.videoElement) : null;
         const objectFit = style && style.objectFit ? style.objectFit : this.videoElement.style.objectFit || 'contain';
+        const key = [
+            rect.left, rect.top, elementWidth, elementHeight,
+            this.width, this.height, objectFit
+        ].join(':');
+        if (this._geometry && this._geometryKey === key) {
+            return this._geometry;
+        }
+        if (!elementWidth || !elementHeight || !this.width || !this.height) {
+            this._geometryKey = key;
+            this._geometry = { rect, left: 0, top: 0, width: elementWidth, height: elementHeight };
+            return this._geometry;
+        }
+
         const videoAspect = this.width / this.height;
         const elementAspect = elementWidth / elementHeight;
         let renderedWidth = elementWidth;
@@ -500,13 +537,15 @@ class ScrcpyInput {
             }
         }
 
-        return {
+        this._geometryKey = key;
+        this._geometry = {
             rect,
             left: (elementWidth - renderedWidth) / 2,
             top: (elementHeight - renderedHeight) / 2,
             width: renderedWidth,
             height: renderedHeight
         };
+        return this._geometry;
     }
 
     mapClientToDevice(clientX, clientY, allowOutside = false) {
@@ -534,6 +573,7 @@ class ScrcpyInput {
     resizeScreen(width, height) {
         this.width = width;
         this.height = height;
+        this.invalidateGeometry();
     }
 
     mapToAndroidKeyCode(event) {
@@ -666,7 +706,7 @@ class ScrcpyInput {
         //     metakey |= 0x400000;
         // }
         let data = this.createKeyProtocolData(action, keycode, keyevent.repeat, metakey);
-        this.callback(data);
+        this.sendControlData(data);
     }
 
     createTouchProtocolData(action, x, y, width, height, actionButton, buttons, pressure) {
@@ -825,11 +865,17 @@ class ScrcpyInput {
     screen_on_off(action) {
         let data = null;
         data = this.createScreenProtocolData(action);
-        this.callback(data)
+        this.sendControlData(data)
     }
 
     destroy() {
         try {
+            if (this._moveFlushTimer) {
+                clearTimeout(this._moveFlushTimer);
+                this._moveFlushTimer = null;
+            }
+            this._pendingMoveData = null;
+            this.invalidateGeometry();
             document.removeEventListener('mousedown', this._onMouseDown);
             document.removeEventListener('mouseup', this._onMouseUp);
             document.removeEventListener('mousemove', this._onMouseMove);
