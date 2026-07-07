@@ -48,8 +48,8 @@ class AlasEmbedResolveTests(unittest.TestCase):
     def test_resolve_base_url_returns_first_reachable_candidate(self):
         attempts = []
 
-        def probe(url):
-            attempts.append(url)
+        def probe(url, timeout=2.0):
+            attempts.append((url, timeout))
             return url == "http://alas.example.test:22267"
 
         self.assertEqual(
@@ -59,15 +59,15 @@ class AlasEmbedResolveTests(unittest.TestCase):
         self.assertEqual(
             attempts,
             [
-                "http://alas.example.test:80",
-                "https://alas.example.test:443",
-                "http://alas.example.test:22267",
+                ("http://alas.example.test:80", 2.0),
+                ("https://alas.example.test:443", 2.0),
+                ("http://alas.example.test:22267", 2.0),
             ],
         )
 
     def test_resolve_base_url_raises_when_all_candidates_fail(self):
         with self.assertRaisesRegex(ValueError, "ALAS Runtime unreachable"):
-            resolve_base_url("alas.example.test", probe=lambda url: False)
+            resolve_base_url("alas.example.test", probe=lambda url, timeout=2.0: False)
 
 
 if __name__ == "__main__":

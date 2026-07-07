@@ -85,6 +85,6 @@ def resolve_base_url(raw_url: str, probe=probe_runtime_url) -> str:
     """解析并返回第一个可连通的 ALAS Runtime 基础地址。"""
     candidates = runtime_url_candidates(raw_url)
     for candidate in candidates:
-        if probe(candidate):
+        if probe(candidate, timeout=2.0):
             return candidate
     raise ValueError(f"ALAS Runtime unreachable: {', '.join(candidates)}")
