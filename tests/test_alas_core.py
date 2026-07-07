@@ -102,6 +102,17 @@ class AlasCoreTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(storage.get_setting("alas_current_config"), "Global")
 
+    def test_save_settings_resolves_base_url_without_port(self):
+        storage, alas = load_modules(self.tmp)
+        alas.resolve_base_url = lambda raw: "http://alas.example.test:22267"
+
+        alas.save_settings({"base_url": "alas.example.test"})
+
+        self.assertEqual(
+            storage.get_setting("alas_base_url"),
+            "http://alas.example.test:22267",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

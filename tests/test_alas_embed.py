@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.alas_embed import runtime_url_candidates
+from app.alas_embed import resolve_base_url, runtime_url_candidates
 
 
 class AlasEmbedTests(unittest.TestCase):
@@ -42,6 +42,32 @@ class AlasEmbedTests(unittest.TestCase):
     def test_url_with_params_raises_value_error(self):
         with self.assertRaises(ValueError):
             runtime_url_candidates("http://example.com/;x")
+
+
+class AlasEmbedResolveTests(unittest.TestCase):
+    def test_resolve_base_url_returns_first_reachable_candidate(self):
+        attempts = []
+
+        def probe(url):
+            attempts.append(url)
+            return url == "http://alas.example.test:22267"
+
+        self.assertEqual(
+            resolve_base_url("alas.example.test", probe=probe),
+            "http://alas.example.test:22267",
+        )
+        self.assertEqual(
+            attempts,
+            [
+                "http://alas.example.test:80",
+                "https://alas.example.test:443",
+                "http://alas.example.test:22267",
+            ],
+        )
+
+    def test_resolve_base_url_raises_when_all_candidates_fail(self):
+        with self.assertRaisesRegex(ValueError, "ALAS Runtime unreachable"):
+            resolve_base_url("alas.example.test", probe=lambda url: False)
 
 
 if __name__ == "__main__":

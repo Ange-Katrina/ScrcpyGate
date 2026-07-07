@@ -1,9 +1,10 @@
 ﻿import json
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 from urllib.request import Request, build_opener, ProxyHandler
 
 from . import storage
+from .alas_embed import resolve_base_url
 
 API_PREFIX = "/api/gyre"
 
@@ -30,10 +31,7 @@ def save_settings(payload: dict) -> None:
         storage.set_setting("alas_enabled", "true" if payload.get("enabled") else "false")
     if payload.get("base_url") is not None:
         raw = str(payload.get("base_url") or "").strip().rstrip("/") or "http://127.0.0.1:22267"
-        parsed = urlparse(raw)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-            raise ValueError("invalid ALAS API URL")
-        storage.set_setting("alas_base_url", raw)
+        storage.set_setting("alas_base_url", resolve_base_url(raw))
     if payload.get("current_config") is not None:
         config = sanitize_config_name(payload.get("current_config"))
         storage.set_setting("alas_current_config", config)

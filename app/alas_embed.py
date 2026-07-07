@@ -2,7 +2,9 @@
 # -_- coding: utf-8 -_-
 
 import ipaddress
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import Request, build_opener, ProxyHandler
 
 ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
@@ -64,3 +66,25 @@ def runtime_url_candidates(raw_url: str) -> list[str]:
         f"https://{host}:{DOMAIN_FALLBACK_PORTS[1]}",
         f"http://{host}:{DOMAIN_FALLBACK_PORTS[2]}",
     ]
+
+
+def probe_runtime_url(url: str, timeout: float = 2.0) -> bool:
+    """探测 ALAS Runtime 根路径是否可连通。"""
+    opener = build_opener(ProxyHandler({}))
+    req = Request(url, method="GET")
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            return 200 <= resp.getcode() < 500
+    except HTTPError as exc:
+        return 400 <= exc.code < 500
+    except (URLError, TimeoutError, OSError):
+        return False
+
+
+def resolve_base_url(raw_url: str, probe=probe_runtime_url) -> str:
+    """解析并返回第一个可连通的 ALAS Runtime 基础地址。"""
+    candidates = runtime_url_candidates(raw_url)
+    for candidate in candidates:
+        if probe(candidate):
+            return candidate
+    raise ValueError(f"ALAS Runtime unreachable: {', '.join(candidates)}")
