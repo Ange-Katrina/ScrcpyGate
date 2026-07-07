@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -450,6 +451,19 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
 
         self.assertEqual(self.websocket_close_code("/alas/embed/proxy/ws?config=其它"), 1008)
+
+    def test_websocket_denies_other_config_path_for_bound_user(self):
+        """普通用户通过路径请求其它配置时 WebSocket 代理拒绝连接。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+
+        with self.assertRaises(WebSocketDisconnect) as context:
+            with self.client.websocket_connect("/alas/embed/proxy/config/其它"):
+                pass
+
+        self.assertEqual(context.exception.code, 1008)
 
     def test_websocket_allows_admin_into_skeleton(self):
         """管理员可通过 WebSocket 权限检查进入占位骨架。"""

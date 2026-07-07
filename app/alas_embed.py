@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import quote, unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, build_opener, ProxyHandler
 
 from fastapi import HTTPException, Request as FastAPIRequest
@@ -83,6 +83,17 @@ def _query_values(query, key):
     return [stripped_value]
 
 
+def _path_switches_config(path: str, config_name: str) -> bool:
+    """判断普通用户代理路径是否尝试切换到非绑定 ALAS 配置。"""
+    decoded_path = unquote(str(path or "")).replace("\\", "/")
+    parts = [part.strip() for part in decoded_path.split("/") if part.strip()]
+    for index, part in enumerate(parts[:-1]):
+        if part.lower() != "config":
+            continue
+        return parts[index + 1] != config_name
+    return False
+
+
 def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> ProxyDecision:
     """根据用户角色、绑定配置、路径与查询参数判定代理访问策略。"""
     role = str((user or {}).get("role", ""))
@@ -103,6 +114,14 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> 
             status_code=403,
             config_name=config_name,
             reason="management path denied",
+        )
+
+    if _path_switches_config(path, config_name):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason="config path mismatch",
         )
 
     for key in CONFIG_QUERY_KEYS:
