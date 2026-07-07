@@ -2,6 +2,7 @@
 # -_- coding: utf-8 -_-
 
 import ipaddress
+from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, build_opener, ProxyHandler
@@ -9,6 +10,75 @@ from urllib.request import Request, build_opener, ProxyHandler
 ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
 DOMAIN_FALLBACK_PORTS = (80, 443, 22267)
+MANAGEMENT_MARKERS = ("管理", "Manage", "Settings.Admin", "alas.config_list")
+CONFIG_QUERY_KEYS = ("config", "name", "config_name")
+
+
+@dataclass(frozen=True)
+class ProxyDecision:
+    """表示 ALAS 嵌入代理访问判定结果。"""
+
+    allowed: bool
+    status_code: int = 200
+    config_name: str = ""
+    filtered: bool = False
+    reason: str = ""
+
+
+def _query_value(query, key):
+    """读取查询参数首个值，兼容列表值与单值。"""
+    value = query.get(key)
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return ""
+        return str(value[0])
+    if value is None:
+        return ""
+    return str(value)
+
+
+def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> ProxyDecision:
+    """根据用户角色、绑定配置、路径与查询参数判定代理访问策略。"""
+    role = str((user or {}).get("role", ""))
+    if role == "admin":
+        return ProxyDecision(allowed=True)
+
+    if not binding:
+        return ProxyDecision(allowed=False, status_code=403, reason="missing binding")
+
+    config_name = str(binding.get("config_name") or "")
+    lowered_path = str(path or "").lower()
+    if "admin" in lowered_path or "manage" in lowered_path:
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason="management path denied",
+        )
+
+    for key in CONFIG_QUERY_KEYS:
+        requested_config = _query_value(query or {}, key)
+        if requested_config and requested_config != config_name:
+            return ProxyDecision(
+                allowed=False,
+                status_code=403,
+                config_name=config_name,
+                reason="config mismatch",
+            )
+
+    return ProxyDecision(allowed=True, config_name=config_name, filtered=True)
+
+
+def filter_user_html(html: str, config_name: str) -> str:
+    """对普通用户 HTML 做最小外观过滤，隐藏管理与其他配置入口。"""
+    filtered = str(html or "")
+    for marker in MANAGEMENT_MARKERS:
+        filtered = filtered.replace(marker, "")
+    for config_marker in ("其它配置", "其他配置"):
+        filtered = filtered.replace(config_marker, "")
+    if config_name and config_name not in filtered:
+        filtered = f"{filtered}<!-- bound ALAS config: {config_name} -->"
+    return filtered
 
 
 def _parse_runtime_url(raw_url: str):
