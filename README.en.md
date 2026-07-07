@@ -305,6 +305,7 @@ Common environment variables:
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | Public base URL |
 | `ALLOWED_HOSTS` | `127.0.0.1,localhost` | Allowed Host values |
 | `ALLOWED_ORIGINS` | empty | Allowed Origin values |
+| `ALLOW_NULL_ORIGIN` | `false` | Allow `Origin: null` in WAF/proxy deployments |
 | `SESSION_COOKIE_SECURE` | `false` | Send session cookies only over HTTPS |
 | `TRUST_PROXY` | `false` | Trust reverse proxy headers |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | Trusted proxy IPs or CIDRs |
@@ -345,6 +346,7 @@ Common causes:
 
 - `ALLOWED_HOSTS` does not include the current domain or IP
 - `ALLOWED_ORIGINS` does not include the current page origin
+- a reverse proxy or WAF makes browser login requests send `Origin: null`, but `ALLOW_NULL_ORIGIN=true` is not set
 - a reverse proxy sends `X-Forwarded-*` headers but `TRUST_PROXY` and `TRUSTED_PROXY_IPS` are not configured correctly
 
 Check logs:

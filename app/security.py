@@ -86,6 +86,8 @@ def request_host_allowed(request: Request) -> bool:
 def origin_allowed(origin: str | None, request_host_url: str | None = None) -> bool:
     if origin is None or not str(origin).strip():
         return True
+    if str(origin).strip().lower() == "null":
+        return env_bool("ALLOW_NULL_ORIGIN", False)
     normalized = normalize_origin(origin)
     if not normalized:
         return False

@@ -16,7 +16,7 @@ def load_security():
 
 class SecurityCoreTests(unittest.TestCase):
     def tearDown(self):
-        for key in ("PUBLIC_BASE_URL", "ALLOWED_ORIGINS", "ALLOWED_HOSTS", "TRUST_PROXY", "TRUSTED_PROXY_IPS"):
+        for key in ("PUBLIC_BASE_URL", "ALLOWED_ORIGINS", "ALLOWED_HOSTS", "ALLOW_NULL_ORIGIN", "TRUST_PROXY", "TRUSTED_PROXY_IPS"):
             os.environ.pop(key, None)
         sys.modules.pop("app.security", None)
 
@@ -26,7 +26,16 @@ class SecurityCoreTests(unittest.TestCase):
         self.assertTrue(security.origin_allowed(None))
         self.assertTrue(security.origin_allowed(""))
         self.assertFalse(security.origin_allowed("not a url"))
+        self.assertFalse(security.origin_allowed("null"))
         self.assertFalse(security.origin_allowed("javascript:alert(1)"))
+
+    def test_null_origin_requires_explicit_opt_in(self):
+        security = load_security()
+        self.assertFalse(security.origin_allowed("null"))
+
+        os.environ["ALLOW_NULL_ORIGIN"] = "true"
+        security = load_security()
+        self.assertTrue(security.origin_allowed("null"))
 
     def test_origin_can_match_public_base_or_request_host(self):
         os.environ["PUBLIC_BASE_URL"] = "https://example.com"

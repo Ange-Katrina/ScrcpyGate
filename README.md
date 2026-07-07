@@ -304,6 +304,7 @@ curl -fsS http://127.0.0.1:5000/healthz
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | 对外访问地址 |
 | `ALLOWED_HOSTS` | `127.0.0.1,localhost` | 允许的 Host |
 | `ALLOWED_ORIGINS` | 空 | 允许的 Origin |
+| `ALLOW_NULL_ORIGIN` | `false` | 是否允许 WAF/代理场景中的 `Origin: null` |
 | `SESSION_COOKIE_SECURE` | `false` | 是否只通过 HTTPS 发送 Cookie |
 | `TRUST_PROXY` | `false` | 是否信任反向代理头 |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理 IP 或 CIDR |
@@ -344,6 +345,7 @@ curl -fsS http://127.0.0.1:5000/healthz
 
 - `ALLOWED_HOSTS` 没有包含当前访问域名或 IP
 - `ALLOWED_ORIGINS` 没有包含当前页面 Origin
+- 反向代理或 WAF 让浏览器登录请求携带 `Origin: null`，但没有设置 `ALLOW_NULL_ORIGIN=true`
 - 反向代理传了 `X-Forwarded-*`，但没有正确设置 `TRUST_PROXY` 和 `TRUSTED_PROXY_IPS`
 
 处理：
