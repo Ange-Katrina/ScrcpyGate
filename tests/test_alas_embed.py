@@ -56,6 +56,23 @@ class AlasEmbedUrlTests(unittest.TestCase):
         self.assertNotIn("evil.test", result)
         self.assertEqual(result, "/alas/embed/proxy/")
 
+    def test_rewrite_location_header_rejects_same_origin_outside_base_path(self):
+        result = rewrite_location_header(
+            "/other/root",
+            "http://alas.test:22267/base/current/page",
+        )
+
+        self.assertNotEqual(result, "/alas/embed/proxy/other/root")
+        self.assertNotIn("/other/root", result)
+
+    def test_rewrite_location_header_rejects_relative_escape_from_base_path(self):
+        result = rewrite_location_header(
+            "../../outside",
+            "http://alas.test:22267/base/current/page",
+        )
+
+        self.assertNotIn("outside", result)
+
 
 class AlasEmbedTests(unittest.TestCase):
     def test_embed_shell_html_escapes_inputs_and_links_back(self):

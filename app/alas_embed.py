@@ -294,22 +294,32 @@ def _proxy_response_headers(headers, request_url: str) -> dict:
 
 def rewrite_location_header(location: str, base_url: str) -> str:
     """将同源且位于上游基础路径下的 Location 改写到嵌入代理路径。"""
+    safe_location = f"{ALAS_EMBED_PREFIX}/proxy/"
     request_url = str(base_url or "")
     resolved = urljoin(request_url, str(location or ""))
     parsed = urlparse(resolved)
     base = urlparse(request_url)
     if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
-        return f"{ALAS_EMBED_PREFIX}/proxy/"
+        return safe_location
 
-    proxy_base_path = base.path if base.path.endswith("/") else base.path.rsplit("/", 1)[0] + "/"
+    current_dir = base.path if base.path.endswith("/") else base.path.rsplit("/", 1)[0] + "/"
+    base_segments = [part for part in current_dir.split("/") if part]
+    base_path = f"/{base_segments[0]}/" if base_segments else "/"
+    if base_path != "/" and parsed.path != base_path.rstrip("/") and not parsed.path.startswith(base_path):
+        return safe_location
+
     path = parsed.path.lstrip("/")
-    for index in range(len(proxy_base_path.strip("/").split("/")), -1, -1):
-        candidate = "/".join(proxy_base_path.strip("/").split("/")[:index])
-        prefix = f"/{candidate}/" if candidate else "/"
+    for index in range(len(base_segments), 0, -1):
+        candidate = "/".join(base_segments[:index])
+        prefix = f"/{candidate}/"
         if parsed.path.startswith(prefix):
             path = parsed.path[len(prefix):].lstrip("/")
             break
-    rewritten = f"{ALAS_EMBED_PREFIX}/proxy/"
+    else:
+        if base_path != "/":
+            return safe_location
+
+    rewritten = safe_location
     if path:
         rewritten = f"{rewritten}{path}"
     if parsed.query:
