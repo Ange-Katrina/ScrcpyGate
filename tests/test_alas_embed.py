@@ -116,6 +116,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 403)
 
+    def test_user_with_empty_binding_config_name_denied(self):
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": ""},
+            "",
+            {},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+
     def test_user_other_config_denied(self):
         decision = proxy_decision(
             {"role": "user"},
@@ -126,6 +137,28 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 403)
+
+    def test_user_repeated_query_with_other_config_denied(self):
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云"},
+            "",
+            {"config": ["挂机-云", "其它"]},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+
+    def test_user_repeated_query_with_bound_config_allowed(self):
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云"},
+            "",
+            {"config": ["挂机-云", "挂机-云"]},
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.config_name, "挂机-云")
 
     def test_user_bound_config_allowed_and_filtered(self):
         decision = proxy_decision(
@@ -148,6 +181,19 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("挂机-云", result)
         self.assertNotIn("其它配置", result)
         self.assertNotIn("管理入口", result)
+
+    def test_filter_user_html_escapes_config_name_in_comment(self):
+        result = filter_user_html("<main></main>", "x--> <script>")
+
+        self.assertNotIn("x--> <script>", result)
+        self.assertIn("x--&gt; &lt;script&gt;", result)
+        self.assertNotIn("<!-- bound ALAS config: x--> <script> -->", result)
+
+    def test_filter_user_html_escapes_angle_brackets_in_config_comment(self):
+        result = filter_user_html("<div>empty</div>", "<bad>")
+
+        self.assertNotIn("<bad>", result)
+        self.assertIn("&lt;bad&gt;", result)
 
 
 if __name__ == "__main__":

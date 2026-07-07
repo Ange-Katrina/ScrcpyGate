@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
 
+import html as html_utils
 import ipaddress
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -25,16 +26,17 @@ class ProxyDecision:
     reason: str = ""
 
 
-def _query_value(query, key):
-    """读取查询参数首个值，兼容列表值与单值。"""
+def _query_values(query, key):
+    """读取查询参数所有非空字符串值，兼容列表值与单值。"""
     value = query.get(key)
-    if isinstance(value, (list, tuple)):
-        if not value:
-            return ""
-        return str(value[0])
     if value is None:
-        return ""
-    return str(value)
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    stripped_value = str(value).strip()
+    if not stripped_value:
+        return []
+    return [stripped_value]
 
 
 def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> ProxyDecision:
@@ -43,10 +45,13 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> 
     if role == "admin":
         return ProxyDecision(allowed=True)
 
-    if not binding:
+    if not binding or not binding.get("config_name"):
         return ProxyDecision(allowed=False, status_code=403, reason="missing binding")
 
-    config_name = str(binding.get("config_name") or "")
+    config_name = str(binding.get("config_name")).strip()
+    if not config_name:
+        return ProxyDecision(allowed=False, status_code=403, reason="missing binding")
+
     lowered_path = str(path or "").lower()
     if "admin" in lowered_path or "manage" in lowered_path:
         return ProxyDecision(
@@ -57,14 +62,14 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> 
         )
 
     for key in CONFIG_QUERY_KEYS:
-        requested_config = _query_value(query or {}, key)
-        if requested_config and requested_config != config_name:
-            return ProxyDecision(
-                allowed=False,
-                status_code=403,
-                config_name=config_name,
-                reason="config mismatch",
-            )
+        for requested_config in _query_values(query or {}, key):
+            if requested_config != config_name:
+                return ProxyDecision(
+                    allowed=False,
+                    status_code=403,
+                    config_name=config_name,
+                    reason="config mismatch",
+                )
 
     return ProxyDecision(allowed=True, config_name=config_name, filtered=True)
 
@@ -77,7 +82,8 @@ def filter_user_html(html: str, config_name: str) -> str:
     for config_marker in ("其它配置", "其他配置"):
         filtered = filtered.replace(config_marker, "")
     if config_name and config_name not in filtered:
-        filtered = f"{filtered}<!-- bound ALAS config: {config_name} -->"
+        escaped_config_name = html_utils.escape(config_name, quote=True)
+        filtered = f"{filtered}<!-- bound ALAS config: {escaped_config_name} -->"
     return filtered
 
 
