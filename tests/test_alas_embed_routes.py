@@ -681,6 +681,20 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
         self.assertEqual(captured, [])
 
+    def test_proxy_denies_user_alas_settings_query(self):
+        """普通用户不能通过 HTTP 打开 ALAS -> ALAS 设置页。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get("/alas/embed/proxy/api/state?config=挂机-云&menu=Alas&task=Alas")
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权访问 ALAS 设置页")
+        self.assertEqual(captured, [])
+
     def test_proxy_denies_body_management_event(self):
         """普通用户 body event=alas.config_list 管理操作应被拒绝。"""
         session = self.login("alice", "password123456", "user")
@@ -1066,6 +1080,23 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"event":"alas.config_list"}')
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_closes_1008_when_user_message_requests_alas_settings(self):
+        """普通用户 WebSocket 消息尝试打开 ALAS 设置页时连接会被策略关闭。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_text('{"menu":"Alas","task":"Alas","config":"挂机-云"}')
             message = websocket.receive()
 
         self.assertEqual(message["type"], "websocket.close")

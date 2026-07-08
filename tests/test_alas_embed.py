@@ -469,6 +469,47 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "management path denied")
 
+    def test_admin_policy_allows_alas_settings(self):
+        """管理员仍可完整访问 ALAS 原页面设置分组。"""
+        decision = proxy_decision(
+            {"role": "admin"},
+            None,
+            "api/state",
+            {"menu": "Alas", "task": "Alas"},
+            method="GET",
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertFalse(decision.filtered)
+
+    def test_user_query_alas_settings_denied(self):
+        """普通用户不能打开 ALAS -> ALAS 设置页。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云", "menu": "Alas", "task": "Alas"},
+            method="GET",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+        self.assertEqual(decision.reason, "alas settings denied")
+
+    def test_user_body_alas_emulator_setting_denied(self):
+        """普通用户不能请求 ALAS 模拟器设置字段。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云"},
+            method="POST",
+            body={"key": "Alas.Emulator.Serial"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "alas settings denied")
+
     def test_user_bound_config_allowed_and_filtered(self):
         decision = proxy_decision(
             {"role": "user"},
@@ -607,6 +648,24 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
         for message in cases:
             with self.subTest(message=message):
                 self.assertFalse(websocket_message_allowed(message, "挂机-云"))
+
+    def test_message_with_alas_settings_task_is_denied(self):
+        """普通用户 WebSocket 消息不能切到 ALAS -> ALAS 设置页。"""
+        self.assertFalse(
+            websocket_message_allowed(
+                '{"menu":"Alas","task":"Alas","config":"挂机-云"}',
+                "挂机-云",
+            )
+        )
+
+    def test_message_with_alas_emulator_setting_is_denied(self):
+        """普通用户 WebSocket 消息不能读取 ALAS 模拟器设置字段。"""
+        self.assertFalse(
+            websocket_message_allowed(
+                '{"key":"Alas.Emulator.Serial","config":"挂机-云"}',
+                "挂机-云",
+            )
+        )
 
     def test_message_with_manage_text_outside_command_fields_is_allowed(self):
         """普通文本字段包含管理字样时不应误拒绝。"""

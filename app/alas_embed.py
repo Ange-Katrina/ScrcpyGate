@@ -23,6 +23,16 @@ MANAGEMENT_MARKERS = ("管理", "admin", "manage", "management", "config_list", 
 MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
+ALAS_SETTINGS_DENIED_REASON = "alas settings denied"
+ALAS_SETTINGS_CONTEXT_KEYS = ("menu", "category", "section", "task", "module", "page", "route", "path", "scope")
+ALAS_SETTINGS_FIELD_KEYS = ("key", "setting", "field", "argument", "option", "name")
+ALAS_SETTINGS_FIELD_MARKERS = (
+    "alas.emulator",
+    "alas.restartemulator",
+    "alas.optimization",
+    "alas.droprecord",
+    "emulator.serial",
+)
 BUSINESS_PATH_PREFIXES = ("api", "ajax", "pywebio")
 STATIC_PATH_PREFIXES = ("static", "assets", "favicon.ico")
 HOP_BY_HOP_HEADERS = {
@@ -226,6 +236,62 @@ def _body_denied_by_action_permission(value, can_run: bool, can_edit: bool) -> b
     return _message_denied_by_action_permission(value, can_run, can_edit)
 
 
+def _compact_text(value: object) -> str:
+    """Return a case-folded text token without separators for fuzzy ALAS UI routing checks."""
+    return "".join(char.lower() for char in str(value or "") if char.isalnum())
+
+
+def _plain_text(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _is_alas_settings_task(value: object) -> bool:
+    text = _compact_text(value)
+    return text in {"alas", "alas设置", "alassettings"}
+
+
+def _is_alas_settings_field(value: object) -> bool:
+    text = _plain_text(value).replace("\\", ".").replace("/", ".")
+    compact = _compact_text(text)
+    if any(marker in text for marker in ALAS_SETTINGS_FIELD_MARKERS):
+        return True
+    return any(_compact_text(marker) in compact for marker in ALAS_SETTINGS_FIELD_MARKERS)
+
+
+def _message_targets_alas_settings(value) -> bool:
+    """Return True when a request explicitly targets the sensitive ALAS settings page."""
+    if isinstance(value, dict):
+        lowered = {str(key).lower(): item for key, item in value.items()}
+        menu_like = any(
+            key in lowered and _is_alas_settings_task(lowered[key])
+            for key in ("menu", "category", "section", "module")
+        )
+        task_like = any(
+            key in lowered and _is_alas_settings_task(lowered[key])
+            for key in ("task", "page", "route", "path", "scope")
+        )
+        if menu_like and task_like:
+            return True
+        for key, item in lowered.items():
+            if key in ALAS_SETTINGS_FIELD_KEYS and _is_alas_settings_field(item):
+                return True
+            if key in ALAS_SETTINGS_CONTEXT_KEYS and _is_alas_settings_field(item):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _message_targets_alas_settings(item):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_message_targets_alas_settings(item) for item in value)
+    return False
+
+
+def _query_targets_alas_settings(query: dict) -> bool:
+    return _message_targets_alas_settings(query or {})
+
+
+def _body_targets_alas_settings(value) -> bool:
+    return _message_targets_alas_settings(value)
+
+
 def _is_readonly_http_request(method: str, path: str, query: dict) -> bool:
     """判断 HTTP 请求是否明显为只读页面、静态资源或状态查询。"""
     upper_method = str(method or "GET").upper()
@@ -282,6 +348,14 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
             status_code=403,
             config_name=config_name,
             reason="management path denied",
+        )
+
+    if _query_targets_alas_settings(query or {}) or (body is not None and _body_targets_alas_settings(body)):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason=ALAS_SETTINGS_DENIED_REASON,
         )
 
     if _path_switches_config(path, config_name):
@@ -843,6 +917,8 @@ def websocket_message_allowed(message: str | bytes, config_name: str, can_run: b
             return False
         return True
     if _message_contains_management(payload):
+        return False
+    if _message_targets_alas_settings(payload):
         return False
     if _message_switches_config(payload, config_name):
         return False
