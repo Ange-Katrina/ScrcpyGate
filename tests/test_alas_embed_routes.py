@@ -469,6 +469,24 @@ class AlasEmbedRouteTests(unittest.TestCase):
         }
         return captured
 
+    def test_websocket_denies_disallowed_origin_before_upstream_connect(self):
+        """Origin 检查不通过时 WebSocket 代理拒绝连接且不连接上游。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        captured = self.install_fake_websocket_upstream(incoming=["should-not-reach"])
+        original_origin_allowed = self.main.security.websocket_origin_allowed
+        self.main.security.websocket_origin_allowed = lambda websocket: False
+        try:
+            with self.assertRaises(WebSocketDisconnect) as context:
+                with self.client.websocket_connect("/alas/embed/proxy/"):
+                    pass
+        finally:
+            self.main.security.websocket_origin_allowed = original_origin_allowed
+
+        self.assertEqual(context.exception.code, 4403)
+        self.assertEqual(captured["targets"], [])
+
     def test_websocket_forwards_text_bidirectionally_and_preserves_query(self):
         """WebSocket 代理转发文本消息并保留重复查询参数。"""
         self.login("admin", "password123456", "admin")

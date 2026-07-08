@@ -614,6 +614,9 @@ async def alas_embed_proxy(request: Request, path: str = ""):
 @app.websocket("/alas/embed/proxy/{path:path}")
 async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     """执行 ALAS WebSocket 代理入口权限检查并转发到 Runtime。"""
+    if not security.websocket_origin_allowed(websocket):
+        await websocket.close(code=4403)
+        return
     user = security.get_current_user(websocket)
     if not user:
         await websocket.close(code=1008)
