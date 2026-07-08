@@ -550,7 +550,16 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertIn("data-scrcpygate-alas-bind", result)
         self.assertIn("data-scrcpygate-hidden-config", result)
+        self.assertIn("data-scrcpygate-hidden-alas-settings", result)
+        self.assertIn("data-scrcpygate-hidden-sensitive-device", result)
         self.assertIn("filterConfigRail", result)
+        self.assertIn("filterAlasSettings", result)
+
+    def test_filter_user_html_masks_adb_endpoint(self):
+        result = filter_user_html("<main>Serial 10.0.1.30:30100</main>", "挂机-云")
+
+        self.assertNotIn("10.0.1.30:30100", result)
+        self.assertIn("已隐藏", result)
 
     def test_filter_user_json_payload_keeps_only_bound_config_list_entries(self):
         payload = {"configs": ["挂机-云", "其它"], "nested": {"config_list": [{"name": "挂机-云"}, {"name": "其它"}]}}
@@ -560,12 +569,41 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertEqual(result["configs"], ["挂机-云"])
         self.assertEqual(result["nested"]["config_list"], [{"name": "挂机-云"}])
 
+    def test_filter_user_json_payload_removes_alas_settings_menu_entries(self):
+        payload = {
+            "menus": [
+                {"name": "Alas", "page": "setting", "tasks": ["Alas", "General", "Restart"]},
+                {"name": "Farm", "page": "setting", "tasks": ["Main"]},
+            ]
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["menus"], [{"name": "Farm", "page": "setting", "tasks": ["Main"]}])
+
+    def test_filter_user_json_payload_masks_nested_adb_endpoint(self):
+        payload = {"settings": {"Serial": "10.0.1.30:30100"}}
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["settings"]["Serial"], "已隐藏")
+
     def test_filter_user_websocket_downstream_filters_config_list(self):
         message = '{"configs":["挂机-云","其它"],"status":"ok"}'
 
         result = filter_user_websocket_downstream(message, "挂机-云")
 
         self.assertEqual(json.loads(result), {"configs": ["挂机-云"], "status": "ok"})
+
+    def test_filter_user_websocket_downstream_rejects_alas_settings_payload(self):
+        result = filter_user_websocket_downstream('{"menu":"Alas","task":"Alas"}', "挂机-云")
+
+        self.assertIsNone(result)
+
+    def test_filter_user_websocket_downstream_masks_adb_endpoint(self):
+        result = filter_user_websocket_downstream('{"serial":"10.0.1.30:30100"}', "挂机-云")
+
+        self.assertEqual(json.loads(result), {"serial": "已隐藏"})
 
     def test_filter_user_websocket_downstream_rejects_other_config(self):
         result = filter_user_websocket_downstream('{"config":"其它"}', "挂机-云")

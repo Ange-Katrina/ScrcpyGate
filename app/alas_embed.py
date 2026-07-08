@@ -54,6 +54,9 @@ READONLY_ACTION_MARKERS = ("status", "state", "log", "logs", "overview", "summar
 HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER = "已隐藏"
 ADB_ENDPOINT_RE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}(?![\w.])")
+ALAS_SETTINGS_MENU_KEYS = ("name", "label", "title", "text", "menu", "category", "section", "module")
+ALAS_SETTINGS_PAGE_KEYS = ("page", "route", "path", "scope", "type", "tab")
+ALAS_SETTINGS_TASK_KEYS = ("task", "tasks", "children", "items", "options", "pages", "tabs")
 
 
 @dataclass(frozen=True)
@@ -284,6 +287,63 @@ def _message_targets_alas_settings(value) -> bool:
     return False
 
 
+def _is_alas_settings_page(value: object) -> bool:
+    compact = _compact_text(value)
+    return compact in {"setting", "settings", "alas", "alas设置", "alassettings"}
+
+
+def _collection_has_alas_settings_task(value) -> bool:
+    if isinstance(value, dict):
+        return _json_item_targets_alas_settings(value)
+    if isinstance(value, (list, tuple)):
+        return any(_collection_has_alas_settings_task(item) for item in value)
+    return _is_alas_settings_task(value) or _is_alas_settings_field(value)
+
+
+def _json_item_targets_alas_settings(value) -> bool:
+    """Return True for downstream ALAS menu/page payloads that expose ALAS settings."""
+    if _message_targets_alas_settings(value):
+        return True
+    if not isinstance(value, dict):
+        return False
+
+    lowered = {str(key).lower(): item for key, item in value.items()}
+    if any(_is_alas_settings_field(key) for key in lowered):
+        return True
+    name_like = any(
+        key in lowered and _is_alas_settings_task(lowered[key])
+        for key in ALAS_SETTINGS_MENU_KEYS
+    )
+    page_like = any(
+        key in lowered and _is_alas_settings_page(lowered[key])
+        for key in ALAS_SETTINGS_PAGE_KEYS
+    )
+    task_like = any(
+        key in lowered and _collection_has_alas_settings_task(lowered[key])
+        for key in ALAS_SETTINGS_TASK_KEYS
+    )
+    if name_like and (page_like or task_like):
+        return True
+    return any(
+        key in lowered and _is_alas_settings_field(lowered[key])
+        for key in ALAS_SETTINGS_FIELD_KEYS
+    )
+
+
+def mask_sensitive_device_endpoints(value):
+    """Mask ADB endpoint strings before they leave the ALAS embed proxy."""
+    if isinstance(value, str):
+        return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, value)
+    if isinstance(value, dict):
+        return {
+            mask_sensitive_device_endpoints(key): mask_sensitive_device_endpoints(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [mask_sensitive_device_endpoints(item) for item in value]
+    return value
+
+
 def _query_targets_alas_settings(query: dict) -> bool:
     return _message_targets_alas_settings(query or {})
 
@@ -421,6 +481,7 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
 def filter_user_html(html: str, config_name: str) -> str:
     """对普通用户 HTML 做最小外观过滤，隐藏管理与其他配置入口。"""
     filtered = str(html or "")
+    filtered = ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, filtered)
     for marker in MANAGEMENT_MARKERS:
         filtered = filtered.replace(marker, "")
     for config_marker in ("其它配置", "其他配置"):
@@ -442,12 +503,21 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
         .replace("<", "\\u003c")
         .replace(">", "\\u003e")
     )
+    hidden_endpoint_json = (
+        json.dumps(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, ensure_ascii=False)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
     script = f"""
 <script data-scrcpygate-alas-bind>
 (function() {{
   var boundConfig = {config_json};
+  var hiddenEndpointText = {hidden_endpoint_json};
   var proxyPrefix = "{ALAS_EMBED_PREFIX}/proxy";
   var configKeys = ["config", "name", "config_name"];
+  var adbEndpointPattern = /(?:\\d{{1,3}}\\.){{3}}\\d{{1,3}}:\\d{{2,5}}/g;
+  var sensitiveDeviceWords = ["serial", "模拟器serial", "emulatorserial", "emulator.serial", "adb", "设备地址"];
   function hasConfig(url) {{
     return configKeys.some(function(key) {{ return url.searchParams.has(key); }});
   }}
@@ -506,6 +576,50 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   function normalizedText(value) {{
     return String(value || "").replace(/\\s+/g, "").toLowerCase();
   }}
+  function compactText(value) {{
+    return String(value || "").replace(/[^0-9a-zA-Z\\u4e00-\\u9fff]+/g, "").toLowerCase();
+  }}
+  function textTargetsAlasSettings(value) {{
+    var text = compactText(value);
+    return text === "alas" ||
+      text.indexOf("alas设置") !== -1 ||
+      text.indexOf("alassettings") !== -1 ||
+      text.indexOf("alas設定") !== -1 ||
+      (text.indexOf("alas") !== -1 && (text.indexOf("setting") !== -1 || text.indexOf("设置") !== -1));
+  }}
+  function textContainsSensitiveDevice(value) {{
+    var raw = String(value || "");
+    var text = compactText(raw);
+    if (adbEndpointPattern.test(raw)) {{
+      adbEndpointPattern.lastIndex = 0;
+      return true;
+    }}
+    adbEndpointPattern.lastIndex = 0;
+    for (var i = 0; i < sensitiveDeviceWords.length; i += 1) {{
+      if (text.indexOf(compactText(sensitiveDeviceWords[i])) !== -1) return true;
+    }}
+    return false;
+  }}
+  function nearestActionItem(element) {{
+    var current = element;
+    var best = element;
+    while (current && current !== document.body && current !== document.documentElement) {{
+      if (current.matches && current.matches("a,button,[role='button'],li,.ant-menu-item,.menu-item,.el-menu-item")) return current;
+      best = current;
+      current = current.parentElement;
+    }}
+    return best;
+  }}
+  function nearestSensitiveRow(element) {{
+    var current = element;
+    var best = element;
+    while (current && current !== document.body && current !== document.documentElement) {{
+      if (current.matches && current.matches("tr,li,label,.form-item,.ant-form-item,.el-form-item,.pywebio-scope,.row")) return current;
+      best = current;
+      current = current.parentElement;
+    }}
+    return best;
+  }}
   var boundNormalized = normalizedText(boundConfig);
   var allowedRailLabels = {{
     "主页": true,
@@ -558,11 +672,62 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       }}
     }}
   }}
+  function maskTextNode(node) {{
+    if (!node || !node.nodeValue) return;
+    if (!adbEndpointPattern.test(node.nodeValue)) {{
+      adbEndpointPattern.lastIndex = 0;
+      return;
+    }}
+    adbEndpointPattern.lastIndex = 0;
+    node.nodeValue = node.nodeValue.replace(adbEndpointPattern, hiddenEndpointText);
+    adbEndpointPattern.lastIndex = 0;
+  }}
+  function filterAlasSettings() {{
+    var nodes = document.querySelectorAll("a,button,[role='button'],li,div,span,label,tr,input,textarea,select");
+    for (var i = 0; i < nodes.length; i += 1) {{
+      var node = nodes[i];
+      var text = node.innerText || node.textContent || node.value || node.getAttribute("placeholder") || node.getAttribute("title") || "";
+      if (textTargetsAlasSettings(text)) {{
+        var item = nearestActionItem(node);
+        if (item && item !== document.body && item !== document.documentElement) {{
+          item.setAttribute("data-scrcpygate-hidden-alas-settings", "true");
+          item.style.setProperty("display", "none", "important");
+        }}
+        continue;
+      }}
+      if (textContainsSensitiveDevice(text)) {{
+        var row = nearestSensitiveRow(node);
+        if (row && row !== document.body && row !== document.documentElement) {{
+          row.setAttribute("data-scrcpygate-hidden-sensitive-device", "true");
+          row.style.setProperty("display", "none", "important");
+        }}
+        if ("value" in node && typeof node.value === "string") {{
+          node.value = node.value.replace(adbEndpointPattern, hiddenEndpointText);
+          adbEndpointPattern.lastIndex = 0;
+        }}
+      }}
+    }}
+    if (document.createTreeWalker) {{
+      var walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      var textNode = walker.nextNode();
+      while (textNode) {{
+        maskTextNode(textNode);
+        textNode = walker.nextNode();
+      }}
+    }}
+  }}
+  function filterAlasUi() {{
+    filterConfigRail();
+    filterAlasSettings();
+  }}
   function blocksForeignRailConfigEvent(event) {{
     var current = event.target;
     while (current && current !== document.body && current !== document.documentElement) {{
       if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-config") === "true") return true;
+      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-alas-settings") === "true") return true;
+      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-sensitive-device") === "true") return true;
       if (shouldHideRailConfig(current)) return true;
+      if (textTargetsAlasSettings(current.innerText || current.textContent || "")) return true;
       current = current.parentElement;
     }}
     return false;
@@ -580,13 +745,13 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   if (document.documentElement) {{
     var style = document.createElement("style");
     style.setAttribute("data-scrcpygate-alas-bind-style", "true");
-    style.textContent = "[data-scrcpygate-hidden-config='true']{{display:none!important;visibility:hidden!important;pointer-events:none!important}}";
+    style.textContent = "[data-scrcpygate-hidden-config='true'],[data-scrcpygate-hidden-alas-settings='true'],[data-scrcpygate-hidden-sensitive-device='true']{{display:none!important;visibility:hidden!important;pointer-events:none!important}}";
     (document.head || document.documentElement).appendChild(style);
   }}
-  filterConfigRail();
-  window.setInterval(filterConfigRail, 500);
+  filterAlasUi();
+  window.setInterval(filterAlasUi, 500);
   if (window.MutationObserver && document.documentElement) {{
-    new MutationObserver(filterConfigRail).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
+    new MutationObserver(filterAlasUi).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
   }}
 }})();
 </script>"""
@@ -947,27 +1112,39 @@ def _json_item_matches_bound_config(value, config_name: str) -> bool:
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
+        if _json_item_targets_alas_settings(value):
+            return {}
         filtered = {}
         for key, item in value.items():
+            filtered_key = mask_sensitive_device_endpoints(key)
             if _is_config_list_key(key):
                 if isinstance(item, list):
-                    filtered[key] = [
+                    filtered[filtered_key] = [
                         filter_user_json_payload(entry, config_name)
                         for entry in item
                         if _json_item_matches_bound_config(entry, config_name)
+                        and not _json_item_targets_alas_settings(entry)
                     ]
                 elif _json_item_matches_bound_config(item, config_name):
-                    filtered[key] = filter_user_json_payload(item, config_name)
+                    filtered[filtered_key] = filter_user_json_payload(item, config_name)
                 else:
-                    filtered[key] = [] if isinstance(item, (list, tuple)) else None
+                    filtered[filtered_key] = [] if isinstance(item, (list, tuple)) else None
                 continue
-            filtered[key] = filter_user_json_payload(item, config_name)
+            filtered[filtered_key] = filter_user_json_payload(item, config_name)
         return filtered
     if isinstance(value, list):
-        return [filter_user_json_payload(item, config_name) for item in value]
+        return [
+            filter_user_json_payload(item, config_name)
+            for item in value
+            if not _json_item_targets_alas_settings(item)
+        ]
     if isinstance(value, tuple):
-        return [filter_user_json_payload(item, config_name) for item in value]
-    return value
+        return [
+            filter_user_json_payload(item, config_name)
+            for item in value
+            if not _json_item_targets_alas_settings(item)
+        ]
+    return mask_sensitive_device_endpoints(value)
 
 
 def _message_switches_downstream_config(value, config_name: str) -> bool:
@@ -991,9 +1168,17 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
         text = str(message or "")
         if _text_contains_management_command(text):
             return None
-        return message
+        if _is_alas_settings_field(text):
+            return None
+        return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
+    if _message_targets_alas_settings(payload):
+        return None
     filtered = filter_user_json_payload(payload, config_name)
-    if _message_contains_management(filtered) or _message_switches_downstream_config(filtered, config_name):
+    if (
+        _message_contains_management(filtered)
+        or _message_targets_alas_settings(filtered)
+        or _message_switches_downstream_config(filtered, config_name)
+    ):
         return None
     text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
     if isinstance(message, bytes):
