@@ -53,6 +53,27 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.main.security.get_current_session = lambda request: session
         return session
 
+    def test_index_page_contains_alas_embed_entry(self):
+        """普通用户投屏页包含 ALAS 原页面入口。"""
+        self.login("alice", "password123456", "user")
+
+        res = self.client.get("/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('href="/alas/embed/"', res.text)
+        self.assertIn("打开 ALAS 页面", res.text)
+
+    def test_admin_page_contains_alas_embed_entry(self):
+        """管理员后台 ALAS 设置包含完整原页面入口。"""
+        self.login("admin", "password123456", "admin")
+
+        res = self.client.get("/admin")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('href="/alas/embed/"', res.text)
+        self.assertIn("打开完整 ALAS 页面", res.text)
+        self.assertIn("Runtime URL 可填写 IP、域名或完整 URL", res.text)
+
     def test_embed_requires_login(self):
         """未登录访问嵌入入口时重定向到登录页。"""
         res = self.client.get("/alas/embed/", follow_redirects=False)
