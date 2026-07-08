@@ -631,10 +631,31 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(json.loads(result), {"configs": ["挂机-云"], "status": "ok"})
 
-    def test_filter_user_websocket_downstream_rejects_alas_settings_payload(self):
+    def test_filter_user_websocket_downstream_filters_alas_settings_payload(self):
         result = filter_user_websocket_downstream('{"menu":"Alas","task":"Alas"}', "挂机-云")
 
-        self.assertIsNone(result)
+        self.assertEqual(json.loads(result), {})
+
+    def test_filter_user_websocket_downstream_filters_mixed_alas_settings_menu(self):
+        message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "Alas设置", "value": "Alas"},
+                        {"label": "Restart", "value": "Restart"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertEqual(
+            json.loads(result),
+            {"command": "output", "spec": {"items": [{"label": "Restart", "value": "Restart"}]}},
+        )
 
     def test_filter_user_websocket_downstream_rejects_alas_settings_text(self):
         result = filter_user_websocket_downstream("open Alas设置", "挂机-云")

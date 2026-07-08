@@ -59,7 +59,7 @@ jobs:
 
       - name: Scan for deployment secrets
         run: |
-          if grep -RInE "10\.0\.1\.|waf\.pulipuli|2_nLOv|ALAS_TOKEN=.+|SESSION_SECRET=.+|INITIAL_ADMIN_PASSWORD=.+" \
+          if grep -RInE "private-network-marker|personal-domain-marker|2_nLOv|ALAS_TOKEN=.+|SESSION_SECRET=.+|INITIAL_ADMIN_PASSWORD=.+" \
             --exclude-dir=.git \
             --exclude-dir=.github \
             --exclude-dir=__pycache__ \

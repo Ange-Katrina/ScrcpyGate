@@ -330,6 +330,16 @@ def _message_targets_alas_settings(value) -> bool:
     """Return True when a request explicitly targets the sensitive ALAS settings page."""
     if isinstance(value, dict):
         lowered = {str(key).lower(): item for key, item in value.items()}
+        if any(
+            key in lowered
+            and (
+                _is_alas_settings_label(lowered[key])
+                or _is_alas_settings_field(lowered[key])
+                or _is_alas_settings_task(lowered[key])
+            )
+            for key in (*ALAS_SETTINGS_CONTEXT_KEYS, *ALAS_SETTINGS_PAGE_KEYS, *ALAS_SETTINGS_ROUTE_KEYS)
+        ):
+            return True
         menu_like = any(
             key in lowered and _is_alas_settings_task(lowered[key])
             for key in ("menu", "category", "section", "module")
@@ -367,8 +377,6 @@ def _collection_has_alas_settings_task(value) -> bool:
 
 def _json_item_targets_alas_settings(value) -> bool:
     """Return True for downstream ALAS menu/page payloads that expose ALAS settings."""
-    if _message_targets_alas_settings(value):
-        return True
     if not isinstance(value, dict):
         return False
 
@@ -1283,8 +1291,6 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
         if _text_targets_alas_settings_ui(text):
             return None
         return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
-    if _message_targets_alas_settings(payload):
-        return None
     filtered = filter_user_json_payload(payload, config_name)
     if (
         _message_contains_management(filtered)
