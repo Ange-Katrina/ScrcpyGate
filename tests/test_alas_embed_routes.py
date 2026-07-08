@@ -21,6 +21,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def reset_app_modules(names):
+    package = sys.modules.get("app")
+    for name in names:
+        sys.modules.pop(name, None)
+        if package is not None and name.startswith("app."):
+            attr = name.rsplit(".", 1)[1]
+            if hasattr(package, attr):
+                delattr(package, attr)
+
+
 class AlasEmbedRouteTests(unittest.TestCase):
     """验证 ALAS 嵌入 HTTP 路由。"""
 
@@ -29,8 +39,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver,alas.test:22267"
         os.environ["SESSION_COOKIE_SECURE"] = "false"
-        for name in ["app.config", "app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"]:
-            sys.modules.pop(name, None)
+        reset_app_modules(["app.config", "app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.main = importlib.import_module("app.main")
