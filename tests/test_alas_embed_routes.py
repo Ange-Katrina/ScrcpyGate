@@ -1163,6 +1163,38 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(captured["sent"], ['{"config":"挂机-云"}'])
         self.assertFalse(any(log["action"] == "alas_embed_ws" for log in logs))
 
+    def test_websocket_filters_bound_user_alas_settings_menu_without_closing(self):
+        """上游初始化菜单包含 ALAS 设置时只过滤敏感菜单项，不关闭普通用户连接。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        upstream_message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "Alas设置", "value": "Alas"},
+                        {"label": "Restart", "value": "Restart"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[upstream_message])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            filtered = json.loads(websocket.receive_text())
+            close_message = websocket.receive()
+
+        self.assertEqual(
+            filtered,
+            {"command": "output", "spec": {"items": [{"label": "Restart", "value": "Restart"}]}},
+        )
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["closed"], [1000])
+
     def test_websocket_appends_bound_config_when_query_missing(self):
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
