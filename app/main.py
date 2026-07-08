@@ -643,7 +643,6 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     if not settings.get("base_url"):
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
         raise HTTPException(status_code=502, detail="ALAS Runtime 未配置，请先在后台填写 Runtime URL")
-    storage.audit(user["username"], "alas_embed_proxy", path or "/")
     try:
         return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision)
     except HTTPException as exc:

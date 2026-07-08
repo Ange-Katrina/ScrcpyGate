@@ -200,6 +200,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(res.content, b'{"ok": true}')
         self.assertEqual(captured[0]["method"], "GET")
         self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/state?config=a&config=b&x=1")
+        self.assertFalse(any(log["action"] == "alas_embed_proxy" for log in self.storage.recent_audit(5)))
 
     def test_proxy_forwards_post_body_to_upstream(self):
         """代理路由将 POST 请求正文和 Content-Type 转发到上游。"""
