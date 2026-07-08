@@ -199,30 +199,69 @@ TRUST_PROXY=false \
 
 ## 画质与流模式
 
+ScrcpyGate 的画质设置只控制 scrcpy 输出流，不修改 Android 设备或模拟器真实分辨率。
+也就是说，后台和前台里的“输出尺寸”会传给 scrcpy 的 `max_size`，不会执行 `wm size`、`wm density`，也不会改 `Physical size` 或 `Override size`。
+
+### 流模式
+
 默认流模式：
 
 ```env
 SCRCPY_STREAM_MODE=raw
 ```
 
-建议保持 `raw` 作为默认模式。`protocol` 和 `legacy` 作为可选诊断能力保留，可以在后台启用后测试。
+| 模式 | 状态 | 作用 | 建议 |
+| --- | --- | --- | --- |
+| `raw` | 推荐默认 | scrcpy 直接输出 H264 Annex-B，后端按纯 H264 推给浏览器 | 优先使用，公网部署也建议先保持此模式 |
+| `protocol` | 诊断/备用 | 解析完整 scrcpy video protocol，再拆出 H264 | 当前兼容性依赖 scrcpy server 版本，稳定前不建议给普通用户开放 |
+| `legacy` | 诊断 | 旧版 H264 起始码扫描兼容路径 | 只用于排查，不建议生产长期使用 |
+
+后台可以配置“允许的流模式”。如果只启用 `raw`，即使用户请求 `protocol`，后端也会回退到 `raw`。这适合在 `protocol` 未稳定前先禁用，避免用户误选导致黑屏或绿屏。
 
 ### 画质预设
 
-| 预设 | 目标 | 建议场景 |
-| --- | --- | --- |
-| 流畅 | 尽量低码率 | 上行很紧张、移动网络 |
-| 稳定 | 稳定优先 | 日常默认 |
-| 高清 | 更清晰 | 上行较充足 |
-| 低延迟 | 操作响应优先 | 需要频繁点击/滑动 |
+画质预设由三个核心参数组成：
+
+| 参数 | 单位 | 作用 | 说明 |
+| --- | --- | --- | --- |
+| `video_bit_rate` | bps | 视频目标码率 | 越高越清晰，但越占上行；低带宽环境优先压低它 |
+| `max_size` | px | 输出流长边尺寸 | 只影响投屏输出，不改设备分辨率；`480` 表示输出长边不超过 480px |
+| `max_fps` | fps | 输出最大帧率 | 越高越顺滑，但码率和 CPU 压力也会上升 |
+
+内置默认值：
+
+| 预设 | 码率 | 输出尺寸 | 帧率 | 目标 | 建议场景 |
+| --- | ---: | ---: | ---: | --- | --- |
+| 流畅 `smooth` | 700 Kbps | 480 | 24 | 尽量省上行 | 上行紧张、多人观看、移动网络 |
+| 稳定 `balanced` | 900 Kbps | 540 | 24 | 稳定优先 | 默认推荐，兼顾清晰度和带宽 |
+| 高清 `sharp` | 1.6 Mbps | 720 | 30 | 更清晰 | 上行较充足、画面细节更重要 |
+| 低延迟 `low_latency` | 900 Kbps | 480 | 30 | 操作响应优先 | 频繁点击、滑动、需要更跟手 |
+
+带宽推荐会在后台“一键套用”到四个内置预设。它不是固定限制，而是帮管理员根据服务器上行快速生成一组更合理的默认值。
+
+| 上行档位 | 流畅 | 稳定 | 高清 | 低延迟 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| 2 Mbps | 450K / 480 / 20 | 650K / 480 / 24 | 1.1M / 540 / 24 | 750K / 480 / 30 | 极低上行，优先保证能动、少卡顿 |
+| 5 Mbps | 700K / 480 / 24 | 1.2M / 540 / 24 | 2.2M / 720 / 30 | 1.2M / 480 / 30 | 家宽低上行或多人共用 |
+| 10 Mbps | 900K / 480 / 24 | 1.8M / 720 / 24 | 3.5M / 960 / 30 | 1.8M / 540 / 30 | 常见可用档，清晰度明显提升 |
+| 20 Mbps | 1.2M / 540 / 24 | 2.8M / 720 / 30 | 5.5M / 1280 / 30 | 2.8M / 720 / 30 | 上行较充足，可给高清更多空间 |
+
+表格格式为：`码率 / 输出尺寸 / 帧率`。
 
 后台可以修改每个预设的：
 
 - 码率
 - 输出尺寸
 - 帧率
+- 自定义预设名称和值
 
-这些参数只影响 scrcpy 输出流。修改画质后可能需要重启投屏才能完全生效。
+使用建议：
+
+- 上行有限时，优先降低 `video_bit_rate`，其次降低 `max_size`，最后再降 `max_fps`。
+- 目标是“480p 20-30 帧左右流畅”时，推荐从 `smooth` 或 2 Mbps 带宽档开始。
+- 多人同时观看同一设备时，服务器总上行会接近“单路码率 × 观看人数”，应给预设留余量。
+- `max_size=0` 表示不限制 scrcpy 输出尺寸，不建议在上行有限或公网环境使用。
+- 修改画质后可能需要重启投屏才能完全生效；这不会修改设备真实分辨率，也不会影响 ALAS 对 `1280x720` 模拟器环境的识别。
 
 ## ALAS / Alas-Gyre Overlay
 
@@ -292,38 +331,111 @@ curl -fsS http://127.0.0.1:5000/healthz
 
 ## 配置项
 
-常用环境变量：
+配置来源有三类：
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `WEB_SCRCPY_BIND` | `127.0.0.1` | 服务绑定地址 |
-| `WEB_SCRCPY_PORT` | `5000` | 宿主机端口 |
-| `WEB_SCRCPY_DATA_HOST` | `./data` | 宿主机数据目录 |
-| `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | 对外访问地址 |
-| `ALLOWED_HOSTS` | `127.0.0.1,localhost` | 允许的 Host |
-| `ALLOWED_ORIGINS` | 空 | 允许的 Origin |
-| `ALLOW_NULL_ORIGIN` | `false` | 是否允许 WAF/代理场景中的 `Origin: null` |
-| `SESSION_COOKIE_SECURE` | `false` | 是否只通过 HTTPS 发送 Cookie |
-| `TRUST_PROXY` | `false` | 是否信任反向代理头 |
-| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理 IP 或 CIDR |
-| `ENABLE_API_DOCS` | `false` | 是否开启 FastAPI `/docs`、`/redoc`、`/openapi.json` |
-| `MIN_PASSWORD_LENGTH` | `12` | 最小密码长度 |
-| `PASSWORD_PBKDF2_ITERATIONS` | `310000` | 密码 PBKDF2-SHA256 哈希迭代次数 |
-| `LOGIN_RATE_LIMIT_ENABLED` | `true` | 是否启用登录防爆破限制 |
-| `LOGIN_RATE_LIMIT_MAX` | `6` | 限流窗口内允许的失败次数 |
-| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | 登录失败统计窗口秒数 |
-| `LOGIN_LOCKOUT_SECONDS` | `600` | 触发限流后的锁定秒数 |
-| `ADB_AUTOCONNECT` | `true` | 启动后自动连接已启用设备 |
-| `ADB_HEARTBEAT_INTERVAL` | `15` | ADB 心跳间隔秒数 |
-| `ADB_CONNECT_TIMEOUT` | `8` | ADB 连接超时秒数 |
-| `ADB_RECONNECT_BACKOFF` | `5` | ADB 重连退避秒数 |
-| `SCRCPY_STREAM_MODE` | `raw` | 默认 scrcpy 流模式 |
-| `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | 视频流健康检测超时 |
-| `VIDEO_QUEUE_MAXSIZE` | `60` | 单客户端视频队列硬上限 |
-| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | 单客户端视频队列软上限，超过后等待关键帧恢复 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
+- `.env` / 环境变量：影响容器启动、网络边界、安全策略和默认运行参数。
+- 后台管理页：影响设备、用户、权限、ALAS、画质预设等业务配置，保存到 SQLite。
+- 用户个人设置：影响当前用户自己的画质偏好和密码，不改变后台默认值。
 
 更多示例见 [.env.example](.env.example)。
+
+### 部署与数据目录
+
+| 变量 | 默认值 | 作用 | 什么时候修改 |
+| --- | --- | --- | --- |
+| `WEB_SCRCPY_BIND` | `127.0.0.1` | Docker 端口绑定的宿主机地址 | 局域网直接访问时改为服务器 IP 或 `0.0.0.0`；反代部署建议保持内网地址 |
+| `WEB_SCRCPY_PORT` | `5000` | 宿主机暴露端口 | v1 已停用并希望 v2 接管时用 `5000`；并行测试可用 `5001` |
+| `WEB_SCRCPY_DATA_HOST` | `./data` | 宿主机数据目录，挂载到容器 `/app/data` | 正式部署建议使用固定绝对路径，例如 `/root/ScrcpyGate/data` |
+| `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | 用户实际访问的外部地址 | 反代、HTTPS、域名、局域网 IP 访问时必须改成真实访问地址 |
+| `LOG_LEVEL` | `INFO` | 应用日志级别 | 排查问题时可临时改为 `DEBUG`，稳定后用 `INFO` |
+
+`data/` 中保存 SQLite 数据库、设置、审计日志和运行期状态。不要提交到 GitHub，也不要在升级时删除。
+
+### Host、Origin 与反向代理
+
+| 变量 | 默认值 | 作用 | 说明 |
+| --- | --- | --- | --- |
+| `ALLOWED_HOSTS` | `127.0.0.1,localhost` | 允许访问的 Host 名称 | 必须包含浏览器地址栏里的域名或 IP，不含协议和端口 |
+| `ALLOWED_ORIGINS` | 空 | 允许的浏览器 Origin | 推荐填写完整源，例如 `https://example.com:443` 或 `http://192.168.1.10:5000` |
+| `ALLOW_NULL_ORIGIN` | `false` | 是否允许 `Origin: null` | 只建议在本地 file/iframe/WAF 特殊场景临时开启；公网默认不要开启 |
+| `TRUST_PROXY` | `false` | 是否信任 `X-Forwarded-*` 代理头 | 只有请求确实来自可信反代时才开启 |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理来源 IP 或 CIDR | 填写反向代理访问 ScrcpyGate 时的真实来源 IP |
+| `SESSION_COOKIE_SECURE` | `false` | Cookie 是否仅 HTTPS 发送 | HTTPS 域名部署设为 `true`；纯 HTTP 局域网必须为 `false` |
+| `ENABLE_API_DOCS` | `false` | 是否开启 `/docs`、`/redoc`、`/openapi.json` | 仅本地开发调试开启，公网环境保持关闭 |
+
+常见组合：
+
+| 场景 | 推荐配置 |
+| --- | --- |
+| 本机直接访问 | `PUBLIC_BASE_URL=http://127.0.0.1:5000`，`SESSION_COOKIE_SECURE=false` |
+| 局域网 HTTP | `PUBLIC_BASE_URL=http://服务器IP:5000`，`ALLOWED_HOSTS=服务器IP,127.0.0.1,localhost` |
+| HTTPS 反代 | `PUBLIC_BASE_URL=https://域名`，`SESSION_COOKIE_SECURE=true`，`TRUST_PROXY=true` |
+| WAF 出现 `Origin: null` | 先检查反代配置；确认无法避免时再设 `ALLOW_NULL_ORIGIN=true` |
+
+### 密码与登录保护
+
+| 变量 | 默认值 | 作用 | 说明 |
+| --- | --- | --- | --- |
+| `MIN_PASSWORD_LENGTH` | `12` | 新密码最小长度 | 管理员创建用户、用户改密码、重置管理员密码都会校验 |
+| `PASSWORD_PBKDF2_ITERATIONS` | `310000` | PBKDF2-SHA256 哈希迭代次数 | 越高越抗暴力破解，但登录和改密会更耗 CPU |
+| `LOGIN_RATE_LIMIT_ENABLED` | `true` | 登录防爆破开关 | 建议保持开启 |
+| `LOGIN_RATE_LIMIT_MAX` | `6` | 单窗口失败次数 | 达到后进入锁定 |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | 失败统计窗口 | 默认 5 分钟 |
+| `LOGIN_LOCKOUT_SECONDS` | `600` | 锁定时间 | 默认 10 分钟 |
+
+初始管理员密码只在首次部署时显示一次，不写入明文文件。忘记后使用：
+
+```bash
+docker compose -f docker-compose.v2.yml exec -T web-scrcpy-v2 python -m app.cli reset-admin
+```
+
+### ADB 自动连接
+
+| 变量 | 默认值 | 作用 | 说明 |
+| --- | --- | --- | --- |
+| `ADB_AUTOCONNECT` | `true` | 服务启动后自动连接后台已启用设备 | 避免首次登录后点击投屏才发现 ADB 未连接 |
+| `ADB_HEARTBEAT_INTERVAL` | `15` | 心跳间隔秒数 | 定期执行状态检查，掉线后尝试恢复 |
+| `ADB_CONNECT_TIMEOUT` | `8` | 单次连接超时秒数 | 网络差或设备较慢时可适当调大 |
+| `ADB_RECONNECT_BACKOFF` | `5` | 重连退避秒数 | 避免设备离线时高频重连打满日志 |
+
+后台设备表里的“设备 ID”建议使用别名，例如 `emu-1`；“ADB 地址”填写真实连接地址，例如 `192.0.2.10:30100`。普通用户接口和投屏页不会显示真实 ADB 地址。
+
+### 视频流、队列与稳定性
+
+| 变量 | 默认值 | 作用 | 调整建议 |
+| --- | --- | --- | --- |
+| `SCRCPY_STREAM_MODE` | `raw` | 默认 scrcpy 流模式 | 生产建议 `raw`；`protocol`、`legacy` 等稳定后再在后台开启 |
+| `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | 启动后等待关键视频数据的秒数 | 设备启动慢时可调大；太大则失败反馈变慢 |
+| `VIDEO_QUEUE_MAXSIZE` | `60` | 每个浏览器视频队列硬上限 | 越大越抗抖动，但延迟和内存占用增加 |
+| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | 队列软上限 | 慢客户端超过软上限后会丢自己的帧并等待关键帧，不拖垮其他观看端 |
+
+队列是按浏览器客户端隔离的。一个慢客户端卡顿时，只会丢它自己的帧，不会拖慢同设备的其他观看者。
+
+### Docker 构建参数
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `PYTHON_IMAGE` | `python:3.12-alpine` | Dockerfile 基础镜像 |
+| `PIP_INDEX_URL` | 空 | 构建时 pip 镜像源；国内服务器可使用清华、阿里等镜像 |
+
+示例：
+
+```bash
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+docker compose -f docker-compose.v2.yml build
+```
+
+### 后台业务参数
+
+这些参数不通过 `.env` 配置，而是在后台保存到 SQLite：
+
+| 模块 | 参数 | 作用 |
+| --- | --- | --- |
+| 设备 | 设备 ID、名称、ADB 地址、启用状态 | 管理可投屏设备；普通用户只看到名称和在线状态 |
+| 权限 | 用户、设备、查看、控制 | 控制谁能看、谁能操作某台设备 |
+| 画质 | 默认预设、各预设码率/尺寸/帧率、自定义预设、允许的流模式 | 管理员按网络环境设置默认值，用户可选择预设 |
+| ALAS | Runtime URL、Token、当前配置、用户绑定、运行权限 | 只代理已授权的启动/停止/重启和嵌入访问 |
+| 安全日志 | 登录、登出、权限、ALAS、投屏操作记录 | 方便追踪异常登录和越权访问 |
 
 ## 项目结构
 
