@@ -2,6 +2,13 @@
 
 ScrcpyGate bundles a few third-party runtime assets so Docker deployments can run without downloading them at container startup.
 
+## Original web-scrcpy Project
+
+- Upstream: https://github.com/baixin1228/web-scrcpy
+- Purpose: Original Web-Scrcpy project and implementation reference for browser-based scrcpy access.
+
+ScrcpyGate is a FastAPI/WebSocket refactor and productized gateway built with its own authentication, authorization, video-profile, ALAS, and deployment layers. Keep upstream attribution visible when publishing derivative releases.
+
 ## scrcpy-server
 
 - File: `scrcpy-server`

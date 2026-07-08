@@ -21,6 +21,7 @@ It is not a thin page that simply exposes ADB. It is a lightweight management ga
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Development Checks](#development-checks)
+- [Acknowledgements](#acknowledgements)
 - [License](#license)
 
 ## Use Cases
@@ -423,6 +424,16 @@ Sensitive data scan example:
 ```bash
 rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
 ```
+
+## Acknowledgements
+
+ScrcpyGate's early direction and parts of its implementation were inspired by the original project [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy). Thanks to that project for the Web-based scrcpy mirroring idea, baseline structure, and practical reference.
+
+Thanks also to these open-source projects:
+
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy): Android screen capture and control.
+- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer): H264 remuxing and MSE playback in the browser.
+- [FastAPI](https://github.com/fastapi/fastapi): HTTP and WebSocket backend framework.
 
 ## License
 

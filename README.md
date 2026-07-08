@@ -21,6 +21,7 @@ ScrcpyGate 是一个基于 FastAPI、原生 WebSocket 和 scrcpy 的浏览器投
 - [配置项](#配置项)
 - [故障排查](#故障排查)
 - [开发检查](#开发检查)
+- [致谢](#致谢)
 - [许可证](#许可证)
 
 ## 适用场景
@@ -538,6 +539,16 @@ rg -n "wm size|wm density|modifydev|Physical size|Override size" .
 ```bash
 rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
 ```
+
+## 致谢
+
+ScrcpyGate 的早期方向和部分实现参考自原始项目 [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy)。感谢原项目提供 Web 端 scrcpy 投屏思路、基础结构和实践参考。
+
+同时感谢以下开源项目：
+
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)：Android 投屏与控制核心能力。
+- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer)：浏览器端 H264 remux 与 MSE 播放。
+- [FastAPI](https://github.com/fastapi/fastapi)：后端 HTTP 与 WebSocket 框架。
 
 ## 许可证
 
