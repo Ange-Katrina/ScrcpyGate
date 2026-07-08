@@ -94,6 +94,13 @@ def request_host_allowed(request: Request) -> bool:
     return bool(host and host in allowed_hosts())
 
 
+def origin_check_exempt(request: Request) -> bool:
+    # Logout is CSRF-protected by a per-session token in the route itself.
+    # Some WAF/iframe/browser combinations submit the form with Origin: null;
+    # let the route validate the token instead of failing before it can logout.
+    return request.method.upper() == "POST" and request.url.path == "/logout"
+
+
 def origin_allowed(origin: str | None, request_host_url: str | None = None) -> bool:
     if origin is None or not str(origin).strip():
         return True
@@ -156,7 +163,7 @@ def enforce_http_boundary(request: Request) -> None:
         log.warning("HOST_REJECT path=%s host=%s allowed=%s", request.url.path, request.headers.get("host", ""), sorted(allowed_hosts()))
         raise HTTPException(status_code=400, detail="Bad Request")
     origin = request.headers.get("origin")
-    if origin and not origin_allowed(origin, str(request.base_url).rstrip("/")):
+    if origin and not origin_check_exempt(request) and not origin_allowed(origin, str(request.base_url).rstrip("/")):
         log.warning("ORIGIN_REJECT path=%s origin=%s base=%s allowed=%s", request.url.path, origin, str(request.base_url).rstrip("/"), sorted(allowed_origins()))
         raise HTTPException(status_code=403, detail="Forbidden")
 
