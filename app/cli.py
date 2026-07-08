@@ -1,11 +1,21 @@
-﻿import sys
+import os
+import sys
 
 from . import storage
 
 
 def main() -> int:
-    storage.init_db()
     command = sys.argv[1] if len(sys.argv) > 1 else "initial-password"
+    if command == "bootstrap-admin":
+        password = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+        if not password:
+            password = storage.generate_random_password()
+        os.environ["INITIAL_ADMIN_PASSWORD"] = password
+        storage.init_db()
+        print(storage.get_initial_admin_password_for_display())
+        return 0
+
+    storage.init_db()
     if command == "initial-password":
         password = storage.get_initial_admin_password_for_display()
         if password:
@@ -14,7 +24,7 @@ def main() -> int:
         print("")
         return 1
     if command == "reset-admin":
-        password = sys.argv[2] if len(sys.argv) > 2 else storage._generate_initial_password()
+        password = sys.argv[2] if len(sys.argv) > 2 else storage.generate_random_password()
         storage.upsert_user("admin", password, "admin")
         print(password)
         return 0

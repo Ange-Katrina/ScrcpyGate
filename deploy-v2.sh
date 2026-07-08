@@ -62,7 +62,7 @@ case "$WEB_SCRCPY_BIND" in
 esac
 echo "SafeLine upstream can use: http://${health_host}:${WEB_SCRCPY_PORT}"
 
-$DC -f docker-compose.v2.yml up -d --build
+$DC -f docker-compose.v2.yml build
 
 if command -v docker >/dev/null 2>&1; then
   app_uid="$(docker run --rm --entrypoint id web-scrcpy-v2:local -u 2>/dev/null || true)"
@@ -70,9 +70,16 @@ if command -v docker >/dev/null 2>&1; then
   if [ -n "$app_uid" ] && [ -n "$app_gid" ]; then
     chown -R "$app_uid:$app_gid" "$WEB_SCRCPY_DATA_HOST" 2>/dev/null || true
     chmod 700 "$WEB_SCRCPY_DATA_HOST" 2>/dev/null || true
-    $DC -f docker-compose.v2.yml up -d >/dev/null
   fi
 fi
+
+password="$($DC -f docker-compose.v2.yml run --rm --no-deps -e INITIAL_ADMIN_PASSWORD web-scrcpy-v2 python -m app.cli bootstrap-admin 2>/dev/null)" || {
+  echo "ERROR: failed to initialize admin account." >&2
+  exit 1
+}
+password="$(printf '%s' "$password" | tr -d '\r' | tail -n 1)"
+
+$DC -f docker-compose.v2.yml up -d
 
 printf 'Waiting for healthz'
 i=0
@@ -94,18 +101,13 @@ while [ "$i" -lt 40 ]; do
   i=$((i + 1))
 done
 
-password=""
-if password="$($DC -f docker-compose.v2.yml exec -T web-scrcpy-v2 python -m app.cli initial-password 2>/dev/null)"; then
-  password="$(printf '%s' "$password" | tr -d '\r' | tail -n 1)"
-fi
-
 if [ -n "$password" ]; then
   echo ""
   echo "Initial admin account:"
   echo "  username: admin"
   echo "  password: $password"
   echo ""
-  echo "This password is also stored in: $WEB_SCRCPY_DATA_HOST/initial_admin_password.txt"
+  echo "This password is shown once and is not saved in plaintext."
 else
   echo ""
   echo "No new initial password was generated. Existing users were detected or the old users.json was migrated."

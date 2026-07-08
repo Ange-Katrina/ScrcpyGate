@@ -1,4 +1,5 @@
 ﻿import importlib
+import hashlib
 import json
 import os
 import shutil
@@ -28,16 +29,16 @@ class StorageCoreTests(unittest.TestCase):
         os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
         os.environ.pop("INITIAL_ADMIN_PASSWORD", None)
 
-    def test_fresh_install_generates_displayable_admin_password(self):
+    def test_fresh_install_does_not_persist_plaintext_admin_password(self):
         storage = load_storage(self.tmp)
         storage.init_db()
 
-        password = storage.get_initial_admin_password_for_display()
-        self.assertTrue(password)
-        self.assertTrue((self.tmp / "initial_admin_password.txt").exists())
-        user = storage.authenticate("admin", password)
+        self.assertEqual(storage.get_initial_admin_password_for_display(), "")
+        self.assertFalse((self.tmp / "initial_admin_password.txt").exists())
+        user = storage.get_user("admin")
         self.assertIsNotNone(user)
         self.assertEqual(user["role"], "admin")
+        self.assertTrue(str(user["password_hash"]).startswith("pbkdf2_sha256$"))
 
     def test_initial_admin_password_env_is_used_and_displayed(self):
         os.environ["INITIAL_ADMIN_PASSWORD"] = "StrongInitialPwd123"
@@ -45,6 +46,7 @@ class StorageCoreTests(unittest.TestCase):
         storage.init_db()
 
         self.assertEqual(storage.get_initial_admin_password_for_display(), "StrongInitialPwd123")
+        self.assertFalse((self.tmp / "initial_admin_password.txt").exists())
         self.assertIsNotNone(storage.authenticate("admin", "StrongInitialPwd123"))
 
     def test_legacy_users_are_migrated_without_password_override(self):
@@ -59,6 +61,34 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0]["username"], "admin")
         self.assertEqual(storage.get_initial_admin_password_for_display(), "")
+        self.assertFalse((self.tmp / "initial_admin_password.txt").exists())
+
+    def test_legacy_plaintext_password_is_hashed_before_migration(self):
+        (self.tmp / "users.json").write_text(json.dumps({
+            "alice": {"password": "AlicePassword123", "role": "user", "created_at": "2026-07-05 00:00:00"}
+        }), encoding="utf-8")
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        user = storage.get_user("alice")
+        self.assertIsNotNone(user)
+        self.assertNotEqual(user["password_hash"], "AlicePassword123")
+        self.assertTrue(user["password_hash"].startswith("pbkdf2_sha256$"))
+        self.assertIsNotNone(storage.authenticate("alice", "AlicePassword123"))
+
+    def test_legacy_password_hash_is_upgraded_after_successful_login(self):
+        salt = os.urandom(32)
+        key = hashlib.pbkdf2_hmac("sha256", b"AdminPassword123", salt, 100000)
+        old_hash = salt.hex() + ":" + key.hex()
+        (self.tmp / "users.json").write_text(json.dumps({
+            "admin": {"password_hash": old_hash, "role": "admin", "created_at": "2026-07-05 00:00:00"}
+        }), encoding="utf-8")
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        self.assertIsNotNone(storage.authenticate("admin", "AdminPassword123"))
+        upgraded = storage.get_user("admin")["password_hash"]
+        self.assertTrue(upgraded.startswith("pbkdf2_sha256$310000$"))
 
     def test_user_permissions_and_control_lock(self):
         storage = load_storage(self.tmp)

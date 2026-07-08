@@ -18,6 +18,7 @@ INITIAL_ADMIN_PASSWORD_FILE = DATA_DIR / "initial_admin_password.txt"
 LEGACY_USERS_FILE = DATA_DIR / "users.json"
 LEGACY_ENV_FILE = DATA_DIR / ".env"
 MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH", "12") or "12")
+PASSWORD_PBKDF2_ITERATIONS = int(os.environ.get("PASSWORD_PBKDF2_ITERATIONS", "310000") or "310000")
 
 DEFAULT_SETTINGS = {
     "video_profile": "balanced",
@@ -64,14 +65,6 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-def _protect(path: Path) -> None:
-    try:
-        if path.exists():
-            os.chmod(path, 0o600)
-    except Exception:
-        pass
-
-
 def parse_env_file(path: Path) -> dict:
     result = {}
     if not path.exists():
@@ -87,12 +80,33 @@ def parse_env_file(path: Path) -> dict:
 
 def hash_password(password: str) -> str:
     salt = os.urandom(32)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
-    return salt.hex() + ":" + key.hex()
+    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PASSWORD_PBKDF2_ITERATIONS}${salt.hex()}${key.hex()}"
+
+
+def password_hash_needs_upgrade(stored: str) -> bool:
+    stored = stored or ""
+    if not stored.startswith("pbkdf2_sha256$"):
+        return True
+    try:
+        _, iterations_text, _salt_hex, _key_hex = stored.split("$", 3)
+        return int(iterations_text) < PASSWORD_PBKDF2_ITERATIONS
+    except Exception:
+        return True
 
 
 def verify_password(password: str, stored: str) -> bool:
     stored = stored or ""
+    if stored.startswith("pbkdf2_sha256$"):
+        try:
+            _, iterations_text, salt_hex, key_hex = stored.split("$", 3)
+            iterations = int(iterations_text)
+            salt = bytes.fromhex(salt_hex)
+            stored_key = bytes.fromhex(key_hex)
+            new_key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+            return secrets.compare_digest(stored_key, new_key)
+        except Exception:
+            return False
     if ":" in stored and not stored.startswith(("pbkdf2:", "scrypt:")):
         try:
             salt_hex, key_hex = stored.split(":", 1)
@@ -123,6 +137,7 @@ def validate_password(password: str, username: str = "") -> str | None:
 
 def init_db() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _remove_initial_password_file()
     with db_connect() as conn:
         conn.executescript(
             """
@@ -219,29 +234,30 @@ def _migrate_video_defaults(conn: sqlite3.Connection) -> None:
             conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, DEFAULT_SETTINGS[key]))
 
 
-def _write_initial_password_file(password: str) -> None:
-    INITIAL_ADMIN_PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
-    _protect(INITIAL_ADMIN_PASSWORD_FILE)
+def _remove_initial_password_file() -> None:
+    try:
+        INITIAL_ADMIN_PASSWORD_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def generate_random_password() -> str:
+    return secrets.token_urlsafe(24)
 
 
 def _generate_initial_password() -> str:
+    _remove_initial_password_file()
     configured = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
     if configured:
-        _write_initial_password_file(configured)
+        error = validate_password(configured, "admin")
+        if error:
+            raise ValueError(error)
         return configured
-    if INITIAL_ADMIN_PASSWORD_FILE.exists():
-        existing = INITIAL_ADMIN_PASSWORD_FILE.read_text(encoding="utf-8", errors="replace").strip()
-        if existing:
-            return existing
-    password = secrets.token_urlsafe(18)
-    _write_initial_password_file(password)
-    return password
+    return generate_random_password()
 
 
 def get_initial_admin_password_for_display() -> str:
-    if not INITIAL_ADMIN_PASSWORD_FILE.exists():
-        return ""
-    password = INITIAL_ADMIN_PASSWORD_FILE.read_text(encoding="utf-8", errors="replace").strip()
+    password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
     if not password:
         return ""
     with db_connect() as conn:
@@ -264,11 +280,15 @@ def migrate_legacy_data() -> None:
                     role = info.get("role") or ("admin" if info.get("is_admin") else "user")
                     if role not in ("admin", "user"):
                         role = "user"
+                    migrated_hash = str(info.get("password_hash") or "")
+                    raw_password = str(info.get("password") or "")
+                    if not migrated_hash and raw_password:
+                        migrated_hash = hash_password(raw_password)
                     conn.execute(
                         "INSERT OR REPLACE INTO users(username,password_hash,role,created_at,must_change_password) VALUES(?,?,?,?,?)",
                         (
                             str(username),
-                            str(info.get("password_hash") or info.get("password") or ""),
+                            migrated_hash,
                             role,
                             str(info.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S")),
                             1 if info.get("must_change_password") else 0,
@@ -685,6 +705,10 @@ def authenticate(username: str, password: str) -> dict | None:
         return None
     if not verify_password(password, user["password_hash"]):
         return None
+    if password_hash_needs_upgrade(user["password_hash"]):
+        with db_connect() as conn:
+            conn.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_password(password), user["username"]))
+            conn.commit()
     return dict(user)
 
 
