@@ -1195,6 +1195,34 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["closed"], [1000])
 
+    def test_websocket_keeps_bound_user_pywebio_alas_scope_output(self):
+        """ALAS/PyWebIO 正常输出包可包含 scope=Alas，不应被当成 ALAS 设置页而断开。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        upstream_message = json.dumps(
+            {
+                "command": "output",
+                "scope": "Alas",
+                "spec": {"content": "任务总览", "config": "挂机-云"},
+            },
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[upstream_message])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            forwarded = json.loads(websocket.receive_text())
+            close_message = websocket.receive()
+
+        self.assertEqual(
+            forwarded,
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览", "config": "挂机-云"}},
+        )
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["closed"], [1000])
+
     def test_websocket_appends_bound_config_when_query_missing(self):
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")

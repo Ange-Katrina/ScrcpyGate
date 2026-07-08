@@ -1280,7 +1280,13 @@ def _message_switches_downstream_config(value, config_name: str) -> bool:
 
 
 def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> str | bytes | None:
-    """Filter ALAS-to-browser WebSocket messages for bound users."""
+    """Filter ALAS-to-browser WebSocket messages for bound users.
+
+    Downstream messages are UI render payloads from PyWebIO.  They may contain
+    broad scope names such as "Alas" even when the browser is not navigating to
+    the sensitive ALAS settings page, so this path must clean fields and menu
+    items instead of reusing the stricter upstream request blocker.
+    """
     payload = _parse_websocket_message(message)
     if payload is None:
         if isinstance(message, bytes):
@@ -1292,11 +1298,7 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
             return None
         return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
     filtered = filter_user_json_payload(payload, config_name)
-    if (
-        _message_contains_management(filtered)
-        or _message_targets_alas_settings(filtered)
-        or _message_switches_downstream_config(filtered, config_name)
-    ):
+    if _message_switches_downstream_config(filtered, config_name):
         return None
     text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
     if isinstance(message, bytes):

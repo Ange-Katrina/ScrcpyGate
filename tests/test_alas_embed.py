@@ -657,6 +657,23 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             {"command": "output", "spec": {"items": [{"label": "Restart", "value": "Restart"}]}},
         )
 
+    def test_filter_user_websocket_downstream_keeps_pywebio_alas_scope_output(self):
+        message = json.dumps(
+            {
+                "command": "output",
+                "scope": "Alas",
+                "spec": {"content": "任务总览", "config": "挂机-云"},
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertEqual(
+            json.loads(result),
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览", "config": "挂机-云"}},
+        )
+
     def test_filter_user_websocket_downstream_rejects_alas_settings_text(self):
         result = filter_user_websocket_downstream("open Alas设置", "挂机-云")
 
