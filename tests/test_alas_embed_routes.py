@@ -533,6 +533,56 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["closed"], [1008, 1008])
 
+    def test_websocket_closes_1008_when_user_message_switches_nested_config(self):
+        """普通用户 WebSocket 嵌套消息尝试切换配置时连接会被策略关闭。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_text('{"params":{"config":"其它"}}')
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_closes_1008_when_user_sends_binary_message(self):
+        """普通用户发送任意二进制消息时连接会被策略关闭且不转发。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_bytes(b"from-client")
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_forwards_admin_binary_message(self):
+        """管理员发送二进制消息时仍然转发给上游。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        captured = self.install_fake_websocket_upstream(incoming=[b"admin-ok"])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
+            websocket.send_bytes(b"from-admin")
+            self.assertEqual(websocket.receive_bytes(), b"admin-ok")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], [b"from-admin"])
+
     def test_websocket_closes_1008_when_user_message_requests_management(self):
         """普通用户 WebSocket 消息尝试管理操作时连接会被策略关闭。"""
         self.login("alice", "password123456", "user")
@@ -634,6 +684,22 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["type"], "websocket.close")
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["sent"], ['{"config":"其它"}'])
+
+    def test_websocket_forwards_admin_management_text(self):
+        """管理员 WebSocket 管理消息不受普通用户过滤影响并透传。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_websocket_upstream(incoming=["admin-ok"])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
+            websocket.send_text('{"event":"Manage","method":"alas.config_list"}')
+            self.assertEqual(websocket.receive_text(), "admin-ok")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], ['{"event":"Manage","method":"alas.config_list"}'])
 
     def test_websocket_denies_when_alas_disabled(self):
         """ALAS 未启用时 WebSocket 代理拒绝连接。"""

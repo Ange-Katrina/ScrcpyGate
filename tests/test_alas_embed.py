@@ -311,6 +311,24 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
         """包含其它配置名的 WebSocket 文本消息会被拒绝。"""
         self.assertFalse(websocket_message_allowed('{"config":"其它"}', "挂机-云"))
 
+    def test_nested_dict_message_with_other_config_is_denied(self):
+        """嵌套字典中的其它配置名会被拒绝。"""
+        self.assertFalse(
+            websocket_message_allowed('{"params":{"config":"其它"}}', "挂机-云")
+        )
+
+    def test_list_message_with_other_config_is_denied(self):
+        """列表内嵌字典中的其它配置名会被拒绝。"""
+        self.assertFalse(
+            websocket_message_allowed('[{"config":"挂机-云"},{"config":"其它"}]', "挂机-云")
+        )
+
+    def test_nested_dict_message_with_bound_config_is_allowed(self):
+        """嵌套字典中的绑定配置名会被允许。"""
+        self.assertTrue(
+            websocket_message_allowed('{"params":{"config":"挂机-云"}}', "挂机-云")
+        )
+
     def test_message_with_bound_config_is_allowed(self):
         """包含绑定配置名的 WebSocket 文本消息会被允许。"""
         self.assertTrue(websocket_message_allowed('{"config":"挂机-云"}', "挂机-云"))
@@ -319,8 +337,43 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
         """普通用户 WebSocket 文本消息尝试管理操作时会被拒绝。"""
         self.assertFalse(websocket_message_allowed('{"event":"alas.config_list"}', "挂机-云"))
 
-    def test_non_json_message_is_allowed(self):
-        """非 JSON WebSocket 文本消息不做配置拦截。"""
+    def test_message_with_management_operation_case_variant_is_denied(self):
+        """管理操作字段和值的大小写变体会被拒绝。"""
+        cases = [
+            '{"event":"Manage"}',
+            '{"event":"manage"}',
+            '{"method":"alas.config_list"}',
+        ]
+        for message in cases:
+            with self.subTest(message=message):
+                self.assertFalse(websocket_message_allowed(message, "挂机-云"))
+
+    def test_plain_text_config_expression_for_other_config_is_denied(self):
+        """非 JSON 文本包含其它配置表达式时会被拒绝。"""
+        self.assertFalse(websocket_message_allowed("config=其它", "挂机-云"))
+
+    def test_plain_text_normal_content_is_allowed(self):
+        """非 JSON 普通文本不应被误杀。"""
+        self.assertTrue(websocket_message_allowed("hello world", "挂机-云"))
+
+    def test_plain_text_management_word_is_denied_by_conservative_policy(self):
+        """非 JSON 文本明显包含管理标记时按保守策略拒绝。"""
+        self.assertFalse(websocket_message_allowed("这是一条包含管理二字的普通文本", "挂机-云"))
+
+    def test_bytes_bound_config_json_is_denied(self):
+        """bytes 消息不在文本过滤函数内解析，按保守策略拒绝。"""
+        self.assertFalse(websocket_message_allowed('{"config":"挂机-云"}'.encode("utf-8"), "挂机-云"))
+
+    def test_bytes_other_config_json_is_denied(self):
+        """UTF-8 JSON bytes 访问其它配置时拒绝。"""
+        self.assertFalse(websocket_message_allowed('{"config":"其它"}'.encode("utf-8"), "挂机-云"))
+
+    def test_unparseable_bytes_message_is_denied(self):
+        """无法安全解析的 bytes 消息按保守策略拒绝。"""
+        self.assertFalse(websocket_message_allowed(b"\xff\xfe", "挂机-云"))
+
+    def test_non_json_message_without_sensitive_content_is_allowed(self):
+        """非 JSON 且无敏感内容的 WebSocket 文本消息会被允许。"""
         self.assertTrue(websocket_message_allowed("ping", "挂机-云"))
 
 

@@ -5,6 +5,7 @@ import asyncio
 import html as html_utils
 import ipaddress
 import json
+import re
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
@@ -19,6 +20,7 @@ ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
 DOMAIN_FALLBACK_PORTS = (80, 443, 22267)
 MANAGEMENT_MARKERS = ("管理", "Manage", "Settings.Admin", "alas.config_list")
+MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "path", "topic", "action", "type")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -353,30 +355,87 @@ def rewrite_location_header(location: str, base_url: str) -> str:
     return rewritten
 
 
+def _is_management_text(value) -> bool:
+    """判断字符串值是否明显包含管理操作标记。"""
+    text = str(value or "").lower()
+    return any(str(marker).lower() in text for marker in MANAGEMENT_MARKERS)
+
+
 def _message_contains_management(value) -> bool:
-    """递归检查 WebSocket 消息载荷是否包含管理操作标记。"""
+    """递归检查 WebSocket 消息的明确管理字段是否包含管理操作标记。"""
     if isinstance(value, dict):
-        return any(_message_contains_management(item) for item in value.values())
+        for key, item in value.items():
+            if str(key).lower() in MANAGEMENT_MESSAGE_KEYS and _is_management_text(item):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _message_contains_management(item):
+                return True
     if isinstance(value, (list, tuple)):
         return any(_message_contains_management(item) for item in value)
-    text = str(value or "")
-    return any(marker in text for marker in MANAGEMENT_MARKERS)
+    return False
 
 
-def websocket_message_allowed(message: str, config_name: str) -> bool:
-    """检查 WebSocket 文本消息是否试图访问其它配置或管理操作。"""
+def _message_switches_config(value, config_name: str) -> bool:
+    """递归检查 WebSocket JSON 载荷是否请求非绑定配置。"""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in CONFIG_QUERY_KEYS:
+                if _config_value_mismatches(item, config_name):
+                    return True
+                continue
+            if isinstance(item, (dict, list, tuple)) and _message_switches_config(item, config_name):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_message_switches_config(item, config_name) for item in value)
+    return False
+
+
+def _config_value_mismatches(value, config_name: str) -> bool:
+    """递归检查配置字段值，只要存在非空且非绑定配置即视为越权。"""
+    if isinstance(value, dict):
+        return any(_config_value_mismatches(item, config_name) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_config_value_mismatches(item, config_name) for item in value)
+    requested_config = str(value or "").strip()
+    return bool(requested_config and requested_config != config_name)
+
+
+def _parse_websocket_message(message):
+    """将 WebSocket 文本消息解析为 JSON 载荷。"""
+    if not isinstance(message, str):
+        return None
     try:
-        payload = json.loads(message)
+        return json.loads(message)
     except Exception:
-        return True
-    if not isinstance(payload, dict):
-        return True
+        return None
+
+
+def _plain_text_switches_config(text: str, config_name: str) -> bool:
+    """检查非 JSON 文本中明显的配置切换表达式是否指向非绑定配置。"""
+    key_pattern = "|".join(re.escape(key) for key in CONFIG_QUERY_KEYS)
+    pattern = re.compile(rf"(?:^|[?&\s])(?:{key_pattern})\s*=\s*([^&\s]+)", re.IGNORECASE)
+    for match in pattern.finditer(str(text or "")):
+        requested_config = match.group(1).strip().strip("'\"")
+        if requested_config and requested_config != config_name:
+            return True
+    return False
+
+
+def _plain_text_denied(text: str, config_name: str) -> bool:
+    """检查非 JSON 文本是否明显包含配置越权或管理操作意图。"""
+    return _plain_text_switches_config(text, config_name) or _is_management_text(text)
+
+
+def websocket_message_allowed(message: str | bytes, config_name: str) -> bool:
+    """检查 WebSocket 文本消息是否试图访问其它配置或管理操作。"""
+    if isinstance(message, bytes):
+        return False
+    payload = _parse_websocket_message(message)
+    if payload is None:
+        return not _plain_text_denied(str(message or ""), config_name)
     if _message_contains_management(payload):
         return False
-    for key in CONFIG_QUERY_KEYS:
-        value = str(payload.get(key) or "").strip()
-        if value and value != config_name:
-            return False
+    if _message_switches_config(payload, config_name):
+        return False
     return True
 
 
@@ -432,7 +491,12 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
                             return 1008
                         await upstream.send(text)
                     elif "bytes" in message:
-                        await upstream.send(message["bytes"])
+                        data = message["bytes"]
+                        if decision.filtered:
+                            await _close_upstream_safely(upstream, code=1008)
+                            await _close_websocket_safely(websocket, 1008)
+                            return 1008
+                        await upstream.send(data)
 
             async def upstream_to_client() -> None:
                 """转发上游文本或二进制消息回客户端。"""
