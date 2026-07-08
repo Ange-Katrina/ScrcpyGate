@@ -676,6 +676,61 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
         self.assertEqual(captured, [])
 
+    def test_proxy_denies_invalid_json_body_for_bound_user(self):
+        """普通用户声明 JSON 但正文无法解析时应拒绝，避免绕过 body 策略。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            content=b'{"event":"alas.config_list"',
+            headers={"Content-Type": "application/json", "X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["detail"], "ALAS 请求正文无法安全解析")
+        self.assertEqual(captured, [])
+
+    def test_proxy_denies_oversized_json_body_for_bound_user(self):
+        """普通用户 JSON body 超过策略解析上限时应拒绝，避免 fail-open 透传。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            content=b'{"payload":"' + (b"x" * 70000) + b'"}',
+            headers={"Content-Type": "application/json", "X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["detail"], "ALAS 请求正文无法安全解析")
+        self.assertEqual(captured, [])
+
+    def test_proxy_allows_admin_invalid_json_body(self):
+        """管理员无绑定限制时，无法解析的 JSON body 仍按原样透传。"""
+        session = self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state",
+            content=b'{"event":"alas.config_list"',
+            headers={"Content-Type": "application/json", "X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["data"], b'{"event":"alas.config_list"')
+
     def test_proxy_disabled_returns_clear_error_and_audit_log(self):
         """ALAS 未启用时代理返回清晰中文文案并写入审计。"""
         self.login("admin", "password123456", "admin")

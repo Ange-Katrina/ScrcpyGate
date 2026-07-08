@@ -172,6 +172,8 @@ def alas_embed_denied_message(reason: str) -> str:
         return "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置"
     if reason_text in ("missing request config", "missing_request_config"):
         return "业务请求必须显式指定绑定的 ALAS 配置"
+    if reason_text in ("invalid body", "invalid_body"):
+        return "ALAS 请求正文无法安全解析"
     if reason_text in ("config mismatch", "config path mismatch"):
         return "无权访问其它 ALAS 配置"
     if reason_text == "management path denied":
@@ -188,6 +190,7 @@ def alas_embed_reason_code(reason: str) -> str:
     return {
         "missing binding": "missing_binding",
         "missing request config": "missing_request_config",
+        "invalid body": "invalid_body",
         "config mismatch": "config_mismatch",
         "config path mismatch": "config_path_mismatch",
         "management path denied": "management_path_denied",

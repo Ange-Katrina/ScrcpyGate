@@ -55,6 +55,17 @@ class ProxyDecision:
     can_edit: bool = True
 
 
+@dataclass(frozen=True)
+class ParsedBody:
+    """表示受限解析后的 HTTP 正文。"""
+
+    value: object
+    valid: bool = True
+
+
+PARSED_BODY_INVALID = ParsedBody(None, False)
+
+
 def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     """生成 ScrcpyGate ALAS iframe 外壳页面。"""
     safe_title = escape(title)
@@ -209,6 +220,11 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
     role = str((user or {}).get("role", ""))
     if role == "admin":
         return ProxyDecision(allowed=True)
+
+    if isinstance(body, ParsedBody):
+        if not body.valid:
+            return ProxyDecision(allowed=False, status_code=400, reason="invalid body")
+        body = body.value
 
     if not binding or not binding.get("config_name"):
         return ProxyDecision(allowed=False, status_code=403, reason="missing binding")
@@ -734,21 +750,26 @@ def _content_type_charset(content_type: str) -> str:
 
 
 def parse_limited_body(body: bytes, content_type: str, limit: int = 65536):
-    """在大小限制内解析 JSON 或 form-urlencoded 正文，无法解析时返回 None。"""
+    """在大小限制内解析 JSON 或 form-urlencoded 正文，并保留解析状态。"""
     if not body:
-        return {}
+        return ParsedBody({})
     if len(body) > limit:
-        return None
+        return PARSED_BODY_INVALID
     media_type = _content_type_media_type(content_type)
     if media_type == "application/json":
         try:
             payload = json.loads(body.decode("utf-8"))
         except Exception:
-            return None
-        return payload if isinstance(payload, (dict, list)) else None
+            return PARSED_BODY_INVALID
+        if not isinstance(payload, (dict, list)):
+            return PARSED_BODY_INVALID
+        return ParsedBody(payload)
     if media_type == "application/x-www-form-urlencoded":
-        form = parse_qs(body.decode("utf-8", "ignore"), keep_blank_values=True)
-        return {key: values[-1] if values else "" for key, values in form.items()}
+        try:
+            form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+        except UnicodeDecodeError:
+            return PARSED_BODY_INVALID
+        return ParsedBody({key: values[-1] if values else "" for key, values in form.items()})
     return None
 
 
