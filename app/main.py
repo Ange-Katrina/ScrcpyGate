@@ -154,6 +154,35 @@ def audit_detail(request: Request, extra: str = "") -> str:
     return " ".join(parts)
 
 
+def alas_embed_denial_detail(request: Request, reason: str, path: str = "") -> str:
+    """生成 ALAS 嵌入拒绝审计详情，避免记录敏感正文和完整凭据。"""
+    safe_reason = str(reason or "unknown").replace("\r", " ").replace("\n", " ")[:80]
+    safe_path = str(path or "/").replace("\r", " ").replace("\n", " ")[:160]
+    return audit_detail(request, f"reason={safe_reason} path={safe_path}")
+
+
+def alas_embed_denied_message(reason: str) -> str:
+    """将 ALAS 嵌入代理拒绝原因转换为用户可见中文文案。"""
+    reason_text = str(reason or "")
+    if reason_text in ("missing binding", "missing_binding"):
+        return "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置"
+    if reason_text in ("config mismatch", "config path mismatch"):
+        return "无权访问其它 ALAS 配置"
+    if reason_text == "management path denied":
+        return "无权访问 ALAS 管理入口"
+    return "ALAS 嵌入访问被拒绝"
+
+
+def alas_embed_reason_code(reason: str) -> str:
+    """将内部拒绝原因规范化为审计日志代码。"""
+    return {
+        "missing binding": "missing_binding",
+        "config mismatch": "config_mismatch",
+        "config path mismatch": "config_path_mismatch",
+        "management path denied": "management_path_denied",
+    }.get(str(reason or ""), "denied")
+
+
 def default_video_options() -> dict:
     return settings_to_video_options(storage.get_settings())
 
@@ -573,7 +602,12 @@ async def alas_embed_page(request: Request):
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     if user.get("role") != "admin" and not binding:
-        raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
+        storage.audit(
+            user["username"],
+            "alas_embed_denied",
+            alas_embed_denial_detail(request, "missing_binding", "/alas/embed/"),
+        )
+        raise HTTPException(status_code=403, detail=alas_embed_denied_message("missing_binding"))
     if user.get("role") == "admin":
         storage.audit(user["username"], "alas_embed_open", "admin")
         return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", "/alas/embed/proxy/", "管理员完整访问"))
@@ -599,15 +633,31 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
     decision = alas_embed.proxy_decision(user, binding, path, query_params)
     if not decision.allowed:
-        storage.audit(user["username"], "alas_embed_proxy_denied", decision.reason)
-        raise HTTPException(status_code=decision.status_code, detail=decision.reason or "ALAS proxy denied")
+        reason_code = alas_embed_reason_code(decision.reason)
+        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
+        raise HTTPException(status_code=decision.status_code, detail=alas_embed_denied_message(decision.reason))
     settings = alas.public_settings()
     if not settings.get("enabled"):
-        raise HTTPException(status_code=400, detail="ALAS control is disabled")
+        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "disabled", path or "/"))
+        raise HTTPException(status_code=400, detail="ALAS 控制未启用")
     if not settings.get("base_url"):
-        raise HTTPException(status_code=502, detail="ALAS Runtime is not configured")
+        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
+        raise HTTPException(status_code=502, detail="ALAS Runtime 未配置，请先在后台填写 Runtime URL")
     storage.audit(user["username"], "alas_embed_proxy", path or "/")
-    return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision)
+    try:
+        return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision)
+    except HTTPException as exc:
+        if exc.status_code == 502:
+            storage.audit(
+                user["username"],
+                "alas_embed_proxy_failed",
+                alas_embed_denial_detail(request, "upstream_unreachable", path or "/"),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="ALAS Runtime 不可达，请确认服务已启动且 Runtime URL 可访问",
+            ) from exc
+        raise
 
 
 @app.websocket("/alas/embed/proxy")
@@ -625,18 +675,19 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     query_params = {key: websocket.query_params.getlist(key) for key in websocket.query_params.keys()}
     decision = alas_embed.proxy_decision(user, binding, path, query_params)
     if not decision.allowed:
-        storage.audit(user["username"], "alas_embed_ws_denied", decision.reason)
+        reason_code = alas_embed_reason_code(decision.reason)
+        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, reason_code, path or "/"))
         await websocket.close(code=1008)
         return
     settings = alas.public_settings()
     raw_enabled = storage.get_setting("alas_enabled", "false")
     raw_base_url = storage.get_setting("alas_base_url", "")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
-        storage.audit(user["username"], "alas_embed_ws_denied", "ALAS control is disabled")
+        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "disabled", path or "/"))
         await websocket.close(code=1011)
         return
     if not raw_base_url.strip():
-        storage.audit(user["username"], "alas_embed_ws_denied", "ALAS Runtime is not configured")
+        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)
         return
     storage.audit(user["username"], "alas_embed_ws", path or "/")

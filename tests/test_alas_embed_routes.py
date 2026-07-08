@@ -434,6 +434,100 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(res.status_code, 502)
 
+    def test_user_without_binding_gets_clear_error_and_audit_log(self):
+        """未绑定普通用户访问入口时返回清晰中文文案并写入审计。"""
+        self.login("alice", "password123456", "user")
+
+        res = self.client.get("/alas/embed/")
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置")
+        self.assertEqual(logs[0]["username"], "alice")
+        self.assertEqual(logs[0]["action"], "alas_embed_denied")
+        self.assertIn("missing_binding", logs[0]["detail"])
+
+    def test_proxy_denies_other_config_with_clear_error_and_audit_log(self):
+        """普通用户越权访问其它配置时返回清晰中文文案并写入审计。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+
+        res = self.client.get("/alas/embed/proxy/?config=其它")
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权访问其它 ALAS 配置")
+        self.assertEqual(logs[0]["username"], "alice")
+        self.assertEqual(logs[0]["action"], "alas_embed_denied")
+        self.assertIn("reason=config_mismatch", logs[0]["detail"])
+        self.assertNotIn("password", logs[0]["detail"].lower())
+
+    def test_proxy_disabled_returns_clear_error_and_audit_log(self):
+        """ALAS 未启用时代理返回清晰中文文案并写入审计。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "false")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        res = self.client.get("/alas/embed/proxy/")
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["detail"], "ALAS 控制未启用")
+        self.assertEqual(logs[0]["action"], "alas_embed_denied")
+        self.assertIn("reason=disabled", logs[0]["detail"])
+
+    def test_proxy_unconfigured_returns_clear_error_and_audit_log(self):
+        """ALAS Runtime 未配置时代理返回清晰中文文案并写入审计。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "")
+        self.main.alas.public_settings = lambda: {
+            "enabled": True,
+            "base_url": "",
+            "current_config": "alas",
+            "token_set": False,
+        }
+
+        res = self.client.get("/alas/embed/proxy/")
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["detail"], "ALAS Runtime 未配置，请先在后台填写 Runtime URL")
+        self.assertEqual(logs[0]["action"], "alas_embed_denied")
+        self.assertIn("reason=unconfigured", logs[0]["detail"])
+
+    def test_proxy_upstream_unreachable_returns_clear_error_and_audit_log(self):
+        """上游不可达时代理返回清晰中文文案并写入审计。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        class BrokenOpener:
+            """模拟不可达的 urllib opener 对象。"""
+
+            def open(self, req, timeout=0):
+                raise OSError("boom")
+
+        self.main.alas_embed.build_opener = lambda *handlers: BrokenOpener()
+        self.main.alas.public_settings = lambda: {
+            "enabled": True,
+            "base_url": "http://alas.test:22267",
+            "current_config": "alas",
+            "token_set": False,
+        }
+        self.current_user = dict(self.current_user)
+
+        res = self.client.get("/alas/embed/proxy/")
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["detail"], "ALAS Runtime 不可达，请确认服务已启动且 Runtime URL 可访问")
+        self.assertTrue(any(log["action"] == "alas_embed_proxy_failed" for log in logs))
+        failure_log = next(log for log in logs if log["action"] == "alas_embed_proxy_failed")
+        self.assertIn("reason=upstream_unreachable", failure_log["detail"])
+
     def websocket_close_code(self, path):
         """连接 WebSocket 并返回服务端关闭码。"""
         try:

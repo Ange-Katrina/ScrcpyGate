@@ -241,6 +241,16 @@ ALAS 控制功能需要先安装并启动 Alas-Gyre 的 Overlay Runtime。Scrcpy
 - 当前配置名
 - 用户和 ALAS 配置绑定关系
 
+ScrcpyGate 还可以通过 `/alas/embed/` 代理嵌入 ALAS 原页面。管理员可访问完整原页面；普通用户必须先绑定 ALAS 配置，并只能访问绑定配置内的主页、任务、配置和设置。Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267，域名会尝试 80、443、22267。
+
+访问规则与安全注意事项：
+
+- 普通用户前台入口为“打开 ALAS 页面”，管理员后台入口为“打开完整 ALAS 页面”。
+- 普通用户只能访问自己绑定的单个 ALAS 配置；管理员可以访问完整 ALAS 原页面。
+- HTTP / WebSocket 代理会校验登录态、用户角色和 ALAS 绑定关系，并拒绝其它配置、管理入口和未授权长连接消息。
+- ALAS Runtime 地址和 Token 只保存在 ScrcpyGate 后端，不会在普通用户界面展示。
+- 建议让 ALAS Runtime 只对 ScrcpyGate 或受信局域网可达，不要把 Runtime 直接暴露给普通用户或公网。
+
 普通用户只能启动、停止、重启自己绑定的单个 ALAS 配置。前台不会暴露全部配置列表、配置内容和 Runtime Token。
 
 相关项目：
