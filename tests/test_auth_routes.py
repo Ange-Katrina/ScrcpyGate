@@ -33,6 +33,7 @@ class AuthRouteTests(unittest.TestCase):
         os.environ["LOGIN_RATE_LIMIT_MAX"] = "2"
         os.environ["LOGIN_RATE_LIMIT_WINDOW_SECONDS"] = "60"
         os.environ["LOGIN_LOCKOUT_SECONDS"] = "30"
+        os.environ.pop("ALLOW_NULL_ORIGIN", None)
         reset_app_modules(["app.main", "app.mirror", "app.storage", "app.security"])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
@@ -50,6 +51,7 @@ class AuthRouteTests(unittest.TestCase):
             "LOGIN_RATE_LIMIT_WINDOW_SECONDS",
             "LOGIN_LOCKOUT_SECONDS",
             "ENABLE_API_DOCS",
+            "ALLOW_NULL_ORIGIN",
         ):
             os.environ.pop(key, None)
         reset_app_modules(["app.main", "app.mirror", "app.storage", "app.security"])
@@ -65,6 +67,15 @@ class AuthRouteTests(unittest.TestCase):
 
         rows = self.storage.recent_audit(20)
         self.assertIn("login_rate_limited", [row["action"] for row in rows])
+
+    def test_login_rejects_null_origin_by_default(self):
+        response = self.client.post(
+            "/login",
+            headers={"origin": "null"},
+            data={"username": "admin", "password": "AdminPassword123"},
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_api_docs_are_disabled_by_default(self):
         for path in ("/docs", "/redoc", "/openapi.json"):
@@ -191,6 +202,35 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.headers.get("location", ""))
         self.assertIsNone(self.storage.get_session(session["sid"]))
+
+    def test_logout_allows_null_origin_when_csrf_is_valid(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        response = self.client.post(
+            "/logout",
+            headers={"origin": "null"},
+            data={"csrf_token": session["csrf_token"]},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers.get("location", ""))
+        self.assertIsNone(self.storage.get_session(session["sid"]))
+
+    def test_logout_rejects_null_origin_when_csrf_is_invalid(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        response = self.client.post(
+            "/logout",
+            headers={"origin": "null"},
+            data={"csrf_token": "wrong-token"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNotNone(self.storage.get_session(session["sid"]))
 
 
 if __name__ == "__main__":

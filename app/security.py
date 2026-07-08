@@ -98,7 +98,11 @@ def origin_check_exempt(request: Request) -> bool:
     # Logout is CSRF-protected by a per-session token in the route itself.
     # Some WAF/iframe/browser combinations submit the form with Origin: null;
     # let the route validate the token instead of failing before it can logout.
-    return request.method.upper() == "POST" and request.url.path == "/logout"
+    return (
+        request.method.upper() == "POST"
+        and request.url.path == "/logout"
+        and request.headers.get("origin", "").strip().lower() == "null"
+    )
 
 
 def origin_allowed(origin: str | None, request_host_url: str | None = None) -> bool:
