@@ -61,6 +61,8 @@ ALAS_SETTINGS_PAGE_KEYS = ("page", "route", "path", "scope", "type", "tab")
 ALAS_SETTINGS_TASK_KEYS = ("task", "tasks", "children", "items", "options", "pages", "tabs")
 ALAS_SETTINGS_LABEL_KEYS = ("label", "title", "text", "caption", "aria-label", "placeholder")
 ALAS_SETTINGS_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action")
+UPDATE_NOTICE_TEXT_KEYS = ("label", "title", "text", "caption", "message", "content", "toast", "notification")
+UPDATE_NOTICE_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action", "event", "method", "route", "path")
 
 
 @dataclass(frozen=True)
@@ -296,6 +298,38 @@ def _body_denied_by_action_permission(value, can_run: bool, can_edit: bool) -> b
     return _message_denied_by_action_permission(value, can_run, can_edit)
 
 
+def _filter_visible_html_text(html: str) -> str:
+    """Redact visible static HTML text without modifying scripts or styles."""
+    tokens = re.split(r"(<[^>]+>)", str(html or ""))
+    filtered = []
+    raw_text_element = ""
+    for token in tokens:
+        if not token:
+            continue
+        if token.startswith("<") and token.endswith(">"):
+            tag = token.strip().lower()
+            if tag.startswith("</script") or tag.startswith("</style"):
+                filtered.append(token)
+                raw_text_element = ""
+                continue
+            filtered.append(ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, token))
+            if tag.startswith("<script") and not tag.endswith("/>"):
+                raw_text_element = "script"
+            elif tag.startswith("<style") and not tag.endswith("/>"):
+                raw_text_element = "style"
+            continue
+        if raw_text_element:
+            filtered.append(token)
+            continue
+        text = ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, token)
+        for marker in MANAGEMENT_MARKERS:
+            text = text.replace(marker, "")
+        for marker in ("其它配置", "其他配置"):
+            text = text.replace(marker, "")
+        filtered.append(text)
+    return "".join(filtered)
+
+
 def _compact_text(value: object) -> str:
     """Return a case-folded text token without separators for fuzzy ALAS UI routing checks."""
     return "".join(char.lower() for char in str(value or "") if char.isalnum())
@@ -373,6 +407,41 @@ def _collection_has_alas_settings_task(value) -> bool:
     if isinstance(value, (list, tuple)):
         return any(_collection_has_alas_settings_task(item) for item in value)
     return _is_alas_settings_task(value) or _is_alas_settings_field(value)
+
+
+def _is_update_notice_text(value: object) -> bool:
+    raw = str(value or "").strip().lower()
+    compact = _compact_text(raw)
+    if not compact:
+        return False
+    return (
+        "有更新可用" in raw
+        or "点击这里进行更新" in raw
+        or "更新可用" in raw
+        or "updateavailable" in compact
+        or "newversionavailable" in compact
+        or "upgradeavailable" in compact
+    )
+
+
+def _is_update_notice_action(value: object) -> bool:
+    compact = _compact_text(value)
+    return compact in {"update", "upgrade", "updater", "checkupdate", "selfupdate"}
+
+
+def _json_item_targets_update_notice(value) -> bool:
+    """Return True for downstream ALAS self-update prompts exposed to bound users."""
+    if not isinstance(value, dict):
+        return False
+    lowered = {str(key).lower(): item for key, item in value.items()}
+    if any(key in lowered and _is_update_notice_text(lowered[key]) for key in UPDATE_NOTICE_TEXT_KEYS):
+        return True
+    route_like = any(
+        key in lowered and (_is_update_notice_action(lowered[key]) or _is_update_notice_text(lowered[key]))
+        for key in UPDATE_NOTICE_ROUTE_KEYS
+    )
+    text_like = any(key in lowered and _is_update_notice_text(lowered[key]) for key in UPDATE_NOTICE_TEXT_KEYS)
+    return route_like and text_like
 
 
 def _json_item_targets_alas_settings(value) -> bool:
@@ -574,13 +643,8 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
 
 
 def filter_user_html(html: str, config_name: str) -> str:
-    """对普通用户 HTML 做最小外观过滤，隐藏管理与其他配置入口。"""
-    filtered = str(html or "")
-    filtered = ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, filtered)
-    for marker in MANAGEMENT_MARKERS:
-        filtered = filtered.replace(marker, "")
-    for config_marker in ("其它配置", "其他配置"):
-        filtered = filtered.replace(config_marker, "")
+    """Prepare ALAS HTML for bound users without mutating application scripts."""
+    filtered = _filter_visible_html_text(str(html or ""))
     if config_name and config_name not in filtered:
         escaped_config_name = html_utils.escape(config_name, quote=True)
         filtered = f"{filtered}<!-- bound ALAS config: {escaped_config_name} -->"
@@ -612,7 +676,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   var proxyPrefix = "{ALAS_EMBED_PREFIX}/proxy";
   var configKeys = ["config", "name", "config_name"];
   var adbEndpointPattern = /(?:\\d{{1,3}}\\.){{3}}\\d{{1,3}}:\\d{{2,5}}/g;
-  var sensitiveDeviceWords = ["serial", "模拟器serial", "emulatorserial", "emulator.serial", "adb", "设备地址"];
   function hasConfig(url) {{
     return configKeys.some(function(key) {{ return url.searchParams.has(key); }});
   }}
@@ -668,9 +731,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     window.EventSource = function(url, options) {{ return new NativeEventSource(patchUrl(url), options); }};
     window.EventSource.prototype = NativeEventSource.prototype;
   }}
-  function normalizedText(value) {{
-    return String(value || "").replace(/\\s+/g, "").toLowerCase();
-  }}
   function compactText(value) {{
     return String(value || "").replace(/[^0-9a-zA-Z\\u4e00-\\u9fff]+/g, "").toLowerCase();
   }}
@@ -681,19 +741,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       text.indexOf("alassettings") !== -1 ||
       text.indexOf("alas設定") !== -1 ||
       (text.indexOf("alas") !== -1 && (text.indexOf("setting") !== -1 || text.indexOf("设置") !== -1));
-  }}
-  function textContainsSensitiveDevice(value) {{
-    var raw = String(value || "");
-    var text = compactText(raw);
-    if (adbEndpointPattern.test(raw)) {{
-      adbEndpointPattern.lastIndex = 0;
-      return true;
-    }}
-    adbEndpointPattern.lastIndex = 0;
-    for (var i = 0; i < sensitiveDeviceWords.length; i += 1) {{
-      if (text.indexOf(compactText(sensitiveDeviceWords[i])) !== -1) return true;
-    }}
-    return false;
   }}
   function collectElementSignal(element) {{
     if (!element) return "";
@@ -714,78 +761,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     ];
     return parts.join(" ");
   }}
-  function nearestActionItem(element) {{
-    var current = element;
-    var best = element;
-    while (current && current !== document.body && current !== document.documentElement) {{
-      if (current.matches && current.matches("a,button,[role='button'],li,.ant-menu-item,.menu-item,.el-menu-item")) return current;
-      best = current;
-      current = current.parentElement;
-    }}
-    return best;
-  }}
-  function nearestSensitiveRow(element) {{
-    var current = element;
-    var best = element;
-    while (current && current !== document.body && current !== document.documentElement) {{
-      if (current.matches && current.matches("tr,li,label,.form-item,.ant-form-item,.el-form-item,.pywebio-scope,.row")) return current;
-      best = current;
-      current = current.parentElement;
-    }}
-    return best;
-  }}
-  var boundNormalized = normalizedText(boundConfig);
-  var allowedRailLabels = {{
-    "主页": true,
-    "首頁": true,
-    "首页": true,
-    "管理": true,
-    "home": true,
-    "admin": true,
-    "manage": true
-  }};
-  function isAllowedRailText(text) {{
-    if (!text) return true;
-    if (boundNormalized && text.indexOf(boundNormalized) !== -1) return true;
-    for (var key in allowedRailLabels) {{
-      if (Object.prototype.hasOwnProperty.call(allowedRailLabels, key) && text.indexOf(key) !== -1) return true;
-    }}
-    return false;
-  }}
-  function isLeftConfigRailElement(element) {{
-    if (!element || !element.getBoundingClientRect) return false;
-    var rect = element.getBoundingClientRect();
-    if (!rect.width || !rect.height) return false;
-    if (rect.left > 88 || rect.width > 128 || rect.height < 16 || rect.height > 96) return false;
-    return true;
-  }}
-  function nearestRailItem(element) {{
-    var current = element;
-    var best = null;
-    while (current && current !== document.body && current !== document.documentElement) {{
-      if (isLeftConfigRailElement(current)) best = current;
-      current = current.parentElement;
-    }}
-    return best || element;
-  }}
-  function shouldHideRailConfig(element) {{
-    if (!isLeftConfigRailElement(element)) return false;
-    var text = normalizedText(element.innerText || element.textContent || "");
-    if (isAllowedRailText(text)) return false;
-    return true;
-  }}
-  function filterConfigRail() {{
-    var nodes = document.querySelectorAll("a,button,[role='button'],li,div,span");
-    for (var i = 0; i < nodes.length; i += 1) {{
-      var node = nodes[i];
-      if (!shouldHideRailConfig(node)) continue;
-      var item = nearestRailItem(node);
-      if (item && item !== document.body && item !== document.documentElement) {{
-        item.setAttribute("data-scrcpygate-hidden-config", "true");
-        item.style.setProperty("display", "none", "important");
-      }}
-    }}
-  }}
   function maskTextNode(node) {{
     if (!node || !node.nodeValue) return;
     if (!adbEndpointPattern.test(node.nodeValue)) {{
@@ -796,31 +771,7 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     node.nodeValue = node.nodeValue.replace(adbEndpointPattern, hiddenEndpointText);
     adbEndpointPattern.lastIndex = 0;
   }}
-  function filterAlasSettings() {{
-    var nodes = document.querySelectorAll("a,button,[role='button'],li,div,span,label,tr,input,textarea,select");
-    for (var i = 0; i < nodes.length; i += 1) {{
-      var node = nodes[i];
-      var text = collectElementSignal(node);
-      if (textTargetsAlasSettings(text)) {{
-        var item = nearestActionItem(node);
-        if (item && item !== document.body && item !== document.documentElement) {{
-          item.setAttribute("data-scrcpygate-hidden-alas-settings", "true");
-          item.style.setProperty("display", "none", "important");
-        }}
-        continue;
-      }}
-      if (textContainsSensitiveDevice(text)) {{
-        var row = nearestSensitiveRow(node);
-        if (row && row !== document.body && row !== document.documentElement) {{
-          row.setAttribute("data-scrcpygate-hidden-sensitive-device", "true");
-          row.style.setProperty("display", "none", "important");
-        }}
-        if ("value" in node && typeof node.value === "string") {{
-          node.value = node.value.replace(adbEndpointPattern, hiddenEndpointText);
-          adbEndpointPattern.lastIndex = 0;
-        }}
-      }}
-    }}
+  function maskSensitiveText() {{
     if (document.createTreeWalker) {{
       var walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
       var textNode = walker.nextNode();
@@ -829,43 +780,37 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
         textNode = walker.nextNode();
       }}
     }}
+    var fields = document.querySelectorAll("input,textarea");
+    for (var i = 0; i < fields.length; i += 1) {{
+      var field = fields[i];
+      if ("value" in field && typeof field.value === "string") {{
+        field.value = field.value.replace(adbEndpointPattern, hiddenEndpointText);
+        adbEndpointPattern.lastIndex = 0;
+      }}
+    }}
   }}
-  function filterAlasUi() {{
-    filterConfigRail();
-    filterAlasSettings();
-  }}
-  function blocksForeignRailConfigEvent(event) {{
+  function blocksSensitiveEvent(event) {{
     var current = event.target;
     while (current && current !== document.body && current !== document.documentElement) {{
-      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-config") === "true") return true;
-      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-alas-settings") === "true") return true;
-      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-sensitive-device") === "true") return true;
-      if (shouldHideRailConfig(current)) return true;
       if (textTargetsAlasSettings(collectElementSignal(current))) return true;
       current = current.parentElement;
     }}
     return false;
   }}
   document.addEventListener("click", function(event) {{
-    if (!blocksForeignRailConfigEvent(event)) return;
+    if (!blocksSensitiveEvent(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }}, true);
   document.addEventListener("touchstart", function(event) {{
-    if (!blocksForeignRailConfigEvent(event)) return;
+    if (!blocksSensitiveEvent(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }}, true);
-  if (document.documentElement) {{
-    var style = document.createElement("style");
-    style.setAttribute("data-scrcpygate-alas-bind-style", "true");
-    style.textContent = "[data-scrcpygate-hidden-config='true'],[data-scrcpygate-hidden-alas-settings='true'],[data-scrcpygate-hidden-sensitive-device='true']{{display:none!important;visibility:hidden!important;pointer-events:none!important}}";
-    (document.head || document.documentElement).appendChild(style);
-  }}
-  filterAlasUi();
-  window.setInterval(filterAlasUi, 500);
+  maskSensitiveText();
+  window.setInterval(maskSensitiveText, 1000);
   if (window.MutationObserver && document.documentElement) {{
-    new MutationObserver(filterAlasUi).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
+    new MutationObserver(maskSensitiveText).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
   }}
 }})();
 </script>"""
@@ -1232,7 +1177,7 @@ def _json_item_matches_bound_config(value, config_name: str) -> bool:
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
-        if _json_item_targets_alas_settings(value):
+        if _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
             return {}
         filtered = {}
         for key, item in value.items():
@@ -1244,6 +1189,7 @@ def filter_user_json_payload(value, config_name: str):
                         for entry in item
                         if _json_item_matches_bound_config(entry, config_name)
                         and not _json_item_targets_alas_settings(entry)
+                        and not _json_item_targets_update_notice(entry)
                     ]
                 elif _json_item_matches_bound_config(item, config_name):
                     filtered[filtered_key] = filter_user_json_payload(item, config_name)
@@ -1257,12 +1203,14 @@ def filter_user_json_payload(value, config_name: str):
             filter_user_json_payload(item, config_name)
             for item in value
             if not _json_item_targets_alas_settings(item)
+            and not _json_item_targets_update_notice(item)
         ]
     if isinstance(value, tuple):
         return [
             filter_user_json_payload(item, config_name)
             for item in value
             if not _json_item_targets_alas_settings(item)
+            and not _json_item_targets_update_notice(item)
         ]
     return mask_sensitive_device_endpoints(value)
 
@@ -1296,7 +1244,11 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
             return None
         if _text_targets_alas_settings_ui(text):
             return None
+        if _is_update_notice_text(text):
+            return None
         return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
+    if _json_item_targets_update_notice(payload):
+        return None
     filtered = filter_user_json_payload(payload, config_name)
     if _message_switches_downstream_config(filtered, config_name):
         return None
@@ -1381,9 +1333,7 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
                     if decision.filtered:
                         message = filter_user_websocket_downstream(message, decision.config_name)
                         if message is None:
-                            await _close_upstream_safely(upstream, code=1008)
-                            await _close_websocket_safely(websocket, 1008)
-                            return 1008
+                            continue
                     if isinstance(message, bytes):
                         await websocket.send_bytes(message)
                     else:

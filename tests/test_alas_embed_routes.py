@@ -1223,6 +1223,34 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["closed"], [1000])
 
+    def test_websocket_skips_update_notice_without_closing_bound_user_stream(self):
+        """上游维护更新提示会被丢弃，但不能关闭普通用户 ALAS 页面流。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        update_notice = json.dumps(
+            {"command": "toast", "content": "有更新可用，点击这里进行更新", "action": "update"},
+            ensure_ascii=False,
+        )
+        normal_output = json.dumps(
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览", "config": "挂机-云"}},
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[update_notice, normal_output])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            forwarded = json.loads(websocket.receive_text())
+            close_message = websocket.receive()
+
+        self.assertEqual(
+            forwarded,
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览", "config": "挂机-云"}},
+        )
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["closed"], [1000])
+
     def test_websocket_appends_bound_config_when_query_missing(self):
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")

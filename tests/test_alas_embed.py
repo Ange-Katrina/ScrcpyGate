@@ -523,15 +523,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertTrue(decision.filtered)
         self.assertEqual(decision.config_name, "挂机-云")
 
-    def test_filter_user_html_hides_other_config_and_management_text(self):
+    def test_filter_user_html_filters_visible_text_without_mutating_scripts(self):
         result = filter_user_html(
-            "<nav>挂机-云 其它配置 管理入口</nav>",
+            "<nav>挂机-云 其它配置 管理入口</nav><script>const label = '其它配置 管理入口';</script>",
             "挂机-云",
         )
 
         self.assertIn("挂机-云", result)
-        self.assertNotIn("其它配置", result)
-        self.assertNotIn("管理入口", result)
+        self.assertNotIn("<nav>挂机-云 其它配置 管理入口</nav>", result)
+        self.assertIn("<nav>挂机-云  入口</nav>", result)
+        self.assertIn("<script>const label = '其它配置 管理入口';</script>", result)
+        self.assertIn("data-scrcpygate-alas-bind", result)
 
     def test_filter_user_html_escapes_config_name_in_comment(self):
         result = filter_user_html("<main></main>", "x--> <script>")
@@ -546,15 +548,19 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
 
-    def test_filter_user_html_injects_config_rail_filter(self):
+    def test_filter_user_html_injects_request_patch_without_dom_hiding(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")
 
         self.assertIn("data-scrcpygate-alas-bind", result)
-        self.assertIn("data-scrcpygate-hidden-config", result)
-        self.assertIn("data-scrcpygate-hidden-alas-settings", result)
-        self.assertIn("data-scrcpygate-hidden-sensitive-device", result)
-        self.assertIn("filterConfigRail", result)
-        self.assertIn("filterAlasSettings", result)
+        self.assertIn("patchUrl", result)
+        self.assertIn("configKeys", result)
+        self.assertIn("blocksSensitiveEvent", result)
+        self.assertIn("maskSensitiveText", result)
+        self.assertNotIn("data-scrcpygate-hidden-config", result)
+        self.assertNotIn("data-scrcpygate-hidden-alas-settings", result)
+        self.assertNotIn("data-scrcpygate-hidden-sensitive-device", result)
+        self.assertNotIn("filterConfigRail", result)
+        self.assertNotIn("filterAlasSettings", result)
 
     def test_denied_page_html_redirects_back_to_bound_alas(self):
         result = denied_page_html("无权访问 ALAS 管理入口", "/alas/embed/proxy/?config=3256475495", seconds=3)
@@ -617,6 +623,21 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(result["spec"]["items"], [{"label": "Restart", "value": "Restart"}])
 
+    def test_filter_user_json_payload_removes_update_notice_items(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "items": [
+                    {"label": "有更新可用，点击这里进行更新", "value": "update"},
+                    {"label": "任务总览", "value": "dashboard"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["spec"]["items"], [{"label": "任务总览", "value": "dashboard"}])
+
     def test_filter_user_json_payload_masks_nested_adb_endpoint(self):
         payload = {"settings": {"Serial": "192.0.2.10:30100"}}
 
@@ -673,6 +694,20 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             json.loads(result),
             {"command": "output", "scope": "Alas", "spec": {"content": "任务总览", "config": "挂机-云"}},
         )
+
+    def test_filter_user_websocket_downstream_drops_update_notice(self):
+        message = json.dumps(
+            {
+                "command": "toast",
+                "content": "有更新可用，点击这里进行更新",
+                "action": "update",
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertIsNone(result)
 
     def test_filter_user_websocket_downstream_rejects_alas_settings_text(self):
         result = filter_user_websocket_downstream("open Alas设置", "挂机-云")
