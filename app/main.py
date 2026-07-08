@@ -613,7 +613,7 @@ async def alas_embed_proxy(request: Request, path: str = ""):
 @app.websocket("/alas/embed/proxy")
 @app.websocket("/alas/embed/proxy/{path:path}")
 async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
-    """执行 ALAS WebSocket 代理入口权限检查并返回占位结果。"""
+    """执行 ALAS WebSocket 代理入口权限检查并转发到 Runtime。"""
     user = security.get_current_user(websocket)
     if not user:
         await websocket.close(code=1008)
@@ -636,10 +636,8 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         storage.audit(user["username"], "alas_embed_ws_denied", "ALAS Runtime is not configured")
         await websocket.close(code=1011)
         return
-    storage.audit(user["username"], "alas_embed_ws_skeleton", path or "/")
-    await websocket.accept()
-    await websocket.send_text("ALAS websocket proxy is not implemented")
-    await websocket.close(code=1000)
+    storage.audit(user["username"], "alas_embed_ws", path or "/")
+    await alas_embed.proxy_websocket(websocket, settings.get("base_url") or raw_base_url, path, decision)
 
 
 @app.get("/api/admin/overview")

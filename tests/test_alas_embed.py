@@ -18,10 +18,25 @@ from app.alas_embed import (
     resolve_base_url,
     runtime_url_candidates,
     websocket_message_allowed,
+    websocket_target_url,
 )
 
 
 class AlasEmbedUrlTests(unittest.TestCase):
+    def test_websocket_target_url_converts_http_scheme_and_preserves_repeated_query(self):
+        result = websocket_target_url(
+            "http://alas.test:22267/base/",
+            "ws/channel",
+            [("config", "a"), ("config", "b"), ("x", "1")],
+        )
+
+        self.assertEqual(result, "ws://alas.test:22267/base/ws/channel?config=a&config=b&x=1")
+
+    def test_websocket_target_url_converts_https_scheme_to_wss(self):
+        result = websocket_target_url("https://alas.test:443", "pywebio", [])
+
+        self.assertEqual(result, "wss://alas.test:443/pywebio")
+
     def test_build_upstream_url_preserves_base_path(self):
         result = build_upstream_url(
             "http://alas.test:22267/base/",
@@ -299,6 +314,10 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
     def test_message_with_bound_config_is_allowed(self):
         """包含绑定配置名的 WebSocket 文本消息会被允许。"""
         self.assertTrue(websocket_message_allowed('{"config":"挂机-云"}', "挂机-云"))
+
+    def test_message_with_management_operation_is_denied(self):
+        """普通用户 WebSocket 文本消息尝试管理操作时会被拒绝。"""
+        self.assertFalse(websocket_message_allowed('{"event":"alas.config_list"}', "挂机-云"))
 
     def test_non_json_message_is_allowed(self):
         """非 JSON WebSocket 文本消息不做配置拦截。"""

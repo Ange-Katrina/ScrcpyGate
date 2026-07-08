@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
 
+import asyncio
 import html as html_utils
 import ipaddress
 import json
@@ -12,6 +13,7 @@ from urllib.request import Request, build_opener, ProxyHandler
 
 from fastapi import HTTPException, Request as FastAPIRequest
 from fastapi.responses import Response
+from websockets import connect as websocket_connect
 
 ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
@@ -351,19 +353,113 @@ def rewrite_location_header(location: str, base_url: str) -> str:
     return rewritten
 
 
+def _message_contains_management(value) -> bool:
+    """递归检查 WebSocket 消息载荷是否包含管理操作标记。"""
+    if isinstance(value, dict):
+        return any(_message_contains_management(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_message_contains_management(item) for item in value)
+    text = str(value or "")
+    return any(marker in text for marker in MANAGEMENT_MARKERS)
+
+
 def websocket_message_allowed(message: str, config_name: str) -> bool:
-    """检查 WebSocket 文本消息是否试图访问其它配置。"""
+    """检查 WebSocket 文本消息是否试图访问其它配置或管理操作。"""
     try:
         payload = json.loads(message)
     except Exception:
         return True
     if not isinstance(payload, dict):
         return True
+    if _message_contains_management(payload):
+        return False
     for key in CONFIG_QUERY_KEYS:
         value = str(payload.get(key) or "").strip()
         if value and value != config_name:
             return False
     return True
+
+
+def websocket_target_url(base_url: str, path: str, query_items) -> str:
+    """将 HTTP Runtime URL 转换为 WebSocket 目标 URL。"""
+    target = build_upstream_url(base_url, path, query_items)
+    if target.startswith("https://"):
+        return "wss://" + target[len("https://"):]
+    if target.startswith("http://"):
+        return "ws://" + target[len("http://"):]
+    raise ValueError("invalid ALAS websocket URL")
+
+
+async def _close_websocket_safely(websocket, code: int) -> None:
+    """忽略已关闭连接错误，按指定关闭码关闭客户端 WebSocket。"""
+    try:
+        await websocket.close(code=code)
+    except Exception:
+        pass
+
+
+async def _close_upstream_safely(upstream, code: int = 1000) -> None:
+    """忽略已关闭连接错误，按指定关闭码关闭上游 WebSocket。"""
+    try:
+        await upstream.close(code=code)
+    except Exception:
+        pass
+
+
+async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDecision) -> None:
+    """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
+    try:
+        target = websocket_target_url(base_url, path, websocket.query_params.multi_items())
+    except ValueError:
+        await websocket.close(code=1011)
+        return
+
+    await websocket.accept()
+    try:
+        async with websocket_connect(target, open_timeout=10.0) as upstream:
+            async def client_to_upstream() -> None:
+                """转发客户端文本或二进制消息到上游，并执行普通用户配置越权检查。"""
+                while True:
+                    message = await websocket.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        await _close_upstream_safely(upstream)
+                        return 1000
+                    if "text" in message:
+                        text = message["text"]
+                        if decision.filtered and not websocket_message_allowed(text, decision.config_name):
+                            await _close_upstream_safely(upstream, code=1008)
+                            await _close_websocket_safely(websocket, 1008)
+                            return 1008
+                        await upstream.send(text)
+                    elif "bytes" in message:
+                        await upstream.send(message["bytes"])
+
+            async def upstream_to_client() -> None:
+                """转发上游文本或二进制消息回客户端。"""
+                async for message in upstream:
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        await websocket.send_text(str(message))
+
+            tasks = [
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            close_code = 1000
+            for task in done:
+                result = task.result()
+                if isinstance(result, int):
+                    close_code = result
+            await _close_upstream_safely(upstream, code=close_code)
+            await _close_websocket_safely(websocket, close_code)
+    except Exception:
+        await _close_websocket_safely(websocket, 1011)
 
 
 def _content_type_media_type(content_type: str) -> str:
