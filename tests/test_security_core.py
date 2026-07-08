@@ -14,9 +14,31 @@ def load_security():
     return importlib.import_module("app.security")
 
 
+class FakeClient:
+    def __init__(self, host: str):
+        self.host = host
+
+
+class FakeRequest:
+    def __init__(self, host: str = "203.0.113.10"):
+        self.client = FakeClient(host)
+        self.headers = {}
+
+
 class SecurityCoreTests(unittest.TestCase):
     def tearDown(self):
-        for key in ("PUBLIC_BASE_URL", "ALLOWED_ORIGINS", "ALLOWED_HOSTS", "ALLOW_NULL_ORIGIN", "TRUST_PROXY", "TRUSTED_PROXY_IPS"):
+        for key in (
+            "PUBLIC_BASE_URL",
+            "ALLOWED_ORIGINS",
+            "ALLOWED_HOSTS",
+            "ALLOW_NULL_ORIGIN",
+            "TRUST_PROXY",
+            "TRUSTED_PROXY_IPS",
+            "LOGIN_RATE_LIMIT_ENABLED",
+            "LOGIN_RATE_LIMIT_MAX",
+            "LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+            "LOGIN_LOCKOUT_SECONDS",
+        ):
             os.environ.pop(key, None)
         sys.modules.pop("app.security", None)
 
@@ -56,6 +78,31 @@ class SecurityCoreTests(unittest.TestCase):
         security = load_security()
         self.assertTrue(security.proxy_headers_allowed(headers, "127.0.0.1", "/ws/events"))
         self.assertFalse(security.proxy_headers_allowed(headers, "10.0.0.2", "/ws/events"))
+
+    def test_login_rate_limit_blocks_repeated_failures(self):
+        os.environ["LOGIN_RATE_LIMIT_MAX"] = "2"
+        os.environ["LOGIN_RATE_LIMIT_WINDOW_SECONDS"] = "60"
+        os.environ["LOGIN_LOCKOUT_SECONDS"] = "30"
+        security = load_security()
+        request = FakeRequest()
+
+        self.assertFalse(security.login_rate_limit_status(request, "admin")["limited"])
+        self.assertFalse(security.record_login_failure(request, "admin")["limited"])
+        limited = security.record_login_failure(request, "admin")
+
+        self.assertTrue(limited["limited"])
+        status = security.login_rate_limit_status(request, "admin")
+        self.assertTrue(status["limited"])
+        self.assertGreater(status["retry_after"], 0)
+
+    def test_login_rate_limit_can_be_disabled(self):
+        os.environ["LOGIN_RATE_LIMIT_ENABLED"] = "false"
+        os.environ["LOGIN_RATE_LIMIT_MAX"] = "1"
+        security = load_security()
+        request = FakeRequest()
+
+        self.assertFalse(security.record_login_failure(request, "admin")["limited"])
+        self.assertFalse(security.login_rate_limit_status(request, "admin")["limited"])
 
 
 if __name__ == "__main__":

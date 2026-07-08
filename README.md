@@ -308,6 +308,10 @@ curl -fsS http://127.0.0.1:5000/healthz
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理 IP 或 CIDR |
 | `MIN_PASSWORD_LENGTH` | `12` | 最小密码长度 |
 | `PASSWORD_PBKDF2_ITERATIONS` | `310000` | 密码 PBKDF2-SHA256 哈希迭代次数 |
+| `LOGIN_RATE_LIMIT_ENABLED` | `true` | 是否启用登录防爆破限制 |
+| `LOGIN_RATE_LIMIT_MAX` | `6` | 限流窗口内允许的失败次数 |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | 登录失败统计窗口秒数 |
+| `LOGIN_LOCKOUT_SECONDS` | `600` | 触发限流后的锁定秒数 |
 | `ADB_AUTOCONNECT` | `true` | 启动后自动连接已启用设备 |
 | `ADB_HEARTBEAT_INTERVAL` | `15` | ADB 心跳间隔秒数 |
 | `ADB_CONNECT_TIMEOUT` | `8` | ADB 连接超时秒数 |

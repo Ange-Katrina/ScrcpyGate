@@ -360,10 +360,24 @@ async def login(request: Request):
     data = await parse_body(request)
     username = str(data.get("username", "")).strip()
     password = str(data.get("password", ""))
+    rate = security.login_rate_limit_status(request, username)
+    if rate["limited"]:
+        storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
+        response = templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Too many login attempts. Please try again later."},
+            status_code=429,
+        )
+        response.headers["Retry-After"] = str(rate["retry_after"])
+        return response
     user = storage.authenticate(username, password)
     if not user:
+        rate = security.record_login_failure(request, username)
         storage.audit(username or "anonymous", "login_failed", audit_detail(request))
+        if rate["limited"]:
+            storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password"}, status_code=401)
+    security.record_login_success(request, username)
     session = storage.create_session(user["username"])
     storage.audit(user["username"], "login_success", audit_detail(request))
     response = RedirectResponse("/", status_code=302)

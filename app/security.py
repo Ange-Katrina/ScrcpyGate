@@ -2,6 +2,7 @@
 import logging
 import os
 import secrets
+import time
 from functools import wraps
 from urllib.parse import urlparse
 from fastapi import HTTPException, Request, WebSocket
@@ -12,6 +13,8 @@ from . import storage
 SESSION_COOKIE = "wsid"
 PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip")
 log = logging.getLogger("webscrcpy.security")
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+_LOGIN_LOCKOUTS: dict[str, float] = {}
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -23,6 +26,14 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 def env_list(name: str) -> list[str]:
     return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+def env_int(name: str, default: int, minimum: int = 0, maximum: int = 86400) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)) or default)
+    except Exception:
+        value = default
+    return max(minimum, min(value, maximum))
 
 
 def public_base_url():
@@ -226,3 +237,75 @@ def websocket_origin_allowed(ws: WebSocket) -> bool:
 
 def secure_cookie_enabled() -> bool:
     return env_bool("SESSION_COOKIE_SECURE", True)
+
+
+def _login_rate_limit_values() -> tuple[int, int, int]:
+    max_attempts = env_int("LOGIN_RATE_LIMIT_MAX", 6, 1, 100)
+    window_seconds = env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 300, 10, 86400)
+    lockout_seconds = env_int("LOGIN_LOCKOUT_SECONDS", 600, 10, 86400)
+    return max_attempts, window_seconds, lockout_seconds
+
+
+def _login_keys(request: Request, username: str) -> list[str]:
+    ip = client_ip(request) or "unknown"
+    normalized_user = (username or "").strip().lower()[:64] or "anonymous"
+    return [f"ip:{ip}", f"userip:{ip}:{normalized_user}"]
+
+
+def _prune_login_failures(key: str, now: float, window_seconds: int) -> list[float]:
+    attempts = [ts for ts in _LOGIN_FAILURES.get(key, []) if now - ts <= window_seconds]
+    if attempts:
+        _LOGIN_FAILURES[key] = attempts
+    else:
+        _LOGIN_FAILURES.pop(key, None)
+    return attempts
+
+
+def login_rate_limit_status(request: Request, username: str) -> dict:
+    if not env_bool("LOGIN_RATE_LIMIT_ENABLED", True):
+        return {"limited": False, "retry_after": 0}
+    _max_attempts, window_seconds, _lockout_seconds = _login_rate_limit_values()
+    now = time.time()
+    retry_after = 0
+    for key in _login_keys(request, username):
+        lockout_until = _LOGIN_LOCKOUTS.get(key, 0)
+        if lockout_until <= now:
+            _LOGIN_LOCKOUTS.pop(key, None)
+            _prune_login_failures(key, now, window_seconds)
+            continue
+        retry_after = max(retry_after, int(lockout_until - now) + 1)
+    return {"limited": retry_after > 0, "retry_after": retry_after}
+
+
+def record_login_failure(request: Request, username: str) -> dict:
+    if not env_bool("LOGIN_RATE_LIMIT_ENABLED", True):
+        return {"limited": False, "retry_after": 0}
+    max_attempts, window_seconds, lockout_seconds = _login_rate_limit_values()
+    now = time.time()
+    limited = False
+    retry_after = 0
+    for key in _login_keys(request, username):
+        attempts = _prune_login_failures(key, now, window_seconds)
+        attempts.append(now)
+        _LOGIN_FAILURES[key] = attempts
+        if len(attempts) >= max_attempts:
+            _LOGIN_LOCKOUTS[key] = now + lockout_seconds
+            _LOGIN_FAILURES.pop(key, None)
+            limited = True
+            retry_after = max(retry_after, lockout_seconds)
+    return {"limited": limited, "retry_after": retry_after}
+
+
+def record_login_success(request: Request, username: str) -> None:
+    if not env_bool("LOGIN_RATE_LIMIT_ENABLED", True):
+        return
+    ip = client_ip(request) or "unknown"
+    normalized_user = (username or "").strip().lower()[:64] or "anonymous"
+    key = f"userip:{ip}:{normalized_user}"
+    _LOGIN_FAILURES.pop(key, None)
+    _LOGIN_LOCKOUTS.pop(key, None)
+
+
+def clear_login_rate_limits() -> None:
+    _LOGIN_FAILURES.clear()
+    _LOGIN_LOCKOUTS.clear()

@@ -305,6 +305,10 @@ Common environment variables:
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | Trusted proxy IPs or CIDRs |
 | `MIN_PASSWORD_LENGTH` | `12` | Minimum password length |
 | `PASSWORD_PBKDF2_ITERATIONS` | `310000` | PBKDF2-SHA256 password hash iterations |
+| `LOGIN_RATE_LIMIT_ENABLED` | `true` | Enable login brute-force protection |
+| `LOGIN_RATE_LIMIT_MAX` | `6` | Failed login attempts allowed per window |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | Failed login counting window in seconds |
+| `LOGIN_LOCKOUT_SECONDS` | `600` | Lockout duration after the limit is reached |
 | `ADB_AUTOCONNECT` | `true` | Auto-connect enabled devices on startup |
 | `ADB_HEARTBEAT_INTERVAL` | `15` | ADB heartbeat interval in seconds |
 | `ADB_CONNECT_TIMEOUT` | `8` | ADB connection timeout in seconds |
