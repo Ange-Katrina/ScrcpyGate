@@ -268,6 +268,47 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertTrue(decision.allowed)
         self.assertEqual(decision.config_name, "挂机-云")
 
+    def test_user_can_run_false_denies_run_path(self):
+        """普通用户 can_run=False 时拒绝明显运行类 HTTP 路径。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": False, "can_edit": True},
+            "api/task/start",
+            {"config": "挂机-云"},
+            method="POST",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+        self.assertEqual(decision.reason, "run permission denied")
+
+    def test_user_can_edit_false_denies_edit_path(self):
+        """普通用户 can_edit=False 时拒绝明显编辑类 HTTP 路径。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": False},
+            "api/settings/save",
+            {"config": "挂机-云"},
+            method="PUT",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+        self.assertEqual(decision.reason, "edit permission denied")
+
+    def test_user_readonly_request_allowed_when_run_and_edit_denied(self):
+        """普通用户只读状态查询不受 can_run/can_edit 限制。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": False, "can_edit": False},
+            "api/status",
+            {"config": "挂机-云"},
+            method="GET",
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.filtered)
+
     def test_user_bound_config_allowed_and_filtered(self):
         decision = proxy_decision(
             {"role": "user"},
@@ -306,6 +347,39 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
 class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
     """验证 WebSocket 消息权限兜底。"""
+
+    def test_message_with_run_command_denied_when_can_run_false(self):
+        """can_run=False 时明显运行类 WebSocket 消息会被拒绝。"""
+        self.assertFalse(
+            websocket_message_allowed(
+                '{"action":"start","config":"挂机-云"}',
+                "挂机-云",
+                can_run=False,
+                can_edit=True,
+            )
+        )
+
+    def test_message_with_edit_command_denied_when_can_edit_false(self):
+        """can_edit=False 时明显编辑类 WebSocket 消息会被拒绝。"""
+        self.assertFalse(
+            websocket_message_allowed(
+                '{"method":"settings.save","config":"挂机-云"}',
+                "挂机-云",
+                can_run=True,
+                can_edit=False,
+            )
+        )
+
+    def test_message_readonly_allowed_when_run_and_edit_denied(self):
+        """can_run/can_edit 均为 False 时只读 WebSocket 消息允许。"""
+        self.assertTrue(
+            websocket_message_allowed(
+                '{"event":"status","config":"挂机-云"}',
+                "挂机-云",
+                can_run=False,
+                can_edit=False,
+            )
+        )
 
     def test_message_with_other_config_is_denied(self):
         """包含其它配置名的 WebSocket 文本消息会被拒绝。"""

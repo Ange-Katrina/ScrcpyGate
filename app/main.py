@@ -170,6 +170,10 @@ def alas_embed_denied_message(reason: str) -> str:
         return "无权访问其它 ALAS 配置"
     if reason_text == "management path denied":
         return "无权访问 ALAS 管理入口"
+    if reason_text == "run permission denied":
+        return "无权执行 ALAS 运行类操作"
+    if reason_text == "edit permission denied":
+        return "无权修改 ALAS 绑定配置设置"
     return "ALAS 嵌入访问被拒绝"
 
 
@@ -180,6 +184,8 @@ def alas_embed_reason_code(reason: str) -> str:
         "config mismatch": "config_mismatch",
         "config path mismatch": "config_path_mismatch",
         "management path denied": "management_path_denied",
+        "run permission denied": "run_permission_denied",
+        "edit permission denied": "edit_permission_denied",
     }.get(str(reason or ""), "denied")
 
 
@@ -631,13 +637,14 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
-    decision = alas_embed.proxy_decision(user, binding, path, query_params)
+    decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method)
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
         raise HTTPException(status_code=decision.status_code, detail=alas_embed_denied_message(decision.reason))
     settings = alas.public_settings()
-    if not settings.get("enabled"):
+    raw_enabled = storage.get_setting("alas_enabled", "false")
+    if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "disabled", path or "/"))
         raise HTTPException(status_code=400, detail="ALAS 控制未启用")
     if not settings.get("base_url"):
@@ -672,7 +679,7 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         return
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: websocket.query_params.getlist(key) for key in websocket.query_params.keys()}
-    decision = alas_embed.proxy_decision(user, binding, path, query_params)
+    decision = alas_embed.proxy_decision(user, binding, path, query_params, method="WEBSOCKET")
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, reason_code, path or "/"))

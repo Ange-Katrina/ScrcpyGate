@@ -33,6 +33,10 @@ HOP_BY_HOP_HEADERS = {
 }
 OMITTED_RESPONSE_HEADERS = HOP_BY_HOP_HEADERS | {"content-length"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+RUN_ACTION_MARKERS = ("start", "run", "stop", "pause", "resume", "restart", "deploy", "task", "job")
+EDIT_ACTION_MARKERS = ("save", "update", "edit", "delete", "create", "set", "config", "settings")
+ACTION_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
+READONLY_ACTION_MARKERS = ("status", "state", "log", "logs", "overview", "summary", "info", "list", "get", "query", "static", "assets")
 HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 
 
@@ -45,6 +49,8 @@ class ProxyDecision:
     config_name: str = ""
     filtered: bool = False
     reason: str = ""
+    can_run: bool = True
+    can_edit: bool = True
 
 
 def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
@@ -99,8 +105,52 @@ def _path_switches_config(path: str, config_name: str) -> bool:
     return False
 
 
-def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> ProxyDecision:
-    """根据用户角色、绑定配置、路径与查询参数判定代理访问策略。"""
+def _text_has_action_marker(text: str, markers: tuple[str, ...]) -> bool:
+    """按分隔符切分文本，判断是否包含明确 ALAS 操作语义。"""
+    normalized = "".join(char.lower() if char.isalnum() else " " for char in str(text or ""))
+    tokens = {token for token in normalized.split() if token}
+    return any(marker in tokens for marker in markers)
+
+
+def _query_contains_action(query: dict, markers: tuple[str, ...]) -> bool:
+    """检查查询参数键和值是否出现明确运行或编辑操作语义。"""
+    for key, value in (query or {}).items():
+        if str(key).lower() in CONFIG_QUERY_KEYS:
+            continue
+        if _text_has_action_marker(key, markers):
+            return True
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for item in values:
+            if _text_has_action_marker(str(item or ""), markers):
+                return True
+    return False
+
+
+def _is_readonly_http_request(method: str, path: str, query: dict) -> bool:
+    """判断 HTTP 请求是否明显为只读页面、静态资源或状态查询。"""
+    upper_method = str(method or "GET").upper()
+    if upper_method not in SAFE_METHODS:
+        return False
+    request_text = " ".join([str(path or ""), " ".join(str(key) for key in (query or {}).keys())])
+    return not request_text.strip() or _text_has_action_marker(request_text, READONLY_ACTION_MARKERS)
+
+
+def _denied_by_binding_action_permission(binding: dict, method: str, path: str, query: dict) -> str:
+    """根据普通用户绑定 can_run/can_edit 判断 HTTP 运行和编辑类请求是否应拒绝。"""
+    if _is_readonly_http_request(method, path, query):
+        return ""
+    action_text = str(path or "")
+    has_run_action = _text_has_action_marker(action_text, RUN_ACTION_MARKERS) or _query_contains_action(query, RUN_ACTION_MARKERS)
+    has_edit_action = _text_has_action_marker(action_text, EDIT_ACTION_MARKERS) or _query_contains_action(query, EDIT_ACTION_MARKERS)
+    if has_run_action and not binding.get("can_run", True):
+        return "run permission denied"
+    if has_edit_action and not binding.get("can_edit", False):
+        return "edit permission denied"
+    return ""
+
+
+def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, method: str = "GET") -> ProxyDecision:
+    """根据用户角色、绑定配置、路径、方法与查询参数判定代理访问策略。"""
     role = str((user or {}).get("role", ""))
     if role == "admin":
         return ProxyDecision(allowed=True)
@@ -139,7 +189,22 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict) -> 
                     reason="config mismatch",
                 )
 
-    return ProxyDecision(allowed=True, config_name=config_name, filtered=True)
+    permission_denial = _denied_by_binding_action_permission(binding, method, path, query or {})
+    if permission_denial:
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason=permission_denial,
+        )
+
+    return ProxyDecision(
+        allowed=True,
+        config_name=config_name,
+        filtered=True,
+        can_run=bool(binding.get("can_run", True)),
+        can_edit=bool(binding.get("can_edit", False)),
+    )
 
 
 def filter_user_html(html: str, config_name: str) -> str:
@@ -369,6 +434,31 @@ def _message_contains_management(value) -> bool:
     return False
 
 
+def _message_contains_action(value, markers: tuple[str, ...]) -> bool:
+    """递归检查 WebSocket 消息关键字段是否包含明显运行或编辑操作语义。"""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered_key = str(key).lower()
+            if lowered_key in ACTION_MESSAGE_KEYS and _text_has_action_marker(str(item or ""), markers):
+                return True
+            if lowered_key not in CONFIG_QUERY_KEYS and _text_has_action_marker(lowered_key, markers) and not isinstance(item, (dict, list, tuple)):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _message_contains_action(item, markers):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_message_contains_action(item, markers) for item in value)
+    return False
+
+
+def _message_denied_by_action_permission(payload, can_run: bool, can_edit: bool) -> bool:
+    """根据 can_run/can_edit 判断 WebSocket JSON 载荷是否触发被禁操作。"""
+    if not can_run and _message_contains_action(payload, RUN_ACTION_MARKERS):
+        return True
+    if not can_edit and _message_contains_action(payload, EDIT_ACTION_MARKERS):
+        return True
+    return False
+
+
 def _message_switches_config(value, config_name: str) -> bool:
     """递归检查 WebSocket JSON 载荷是否请求非绑定配置。"""
     if isinstance(value, dict):
@@ -414,16 +504,25 @@ def _text_contains_management_command(text: str) -> bool:
     return any(marker in lowered_text for marker in plain_markers)
 
 
-def websocket_message_allowed(message: str | bytes, config_name: str) -> bool:
-    """检查 WebSocket 消息是否试图访问其它配置或管理操作。"""
+def websocket_message_allowed(message: str | bytes, config_name: str, can_run: bool = True, can_edit: bool = True) -> bool:
+    """检查 WebSocket 消息是否试图越权访问配置、管理或运行编辑操作。"""
     payload = _parse_websocket_message(message)
     if payload is None:
         if isinstance(message, bytes):
             return False
-        return not _text_contains_management_command(str(message or ""))
+        text = str(message or "")
+        if _text_contains_management_command(text):
+            return False
+        if not can_run and _text_has_action_marker(text, RUN_ACTION_MARKERS):
+            return False
+        if not can_edit and _text_has_action_marker(text, EDIT_ACTION_MARKERS):
+            return False
+        return True
     if _message_contains_management(payload):
         return False
     if _message_switches_config(payload, config_name):
+        return False
+    if _message_denied_by_action_permission(payload, can_run, can_edit):
         return False
     return True
 
@@ -474,14 +573,24 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
                         return 1000
                     if "text" in message:
                         text = message["text"]
-                        if decision.filtered and not websocket_message_allowed(text, decision.config_name):
+                        if decision.filtered and not websocket_message_allowed(
+                            text,
+                            decision.config_name,
+                            can_run=getattr(decision, "can_run", True),
+                            can_edit=getattr(decision, "can_edit", True),
+                        ):
                             await _close_upstream_safely(upstream, code=1008)
                             await _close_websocket_safely(websocket, 1008)
                             return 1008
                         await upstream.send(text)
                     elif "bytes" in message:
                         data = message["bytes"]
-                        if decision.filtered and not websocket_message_allowed(data, decision.config_name):
+                        if decision.filtered and not websocket_message_allowed(
+                            data,
+                            decision.config_name,
+                            can_run=getattr(decision, "can_run", True),
+                            can_edit=getattr(decision, "can_edit", True),
+                        ):
                             await _close_upstream_safely(upstream, code=1008)
                             await _close_websocket_safely(websocket, 1008)
                             return 1008

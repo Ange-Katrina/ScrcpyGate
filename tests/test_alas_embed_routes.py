@@ -184,6 +184,65 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.current_user = dict(self.current_user)
         return captured
 
+    def test_proxy_denies_run_request_when_user_can_run_false(self):
+        """普通用户 can_run=False 时 HTTP 代理拒绝绑定配置内运行类请求。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", False, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/task/start?config=挂机-云",
+            content=b"{}",
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权执行 ALAS 运行类操作")
+        self.assertEqual(captured, [])
+        self.assertIn("reason=run_permission_denied", logs[0]["detail"])
+
+    def test_proxy_denies_edit_request_when_user_can_edit_false(self):
+        """普通用户 can_edit=False 时 HTTP 代理拒绝绑定配置内编辑类请求。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, False)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.put(
+            "/alas/embed/proxy/api/settings/save?config=挂机-云",
+            content=b"{}",
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+        logs = self.storage.recent_audit(5)
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权修改 ALAS 绑定配置设置")
+        self.assertEqual(captured, [])
+        self.assertIn("reason=edit_permission_denied", logs[0]["detail"])
+
+    def test_proxy_allows_admin_run_and_edit_requests(self):
+        """管理员 HTTP 代理运行和编辑类请求不受普通用户绑定权限限制。"""
+        session = self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/task/start?config=其它",
+            content=b"{}",
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["method"], "POST")
+
     def test_proxy_forwards_get_to_upstream_url_with_query(self):
         """代理路由将 GET 请求按路径和重复查询参数转发到上游。"""
         self.login("admin", "password123456", "admin")
@@ -632,6 +691,56 @@ class AlasEmbedRouteTests(unittest.TestCase):
             websocket.receive()
 
         self.assertEqual(captured["sent"], [b"from-client"])
+
+    def test_websocket_closes_1008_when_user_can_run_false_sends_run_message(self):
+        """普通用户 can_run=False 时 WebSocket 运行类消息会被策略关闭。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", False, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_text('{"action":"start","config":"挂机-云"}')
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_closes_1008_when_user_can_edit_false_sends_edit_message(self):
+        """普通用户 can_edit=False 时 WebSocket 编辑类消息会被策略关闭。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, False)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_text('{"method":"settings.save","config_name":"挂机-云"}')
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_admin_forwards_run_and_edit_messages(self):
+        """管理员 WebSocket 运行和编辑类消息不受普通用户绑定权限限制。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_websocket_upstream(incoming=["admin-ok"])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
+            websocket.send_text('{"action":"start","method":"settings.save"}')
+            self.assertEqual(websocket.receive_text(), "admin-ok")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], ['{"action":"start","method":"settings.save"}'])
 
     def test_websocket_closes_1008_when_user_message_switches_config(self):
         """普通用户 WebSocket 消息尝试切换配置时客户端和上游均以策略码关闭。"""
