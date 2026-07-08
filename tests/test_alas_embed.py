@@ -548,7 +548,7 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
 
-    def test_filter_user_html_injects_request_patch_without_dom_hiding(self):
+    def test_filter_user_html_injects_request_patch_with_narrow_dom_filtering(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")
 
         self.assertIn("data-scrcpygate-alas-bind", result)
@@ -556,6 +556,10 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("configKeys", result)
         self.assertIn("blocksSensitiveEvent", result)
         self.assertIn("maskSensitiveText", result)
+        self.assertIn("closestActionable", result)
+        self.assertIn("filterBoundConfigRail", result)
+        self.assertIn("data-scrcpygate-filtered-config", result)
+        self.assertNotIn('text === "alas"', result)
         self.assertNotIn("data-scrcpygate-hidden-config", result)
         self.assertNotIn("data-scrcpygate-hidden-alas-settings", result)
         self.assertNotIn("data-scrcpygate-hidden-sensitive-device", result)
@@ -622,6 +626,52 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         result = filter_user_json_payload(payload, "挂机-云")
 
         self.assertEqual(result["spec"]["items"], [{"label": "Restart", "value": "Restart"}])
+
+    def test_filter_user_json_payload_keeps_normal_alas_buttons(self):
+        payload = {
+            "command": "output",
+            "scope": "Alas",
+            "spec": {
+                "items": [
+                    {"label": "Restart", "value": "Restart"},
+                    {"label": "任务总览", "value": "dashboard"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(
+            result["spec"]["items"],
+            [{"label": "Restart", "value": "Restart"}, {"label": "任务总览", "value": "dashboard"}],
+        )
+
+    def test_filter_user_json_payload_filters_pywebio_config_option_items(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "items": [
+                    {"label": "3256475495", "value": "3256475495"},
+                    {"label": "13361966861", "value": "13361966861"},
+                    {"label": "alas", "value": "alas"},
+                    {"label": "Restart", "value": "Restart"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "3256475495")
+
+        self.assertEqual(
+            result["spec"]["items"],
+            [{"label": "3256475495", "value": "3256475495"}, {"label": "Restart", "value": "Restart"}],
+        )
+
+    def test_filter_user_json_payload_filters_pywebio_string_config_items(self):
+        payload = {"command": "output", "spec": {"items": ["3256475495", "13361966861", "alas", "Restart"]}}
+
+        result = filter_user_json_payload(payload, "3256475495")
+
+        self.assertEqual(result["spec"]["items"], ["3256475495", "Restart"])
 
     def test_filter_user_json_payload_removes_update_notice_items(self):
         payload = {

@@ -25,6 +25,7 @@ MANAGEMENT_MARKERS = ("管理", "admin", "manage", "management", "config_list", 
 MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
+CONFIG_OPTION_KEYS = ("label", "value", "name", "title", "text", "caption", "key", "id")
 ALAS_SETTINGS_DENIED_REASON = "alas settings denied"
 ALAS_SETTINGS_CONTEXT_KEYS = ("menu", "category", "section", "task", "module", "page", "route", "path", "scope")
 ALAS_SETTINGS_FIELD_KEYS = ("key", "setting", "field", "argument", "option", "name")
@@ -734,19 +735,32 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   function compactText(value) {{
     return String(value || "").replace(/[^0-9a-zA-Z\\u4e00-\\u9fff]+/g, "").toLowerCase();
   }}
+  var boundConfigCompact = compactText(boundConfig);
+  var actionableSelector = [
+    "a", "button", "li", "[onclick]", "[tabindex]",
+    "[role='button']", "[role='menuitem']", "[role='option']", "[role='radio']", "[role='tab']", "[role='treeitem']",
+    ".ant-menu-item", ".ant-select-item-option", ".ant-radio-wrapper", ".el-menu-item", ".v-list-item", ".q-item", ".menu-item"
+  ].join(",");
   function textTargetsAlasSettings(value) {{
     var text = compactText(value);
-    return text === "alas" ||
-      text.indexOf("alas设置") !== -1 ||
+    return text.indexOf("alas设置") !== -1 ||
       text.indexOf("alassettings") !== -1 ||
       text.indexOf("alas設定") !== -1 ||
       (text.indexOf("alas") !== -1 && (text.indexOf("setting") !== -1 || text.indexOf("设置") !== -1));
   }}
+  function shallowElementText(element) {{
+    if (!element || !element.childNodes) return "";
+    var parts = [];
+    for (var i = 0; i < element.childNodes.length; i += 1) {{
+      var child = element.childNodes[i];
+      if (child && child.nodeType === 3 && child.nodeValue) parts.push(child.nodeValue);
+    }}
+    return parts.join(" ");
+  }}
   function collectElementSignal(element) {{
     if (!element) return "";
     var parts = [
-      element.innerText || "",
-      element.textContent || "",
+      shallowElementText(element) || element.innerText || element.textContent || "",
       element.value || "",
       element.getAttribute && element.getAttribute("placeholder") || "",
       element.getAttribute && element.getAttribute("title") || "",
@@ -760,6 +774,76 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       typeof element.className === "string" ? element.className : ""
     ];
     return parts.join(" ");
+  }}
+  function elementFromEvent(event) {{
+    var target = event && event.target;
+    if (!target) return null;
+    return target.nodeType === 1 ? target : target.parentElement;
+  }}
+  function closestActionable(element) {{
+    if (!element) return null;
+    try {{
+      return element.closest ? element.closest(actionableSelector) : null;
+    }} catch (err) {{
+      return null;
+    }}
+  }}
+  function isCompactActionable(element) {{
+    if (!element || !element.getBoundingClientRect) return false;
+    var rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return true;
+    return rect.width <= Math.max(280, window.innerWidth * 0.45) && rect.height <= 140;
+  }}
+  function visibleElementText(element) {{
+    return String(element && (element.innerText || element.textContent || "") || "").replace(/\\s+/g, " ").trim();
+  }}
+  function isBoundConfigText(text) {{
+    var raw = String(text || "").trim();
+    return raw === boundConfig || compactText(raw) === boundConfigCompact;
+  }}
+  function isCommonUiText(text) {{
+    var compact = compactText(text);
+    return !compact || {{
+      home: true, main: true, menu: true, task: true, tasks: true, dashboard: true, overview: true,
+      status: true, start: true, stop: true, restart: true, refresh: true, reload: true, save: true,
+      cancel: true, back: true, settings: true, config: true, logs: true, help: true,
+      主页: true, 首页: true, 菜单: true, 任务: true, 总览: true, 状态: true, 启动: true,
+      停止: true, 重启: true, 刷新: true, 保存: true, 取消: true, 返回: true, 设置: true, 配置: true
+    }}[compact] === true;
+  }}
+  function isLikelyConfigRailCandidate(element) {{
+    if (!element || !element.getBoundingClientRect) return false;
+    if (element.closest && element.closest("input,textarea,select,[contenteditable='true']")) return false;
+    var rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.left > 220 || rect.width > 220 || rect.height > 110) return false;
+    var text = visibleElementText(element);
+    if (!text || isBoundConfigText(text) || isCommonUiText(text)) return false;
+    if (text.length > 80 || text.split(/\\s+/).length > 3) return false;
+    return true;
+  }}
+  function filterBoundConfigRail() {{
+    if (!document.querySelectorAll || !boundConfig) return;
+    var nodes = document.querySelectorAll(actionableSelector);
+    var candidates = [];
+    var hasBoundConfig = false;
+    for (var i = 0; i < nodes.length; i += 1) {{
+      var node = nodes[i];
+      if (!isLikelyConfigRailCandidate(node) && !isBoundConfigText(visibleElementText(node))) continue;
+      var rect = node.getBoundingClientRect && node.getBoundingClientRect();
+      if (rect && rect.left <= 220 && rect.width <= 220 && rect.height <= 110 && isBoundConfigText(visibleElementText(node))) {{
+        hasBoundConfig = true;
+      }}
+      candidates.push(node);
+    }}
+    if (!hasBoundConfig) return;
+    for (var j = 0; j < candidates.length; j += 1) {{
+      var item = candidates[j];
+      if (!isLikelyConfigRailCandidate(item)) continue;
+      item.setAttribute("data-scrcpygate-filtered-config", "1");
+      item.style.setProperty("display", "none", "important");
+      item.setAttribute("aria-hidden", "true");
+    }}
   }}
   function maskTextNode(node) {{
     if (!node || !node.nodeValue) return;
@@ -790,12 +874,8 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     }}
   }}
   function blocksSensitiveEvent(event) {{
-    var current = event.target;
-    while (current && current !== document.body && current !== document.documentElement) {{
-      if (textTargetsAlasSettings(collectElementSignal(current))) return true;
-      current = current.parentElement;
-    }}
-    return false;
+    var item = closestActionable(elementFromEvent(event));
+    return !!(item && isCompactActionable(item) && textTargetsAlasSettings(collectElementSignal(item)));
   }}
   document.addEventListener("click", function(event) {{
     if (!blocksSensitiveEvent(event)) return;
@@ -807,10 +887,14 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     event.preventDefault();
     event.stopImmediatePropagation();
   }}, true);
-  maskSensitiveText();
-  window.setInterval(maskSensitiveText, 1000);
+  function runScrcpyGateFilters() {{
+    maskSensitiveText();
+    filterBoundConfigRail();
+  }}
+  runScrcpyGateFilters();
+  window.setInterval(runScrcpyGateFilters, 1000);
   if (window.MutationObserver && document.documentElement) {{
-    new MutationObserver(maskSensitiveText).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
+    new MutationObserver(runScrcpyGateFilters).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
   }}
 }})();
 </script>"""
@@ -1174,6 +1258,49 @@ def _json_item_matches_bound_config(value, config_name: str) -> bool:
     return not requested_config or requested_config == config_name
 
 
+def _json_item_is_config_option(value, config_name: str) -> bool:
+    """Return True for select/menu items that look like ALAS config choices."""
+    if isinstance(value, str):
+        return _looks_like_config_choice_text(value, config_name)
+    if not isinstance(value, dict) or not config_name:
+        return False
+    option_values = []
+    for key, item in value.items():
+        normalized_key = "".join(char.lower() for char in str(key or "") if char.isalnum() or char == "_")
+        if normalized_key in CONFIG_OPTION_KEYS and isinstance(item, (str, int, float)):
+            option_values.append(str(item).strip())
+    if not option_values:
+        return False
+    return any(_looks_like_config_choice_text(item, config_name) for item in option_values)
+
+
+def _json_item_is_bound_config_option(value, config_name: str) -> bool:
+    if isinstance(value, str):
+        return value.strip() == config_name
+    if not isinstance(value, dict):
+        return False
+    return any(str(value.get(key) or "").strip() == config_name for key in CONFIG_OPTION_KEYS)
+
+
+def _looks_like_config_choice_text(value: object, config_name: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if raw == config_name:
+        return True
+    compact = _compact_text(raw)
+    bound_compact = _compact_text(config_name)
+    if compact == bound_compact:
+        return True
+    if compact == "alas":
+        return True
+    if compact.isdigit() and 4 <= len(compact) <= 32:
+        return True
+    if re.fullmatch(r"[a-z0-9_.:-]{3,64}", raw.lower() or "") and any(char.isdigit() for char in raw):
+        return True
+    return False
+
+
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
@@ -1199,18 +1326,30 @@ def filter_user_json_payload(value, config_name: str):
             filtered[filtered_key] = filter_user_json_payload(item, config_name)
         return filtered
     if isinstance(value, list):
+        has_bound_config_option = any(_json_item_is_bound_config_option(item, config_name) for item in value)
         return [
             filter_user_json_payload(item, config_name)
             for item in value
             if not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and (
+                not has_bound_config_option
+                or not _json_item_is_config_option(item, config_name)
+                or _json_item_is_bound_config_option(item, config_name)
+            )
         ]
     if isinstance(value, tuple):
+        has_bound_config_option = any(_json_item_is_bound_config_option(item, config_name) for item in value)
         return [
             filter_user_json_payload(item, config_name)
             for item in value
             if not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and (
+                not has_bound_config_option
+                or not _json_item_is_config_option(item, config_name)
+                or _json_item_is_bound_config_option(item, config_name)
+            )
         ]
     return mask_sensitive_device_endpoints(value)
 
