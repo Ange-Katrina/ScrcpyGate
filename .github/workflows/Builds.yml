@@ -1,0 +1,144 @@
+name: Builds
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: scrcpygate
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Python files
+        run: python -m compileall -q app tests
+
+      - name: Run unit tests
+        env:
+          SESSION_COOKIE_SECURE: "false"
+          ENABLE_API_DOCS: "false"
+        run: python -m unittest discover -s tests
+
+      - name: Scan for forbidden resolution commands
+        run: python -m unittest tests.test_resolution_safety
+
+      - name: Scan for deployment secrets
+        run: |
+          if grep -RInE "10\.0\.1\.|waf\.pulipuli|2_nLOv|ALAS_TOKEN=.+|SESSION_SECRET=.+|INITIAL_ADMIN_PASSWORD=.+" \
+            --exclude-dir=.git \
+            --exclude-dir=.github \
+            --exclude-dir=__pycache__ \
+            --exclude-dir=.pytest_cache \
+            --exclude-dir=.mypy_cache \
+            --exclude-dir=.ruff_cache \
+            .; then
+            echo "Forbidden deployment-specific value found."
+            exit 1
+          fi
+
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-24.04
+    needs: tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare image metadata
+        run: |
+          OWNER_LOWER="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REPO="ghcr.io/${OWNER_LOWER}/${{ env.IMAGE_NAME }}"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            VERSION="pr-${{ github.event.pull_request.number }}-${SHORT_SHA}"
+          else
+            BRANCH="$(echo "${{ github.ref_name }}" | tr '/_' '--' | tr -cd '[:alnum:].-')"
+            VERSION="${BRANCH}-${SHORT_SHA}"
+          fi
+
+          {
+            echo "IMAGE_REPO=${IMAGE_REPO}"
+            echo "VERSION=${VERSION}"
+            echo "TAGS<<EOF"
+            echo "${IMAGE_REPO}:${VERSION}"
+            if [ "${{ github.ref_type }}" = "tag" ] && echo "${{ github.ref_name }}" | grep -Eq '^v'; then
+              echo "${IMAGE_REPO}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## ScrcpyGate Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: ${{ env.IMAGE_REPO }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ env.VERSION }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Event: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "- Push: skipped for pull request" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Push: GHCR" >> "$GITHUB_STEP_SUMMARY"
+          fi
