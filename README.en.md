@@ -303,6 +303,7 @@ Common environment variables:
 | `SESSION_COOKIE_SECURE` | `false` | Send session cookies only over HTTPS |
 | `TRUST_PROXY` | `false` | Trust reverse proxy headers |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | Trusted proxy IPs or CIDRs |
+| `ENABLE_API_DOCS` | `false` | Enable FastAPI `/docs`, `/redoc`, and `/openapi.json` |
 | `MIN_PASSWORD_LENGTH` | `12` | Minimum password length |
 | `PASSWORD_PBKDF2_ITERATIONS` | `310000` | PBKDF2-SHA256 password hash iterations |
 | `LOGIN_RATE_LIMIT_ENABLED` | `true` | Enable login brute-force protection |

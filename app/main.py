@@ -40,7 +40,14 @@ from .video_options import (
 
 setup_logging()
 log = logging.getLogger("webscrcpy.main")
-app = FastAPI(title="ScrcpyGate", version="0.1.0")
+api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
+app = FastAPI(
+    title="ScrcpyGate",
+    version="0.1.0",
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
+)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 mirror_autostop_task: asyncio.Task | None = None
@@ -387,12 +394,15 @@ async def login(request: Request):
 
 @app.post("/logout")
 async def logout(request: Request):
+    data = await parse_body(request)
+    security.verify_csrf_token(request, str(data.get("csrf_token") or request.headers.get("x-csrf-token", "")))
     user = security.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="login required")
     sess = security.get_current_session(request)
     if sess:
         storage.delete_session(sess["sid"])
-    if user:
-        storage.audit(user["username"], "logout", audit_detail(request))
+    storage.audit(user["username"], "logout", audit_detail(request))
     response = RedirectResponse("/login", status_code=302)
     clear_session_cookie(response)
     return response

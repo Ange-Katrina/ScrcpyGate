@@ -565,9 +565,9 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("window.location.replace", result)
 
     def test_filter_user_html_masks_adb_endpoint(self):
-        result = filter_user_html("<main>Serial 10.0.1.30:30100</main>", "挂机-云")
+        result = filter_user_html("<main>Serial 192.0.2.10:30100</main>", "挂机-云")
 
-        self.assertNotIn("10.0.1.30:30100", result)
+        self.assertNotIn("192.0.2.10:30100", result)
         self.assertIn("已隐藏", result)
 
     def test_filter_user_json_payload_keeps_only_bound_config_list_entries(self):
@@ -618,7 +618,7 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertEqual(result["spec"]["items"], [{"label": "Restart", "value": "Restart"}])
 
     def test_filter_user_json_payload_masks_nested_adb_endpoint(self):
-        payload = {"settings": {"Serial": "10.0.1.30:30100"}}
+        payload = {"settings": {"Serial": "192.0.2.10:30100"}}
 
         result = filter_user_json_payload(payload, "挂机-云")
 
@@ -642,7 +642,7 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_filter_user_websocket_downstream_masks_adb_endpoint(self):
-        result = filter_user_websocket_downstream('{"serial":"10.0.1.30:30100"}', "挂机-云")
+        result = filter_user_websocket_downstream('{"serial":"192.0.2.10:30100"}', "挂机-云")
 
         self.assertEqual(json.loads(result), {"serial": "已隐藏"})
 

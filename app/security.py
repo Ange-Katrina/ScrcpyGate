@@ -187,12 +187,19 @@ def require_admin(request: Request) -> dict:
     return user
 
 
-def verify_csrf(request: Request) -> None:
+def csrf_valid(request: Request, provided: str) -> bool:
     sess = get_current_session(request)
-    provided = request.headers.get("x-csrf-token", "")
     expected = str(sess.get("csrf_token", "")) if sess else ""
-    if not sess or not provided or not expected or not secrets.compare_digest(provided, expected):
+    return bool(sess and provided and expected and secrets.compare_digest(provided, expected))
+
+
+def verify_csrf_token(request: Request, provided: str) -> None:
+    if not csrf_valid(request, provided):
         raise HTTPException(status_code=400, detail="CSRF failed")
+
+
+def verify_csrf(request: Request) -> None:
+    verify_csrf_token(request, request.headers.get("x-csrf-token", ""))
 
 
 def redirect_if_not_logged_in(request: Request):

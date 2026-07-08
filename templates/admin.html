@@ -79,7 +79,7 @@
       <h1>后台管理</h1>
       <div class="chips"><span class="chip ok">{{ user.username }}</span><span id="summaryMirror" class="chip">投屏 0</span><span id="summaryAlas" class="chip">ALAS</span></div>
     </div>
-    <div class="top-actions"><a href="/">返回投屏页</a><form method="post" action="/logout"><button class="logout" type="submit">退出登录</button></form></div>
+    <div class="top-actions"><a href="/">返回投屏页</a><form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" type="submit">退出登录</button></form></div>
   </header>
   <nav class="tabs">
     <button data-tab="overview" class="active" type="button">总览</button>

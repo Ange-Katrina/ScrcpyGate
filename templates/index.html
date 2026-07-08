@@ -111,7 +111,7 @@
         <div class="brand">ScrcpyGate</div>
         <div class="chips" style="margin-top:10px"><span class="chip">{{ user.username }}</span><span id="roleChip" class="chip"></span></div>
       </div>
-      <form method="post" action="/logout"><button class="logout" type="submit">退出</button></form>
+      <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" type="submit">退出</button></form>
     </div>
     <a id="adminLink" class="link-btn" href="/admin" hidden>后台管理</a>
     <div class="sidebar-menu">

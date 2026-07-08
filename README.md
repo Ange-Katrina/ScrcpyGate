@@ -306,6 +306,7 @@ curl -fsS http://127.0.0.1:5000/healthz
 | `SESSION_COOKIE_SECURE` | `false` | 是否只通过 HTTPS 发送 Cookie |
 | `TRUST_PROXY` | `false` | 是否信任反向代理头 |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理 IP 或 CIDR |
+| `ENABLE_API_DOCS` | `false` | 是否开启 FastAPI `/docs`、`/redoc`、`/openapi.json` |
 | `MIN_PASSWORD_LENGTH` | `12` | 最小密码长度 |
 | `PASSWORD_PBKDF2_ITERATIONS` | `310000` | 密码 PBKDF2-SHA256 哈希迭代次数 |
 | `LOGIN_RATE_LIMIT_ENABLED` | `true` | 是否启用登录防爆破限制 |
