@@ -199,6 +199,18 @@ def alas_embed_reason_code(reason: str) -> str:
     }.get(str(reason or ""), "denied")
 
 
+def log_alas_embed_denied(user: dict, binding: dict | None, channel: str, path: str, reason: str) -> None:
+    log.warning(
+        "ALAS_EMBED_DENIED channel=%s user=%s role=%s bound=%s path=%s reason=%s",
+        channel,
+        (user or {}).get("username", ""),
+        (user or {}).get("role", ""),
+        bool(binding and binding.get("config_name")),
+        path or "/",
+        reason,
+    )
+
+
 def default_video_options() -> dict:
     return settings_to_video_options(storage.get_settings())
 
@@ -654,14 +666,17 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method, body=parsed_body)
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
+        log_alas_embed_denied(user, binding, "http", path or "/", reason_code)
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
         raise HTTPException(status_code=decision.status_code, detail=alas_embed_denied_message(decision.reason))
     settings = alas.public_settings()
     raw_enabled = storage.get_setting("alas_enabled", "false")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
+        log_alas_embed_denied(user, binding, "http", path or "/", "disabled")
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "disabled", path or "/"))
         raise HTTPException(status_code=400, detail="ALAS 控制未启用")
     if not settings.get("base_url"):
+        log_alas_embed_denied(user, binding, "http", path or "/", "unconfigured")
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
         raise HTTPException(status_code=502, detail="ALAS Runtime 未配置，请先在后台填写 Runtime URL")
     try:
@@ -696,6 +711,7 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method="WEBSOCKET")
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
+        log_alas_embed_denied(user, binding, "websocket", path or "/", reason_code)
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, reason_code, path or "/"))
         await websocket.close(code=1008)
         return
@@ -703,10 +719,12 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     raw_enabled = storage.get_setting("alas_enabled", "false")
     raw_base_url = storage.get_setting("alas_base_url", "")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
+        log_alas_embed_denied(user, binding, "websocket", path or "/", "disabled")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "disabled", path or "/"))
         await websocket.close(code=1011)
         return
     if not raw_base_url.strip():
+        log_alas_embed_denied(user, binding, "websocket", path or "/", "unconfigured")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)
         return

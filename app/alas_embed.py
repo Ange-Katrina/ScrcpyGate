@@ -5,6 +5,7 @@ import asyncio
 import html as html_utils
 import ipaddress
 import json
+import re
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
@@ -21,6 +22,7 @@ DOMAIN_FALLBACK_PORTS = (80, 443, 22267)
 MANAGEMENT_MARKERS = ("管理", "admin", "manage", "management", "config_list", "alas.config_list", "settings.admin")
 MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
+CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
 BUSINESS_PATH_PREFIXES = ("api", "ajax", "pywebio")
 STATIC_PATH_PREFIXES = ("static", "assets", "favicon.ico")
 HOP_BY_HOP_HEADERS = {
@@ -40,6 +42,8 @@ EDIT_ACTION_MARKERS = ("save", "update", "edit", "delete", "create", "set", "con
 ACTION_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
 READONLY_ACTION_MARKERS = ("status", "state", "log", "logs", "overview", "summary", "info", "list", "get", "query", "static", "assets")
 HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
+SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER = "已隐藏"
+ADB_ENDPOINT_RE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}(?![\w.])")
 
 
 @dataclass(frozen=True)
@@ -177,6 +181,36 @@ def _has_explicit_bound_config(query: dict, config_name: str) -> bool:
     return False
 
 
+def _iter_query_items(query_items) -> list[tuple[str, object]]:
+    """Return repeated query items from Starlette QueryParams, dicts or plain pairs."""
+    if hasattr(query_items, "multi_items"):
+        return list(query_items.multi_items())
+    if isinstance(query_items, dict):
+        items = []
+        for key, value in query_items.items():
+            if isinstance(value, (list, tuple)):
+                items.extend((key, item) for item in value)
+            else:
+                items.append((key, value))
+        return items
+    return list(query_items or [])
+
+
+def bound_config_query_items(query_items, decision: ProxyDecision) -> list[tuple[str, object]]:
+    """Append the bound ALAS config for filtered users when the browser omitted it."""
+    params = []
+    has_config = False
+    for key, value in _iter_query_items(query_items):
+        if str(key).lower() in CONFIG_QUERY_KEYS:
+            if not str(value or "").strip():
+                continue
+            has_config = True
+        params.append((key, value))
+    if decision.filtered and decision.config_name and not has_config:
+        params.append(("config", decision.config_name))
+    return params
+
+
 def _body_contains_management(value) -> bool:
     """递归检查 HTTP 正文是否包含管理操作标记。"""
     return _message_contains_management(value)
@@ -276,14 +310,6 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
             reason="config mismatch",
         )
 
-    if _request_requires_explicit_config(method, path) and not _has_explicit_bound_config(query or {}, config_name):
-        return ProxyDecision(
-            allowed=False,
-            status_code=403,
-            config_name=config_name,
-            reason="missing request config",
-        )
-
     permission_denial = _denied_by_binding_action_permission(binding, method, path, query or {})
     if permission_denial:
         return ProxyDecision(
@@ -328,7 +354,173 @@ def filter_user_html(html: str, config_name: str) -> str:
     if config_name and config_name not in filtered:
         escaped_config_name = html_utils.escape(config_name, quote=True)
         filtered = f"{filtered}<!-- bound ALAS config: {escaped_config_name} -->"
+    filtered = inject_bound_config_script(filtered, config_name)
     return filtered
+
+
+def inject_bound_config_script(html: str, config_name: str) -> str:
+    """Inject a small bootstrap so PyWebIO child requests keep the bound config."""
+    if not config_name or "data-scrcpygate-alas-bind" in str(html or ""):
+        return str(html or "")
+    config_json = (
+        json.dumps(str(config_name), ensure_ascii=False)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+    script = f"""
+<script data-scrcpygate-alas-bind>
+(function() {{
+  var boundConfig = {config_json};
+  var proxyPrefix = "{ALAS_EMBED_PREFIX}/proxy";
+  var configKeys = ["config", "name", "config_name"];
+  function hasConfig(url) {{
+    return configKeys.some(function(key) {{ return url.searchParams.has(key); }});
+  }}
+  function shouldProxyPath(pathname) {{
+    return pathname.indexOf(proxyPrefix) === 0 ||
+      pathname.indexOf("/pywebio") === 0 ||
+      pathname.indexOf("/api") === 0 ||
+      pathname.indexOf("/ajax") === 0;
+  }}
+  function isSameScrcpyGateHost(url) {{
+    if (url.origin === window.location.origin) return true;
+    if (url.host !== window.location.host) return false;
+    if (window.location.protocol === "https:" && url.protocol === "wss:") return true;
+    if (window.location.protocol === "http:" && url.protocol === "ws:") return true;
+    return false;
+  }}
+  function patchUrl(value) {{
+    var raw = value && value.url ? value.url : value;
+    if (typeof raw !== "string") return value;
+    try {{
+      var url = new URL(raw, window.location.href);
+      if (!isSameScrcpyGateHost(url) || !shouldProxyPath(url.pathname)) return value;
+      if (url.pathname.indexOf(proxyPrefix) !== 0) {{
+        url.pathname = proxyPrefix + (url.pathname.charAt(0) === "/" ? url.pathname : "/" + url.pathname);
+      }}
+      if (!hasConfig(url)) url.searchParams.append("config", boundConfig);
+      if (typeof Request !== "undefined" && value instanceof Request) return new Request(url.href, value);
+      return url.href;
+    }} catch (err) {{
+      return value;
+    }}
+  }}
+  if (window.fetch) {{
+    var nativeFetch = window.fetch;
+    window.fetch = function(input, init) {{ return nativeFetch.call(this, patchUrl(input), init); }};
+  }}
+  if (window.XMLHttpRequest) {{
+    var nativeOpen = window.XMLHttpRequest.prototype.open;
+    window.XMLHttpRequest.prototype.open = function(method, url) {{
+      arguments[1] = patchUrl(url);
+      return nativeOpen.apply(this, arguments);
+    }};
+  }}
+  if (window.WebSocket) {{
+    var NativeWebSocket = window.WebSocket;
+    window.WebSocket = function(url, protocols) {{
+      return protocols === undefined ? new NativeWebSocket(patchUrl(url)) : new NativeWebSocket(patchUrl(url), protocols);
+    }};
+    window.WebSocket.prototype = NativeWebSocket.prototype;
+  }}
+  if (window.EventSource) {{
+    var NativeEventSource = window.EventSource;
+    window.EventSource = function(url, options) {{ return new NativeEventSource(patchUrl(url), options); }};
+    window.EventSource.prototype = NativeEventSource.prototype;
+  }}
+  function normalizedText(value) {{
+    return String(value || "").replace(/\\s+/g, "").toLowerCase();
+  }}
+  var boundNormalized = normalizedText(boundConfig);
+  var allowedRailLabels = {{
+    "主页": true,
+    "首頁": true,
+    "首页": true,
+    "管理": true,
+    "home": true,
+    "admin": true,
+    "manage": true
+  }};
+  function isAllowedRailText(text) {{
+    if (!text) return true;
+    if (boundNormalized && text.indexOf(boundNormalized) !== -1) return true;
+    for (var key in allowedRailLabels) {{
+      if (Object.prototype.hasOwnProperty.call(allowedRailLabels, key) && text.indexOf(key) !== -1) return true;
+    }}
+    return false;
+  }}
+  function isLeftConfigRailElement(element) {{
+    if (!element || !element.getBoundingClientRect) return false;
+    var rect = element.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    if (rect.left > 88 || rect.width > 128 || rect.height < 16 || rect.height > 96) return false;
+    return true;
+  }}
+  function nearestRailItem(element) {{
+    var current = element;
+    var best = null;
+    while (current && current !== document.body && current !== document.documentElement) {{
+      if (isLeftConfigRailElement(current)) best = current;
+      current = current.parentElement;
+    }}
+    return best || element;
+  }}
+  function shouldHideRailConfig(element) {{
+    if (!isLeftConfigRailElement(element)) return false;
+    var text = normalizedText(element.innerText || element.textContent || "");
+    if (isAllowedRailText(text)) return false;
+    return true;
+  }}
+  function filterConfigRail() {{
+    var nodes = document.querySelectorAll("a,button,[role='button'],li,div,span");
+    for (var i = 0; i < nodes.length; i += 1) {{
+      var node = nodes[i];
+      if (!shouldHideRailConfig(node)) continue;
+      var item = nearestRailItem(node);
+      if (item && item !== document.body && item !== document.documentElement) {{
+        item.setAttribute("data-scrcpygate-hidden-config", "true");
+        item.style.setProperty("display", "none", "important");
+      }}
+    }}
+  }}
+  function blocksForeignRailConfigEvent(event) {{
+    var current = event.target;
+    while (current && current !== document.body && current !== document.documentElement) {{
+      if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-config") === "true") return true;
+      if (shouldHideRailConfig(current)) return true;
+      current = current.parentElement;
+    }}
+    return false;
+  }}
+  document.addEventListener("click", function(event) {{
+    if (!blocksForeignRailConfigEvent(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }}, true);
+  document.addEventListener("touchstart", function(event) {{
+    if (!blocksForeignRailConfigEvent(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }}, true);
+  if (document.documentElement) {{
+    var style = document.createElement("style");
+    style.setAttribute("data-scrcpygate-alas-bind-style", "true");
+    style.textContent = "[data-scrcpygate-hidden-config='true']{{display:none!important;visibility:hidden!important;pointer-events:none!important}}";
+    (document.head || document.documentElement).appendChild(style);
+  }}
+  filterConfigRail();
+  window.setInterval(filterConfigRail, 500);
+  if (window.MutationObserver && document.documentElement) {{
+    new MutationObserver(filterConfigRail).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
+  }}
+}})();
+</script>"""
+    original = str(html or "")
+    body_index = original.lower().rfind("</body>")
+    if body_index >= 0:
+        return f"{original[:body_index]}{script}{original[body_index:]}"
+    return f"{original}{script}"
 
 
 def _parse_runtime_url(raw_url: str):
@@ -479,7 +671,26 @@ def _proxy_request_headers(headers) -> dict:
     return result
 
 
-def _proxy_response_headers(headers, request_url: str) -> dict:
+def _append_config_to_embed_url(value: str, config_name: str) -> str:
+    if not config_name:
+        return value
+    parsed = urlparse(str(value or ""))
+    if not parsed.path.startswith(f"{ALAS_EMBED_PREFIX}/proxy"):
+        return value
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if any(key in query and any(str(item or "").strip() for item in query[key]) for key in CONFIG_QUERY_KEYS):
+        return value
+    pairs = []
+    for key, values in query.items():
+        if values:
+            pairs.extend((key, item) for item in values)
+        else:
+            pairs.append((key, ""))
+    pairs.append(("config", config_name))
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(pairs, doseq=True), parsed.fragment))
+
+
+def _proxy_response_headers(headers, request_url: str, decision: ProxyDecision | None = None) -> dict:
     """过滤上游响应头，并将 Location 改写为嵌入代理路径。"""
     result = {}
     omitted = OMITTED_RESPONSE_HEADERS | _connection_header_names(headers)
@@ -489,6 +700,8 @@ def _proxy_response_headers(headers, request_url: str) -> dict:
             continue
         if lowered == "location":
             value = rewrite_location_header(str(value), request_url)
+            if decision and decision.filtered:
+                value = _append_config_to_embed_url(str(value), decision.config_name)
         result[key] = value
     return result
 
@@ -638,6 +851,80 @@ def websocket_message_allowed(message: str | bytes, config_name: str, can_run: b
     return True
 
 
+def _is_config_list_key(key: object) -> bool:
+    normalized = "".join(char.lower() for char in str(key or "") if char.isalnum() or char == "_")
+    return normalized in CONFIG_LIST_KEYS
+
+
+def _json_item_matches_bound_config(value, config_name: str) -> bool:
+    if isinstance(value, dict):
+        for key in CONFIG_QUERY_KEYS:
+            if key in value and str(value.get(key) or "").strip():
+                return not _config_value_mismatches(value.get(key), config_name)
+        return not _message_switches_config(value, config_name)
+    if isinstance(value, (list, tuple)):
+        return not _config_value_mismatches(value, config_name)
+    requested_config = str(value or "").strip()
+    return not requested_config or requested_config == config_name
+
+
+def filter_user_json_payload(value, config_name: str):
+    """Filter obvious ALAS config-list payloads down to the bound config."""
+    if isinstance(value, dict):
+        filtered = {}
+        for key, item in value.items():
+            if _is_config_list_key(key):
+                if isinstance(item, list):
+                    filtered[key] = [
+                        filter_user_json_payload(entry, config_name)
+                        for entry in item
+                        if _json_item_matches_bound_config(entry, config_name)
+                    ]
+                elif _json_item_matches_bound_config(item, config_name):
+                    filtered[key] = filter_user_json_payload(item, config_name)
+                else:
+                    filtered[key] = [] if isinstance(item, (list, tuple)) else None
+                continue
+            filtered[key] = filter_user_json_payload(item, config_name)
+        return filtered
+    if isinstance(value, list):
+        return [filter_user_json_payload(item, config_name) for item in value]
+    if isinstance(value, tuple):
+        return [filter_user_json_payload(item, config_name) for item in value]
+    return value
+
+
+def _message_switches_downstream_config(value, config_name: str) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in ("config", "config_name") and _config_value_mismatches(item, config_name):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _message_switches_downstream_config(item, config_name):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_message_switches_downstream_config(item, config_name) for item in value)
+    return False
+
+
+def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> str | bytes | None:
+    """Filter ALAS-to-browser WebSocket messages for bound users."""
+    payload = _parse_websocket_message(message)
+    if payload is None:
+        if isinstance(message, bytes):
+            return None
+        text = str(message or "")
+        if _text_contains_management_command(text):
+            return None
+        return message
+    filtered = filter_user_json_payload(payload, config_name)
+    if _message_contains_management(filtered) or _message_switches_downstream_config(filtered, config_name):
+        return None
+    text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(message, bytes):
+        return text.encode("utf-8")
+    return text
+
+
 def websocket_target_url(base_url: str, path: str, query_items) -> str:
     """将 HTTP Runtime URL 转换为 WebSocket 目标 URL。"""
     target = build_upstream_url(base_url, path, query_items)
@@ -667,7 +954,7 @@ async def _close_upstream_safely(upstream, code: int = 1000) -> None:
 async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDecision) -> None:
     """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
     try:
-        target = websocket_target_url(base_url, path, websocket.query_params.multi_items())
+        target = websocket_target_url(base_url, path, bound_config_query_items(websocket.query_params, decision))
     except ValueError:
         await websocket.close(code=1011)
         return
@@ -710,6 +997,12 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
             async def upstream_to_client() -> None:
                 """转发上游文本或二进制消息回客户端。"""
                 async for message in upstream:
+                    if decision.filtered:
+                        message = filter_user_websocket_downstream(message, decision.config_name)
+                        if message is None:
+                            await _close_upstream_safely(upstream, code=1008)
+                            await _close_websocket_safely(websocket, 1008)
+                            return 1008
                     if isinstance(message, bytes):
                         await websocket.send_bytes(message)
                     else:
@@ -782,7 +1075,7 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         body = await request.body()
     data = None if method in ("GET", "HEAD") else body
     try:
-        target = build_upstream_url(base_url, path, request.query_params)
+        target = build_upstream_url(base_url, path, bound_config_query_items(request.query_params, decision))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     req = Request(
@@ -796,11 +1089,11 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         with opener.open(req, timeout=15.0) as resp:
             raw = resp.read()
             status = resp.getcode()
-            out_headers = _proxy_response_headers(resp.headers, target)
+            out_headers = _proxy_response_headers(resp.headers, target, decision)
     except HTTPError as exc:
         raw = exc.read()
         status = exc.code
-        out_headers = _proxy_response_headers(exc.headers, target)
+        out_headers = _proxy_response_headers(exc.headers, target, decision)
     except (URLError, TimeoutError, OSError) as exc:
         raise HTTPException(status_code=502, detail="ALAS Runtime unreachable") from exc
 
@@ -822,6 +1115,16 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         text = raw.decode(charset, errors="replace")
         raw = filter_user_html(text, decision.config_name).encode(charset, errors="xmlcharrefreplace")
         out_headers["Content-Type"] = f"{_content_type_media_type(content_type)}; charset={charset}"
+    elif decision.filtered and not content_encoding and _content_type_media_type(content_type) == "application/json":
+        charset = _content_type_charset(content_type)
+        try:
+            payload = json.loads(raw.decode(charset, errors="replace"))
+        except Exception:
+            payload = None
+        if isinstance(payload, (dict, list)):
+            payload = filter_user_json_payload(payload, decision.config_name)
+            raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(charset, errors="xmlcharrefreplace")
+            out_headers["Content-Type"] = f"application/json; charset={charset}"
     out_headers.pop("X-Frame-Options", None)
     out_headers["Content-Security-Policy"] = "frame-ancestors 'self'"
     return Response(content=raw, status_code=status, headers=out_headers)

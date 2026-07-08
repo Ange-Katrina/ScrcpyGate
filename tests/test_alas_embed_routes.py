@@ -5,6 +5,7 @@
 import asyncio
 import gzip
 import importlib
+import json
 import os
 import shutil
 import sys
@@ -542,19 +543,18 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertIn("reason=config_mismatch", logs[0]["detail"])
         self.assertNotIn("password", logs[0]["detail"].lower())
 
-    def test_proxy_denies_business_request_without_config_for_bound_user(self):
-        """绑定普通用户访问业务 API 时无 config 应被拒绝。"""
+    def test_proxy_appends_bound_config_for_business_request_without_config(self):
+        """绑定普通用户访问业务 API 时无 config 应自动补齐绑定配置。"""
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_upstream(body=b"should not reach")
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
 
         res = self.client.get("/alas/embed/proxy/api/state")
 
-        self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.json()["detail"], "业务请求必须显式指定绑定的 ALAS 配置")
-        self.assertEqual(captured, [])
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/state?config=%E6%8C%82%E6%9C%BA-%E4%BA%91")
 
     def test_proxy_allows_business_request_with_bound_config(self):
         """绑定普通用户访问业务 API 时带绑定 config 应允许。"""
@@ -568,6 +568,21 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(res.status_code, 200)
         self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/state?config=%E6%8C%82%E6%9C%BA-%E4%BA%91")
+
+    def test_proxy_filters_json_config_list_for_bound_user(self):
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        self.install_fake_upstream(
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"configs": ["挂机-云", "其它"], "ok": True}, ensure_ascii=False).encode("utf-8"),
+        )
+
+        res = self.client.get("/alas/embed/proxy/api/configs")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["configs"], ["挂机-云"])
 
     def test_proxy_denies_json_body_other_config(self):
         """普通用户 POST JSON body 中请求其它配置时应被拒绝。"""
@@ -1084,6 +1099,22 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["sent"], ['{"config":"挂机-云"}'])
         self.assertFalse(any(log["action"] == "alas_embed_ws" for log in logs))
+
+    def test_websocket_appends_bound_config_when_query_missing(self):
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_websocket_upstream(incoming=["bound-ok"])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
+            websocket.send_text("ping")
+            self.assertEqual(websocket.receive_text(), "bound-ok")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["targets"], ["ws://alas.test:22267/base/ws?config=%E6%8C%82%E6%9C%BA-%E4%BA%91"])
 
     def test_websocket_denies_other_config_for_bound_user(self):
         """普通用户通过查询参数请求其它配置时 WebSocket 代理拒绝连接。"""

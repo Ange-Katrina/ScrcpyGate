@@ -2,6 +2,7 @@
 # -_- coding: utf-8 -_-
 
 import io
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -14,8 +15,11 @@ if str(ROOT) not in sys.path:
 import app.alas_embed as alas_embed
 
 from app.alas_embed import (
+    bound_config_query_items,
     build_upstream_url,
     embed_shell_html,
+    filter_user_json_payload,
+    filter_user_websocket_downstream,
     filter_user_html,
     rewrite_location_header,
     proxy_decision,
@@ -122,6 +126,22 @@ class AlasEmbedTests(unittest.TestCase):
                 "https://alas.example.test:443",
                 "http://alas.example.test:22267",
             ],
+        )
+
+    def test_bound_config_query_items_appends_when_missing(self):
+        decision = alas_embed.ProxyDecision(allowed=True, config_name="挂机-云", filtered=True)
+
+        self.assertEqual(
+            bound_config_query_items([("x", "1")], decision),
+            [("x", "1"), ("config", "挂机-云")],
+        )
+
+    def test_bound_config_query_items_preserves_explicit_bound_config(self):
+        decision = alas_embed.ProxyDecision(allowed=True, config_name="挂机-云", filtered=True)
+
+        self.assertEqual(
+            bound_config_query_items([("config", "挂机-云"), ("x", "1")], decision),
+            [("config", "挂机-云"), ("x", "1")],
         )
 
     def test_explicit_https_domain_without_port_only_uses_https_candidates(self):
@@ -355,8 +375,8 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertTrue(decision.allowed)
         self.assertTrue(decision.filtered)
 
-    def test_user_business_request_without_config_denied(self):
-        """普通用户访问业务 API 时必须显式携带绑定配置。"""
+    def test_user_business_request_without_config_allowed_for_bound_user(self):
+        """普通用户访问业务 API 时可由代理补齐绑定配置。"""
         decision = proxy_decision(
             {"role": "user"},
             {"config_name": "挂机-云", "can_run": True, "can_edit": True},
@@ -365,9 +385,8 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             method="GET",
         )
 
-        self.assertFalse(decision.allowed)
-        self.assertEqual(decision.status_code, 403)
-        self.assertEqual(decision.reason, "missing request config")
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.filtered)
 
     def test_user_static_request_without_config_allowed(self):
         """普通用户访问静态资源时允许不携带配置。"""
@@ -484,6 +503,33 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
+
+    def test_filter_user_html_injects_config_rail_filter(self):
+        result = filter_user_html("<html><body></body></html>", "3256475495")
+
+        self.assertIn("data-scrcpygate-alas-bind", result)
+        self.assertIn("data-scrcpygate-hidden-config", result)
+        self.assertIn("filterConfigRail", result)
+
+    def test_filter_user_json_payload_keeps_only_bound_config_list_entries(self):
+        payload = {"configs": ["挂机-云", "其它"], "nested": {"config_list": [{"name": "挂机-云"}, {"name": "其它"}]}}
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["configs"], ["挂机-云"])
+        self.assertEqual(result["nested"]["config_list"], [{"name": "挂机-云"}])
+
+    def test_filter_user_websocket_downstream_filters_config_list(self):
+        message = '{"configs":["挂机-云","其它"],"status":"ok"}'
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertEqual(json.loads(result), {"configs": ["挂机-云"], "status": "ok"})
+
+    def test_filter_user_websocket_downstream_rejects_other_config(self):
+        result = filter_user_websocket_downstream('{"config":"其它"}', "挂机-云")
+
+        self.assertIsNone(result)
 
 
 class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
