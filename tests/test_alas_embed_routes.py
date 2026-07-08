@@ -550,8 +550,8 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(captured["sent"], [])
         self.assertEqual(captured["closed"], [1008, 1008])
 
-    def test_websocket_closes_1008_when_user_sends_binary_message(self):
-        """普通用户发送任意二进制消息时连接会被策略关闭且不转发。"""
+    def test_websocket_closes_1008_when_user_bytes_message_switches_config(self):
+        """普通用户 WebSocket bytes JSON 尝试切换配置时连接会被策略关闭。"""
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
@@ -559,7 +559,24 @@ class AlasEmbedRouteTests(unittest.TestCase):
         captured = self.install_fake_websocket_upstream()
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
-            websocket.send_bytes(b"from-client")
+            websocket.send_bytes('{"config":"其它"}'.encode("utf-8"))
+            message = websocket.receive()
+
+        self.assertEqual(message["type"], "websocket.close")
+        self.assertEqual(message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_closes_1008_when_user_sends_invalid_binary_message(self):
+        """普通用户发送不可解码二进制消息时连接会被策略关闭且不转发。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
+            websocket.send_bytes(b"\xff\xfe")
             message = websocket.receive()
 
         self.assertEqual(message["type"], "websocket.close")
