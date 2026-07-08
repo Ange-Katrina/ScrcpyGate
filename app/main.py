@@ -187,6 +187,28 @@ def alas_embed_denied_message(reason: str) -> str:
     return "ALAS 嵌入访问被拒绝"
 
 
+def alas_embed_return_url(binding: dict | None) -> str:
+    config_name = ""
+    if binding and binding.get("config_name"):
+        try:
+            config_name = alas.sanitize_config_name(binding.get("config_name"))
+        except ValueError:
+            config_name = ""
+    if config_name:
+        return f"/alas/embed/proxy/?{urlencode({'config': config_name})}"
+    return "/alas/embed/"
+
+
+def alas_embed_denied_html_response(request: Request, binding: dict | None, status_code: int, message: str):
+    accept = request.headers.get("accept", "")
+    if request.method.upper() not in ("GET", "HEAD") or "text/html" not in accept.lower():
+        return None
+    return HTMLResponse(
+        alas_embed.denied_page_html(message, alas_embed_return_url(binding), seconds=3),
+        status_code=status_code,
+    )
+
+
 def alas_embed_reason_code(reason: str) -> str:
     """将内部拒绝原因规范化为审计日志代码。"""
     return {
@@ -669,9 +691,13 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method, body=parsed_body)
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
+        denied_message = alas_embed_denied_message(decision.reason)
         log_alas_embed_denied(user, binding, "http", path or "/", reason_code)
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
-        raise HTTPException(status_code=decision.status_code, detail=alas_embed_denied_message(decision.reason))
+        denied_html = alas_embed_denied_html_response(request, binding, decision.status_code, denied_message)
+        if denied_html is not None:
+            return denied_html
+        raise HTTPException(status_code=decision.status_code, detail=denied_message)
     settings = alas.public_settings()
     raw_enabled = storage.get_setting("alas_enabled", "false")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):

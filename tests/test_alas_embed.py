@@ -17,6 +17,7 @@ import app.alas_embed as alas_embed
 from app.alas_embed import (
     bound_config_query_items,
     build_upstream_url,
+    denied_page_html,
     embed_shell_html,
     filter_user_json_payload,
     filter_user_websocket_downstream,
@@ -555,6 +556,14 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("filterConfigRail", result)
         self.assertIn("filterAlasSettings", result)
 
+    def test_denied_page_html_redirects_back_to_bound_alas(self):
+        result = denied_page_html("无权访问 ALAS 管理入口", "/alas/embed/proxy/?config=3256475495", seconds=3)
+
+        self.assertIn("此入口不可访问", result)
+        self.assertIn("无权访问 ALAS 管理入口", result)
+        self.assertIn('content="3;url=/alas/embed/proxy/?config=3256475495"', result)
+        self.assertIn("window.location.replace", result)
+
     def test_filter_user_html_masks_adb_endpoint(self):
         result = filter_user_html("<main>Serial 10.0.1.30:30100</main>", "挂机-云")
 
@@ -581,6 +590,33 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(result["menus"], [{"name": "Farm", "page": "setting", "tasks": ["Main"]}])
 
+    def test_filter_user_json_payload_removes_alas_settings_label_entries(self):
+        payload = {
+            "buttons": [
+                {"label": "Alas设置", "value": "Alas"},
+                {"label": "任务设置", "value": "Task"},
+            ]
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["buttons"], [{"label": "任务设置", "value": "Task"}])
+
+    def test_filter_user_json_payload_removes_pywebio_alas_settings_items(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "items": [
+                    {"label": "Alas Settings", "value": "Alas"},
+                    {"label": "Restart", "value": "Restart"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["spec"]["items"], [{"label": "Restart", "value": "Restart"}])
+
     def test_filter_user_json_payload_masks_nested_adb_endpoint(self):
         payload = {"settings": {"Serial": "10.0.1.30:30100"}}
 
@@ -597,6 +633,11 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
     def test_filter_user_websocket_downstream_rejects_alas_settings_payload(self):
         result = filter_user_websocket_downstream('{"menu":"Alas","task":"Alas"}', "挂机-云")
+
+        self.assertIsNone(result)
+
+    def test_filter_user_websocket_downstream_rejects_alas_settings_text(self):
+        result = filter_user_websocket_downstream("open Alas设置", "挂机-云")
 
         self.assertIsNone(result)
 

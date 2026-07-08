@@ -2,10 +2,12 @@
 # -_- coding: utf-8 -_-
 
 import asyncio
+import gzip
 import html as html_utils
 import ipaddress
 import json
 import re
+import zlib
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
@@ -57,6 +59,8 @@ ADB_ENDPOINT_RE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}(?![\w.]
 ALAS_SETTINGS_MENU_KEYS = ("name", "label", "title", "text", "menu", "category", "section", "module")
 ALAS_SETTINGS_PAGE_KEYS = ("page", "route", "path", "scope", "type", "tab")
 ALAS_SETTINGS_TASK_KEYS = ("task", "tasks", "children", "items", "options", "pages", "tabs")
+ALAS_SETTINGS_LABEL_KEYS = ("label", "title", "text", "caption", "aria-label", "placeholder")
+ALAS_SETTINGS_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action")
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,59 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
 <body>
   <div class="bar"><strong>{safe_title}</strong><span class="msg">{safe_message}</span><a href="/">返回 ScrcpyGate</a></div>
   <iframe src="{safe_src}" title="{safe_title}"></iframe>
+</body>
+</html>"""
+
+
+def denied_page_html(message: str, redirect_url: str = "/alas/embed/", seconds: int = 3) -> str:
+    """Render a friendly ALAS embed denial page inside the iframe."""
+    safe_message = escape(message or "ALAS 访问被限制")
+    safe_url = escape(redirect_url or "/alas/embed/", quote=True)
+    safe_seconds = max(1, min(30, int(seconds or 3)))
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{safe_seconds};url={safe_url}">
+  <title>ALAS 访问受限</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    html, body {{ margin:0; min-height:100%; background:#0f131a; color:#eef3fb; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+    body {{ display:grid; place-items:center; padding:24px; box-sizing:border-box; }}
+    .panel {{ width:min(520px, 100%); border:1px solid #283244; background:#151b25; border-radius:8px; padding:24px; box-shadow:0 18px 60px rgba(0,0,0,.35); }}
+    .badge {{ display:inline-flex; align-items:center; height:28px; padding:0 10px; border-radius:999px; background:#263247; color:#9fc3ff; font-size:13px; }}
+    h1 {{ margin:18px 0 10px; font-size:24px; line-height:1.25; letter-spacing:0; }}
+    p {{ margin:0; color:#aeb9c9; line-height:1.7; font-size:14px; }}
+    .actions {{ display:flex; flex-wrap:wrap; gap:10px; margin-top:22px; }}
+    a {{ display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border-radius:6px; color:#dfe9ff; text-decoration:none; background:#2563eb; }}
+    a.secondary {{ background:#202938; color:#b9c6d9; }}
+    .count {{ margin-top:14px; font-size:13px; color:#7f8da3; }}
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <span class="badge">ScrcpyGate ALAS</span>
+    <h1>此入口不可访问</h1>
+    <p>{safe_message}</p>
+    <div class="actions">
+      <a href="{safe_url}">返回我的 ALAS 页面</a>
+      <a class="secondary" href="/" target="_top">返回 ScrcpyGate</a>
+    </div>
+    <div class="count"><span id="seconds">{safe_seconds}</span> 秒后自动返回。</div>
+  </main>
+  <script>
+    (function() {{
+      var left = {safe_seconds};
+      var target = {json.dumps(redirect_url or "/alas/embed/")};
+      var node = document.getElementById("seconds");
+      window.setInterval(function() {{
+        left -= 1;
+        if (node) node.textContent = String(Math.max(left, 0));
+        if (left <= 0) window.location.replace(target);
+      }}, 1000);
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -253,6 +310,14 @@ def _is_alas_settings_task(value: object) -> bool:
     return text in {"alas", "alas设置", "alassettings"}
 
 
+def _is_alas_settings_label(value: object) -> bool:
+    text = _compact_text(value)
+    return (
+        text in {"alas设置", "alassettings", "alas設定"}
+        or ("alas" in text and ("设置" in text or "setting" in text or "設定" in text))
+    )
+
+
 def _is_alas_settings_field(value: object) -> bool:
     text = _plain_text(value).replace("\\", ".").replace("/", ".")
     compact = _compact_text(text)
@@ -310,8 +375,30 @@ def _json_item_targets_alas_settings(value) -> bool:
     lowered = {str(key).lower(): item for key, item in value.items()}
     if any(_is_alas_settings_field(key) for key in lowered):
         return True
+    if any(_is_alas_settings_label(key) for key in lowered):
+        return True
+    label_like = any(
+        key in lowered and _is_alas_settings_label(lowered[key])
+        for key in ALAS_SETTINGS_LABEL_KEYS
+    )
+    route_like = any(
+        key in lowered
+        and (
+            _is_alas_settings_label(lowered[key])
+            or _is_alas_settings_field(lowered[key])
+            or _is_alas_settings_task(lowered[key])
+        )
+        for key in ALAS_SETTINGS_ROUTE_KEYS
+    )
+    if label_like:
+        return True
+    if route_like and any(
+        key in lowered and (_is_alas_settings_task(lowered[key]) or _is_alas_settings_page(lowered[key]))
+        for key in (*ALAS_SETTINGS_CONTEXT_KEYS, *ALAS_SETTINGS_PAGE_KEYS, *ALAS_SETTINGS_TASK_KEYS)
+    ):
+        return True
     name_like = any(
-        key in lowered and _is_alas_settings_task(lowered[key])
+        key in lowered and (_is_alas_settings_task(lowered[key]) or _is_alas_settings_label(lowered[key]))
         for key in ALAS_SETTINGS_MENU_KEYS
     )
     page_like = any(
@@ -600,6 +687,25 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     }}
     return false;
   }}
+  function collectElementSignal(element) {{
+    if (!element) return "";
+    var parts = [
+      element.innerText || "",
+      element.textContent || "",
+      element.value || "",
+      element.getAttribute && element.getAttribute("placeholder") || "",
+      element.getAttribute && element.getAttribute("title") || "",
+      element.getAttribute && element.getAttribute("aria-label") || "",
+      element.getAttribute && element.getAttribute("data-key") || "",
+      element.getAttribute && element.getAttribute("data-value") || "",
+      element.getAttribute && element.getAttribute("data-name") || "",
+      element.getAttribute && element.getAttribute("href") || "",
+      element.getAttribute && element.getAttribute("onclick") || "",
+      element.id || "",
+      typeof element.className === "string" ? element.className : ""
+    ];
+    return parts.join(" ");
+  }}
   function nearestActionItem(element) {{
     var current = element;
     var best = element;
@@ -686,7 +792,7 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     var nodes = document.querySelectorAll("a,button,[role='button'],li,div,span,label,tr,input,textarea,select");
     for (var i = 0; i < nodes.length; i += 1) {{
       var node = nodes[i];
-      var text = node.innerText || node.textContent || node.value || node.getAttribute("placeholder") || node.getAttribute("title") || "";
+      var text = collectElementSignal(node);
       if (textTargetsAlasSettings(text)) {{
         var item = nearestActionItem(node);
         if (item && item !== document.body && item !== document.documentElement) {{
@@ -727,7 +833,7 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-alas-settings") === "true") return true;
       if (current.getAttribute && current.getAttribute("data-scrcpygate-hidden-sensitive-device") === "true") return true;
       if (shouldHideRailConfig(current)) return true;
-      if (textTargetsAlasSettings(current.innerText || current.textContent || "")) return true;
+      if (textTargetsAlasSettings(collectElementSignal(current))) return true;
       current = current.parentElement;
     }}
     return false;
@@ -1067,6 +1173,10 @@ def _text_contains_management_command(text: str) -> bool:
     return any(marker in lowered_text for marker in plain_markers)
 
 
+def _text_targets_alas_settings_ui(text: str) -> bool:
+    return _is_alas_settings_label(text) or _is_alas_settings_field(text)
+
+
 def websocket_message_allowed(message: str | bytes, config_name: str, can_run: bool = True, can_edit: bool = True) -> bool:
     """检查 WebSocket 消息是否试图越权访问配置、管理或运行编辑操作。"""
     payload = _parse_websocket_message(message)
@@ -1075,6 +1185,8 @@ def websocket_message_allowed(message: str | bytes, config_name: str, can_run: b
             return False
         text = str(message or "")
         if _text_contains_management_command(text):
+            return False
+        if _text_targets_alas_settings_ui(text):
             return False
         if not can_run and _text_has_action_marker(text, RUN_ACTION_MARKERS):
             return False
@@ -1168,7 +1280,7 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
         text = str(message or "")
         if _text_contains_management_command(text):
             return None
-        if _is_alas_settings_field(text):
+        if _text_targets_alas_settings_ui(text):
             return None
         return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
     if _message_targets_alas_settings(payload):
@@ -1303,6 +1415,37 @@ def _content_type_charset(content_type: str) -> str:
     return "utf-8"
 
 
+def _pop_header_case_insensitive(headers: dict, header_name: str) -> None:
+    lowered_name = header_name.lower()
+    for key in list(headers.keys()):
+        if str(key).lower() == lowered_name:
+            headers.pop(key, None)
+
+
+def _decode_content_encoding(raw: bytes, content_encoding: str) -> bytes:
+    """Decode upstream response encodings before filtered HTML/JSON leaves the proxy."""
+    decoded = raw
+    encodings = [
+        item.strip().lower()
+        for item in str(content_encoding or "").split(",")
+        if item.strip()
+    ]
+    for encoding in reversed(encodings):
+        if encoding in {"identity", "none"}:
+            continue
+        if encoding in {"gzip", "x-gzip"}:
+            decoded = gzip.decompress(decoded)
+            continue
+        if encoding == "deflate":
+            try:
+                decoded = zlib.decompress(decoded)
+            except zlib.error:
+                decoded = zlib.decompress(decoded, -zlib.MAX_WBITS)
+            continue
+        raise ValueError(f"unsupported upstream content encoding: {encoding}")
+    return decoded
+
+
 def parse_limited_body(body: bytes, content_type: str, limit: int = 65536):
     """在大小限制内解析 JSON 或 form-urlencoded 正文，并保留解析状态。"""
     if not body:
@@ -1366,17 +1509,21 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
             content_type = value
         if lowered == "content-encoding":
             content_encoding = value
-    should_filter = (
-        decision.filtered
-        and not content_encoding
-        and _content_type_media_type(content_type) in HTML_CONTENT_TYPES
-    )
+    media_type = _content_type_media_type(content_type)
+    should_filter = decision.filtered and media_type in HTML_CONTENT_TYPES
+    if decision.filtered and content_encoding and media_type in (*HTML_CONTENT_TYPES, "application/json"):
+        try:
+            raw = _decode_content_encoding(raw, content_encoding)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="ALAS encoded response could not be filtered") from exc
+        _pop_header_case_insensitive(out_headers, "Content-Encoding")
+        content_encoding = ""
     if should_filter:
         charset = _content_type_charset(content_type)
         text = raw.decode(charset, errors="replace")
         raw = filter_user_html(text, decision.config_name).encode(charset, errors="xmlcharrefreplace")
-        out_headers["Content-Type"] = f"{_content_type_media_type(content_type)}; charset={charset}"
-    elif decision.filtered and not content_encoding and _content_type_media_type(content_type) == "application/json":
+        out_headers["Content-Type"] = f"{media_type}; charset={charset}"
+    elif decision.filtered and media_type == "application/json":
         charset = _content_type_charset(content_type)
         try:
             payload = json.loads(raw.decode(charset, errors="replace"))

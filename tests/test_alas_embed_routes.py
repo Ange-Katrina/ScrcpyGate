@@ -432,8 +432,8 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertNotIn("Content-length", captured[0]["headers"])
 
-    def test_proxy_keeps_gzip_html_body_unfiltered(self):
-        """带 Content-Encoding 的 HTML 响应不会被解码过滤而破坏 gzip 正文。"""
+    def test_proxy_filters_gzip_html_body_for_bound_user(self):
+        """带 Content-Encoding 的 HTML 响应会先解压再过滤，避免 ALAS 菜单泄漏。"""
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
@@ -450,8 +450,11 @@ class AlasEmbedRouteTests(unittest.TestCase):
         res = self.client.get("/alas/embed/proxy/?config=挂机-云")
 
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.text, "<main>挂机-云 其它配置 管理入口</main>")
-        self.assertEqual(res.headers.get("content-encoding"), "gzip")
+        self.assertIn("挂机-云", res.text)
+        self.assertNotIn("其它配置", res.text)
+        self.assertNotIn("管理入口", res.text)
+        self.assertIn("data-scrcpygate-alas-bind", res.text)
+        self.assertIsNone(res.headers.get("content-encoding"))
 
     def test_proxy_requires_csrf_for_post(self):
         """非安全方法代理请求必须通过既有 CSRF 校验。"""
@@ -679,6 +682,26 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(res.status_code, 403)
         self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
+        self.assertEqual(captured, [])
+
+    def test_proxy_denies_query_management_route_with_friendly_html(self):
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get(
+            "/alas/embed/proxy/api/state?config=3256475495&route=admin",
+            headers={"Accept": "text/html"},
+        )
+
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("text/html", res.headers.get("content-type", ""))
+        self.assertIn("此入口不可访问", res.text)
+        self.assertIn("无权访问 ALAS 管理入口", res.text)
+        self.assertIn("/alas/embed/proxy/?config=3256475495", res.text)
+        self.assertIn("window.location.replace", res.text)
         self.assertEqual(captured, [])
 
     def test_proxy_denies_user_alas_settings_query(self):
