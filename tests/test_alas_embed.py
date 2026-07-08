@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
 
+import io
 import sys
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+import app.alas_embed as alas_embed
 
 from app.alas_embed import (
     build_upstream_url,
@@ -143,6 +147,48 @@ class AlasEmbedTests(unittest.TestCase):
             runtime_url_candidates("http://192.168.5.18:22267/"),
             ["http://192.168.5.18:22267"],
         )
+
+    def test_probe_runtime_url_returns_true_for_http_200(self):
+        """Runtime 探测在 HTTP 200 时返回可达。"""
+        class FakeResponse:
+            """模拟成功 HTTP 响应。"""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def getcode(self):
+                return 200
+
+        class FakeOpener:
+            """模拟 urllib opener 对象。"""
+
+            def open(self, req, timeout=0):
+                return FakeResponse()
+
+        original = alas_embed.build_opener
+        alas_embed.build_opener = lambda *handlers: FakeOpener()
+        try:
+            self.assertTrue(alas_embed.probe_runtime_url("http://alas.test:22267"))
+        finally:
+            alas_embed.build_opener = original
+
+    def test_probe_runtime_url_returns_false_for_http_404(self):
+        """Runtime 探测遇到 HTTP 404 时不应视为可达。"""
+        class FakeOpener:
+            """模拟返回 HTTPError 的 urllib opener 对象。"""
+
+            def open(self, req, timeout=0):
+                raise HTTPError(req.full_url, 404, "missing", {}, io.BytesIO(b"missing"))
+
+        original = alas_embed.build_opener
+        alas_embed.build_opener = lambda *handlers: FakeOpener()
+        try:
+            self.assertFalse(alas_embed.probe_runtime_url("http://alas.test:22267"))
+        finally:
+            alas_embed.build_opener = original
 
     def test_url_with_username_or_password_raises_value_error(self):
         with self.assertRaises(ValueError):
@@ -308,6 +354,101 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertTrue(decision.allowed)
         self.assertTrue(decision.filtered)
+
+    def test_user_business_request_without_config_denied(self):
+        """普通用户访问业务 API 时必须显式携带绑定配置。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {},
+            method="GET",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 403)
+        self.assertEqual(decision.reason, "missing request config")
+
+    def test_user_static_request_without_config_allowed(self):
+        """普通用户访问静态资源时允许不携带配置。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": False, "can_edit": False},
+            "static/logo.png",
+            {},
+            method="GET",
+        )
+
+        self.assertTrue(decision.allowed)
+
+    def test_user_body_other_config_denied(self):
+        """普通用户非安全方法正文中的其它配置会被拒绝。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云"},
+            method="POST",
+            body={"config": "其它"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "config mismatch")
+
+    def test_user_body_run_action_denied_when_can_run_false(self):
+        """can_run=False 时正文中的运行操作会被拒绝。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": False, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云"},
+            method="POST",
+            body={"action": "start"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "run permission denied")
+
+    def test_user_body_edit_method_denied_when_can_edit_false(self):
+        """can_edit=False 时正文中的编辑操作会被拒绝。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": False},
+            "api/state",
+            {"config": "挂机-云"},
+            method="POST",
+            body={"method": "settings.save"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "edit permission denied")
+
+    def test_user_query_management_route_denied(self):
+        """普通用户查询参数中的管理 route 会被拒绝。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云", "route": "admin"},
+            method="GET",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "management path denied")
+
+    def test_user_body_management_event_denied(self):
+        """普通用户正文中的管理事件会被拒绝。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云"},
+            method="POST",
+            body={"event": "alas.config_list"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "management path denied")
 
     def test_user_bound_config_allowed_and_filtered(self):
         decision = proxy_decision(

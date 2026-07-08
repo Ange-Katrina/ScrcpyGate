@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from html import escape
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, unquote, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, build_opener, ProxyHandler
 
 from fastapi import HTTPException, Request as FastAPIRequest
@@ -21,6 +21,8 @@ DOMAIN_FALLBACK_PORTS = (80, 443, 22267)
 MANAGEMENT_MARKERS = ("管理", "admin", "manage", "management", "config_list", "alas.config_list", "settings.admin")
 MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topic", "type", "op", "api", "route")
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
+BUSINESS_PATH_PREFIXES = ("api", "ajax", "pywebio")
+STATIC_PATH_PREFIXES = ("static", "assets", "favicon.ico")
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -126,6 +128,59 @@ def _query_contains_action(query: dict, markers: tuple[str, ...]) -> bool:
     return False
 
 
+def _query_contains_management(query: dict) -> bool:
+    """检查查询参数键和值是否包含管理操作标记。"""
+    for key, value in (query or {}).items():
+        if str(key).lower() in CONFIG_QUERY_KEYS:
+            continue
+        if _text_has_action_marker(key, MANAGEMENT_MARKERS):
+            return True
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for item in values:
+            text = str(item or "").lower()
+            if any(marker in text for marker in MANAGEMENT_MARKERS):
+                return True
+    return False
+
+
+def _request_requires_explicit_config(method: str, path: str) -> bool:
+    """判断普通用户 HTTP 请求是否必须显式携带绑定配置。"""
+    upper_method = str(method or "GET").upper()
+    normalized_path = unquote(str(path or "")).replace("\\", "/").strip("/").lower()
+    first_segment = normalized_path.split("/", 1)[0] if normalized_path else ""
+    if upper_method not in SAFE_METHODS:
+        return True
+    if not normalized_path:
+        return False
+    if first_segment in STATIC_PATH_PREFIXES:
+        return False
+    return first_segment in BUSINESS_PATH_PREFIXES
+
+
+def _has_explicit_bound_config(query: dict, config_name: str) -> bool:
+    """判断请求查询参数是否显式指定了绑定配置。"""
+    for key in CONFIG_QUERY_KEYS:
+        values = _query_values(query or {}, key)
+        if values and all(value == config_name for value in values):
+            return True
+    return False
+
+
+def _body_contains_management(value) -> bool:
+    """递归检查 HTTP 正文是否包含管理操作标记。"""
+    return _message_contains_management(value)
+
+
+def _body_switches_config(value, config_name: str) -> bool:
+    """递归检查 HTTP 正文是否请求非绑定配置。"""
+    return _message_switches_config(value, config_name)
+
+
+def _body_denied_by_action_permission(value, can_run: bool, can_edit: bool) -> bool:
+    """根据 can_run/can_edit 判断 HTTP 正文是否触发被禁操作。"""
+    return _message_denied_by_action_permission(value, can_run, can_edit)
+
+
 def _is_readonly_http_request(method: str, path: str, query: dict) -> bool:
     """判断 HTTP 请求是否明显为只读页面、静态资源或状态查询。"""
     upper_method = str(method or "GET").upper()
@@ -149,8 +204,8 @@ def _denied_by_binding_action_permission(binding: dict, method: str, path: str, 
     return ""
 
 
-def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, method: str = "GET") -> ProxyDecision:
-    """根据用户角色、绑定配置、路径、方法与查询参数判定代理访问策略。"""
+def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, method: str = "GET", body=None) -> ProxyDecision:
+    """根据用户角色、绑定配置、路径、方法、查询参数与正文判定代理访问策略。"""
     role = str((user or {}).get("role", ""))
     if role == "admin":
         return ProxyDecision(allowed=True)
@@ -163,7 +218,15 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
         return ProxyDecision(allowed=False, status_code=403, reason="missing binding")
 
     lowered_path = str(path or "").lower()
-    if "admin" in lowered_path or "manage" in lowered_path:
+    if "admin" in lowered_path or "manage" in lowered_path or _query_contains_management(query or {}):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason="management path denied",
+        )
+
+    if body is not None and _body_contains_management(body):
         return ProxyDecision(
             allowed=False,
             status_code=403,
@@ -189,6 +252,22 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
                     reason="config mismatch",
                 )
 
+    if body is not None and _body_switches_config(body, config_name):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason="config mismatch",
+        )
+
+    if _request_requires_explicit_config(method, path) and not _has_explicit_bound_config(query or {}, config_name):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason="missing request config",
+        )
+
     permission_denial = _denied_by_binding_action_permission(binding, method, path, query or {})
     if permission_denial:
         return ProxyDecision(
@@ -196,6 +275,22 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
             status_code=403,
             config_name=config_name,
             reason=permission_denial,
+        )
+
+    if body is not None and _body_denied_by_action_permission(
+        body,
+        bool(binding.get("can_run", True)),
+        bool(binding.get("can_edit", False)),
+    ):
+        if not binding.get("can_run", True) and _message_contains_action(body, RUN_ACTION_MARKERS):
+            reason = "run permission denied"
+        else:
+            reason = "edit permission denied"
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason=reason,
         )
 
     return ProxyDecision(
@@ -286,14 +381,14 @@ def runtime_url_candidates(raw_url: str) -> list[str]:
 
 
 def probe_runtime_url(url: str, timeout: float = 2.0) -> bool:
-    """探测 ALAS Runtime 根路径是否可连通。"""
+    """探测 ALAS Runtime 根路径是否返回 2xx/3xx 可达状态。"""
     opener = build_opener(ProxyHandler({}))
     req = Request(url, method="GET")
     try:
         with opener.open(req, timeout=timeout) as resp:
-            return 200 <= resp.getcode() < 500
+            return 200 <= resp.getcode() < 400
     except HTTPError as exc:
-        return 400 <= exc.code < 500
+        return 200 <= exc.code < 400
     except (URLError, TimeoutError, OSError):
         return False
 
@@ -638,12 +733,32 @@ def _content_type_charset(content_type: str) -> str:
     return "utf-8"
 
 
-async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision) -> Response:
+def parse_limited_body(body: bytes, content_type: str, limit: int = 65536):
+    """在大小限制内解析 JSON 或 form-urlencoded 正文，无法解析时返回 None。"""
+    if not body:
+        return {}
+    if len(body) > limit:
+        return None
+    media_type = _content_type_media_type(content_type)
+    if media_type == "application/json":
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return None
+        return payload if isinstance(payload, (dict, list)) else None
+    if media_type == "application/x-www-form-urlencoded":
+        form = parse_qs(body.decode("utf-8", "ignore"), keep_blank_values=True)
+        return {key: values[-1] if values else "" for key, values in form.items()}
+    return None
+
+
+async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision, body: bytes | None = None) -> Response:
     """转发 HTTP 请求到 ALAS Runtime，并按权限策略过滤 HTML 响应。"""
     if request.headers.get("upgrade") or "upgrade" in request.headers.get("connection", "").lower():
         raise HTTPException(status_code=501, detail="ALAS websocket proxy is not implemented")
     method = request.method.upper()
-    body = await request.body()
+    if body is None:
+        body = await request.body()
     data = None if method in ("GET", "HEAD") else body
     try:
         target = build_upstream_url(base_url, path, request.query_params)
@@ -686,4 +801,6 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         text = raw.decode(charset, errors="replace")
         raw = filter_user_html(text, decision.config_name).encode(charset, errors="xmlcharrefreplace")
         out_headers["Content-Type"] = f"{_content_type_media_type(content_type)}; charset={charset}"
+    out_headers.pop("X-Frame-Options", None)
+    out_headers["Content-Security-Policy"] = "frame-ancestors 'self'"
     return Response(content=raw, status_code=status, headers=out_headers)

@@ -361,6 +361,24 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertNotIn("其它配置", res.text)
         self.assertNotIn("管理入口", res.text)
 
+    def test_proxy_response_allows_same_site_iframe(self):
+        """代理响应不能携带阻断本站 iframe 的安全头。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        self.install_fake_upstream(
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            body="<main>挂机-云</main>".encode("utf-8"),
+        )
+
+        res = self.client.get("/alas/embed/proxy/?config=挂机-云")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertNotEqual(res.headers.get("x-frame-options"), "DENY")
+        self.assertEqual(res.headers.get("content-security-policy"), "frame-ancestors 'self'")
+        self.assertEqual(res.headers.get("x-content-type-options"), "nosniff")
+
     def test_proxy_filters_connection_declared_hop_headers(self):
         """Connection 声明的扩展逐跳头不会转发或返回。"""
         self.login("admin", "password123456", "admin")
@@ -523,6 +541,140 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(logs[0]["action"], "alas_embed_denied")
         self.assertIn("reason=config_mismatch", logs[0]["detail"])
         self.assertNotIn("password", logs[0]["detail"].lower())
+
+    def test_proxy_denies_business_request_without_config_for_bound_user(self):
+        """绑定普通用户访问业务 API 时无 config 应被拒绝。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get("/alas/embed/proxy/api/state")
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "业务请求必须显式指定绑定的 ALAS 配置")
+        self.assertEqual(captured, [])
+
+    def test_proxy_allows_business_request_with_bound_config(self):
+        """绑定普通用户访问业务 API 时带绑定 config 应允许。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
+
+        res = self.client.get("/alas/embed/proxy/api/state?config=挂机-云")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["url"], "http://alas.test:22267/api/state?config=%E6%8C%82%E6%9C%BA-%E4%BA%91")
+
+    def test_proxy_denies_json_body_other_config(self):
+        """普通用户 POST JSON body 中请求其它配置时应被拒绝。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            json={"config": "其它"},
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权访问其它 ALAS 配置")
+        self.assertEqual(captured, [])
+
+    def test_proxy_denies_json_body_run_action_when_can_run_false(self):
+        """can_run=False 时普通用户 POST body 中 action=start 应被拒绝。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", False, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            json={"action": "start"},
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权执行 ALAS 运行类操作")
+        self.assertEqual(captured, [])
+
+    def test_proxy_denies_form_body_edit_method_when_can_edit_false(self):
+        """can_edit=False 时普通用户 form body 中 method=settings.save 应被拒绝。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, False)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            data={"method": "settings.save"},
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权修改 ALAS 绑定配置设置")
+        self.assertEqual(captured, [])
+
+    def test_proxy_allows_admin_json_body_run_and_edit(self):
+        """管理员 POST body 中运行与编辑命令应允许透传。"""
+        session = self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state",
+            json={"config": "其它", "action": "start", "method": "settings.save"},
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(captured[0]["data"], b'{"config":"\xe5\x85\xb6\xe5\xae\x83","action":"start","method":"settings.save"}')
+
+    def test_proxy_denies_query_management_route(self):
+        """普通用户 query route=admin 管理操作应被拒绝。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        res = self.client.get("/alas/embed/proxy/api/state?config=挂机-云&route=admin")
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
+        self.assertEqual(captured, [])
+
+    def test_proxy_denies_body_management_event(self):
+        """普通用户 body event=alas.config_list 管理操作应被拒绝。"""
+        session = self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "挂机-云", True, True)
+        captured = self.install_fake_upstream(body=b"should not reach")
+
+        self.client.cookies.set("wsid", session["sid"], domain="testserver.local")
+        res = self.client.post(
+            "/alas/embed/proxy/api/state?config=挂机-云",
+            json={"event": "alas.config_list"},
+            headers={"X-CSRF-Token": session["csrf_token"]},
+        )
+
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
+        self.assertEqual(captured, [])
 
     def test_proxy_disabled_returns_clear_error_and_audit_log(self):
         """ALAS 未启用时代理返回清晰中文文案并写入审计。"""
@@ -871,10 +1023,12 @@ class AlasEmbedRouteTests(unittest.TestCase):
             websocket.send_text('{"config":"挂机-云"}')
             self.assertEqual(websocket.receive_text(), "bound-ok")
             close_message = websocket.receive()
+        logs = self.storage.recent_audit(5)
 
         self.assertEqual(close_message["type"], "websocket.close")
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["sent"], ['{"config":"挂机-云"}'])
+        self.assertFalse(any(log["action"] == "alas_embed_ws" for log in logs))
 
     def test_websocket_denies_other_config_for_bound_user(self):
         """普通用户通过查询参数请求其它配置时 WebSocket 代理拒绝连接。"""

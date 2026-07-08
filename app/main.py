@@ -96,15 +96,19 @@ async def security_middleware(request: Request, call_next):
     except HTTPException as exc:
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     response = await call_next(request)
+    is_alas_proxy = request.url.path.startswith("/alas/embed/proxy")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    if not is_alas_proxy:
+        response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "font-src 'self' data:; img-src 'self' data:; connect-src 'self' ws: wss:; "
-        "media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        "frame-ancestors 'self'" if is_alas_proxy else (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; img-src 'self' data:; connect-src 'self' ws: wss:; "
+            "media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+        ),
     )
     if security.secure_cookie_enabled():
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -166,6 +170,8 @@ def alas_embed_denied_message(reason: str) -> str:
     reason_text = str(reason or "")
     if reason_text in ("missing binding", "missing_binding"):
         return "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置"
+    if reason_text in ("missing request config", "missing_request_config"):
+        return "业务请求必须显式指定绑定的 ALAS 配置"
     if reason_text in ("config mismatch", "config path mismatch"):
         return "无权访问其它 ALAS 配置"
     if reason_text == "management path denied":
@@ -181,6 +187,7 @@ def alas_embed_reason_code(reason: str) -> str:
     """将内部拒绝原因规范化为审计日志代码。"""
     return {
         "missing binding": "missing_binding",
+        "missing request config": "missing_request_config",
         "config mismatch": "config_mismatch",
         "config path mismatch": "config_path_mismatch",
         "management path denied": "management_path_denied",
@@ -632,12 +639,16 @@ async def alas_embed_page(request: Request):
 @app.api_route("/alas/embed/proxy/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
 async def alas_embed_proxy(request: Request, path: str = ""):
     """执行 ALAS HTTP 代理权限检查并转发到 Runtime。"""
+    body = b""
+    parsed_body = None
     if request.method.upper() not in alas_embed.SAFE_METHODS:
         security.verify_csrf(request)
+        body = await request.body()
+        parsed_body = alas_embed.parse_limited_body(body, request.headers.get("content-type", ""))
     user = security.require_user(request)
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
-    decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method)
+    decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method, body=parsed_body)
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
@@ -651,7 +662,7 @@ async def alas_embed_proxy(request: Request, path: str = ""):
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
         raise HTTPException(status_code=502, detail="ALAS Runtime 未配置，请先在后台填写 Runtime URL")
     try:
-        return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision)
+        return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision, body=body)
     except HTTPException as exc:
         if exc.status_code == 502:
             storage.audit(
@@ -696,7 +707,6 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)
         return
-    storage.audit(user["username"], "alas_embed_ws", path or "/")
     await alas_embed.proxy_websocket(websocket, settings.get("base_url") or raw_base_url, path, decision)
 
 
