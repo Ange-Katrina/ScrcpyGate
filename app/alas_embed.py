@@ -28,10 +28,6 @@ CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
 CONFIG_OPTION_KEYS = ("label", "value", "name", "title", "text", "caption", "key", "id")
 RESTRICTED_USER_ENTRY_DENIED_REASON = "restricted user entry denied"
 RESTRICTED_USER_ENTRY_LABELS = (
-    "主页",
-    "首页",
-    "home",
-    "homepage",
     "配置",
     "配置列表",
     "config",
@@ -50,10 +46,12 @@ RESTRICTED_USER_ENTRY_LABELS = (
     "远程控制",
     "remote",
     "remotecontrol",
+    "工具",
+    "tool",
+    "tools",
+    "toolbox",
 )
 RESTRICTED_USER_ENTRY_ROUTE_MARKERS = (
-    "home",
-    "homepage",
     "configlist",
     "admin",
     "manage",
@@ -62,6 +60,7 @@ RESTRICTED_USER_ENTRY_ROUTE_MARKERS = (
     "checkupdate",
     "selfupdate",
     "remotecontrol",
+    "toolbox",
 )
 RESTRICTED_USER_ENTRY_KEYS = (
     "name",
@@ -881,10 +880,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   function textTargetsRestrictedUserEntry(value) {{
     var text = compactText(value);
     var restricted = {{
-      "主页": true,
-      "首页": true,
-      "home": true,
-      "homepage": true,
       "配置": true,
       "配置列表": true,
       "config": true,
@@ -902,7 +897,11 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       "upgrade": true,
       "远程控制": true,
       "remote": true,
-      "remotecontrol": true
+      "remotecontrol": true,
+      "工具": true,
+      "tool": true,
+      "tools": true,
+      "toolbox": true
     }};
     return !!restricted[text];
   }}
@@ -1346,7 +1345,7 @@ def _text_contains_management_command(text: str) -> bool:
 
 def _text_targets_restricted_user_entry(text: str) -> bool:
     lowered_text = str(text or "").lower()
-    plain_markers = ("/home", "/config", "/configs", "/updater", "/remote", "route=home", "route=config")
+    plain_markers = ("/config", "/configs", "/updater", "/remote", "/tool", "route=config", "route=tool")
     return any(marker in lowered_text for marker in plain_markers)
 
 

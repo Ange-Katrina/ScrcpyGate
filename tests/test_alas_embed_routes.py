@@ -684,19 +684,22 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(res.json()["detail"], "无权访问 ALAS 管理入口")
         self.assertEqual(captured, [])
 
-    def test_proxy_denies_query_home_route(self):
-        """普通用户 query route=home 原首页入口应被拒绝。"""
+    def test_proxy_allows_query_home_route(self):
+        """普通用户 query route=home 原首页入口应允许通过。"""
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_upstream(body=b"should not reach")
+        captured = self.install_fake_upstream(headers={"Content-Type": "application/json"}, body=b'{"ok": true}')
 
         res = self.client.get("/alas/embed/proxy/api/state?config=挂机-云&route=home")
 
-        self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.json()["detail"], "无权访问 ALAS 受限入口")
-        self.assertEqual(captured, [])
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+        self.assertEqual(
+            captured[0]["url"],
+            "http://alas.test:22267/api/state?config=%E6%8C%82%E6%9C%BA-%E4%BA%91&route=home",
+        )
 
     def test_proxy_denies_query_management_route_with_friendly_html(self):
         self.login("alice", "password123456", "user")
