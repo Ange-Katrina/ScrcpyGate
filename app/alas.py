@@ -11,10 +11,14 @@ API_PREFIX = "/api/gyre"
 
 def _settings(include_token: bool = False) -> dict:
     data = storage.get_settings()
+    default_config = data.get("alas_current_config") or "alas"
     result = {
         "enabled": data.get("alas_enabled", "false").lower() in ("1", "true", "yes", "on"),
         "base_url": (data.get("alas_base_url") or "http://127.0.0.1:22267").rstrip("/"),
-        "current_config": data.get("alas_current_config") or "alas",
+        "default_config": default_config,
+        # Backward-compatible alias. The value is now treated as the admin/default
+        # config, not a single global runtime owner.
+        "current_config": default_config,
         "token_set": bool(data.get("alas_token")),
     }
     if include_token:
@@ -32,8 +36,9 @@ def save_settings(payload: dict) -> None:
     if payload.get("base_url") is not None:
         raw = str(payload.get("base_url") or "").strip().rstrip("/") or "http://127.0.0.1:22267"
         storage.set_setting("alas_base_url", resolve_base_url(raw))
-    if payload.get("current_config") is not None:
-        config = sanitize_config_name(payload.get("current_config"))
+    raw_default_config = payload.get("default_config", payload.get("current_config"))
+    if raw_default_config is not None:
+        config = sanitize_config_name(raw_default_config)
         storage.set_setting("alas_current_config", config)
     if payload.get("clear_token"):
         storage.set_setting("alas_token", "")
