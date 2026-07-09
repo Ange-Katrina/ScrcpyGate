@@ -560,17 +560,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
 
-    def test_filter_user_html_injects_request_patch_and_dom_blocker(self):
+    def test_filter_user_html_injects_request_patch_and_click_blocker(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")
 
         self.assertIn("data-scrcpygate-alas-bind", result)
         self.assertIn("patchUrl", result)
         self.assertIn("configKeys", result)
         self.assertIn("blocksSensitiveEvent", result)
-        self.assertIn("hideSensitiveNavigation", result)
-        self.assertIn("textLooksLikeOtherConfig", result)
         self.assertIn("maskSensitiveText", result)
         self.assertIn("closestActionable", result)
+        self.assertNotIn("hideSensitiveNavigation", result)
+        self.assertNotIn("textLooksLikeOtherConfig", result)
         self.assertNotIn("filterBoundConfigRail", result)
         self.assertNotIn("data-scrcpygate-filtered-config", result)
         self.assertNotIn("data-scrcpygate-hidden-config", result)

@@ -905,13 +905,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     }};
     return !!restricted[text];
   }}
-  function textLooksLikeOtherConfig(value) {{
-    var text = compactText(value);
-    var bound = compactText(boundConfig);
-    if (!text || text === bound) return false;
-    if (text === "alas") return true;
-    return /^[0-9]{{4,32}}$/.test(text);
-  }}
   function shallowElementText(element) {{
     if (!element || !element.childNodes) return "";
     var parts = [];
@@ -991,24 +984,7 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     if (!item || !isCompactActionable(item)) return false;
     var signal = collectElementSignal(item);
     return textTargetsAlasSettings(signal) ||
-      textTargetsRestrictedUserEntry(signal) ||
-      textLooksLikeOtherConfig(signal);
-  }}
-  function hideSensitiveNavigation() {{
-    var nodes = document.querySelectorAll(actionableSelector);
-    for (var i = 0; i < nodes.length; i += 1) {{
-      var item = nodes[i];
-      if (!item || !isCompactActionable(item)) continue;
-      var signal = collectElementSignal(item);
-      var shouldHide = textTargetsAlasSettings(signal) ||
-        textTargetsRestrictedUserEntry(signal) ||
-        textLooksLikeOtherConfig(signal);
-      if (shouldHide) {{
-        item.style.setProperty("display", "none", "important");
-        item.style.setProperty("pointer-events", "none", "important");
-        item.setAttribute("aria-hidden", "true");
-      }}
-    }}
+      textTargetsRestrictedUserEntry(signal);
   }}
   document.addEventListener("click", function(event) {{
     if (!blocksSensitiveEvent(event)) return;
@@ -1022,7 +998,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   }}, true);
   function runScrcpyGateFilters() {{
     maskSensitiveText();
-    hideSensitiveNavigation();
   }}
   runScrcpyGateFilters();
   window.setInterval(runScrcpyGateFilters, 1000);
