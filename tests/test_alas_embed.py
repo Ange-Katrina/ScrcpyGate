@@ -643,6 +643,21 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             [{"label": "主页", "value": "home"}, {"label": "出击", "value": "Campaign"}],
         )
 
+    def test_filter_user_json_payload_keeps_restricted_words_in_locale_dict(self):
+        payload = {
+            "locale": {
+                "home": "主页",
+                "config": "配置",
+                "manage": "管理",
+                "tools": "工具",
+            },
+            "ok": True,
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result, payload)
+
     def test_filter_user_json_payload_removes_pywebio_alas_settings_items(self):
         payload = {
             "command": "output",
@@ -808,6 +823,26 @@ class AlasEmbedPolicyTests(unittest.TestCase):
                 "spec": {"items": [{"label": "主页", "value": "home"}, {"label": "出击", "value": "Campaign"}]},
             },
         )
+
+    def test_filter_user_websocket_downstream_keeps_locale_dict_with_config_label(self):
+        message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "locale": {
+                        "home": "主页",
+                        "config": "配置",
+                        "manage": "管理",
+                        "tools": "工具",
+                    }
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertEqual(json.loads(result), json.loads(message))
 
     def test_filter_user_websocket_downstream_keeps_pywebio_alas_scope_output(self):
         message = json.dumps(

@@ -559,6 +559,13 @@ def _json_item_targets_restricted_user_entry(value) -> bool:
     )
 
 
+def _downstream_config_value_is_ui_label(value) -> bool:
+    """Return True when a downstream config-like value is page text, not a config name."""
+    if isinstance(value, str):
+        return _is_restricted_user_entry_label(value)
+    return False
+
+
 def _json_item_targets_alas_settings(value) -> bool:
     """Return True for downstream ALAS menu/page payloads that expose ALAS settings."""
     if not isinstance(value, dict):
@@ -1420,7 +1427,7 @@ def _looks_like_config_choice_text(value: object, config_name: str) -> bool:
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
-        if _json_item_targets_restricted_user_entry(value) or _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
+        if _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
             return {}
         filtered = {}
         for key, item in value.items():
@@ -1476,7 +1483,11 @@ def filter_user_json_payload(value, config_name: str):
 def _message_switches_downstream_config(value, config_name: str) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in ("config", "config_name") and _config_value_mismatches(item, config_name):
+            if (
+                str(key).lower() in ("config", "config_name")
+                and not _downstream_config_value_is_ui_label(item)
+                and _config_value_mismatches(item, config_name)
+            ):
                 return True
             if isinstance(item, (dict, list, tuple)) and _message_switches_downstream_config(item, config_name):
                 return True
