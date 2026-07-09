@@ -11,7 +11,7 @@
       color-scheme: dark;
       --bg:#0c0f14; --surface:#171b24; --panel:#202635; --panel-soft:#252b3a;
       --line:#394254; --text:#f3f6fb; --muted:#9aa6ba; --primary:#2f7df6;
-      --teal:#23b7a8; --ok:#28c982; --warn:#f0b84b; --danger:#ff6b6b; --dock:74px;
+      --teal:#23b7a8; --ok:#28c982; --warn:#f0b84b; --danger:#ff6b6b; --dock:68px;
     }
     * { box-sizing:border-box; }
     html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overflow:hidden; }
@@ -83,11 +83,17 @@
     .account-grid label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
     .account-grid input { width:100%; min-height:38px; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; padding:7px 9px; outline:none; }
     .account-grid input:focus { border-color:var(--primary); }
-    .dock { position:absolute; left:0; right:0; bottom:0; z-index:4; min-height:var(--dock); padding:10px 14px calc(10px + env(safe-area-inset-bottom)); display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(12,15,20,.95); border-top:1px solid var(--line); backdrop-filter:blur(12px); }
-    .dock .btn { min-width:70px; height:44px; padding:0 12px; }
+    .dock { position:absolute; left:50%; bottom:10px; z-index:4; transform:translateX(-50%); min-height:52px; padding:6px 10px calc(6px + env(safe-area-inset-bottom)); display:flex; justify-content:center; align-items:center; gap:8px; background:rgba(17,23,34,.84); border:1px solid rgba(57,66,84,.72); border-radius:999px; box-shadow:0 18px 44px rgba(0,0,0,.34); backdrop-filter:blur(14px); }
+    .nav-btn { width:58px; height:42px; border:0; border-radius:14px; background:transparent; color:var(--muted); display:grid; grid-template-rows:18px 14px; place-items:center; gap:2px; padding:4px 0; font-weight:750; }
+    .nav-btn:hover, .nav-btn:focus-visible { color:var(--text); background:rgba(255,255,255,.08); outline:none; }
+    .nav-icon { display:block; color:currentColor; }
+    .nav-back { width:0; height:0; border-top:7px solid transparent; border-bottom:7px solid transparent; border-right:11px solid currentColor; }
+    .nav-home { width:15px; height:15px; border:2px solid currentColor; border-radius:50%; }
+    .nav-recent { width:15px; height:15px; border:2px solid currentColor; border-radius:4px; }
+    .nav-label { font-size:11px; line-height:1; }
     .sidebar-backdrop { display:none; }
     @media (max-width: 900px) {
-      :root { --dock:68px; }
+      :root { --dock:64px; }
       .app { grid-template-columns:1fr; }
       .sidebar { position:absolute; z-index:10; left:10px; top:10px; width:min(380px, calc(100vw - 20px)); max-height:calc(100vh - var(--dock) - 26px); border:1px solid var(--line); border-radius:8px; transform:translateY(calc(-100% - 24px)); transition:transform .18s ease; box-shadow:0 24px 60px rgba(0,0,0,.48); }
       .sidebar.open { transform:translateY(0); }
@@ -98,8 +104,8 @@
       .top-status { justify-content:flex-start; margin-top:8px; }
       .stage { padding:6px 6px calc(var(--dock) + 8px + env(safe-area-inset-bottom)); }
       .empty { inset:6px 6px calc(var(--dock) + 8px + env(safe-area-inset-bottom)); }
-      .dock { justify-content:center; overflow:hidden; padding-left:8px; padding-right:8px; }
-      .dock .btn { flex:0 0 auto; min-width:72px; height:42px; }
+      .dock { bottom:8px; max-width:calc(100vw - 18px); overflow:hidden; padding-left:8px; padding-right:8px; }
+      .nav-btn { width:54px; height:40px; }
       .quality-grid { grid-template-columns:1fr; }
       .quality-grid .wide { grid-column:1; }
     }
@@ -212,10 +218,16 @@
     <div id="stage" class="stage">
       <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
       <div id="empty" class="empty">选择设备后开始投屏</div>
-      <nav class="dock">
-        <button id="backBtn" class="btn" type="button">返回</button>
-        <button id="homeBtn" class="btn" type="button">主页</button>
-        <button id="recentBtn" class="btn" type="button">菜单</button>
+      <nav class="dock" aria-label="安卓导航">
+        <button id="backBtn" class="nav-btn" type="button" title="返回" aria-label="返回">
+          <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">返回</span>
+        </button>
+        <button id="homeBtn" class="nav-btn" type="button" title="主页" aria-label="主页">
+          <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">主页</span>
+        </button>
+        <button id="recentBtn" class="nav-btn" type="button" title="菜单" aria-label="菜单">
+          <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">菜单</span>
+        </button>
       </nav>
     </div>
   </main>
@@ -281,17 +293,29 @@ function mergeSessions(devices, sessions){
 function socketLive(ws){
   return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
 }
+const BUILTIN_PROFILE_LABELS = {smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'};
+const ADB_STATE_LABELS = {online:'在线', offline:'离线', unauthorized:'未授权', reconnecting:'重连中', unknown:'未知'};
+const STREAM_HEALTH_LABELS = {healthy:'正常', idle:'空闲', starting:'启动中', config:'等待配置', invalid_h264:'视频异常', adb_failed:'ADB 失败', failed:'失败', stopped:'已停止', unknown:'未知'};
+const ALAS_STATUS_LABELS = {running:'运行中', stopped:'已停止', error:'异常', unknown:'未知'};
+function labelFrom(map, value, fallback){
+  const key = String(value || '').trim();
+  return map[key] || fallback || key || '未知';
+}
+function adbStateLabel(value){ return labelFrom(ADB_STATE_LABELS, value, '未知'); }
+function streamModeLabel(mode){ return ({raw:'原始流 raw', protocol:'协议流 protocol', legacy:'诊断 legacy'}[mode]) || mode; }
+function streamModeShortLabel(mode){ return ({raw:'原始流', protocol:'协议流', legacy:'诊断流', none:'无'}[mode]) || mode || '未知'; }
+function streamHealthLabel(value){ return labelFrom(STREAM_HEALTH_LABELS, value, '未知'); }
+function alasStatusLabel(value){ return labelFrom(ALAS_STATUS_LABELS, value, '未知'); }
 function qualitySummary(){
   const q = qualityPayload();
   const size = q.max_size > 0 ? q.max_size : '原始';
   const fps = q.max_fps > 0 ? q.max_fps : '不限';
-  return `输出 ${size} / ${Math.round(q.video_bit_rate / 100000) / 10}Mbps / ${fps}fps / ${q.scrcpy_stream_mode || 'raw'}`;
+  return `输出 ${size} / ${Math.round(q.video_bit_rate / 100000) / 10}Mbps / ${fps}fps / ${streamModeShortLabel(q.scrcpy_stream_mode || 'raw')}`;
 }
 function enabledStreamModes(){
   const modes = state.videoPrefs && state.videoPrefs.enabled_stream_modes;
   return Array.isArray(modes) && modes.length ? modes : ['raw'];
 }
-function streamModeLabel(mode){ return mode === 'legacy' ? 'legacy 诊断' : mode; }
 function renderQualityStreamMode(selected){
   const select = $('qualityStreamMode');
   if (!select) return;
@@ -334,7 +358,7 @@ function qualityProfileOrder(){
 }
 function qualityProfileLabel(profile){
   const labels = (state.videoPrefs && state.videoPrefs.profile_labels) || {};
-  return labels[profile] || ({smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'}[profile]) || profile;
+  return BUILTIN_PROFILE_LABELS[profile] || labels[profile] || profile;
 }
 function setQualityStatus(text){
   const el = $('qualityStatus');
@@ -382,12 +406,12 @@ function renderDevices(){
     const btn=document.createElement('button'); btn.className='device-card' + (active?' active':''); btn.type='button'; btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
     const title=document.createElement('div'); title.className='device-title';
     const name=document.createElement('strong'); name.textContent=deviceLabel(device);
-    const status=chip(mirrorVisible ? '投屏中' : (device.enabled ? (adbState === 'online' ? '在线' : adbState) : '禁用'), mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
+    const status=chip(mirrorVisible ? '投屏中' : (device.enabled ? adbStateLabel(adbState) : '禁用'), mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
     title.append(name, status);
     const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
     const meta=document.createElement('div'); meta.className='chips';
     meta.appendChild(chip(device.can_control ? '可控制' : '只观看', device.can_control ? 'ok' : 'warn'));
-    meta.appendChild(chip(`ADB: ${adbState}`, adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'));
+    meta.appendChild(chip(`ADB: ${adbStateLabel(adbState)}`, adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'));
     if (session && session.clients) meta.appendChild(chip(`${session.clients} 个观看端`));
     btn.append(title, metaText, meta);
     btn.onclick=()=>selectDevice(id);
@@ -409,9 +433,9 @@ function renderStatus(){
   if (session && session.control_lock) items.push(chip(`控制: ${session.control_lock.username}`, session.control_lock.username === (state.user && state.user.username) ? 'ok' : 'warn'));
   else items.push(chip('控制空闲'));
   if (session && session.video) items.push(chip(`流: ${session.video.max_size || '原始'} / ${session.video.max_fps || '不限'}fps`));
-  if (session && session.stream_mode) items.push(chip(`流模式: ${session.stream_mode}/${session.stream_health || 'unknown'}`, session.stream_health === 'healthy' ? 'ok' : 'warn'));
-  if (device && device.adb_state) items.push(chip(`ADB: ${device.adb_state}`, device.adb_state === 'online' ? 'ok' : 'warn'));
-  if (state.alas) items.push(chip(`ALAS: ${state.alas.status || 'unknown'}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
+  if (session && session.stream_mode) items.push(chip(`流模式: ${streamModeShortLabel(session.stream_mode)}/${streamHealthLabel(session.stream_health)}`, session.stream_health === 'healthy' ? 'ok' : 'warn'));
+  if (device && device.adb_state) items.push(chip(`ADB: ${adbStateLabel(device.adb_state)}`, device.adb_state === 'online' ? 'ok' : 'warn'));
+  if (state.alas) items.push(chip(`ALAS: ${alasStatusLabel(state.alas.status)}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
   items.forEach(item=>topStatus.appendChild(item));
   $('startBtn').textContent = !device ? '开始投屏' : state.starting ? '启动中...' : running ? (state.videoConnected ? '刷新画面' : '连接画面') : '开始投屏';
   $('startBtn').disabled = state.starting || state.qualityApplying || !device;
@@ -432,7 +456,7 @@ function renderAlasPanel(){
   const box=$('alasPanelStatus'); if(!box) return; box.textContent='';
   const a=state.alas || {};
   box.appendChild(chip(a.config ? `配置 ${a.config}` : '未绑定', a.config ? 'ok' : 'warn'));
-  box.appendChild(chip(a.status || 'unknown', a.status === 'running' ? 'ok' : a.status === 'error' ? 'warn' : ''));
+  box.appendChild(chip(alasStatusLabel(a.status), a.status === 'running' ? 'ok' : a.status === 'error' ? 'warn' : ''));
   box.appendChild(chip(a.can_run ? '可运行' : '不可运行', a.can_run ? 'ok' : 'warn'));
   if(a.error) box.appendChild(chip(a.error, 'danger'));
   $('alasToggleRun').textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';

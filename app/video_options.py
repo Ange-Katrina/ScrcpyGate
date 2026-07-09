@@ -33,10 +33,10 @@ VIDEO_PROFILES = {
 }
 
 PROFILE_LABELS = {
-    "smooth": "Smooth",
-    "balanced": "Stable",
-    "sharp": "Sharp",
-    "low_latency": "Low latency",
+    "smooth": "流畅",
+    "balanced": "稳定",
+    "sharp": "高清",
+    "low_latency": "低延迟",
 }
 
 BANDWIDTH_RECOMMENDATIONS = {
