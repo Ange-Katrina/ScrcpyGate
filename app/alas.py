@@ -11,14 +11,13 @@ API_PREFIX = "/api/gyre"
 
 def _settings(include_token: bool = False) -> dict:
     data = storage.get_settings()
-    default_config = data.get("alas_current_config") or "alas"
+    legacy_config = data.get("alas_current_config") or "alas"
     result = {
         "enabled": data.get("alas_enabled", "false").lower() in ("1", "true", "yes", "on"),
         "base_url": (data.get("alas_base_url") or "http://127.0.0.1:22267").rstrip("/"),
-        "default_config": default_config,
-        # Backward-compatible alias. The value is now treated as the admin/default
-        # config, not a single global runtime owner.
-        "current_config": default_config,
+        # Legacy fallback for old deployments that only had one ALAS config.
+        # New UI paths use explicit per-user bindings instead.
+        "current_config": legacy_config,
         "token_set": bool(data.get("alas_token")),
     }
     if include_token:
@@ -27,7 +26,13 @@ def _settings(include_token: bool = False) -> dict:
 
 
 def public_settings() -> dict:
-    return _settings(False)
+    result = _settings(False)
+    result.pop("current_config", None)
+    return result
+
+
+def legacy_config_name() -> str:
+    return _settings(False).get("current_config") or "alas"
 
 
 def save_settings(payload: dict) -> None:

@@ -259,10 +259,9 @@ def alas_binding_for_user(user: dict, allow_admin_global: bool = False) -> dict 
     if binding and binding.get("config_name"):
         return binding
     if allow_admin_global and user.get("role") == "admin":
-        settings = alas.public_settings()
         return {
             "username": user["username"],
-            "config_name": settings.get("current_config") or "alas",
+            "config_name": alas.legacy_config_name(),
             "can_run": True,
             "can_edit": True,
             "updated_at": 0,
@@ -294,6 +293,67 @@ def public_alas_status(result: dict, binding: dict) -> dict:
     cleaned["can_run"] = bool(binding.get("can_run"))
     cleaned["can_edit"] = bool(binding.get("can_edit"))
     return cleaned
+
+
+def bound_alas_config_names(bindings: list[dict] | None = None) -> list[str]:
+    """Return unique ALAS config names that are explicitly bound to users."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for binding in bindings if bindings is not None else storage.list_user_alas_configs():
+        raw = str(binding.get("config_name") or "").strip()
+        if not raw:
+            continue
+        try:
+            name = alas.sanitize_config_name(raw)
+        except ValueError:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def admin_alas_status_for_config(config_name: str | None = None, bindings: list[dict] | None = None) -> dict:
+    settings = alas.public_settings()
+    configs = bound_alas_config_names(bindings)
+    selected = str(config_name or "").strip()
+    if selected:
+        try:
+            selected = alas.sanitize_config_name(selected)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+    elif configs:
+        selected = configs[0]
+    if not selected:
+        status = "disabled" if not settings.get("enabled") else "unknown"
+        return {
+            "ok": True,
+            "settings": settings,
+            "enabled": bool(settings.get("enabled")),
+            "token_set": bool(settings.get("token_set")),
+            "configured": bool(settings.get("enabled") and settings.get("token_set")),
+            "status": status,
+            "task": "",
+            "config": "",
+            "configs": [],
+            "error": "" if settings.get("enabled") else "ALAS control is disabled",
+        }
+    result = alas.status_for_config(selected, include_configs=False)
+    result["enabled"] = bool(settings.get("enabled"))
+    result["token_set"] = bool(settings.get("token_set"))
+    return result
+
+
+def admin_alas_payload(config_name: str | None = None) -> dict:
+    bindings = storage.list_user_alas_configs()
+    return {
+        "settings": alas.public_settings(),
+        "status": admin_alas_status_for_config(config_name, bindings),
+        "bindings": bindings,
+        "bound_configs": bound_alas_config_names(bindings),
+    }
 
 
 def resolve_device_or_404(device_ref: str) -> str:
@@ -787,12 +847,13 @@ async def admin_overview(request: Request):
     devices = storage.list_all_devices()
     sessions = await manager.snapshot()
     statuses = adb_monitor.snapshot()
+    alas_bindings = storage.list_user_alas_configs()
     return {
         "user": user_payload(user),
         "devices": devices_payload(devices, sessions, statuses),
         "sessions": sessions,
         "users": storage.list_users(),
-        "alas": alas.status(include_configs=True),
+        "alas": admin_alas_status_for_config(bindings=alas_bindings),
     }
 
 
@@ -1014,7 +1075,8 @@ async def admin_save_video_settings(request: Request):
 @app.get("/api/admin/alas")
 async def admin_alas(request: Request):
     security.require_admin(request)
-    return {"settings": alas.public_settings(), "status": alas.status(include_configs=True), "bindings": storage.list_user_alas_configs()}
+    config_name = request.query_params.get("config")
+    return admin_alas_payload(config_name)
 
 
 @app.put("/api/admin/alas")
@@ -1027,14 +1089,22 @@ async def admin_save_alas(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     storage.audit(admin["username"], "alas_settings", "updated")
-    return {"ok": True, "settings": alas.public_settings(), "status": alas.status(include_configs=True), "bindings": storage.list_user_alas_configs()}
+    return {"ok": True, **admin_alas_payload()}
 
 
 @app.post("/api/admin/alas/toggle")
 async def admin_toggle_alas(request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
-    result = alas.control("toggle")
+    payload = await parse_body(request)
+    config_name = str(payload.get("config_name") or payload.get("config") or "").strip()
+    if not config_name:
+        raise HTTPException(status_code=400, detail="ALAS config name is required")
+    try:
+        config_name = alas.sanitize_config_name(config_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+    result = alas.control_for_config("toggle", config_name)
     storage.audit(admin["username"], "alas_admin_toggle", json.dumps(result, ensure_ascii=False)[:400])
     return result
 
@@ -1042,7 +1112,10 @@ async def admin_toggle_alas(request: Request):
 @app.get("/api/admin/alas/config")
 async def admin_alas_config(request: Request):
     security.require_admin(request)
-    return alas.get_config()
+    config_name = str(request.query_params.get("config") or "").strip()
+    if not config_name:
+        raise HTTPException(status_code=400, detail="ALAS config name is required")
+    return alas.get_config(config_name)
 
 
 @app.put("/api/admin/alas/config")
@@ -1051,7 +1124,9 @@ async def admin_save_alas_config(request: Request):
     admin = security.require_admin(request)
     payload = await parse_body(request)
     source = str(payload.get("source", ""))
-    target = str(payload.get("target", ""))
+    target = str(payload.get("target") or source)
+    if not source.strip() or not target.strip():
+        raise HTTPException(status_code=400, detail="ALAS config name is required")
     data = payload.get("data")
     if isinstance(data, str):
         try:
@@ -1060,7 +1135,7 @@ async def admin_save_alas_config(request: Request):
             raise HTTPException(status_code=400, detail="config must be valid JSON") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="config data must be a JSON object")
-    result = alas.save_config(source, target, data)
+    result = alas.save_config(source, target, data, update_current=False)
     storage.audit(admin["username"], "alas_config_save", target or source)
     return result
 
