@@ -735,7 +735,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   function compactText(value) {{
     return String(value || "").replace(/[^0-9a-zA-Z\\u4e00-\\u9fff]+/g, "").toLowerCase();
   }}
-  var boundConfigCompact = compactText(boundConfig);
   var actionableSelector = [
     "a", "button", "li", "[onclick]", "[tabindex]",
     "[role='button']", "[role='menuitem']", "[role='option']", "[role='radio']", "[role='tab']", "[role='treeitem']",
@@ -794,57 +793,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     if (!rect || rect.width <= 0 || rect.height <= 0) return true;
     return rect.width <= Math.max(280, window.innerWidth * 0.45) && rect.height <= 140;
   }}
-  function visibleElementText(element) {{
-    return String(element && (element.innerText || element.textContent || "") || "").replace(/\\s+/g, " ").trim();
-  }}
-  function isBoundConfigText(text) {{
-    var raw = String(text || "").trim();
-    return raw === boundConfig || compactText(raw) === boundConfigCompact;
-  }}
-  function isCommonUiText(text) {{
-    var compact = compactText(text);
-    return !compact || {{
-      home: true, main: true, menu: true, task: true, tasks: true, dashboard: true, overview: true,
-      status: true, start: true, stop: true, restart: true, refresh: true, reload: true, save: true,
-      cancel: true, back: true, settings: true, config: true, logs: true, help: true,
-      主页: true, 首页: true, 菜单: true, 任务: true, 总览: true, 状态: true, 启动: true,
-      停止: true, 重启: true, 刷新: true, 保存: true, 取消: true, 返回: true, 设置: true, 配置: true
-    }}[compact] === true;
-  }}
-  function isLikelyConfigRailCandidate(element) {{
-    if (!element || !element.getBoundingClientRect) return false;
-    if (element.closest && element.closest("input,textarea,select,[contenteditable='true']")) return false;
-    var rect = element.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-    if (rect.left > 220 || rect.width > 220 || rect.height > 110) return false;
-    var text = visibleElementText(element);
-    if (!text || isBoundConfigText(text) || isCommonUiText(text)) return false;
-    if (text.length > 80 || text.split(/\\s+/).length > 3) return false;
-    return true;
-  }}
-  function filterBoundConfigRail() {{
-    if (!document.querySelectorAll || !boundConfig) return;
-    var nodes = document.querySelectorAll(actionableSelector);
-    var candidates = [];
-    var hasBoundConfig = false;
-    for (var i = 0; i < nodes.length; i += 1) {{
-      var node = nodes[i];
-      if (!isLikelyConfigRailCandidate(node) && !isBoundConfigText(visibleElementText(node))) continue;
-      var rect = node.getBoundingClientRect && node.getBoundingClientRect();
-      if (rect && rect.left <= 220 && rect.width <= 220 && rect.height <= 110 && isBoundConfigText(visibleElementText(node))) {{
-        hasBoundConfig = true;
-      }}
-      candidates.push(node);
-    }}
-    if (!hasBoundConfig) return;
-    for (var j = 0; j < candidates.length; j += 1) {{
-      var item = candidates[j];
-      if (!isLikelyConfigRailCandidate(item)) continue;
-      item.setAttribute("data-scrcpygate-filtered-config", "1");
-      item.style.setProperty("display", "none", "important");
-      item.setAttribute("aria-hidden", "true");
-    }}
-  }}
   function maskTextNode(node) {{
     if (!node || !node.nodeValue) return;
     if (!adbEndpointPattern.test(node.nodeValue)) {{
@@ -889,7 +837,6 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   }}, true);
   function runScrcpyGateFilters() {{
     maskSensitiveText();
-    filterBoundConfigRail();
   }}
   runScrcpyGateFilters();
   window.setInterval(runScrcpyGateFilters, 1000);
@@ -1295,8 +1242,6 @@ def _looks_like_config_choice_text(value: object, config_name: str) -> bool:
     if compact == "alas":
         return True
     if compact.isdigit() and 4 <= len(compact) <= 32:
-        return True
-    if re.fullmatch(r"[a-z0-9_.:-]{3,64}", raw.lower() or "") and any(char.isdigit() for char in raw):
         return True
     return False
 

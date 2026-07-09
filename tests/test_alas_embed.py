@@ -548,7 +548,7 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
 
-    def test_filter_user_html_injects_request_patch_with_narrow_dom_filtering(self):
+    def test_filter_user_html_injects_request_patch_without_config_dom_hiding(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")
 
         self.assertIn("data-scrcpygate-alas-bind", result)
@@ -557,9 +557,9 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("blocksSensitiveEvent", result)
         self.assertIn("maskSensitiveText", result)
         self.assertIn("closestActionable", result)
-        self.assertIn("filterBoundConfigRail", result)
-        self.assertIn("data-scrcpygate-filtered-config", result)
         self.assertNotIn('text === "alas"', result)
+        self.assertNotIn("filterBoundConfigRail", result)
+        self.assertNotIn("data-scrcpygate-filtered-config", result)
         self.assertNotIn("data-scrcpygate-hidden-config", result)
         self.assertNotIn("data-scrcpygate-hidden-alas-settings", result)
         self.assertNotIn("data-scrcpygate-hidden-sensitive-device", result)
@@ -672,6 +672,30 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         result = filter_user_json_payload(payload, "3256475495")
 
         self.assertEqual(result["spec"]["items"], ["3256475495", "Restart"])
+
+    def test_filter_user_json_payload_keeps_short_numeric_dropdown_items(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "items": [
+                    {"label": "3256475495", "value": "3256475495"},
+                    {"label": "1-1", "value": "1-1"},
+                    {"label": "普通", "value": "normal"},
+                    {"label": "13361966861", "value": "13361966861"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "3256475495")
+
+        self.assertEqual(
+            result["spec"]["items"],
+            [
+                {"label": "3256475495", "value": "3256475495"},
+                {"label": "1-1", "value": "1-1"},
+                {"label": "普通", "value": "normal"},
+            ],
+        )
 
     def test_filter_user_json_payload_removes_update_notice_items(self):
         payload = {
