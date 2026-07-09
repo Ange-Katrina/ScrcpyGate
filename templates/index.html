@@ -75,6 +75,8 @@
     .quality-grid input, .quality-grid select { width:100%; min-height:38px; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:7px; padding:7px 9px; outline:none; }
     .quality-grid .wide { grid-column:1 / -1; }
     .quality-note { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
+    .quality-status { margin-top:8px; min-height:18px; color:#d9fffb; font-size:12px; line-height:1.5; }
+    .quality-status:empty { display:none; }
     .alas-panel .actions { display:flex; flex-wrap:wrap; gap:8px; }
     .alas-panel .actions .btn { min-height:36px; }
     .account-grid { display:grid; gap:10px; }
@@ -156,8 +158,9 @@
             </select>
           </label>
         </div>
+        <div id="qualityStatus" class="quality-status"></div>
       </div>
-      <p class="quality-note">点击预设会立即保存并应用到当前投屏；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+      <p class="quality-note">投屏中点击预设会自动重启投屏流；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
     </div>
     <div id="alasTools" class="tools alas-panel">
       <div class="tools-title">ALAS</div>
@@ -224,7 +227,7 @@ const state = {
   user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0,
-  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced'
+  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false
 };
 const $ = (id) => document.getElementById(id);
 function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
@@ -333,6 +336,10 @@ function qualityProfileLabel(profile){
   const labels = (state.videoPrefs && state.videoPrefs.profile_labels) || {};
   return labels[profile] || ({smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'}[profile]) || profile;
 }
+function setQualityStatus(text){
+  const el = $('qualityStatus');
+  if (el) el.textContent = text || '';
+}
 function ensureQualityButtons(){
   const grid = $('qualityProfiles');
   if (!grid) return;
@@ -350,9 +357,16 @@ function ensureQualityButtons(){
 }
 function renderQualityButtons(){
   ensureQualityButtons();
-  document.querySelectorAll('[data-profile]').forEach(btn=>btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile));
+  document.querySelectorAll('[data-profile]').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile);
+    btn.disabled = !!state.qualityApplying;
+    btn.title = state.qualityApplying ? '画质正在应用，请稍等' : '点击切换投屏画质';
+  });
+  const select = $('qualityStreamMode');
+  if (select) select.disabled = !!state.qualityApplying;
 }
 async function chooseQualityProfile(profile){
+  if (state.qualityApplying) return show('画质正在应用，请稍等');
   state.qualityProfile = profile;
   renderQualityButtons();
   await saveOrApplyQuality();
@@ -382,12 +396,14 @@ function renderDevices(){
 }
 function renderStatus(){
   const device=currentDevice(); const session=selectedSession();
+  const running=!!(session && session.running);
+  const localConnected=!!(state.videoConnected || state.controlConnected || socketLive(state.videoWs) || socketLive(state.controlWs));
   $('selectedTitle').textContent = deviceLabel(device);
   $('selectedMeta').textContent = device ? qualitySummary() : '从设备列表选择一个设备后开始投屏';
   const topStatus=$('topStatus'); topStatus.textContent='';
   const items=[];
   items.push(chip(device ? deviceLabel(device) : '未选择', device ? '' : 'warn'));
-  items.push(chip(session && session.running ? '投屏中' : '未投屏', session && session.running ? 'ok' : 'warn'));
+  items.push(chip(running ? '投屏中' : '未投屏', running ? 'ok' : 'warn'));
   items.push(chip(state.videoConnected ? '视频已连接' : '视频未连接', state.videoConnected ? 'ok' : 'warn'));
   items.push(chip(state.controlConnected ? '控制通道已连接' : '控制通道未连接', state.controlConnected ? 'ok' : 'warn'));
   if (session && session.control_lock) items.push(chip(`控制: ${session.control_lock.username}`, session.control_lock.username === (state.user && state.user.username) ? 'ok' : 'warn'));
@@ -397,13 +413,16 @@ function renderStatus(){
   if (device && device.adb_state) items.push(chip(`ADB: ${device.adb_state}`, device.adb_state === 'online' ? 'ok' : 'warn'));
   if (state.alas) items.push(chip(`ALAS: ${state.alas.status || 'unknown'}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
   items.forEach(item=>topStatus.appendChild(item));
-  $('startBtn').disabled = state.starting;
+  $('startBtn').textContent = !device ? '开始投屏' : state.starting ? '启动中...' : running ? (state.videoConnected ? '刷新画面' : '连接画面') : '开始投屏';
+  $('startBtn').disabled = state.starting || state.qualityApplying || !device;
   $('controlBtn').textContent = state.hasControl ? '释放控制' : '获取控制';
+  $('controlBtn').disabled = state.starting || !device || !device.can_control;
+  $('stopBtn').disabled = state.starting || state.qualityApplying || !device || (!running && !localConnected);
   $('alasBtn').textContent = 'ALAS';
   renderAlasPanel();
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
-  $('empty').textContent = device ? (session && session.running ? '点击开始投屏连接画面' : '点击开始投屏') : '选择设备后开始投屏';
+  $('empty').textContent = device ? (running ? '点击连接画面' : '点击开始投屏') : '选择设备后开始投屏';
   $('empty').style.display = state.videoConnected ? 'none' : 'grid';
   $('phoneVideo').style.objectFit = 'contain';
   layoutVideo();
@@ -465,6 +484,7 @@ async function startMirror(){
   const id=state.selectedDeviceId;
   if (!id) return show('请先选择设备');
   if (state.starting) return show('投屏正在启动，请稍等');
+  if (state.qualityApplying) return show('画质正在应用，请稍等');
   const now = Date.now();
   if (now - state.lastStartAt < 1200) return show('操作过快，请稍等');
   state.lastStartAt = now;
@@ -489,35 +509,50 @@ async function startMirror(){
 async function stopMirror(){
   const id=state.selectedDeviceId;
   if (!id) return show('请先选择设备');
+  if (state.starting) return show('投屏正在启动，请稍等');
   await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
   closeVideo(); state.hasControl=false; await loadAll();
 }
 async function saveOrApplyQuality(){
+  if (state.qualityApplying) return show('画质正在应用，请稍等');
   const id=state.selectedDeviceId;
   const payload = qualityPayload();
-  if (!id) {
-    const saved = await fetchJson('/api/video/preferences', {method:'PUT', body:payload});
-    state.videoPrefs = Object.assign({}, state.videoPrefs || {}, saved);
-    show('画质偏好已保存');
-    render();
-    return;
-  }
-  const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/settings`, {method:'PUT', body:payload});
-  if (result.ok === false) {
-    state.sessions = result.sessions || state.sessions;
-    show(result.detail || result.error || '画质应用失败，投屏未恢复', 5200);
-    render();
-    return;
-  }
-  state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
-  state.sessions = result.sessions || state.sessions;
-  if (result.restarted) {
-    reconnectSockets(id);
-    show('画质已应用，投屏已按新参数重启');
-  } else {
-    show('画质偏好已保存，下次启动投屏生效');
-  }
+  const running = !!(selectedSession() && selectedSession().running);
+  state.qualityApplying = true;
+  setQualityStatus(running ? '正在切换画质，投屏流会短暂重启...' : '正在保存画质偏好...');
   render();
+  try {
+    if (!id) {
+      const saved = await fetchJson('/api/video/preferences', {method:'PUT', body:payload});
+      state.videoPrefs = Object.assign({}, state.videoPrefs || {}, saved);
+      setQualityStatus('');
+      show('画质偏好已保存');
+      return;
+    }
+    const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/settings`, {method:'PUT', body:payload});
+    if (result.ok === false) {
+      state.sessions = result.sessions || state.sessions;
+      setQualityStatus('画质应用失败');
+      show(result.detail || result.error || '画质应用失败，投屏未恢复', 5200);
+      return;
+    }
+    state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
+    state.sessions = result.sessions || state.sessions;
+    if (result.restarted) {
+      reconnectSockets(id);
+      setQualityStatus('画质已应用，投屏流已重启');
+      show('画质已应用，投屏已按新参数重启');
+    } else {
+      setQualityStatus('');
+      show('画质偏好已保存，下次启动投屏生效');
+    }
+  } catch (error) {
+    setQualityStatus('画质应用失败');
+    throw error;
+  } finally {
+    state.qualityApplying = false;
+    render();
+  }
 }
 function closeVideoSocket(){
   state.videoSeq += 1;

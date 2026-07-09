@@ -559,9 +559,6 @@ async def api_mirror_settings(device_id: str, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     sessions = await manager.snapshot()
     running = bool((sessions.get(real_device_id) or {}).get("running"))
-    if running:
-        if user["role"] != "admin" and not storage.lock_owned_by(real_device_id, user["username"]):
-            raise HTTPException(status_code=403, detail="control lock required to restart running mirror")
     storage.set_user_video_preference(user["username"], options)
     if running:
         restart_ok = await manager.start(real_device_id, options, force_restart=True)
@@ -587,8 +584,8 @@ async def api_mirror_stop(device_id: str, request: Request):
     security.verify_csrf(request)
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
-    if user["role"] != "admin" and not storage.lock_owned_by(real_device_id, user["username"]):
-        raise HTTPException(status_code=403, detail="control lock required")
+    if not storage.user_can(user["username"], real_device_id, "view"):
+        raise HTTPException(status_code=403, detail="device denied")
     ok = await manager.stop(real_device_id)
     storage.audit(user["username"], "mirror_stop", real_device_id)
     return {"ok": ok, "sessions": await public_sessions_for_user(user)}
