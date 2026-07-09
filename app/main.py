@@ -185,6 +185,8 @@ def alas_embed_denied_message(reason: str) -> str:
         return "无权访问其它 ALAS 配置"
     if reason_text == "management path denied":
         return "无权访问 ALAS 管理入口"
+    if reason_text == "restricted user entry denied":
+        return "无权访问 ALAS 受限入口"
     if reason_text == "alas settings denied":
         return "无权访问 ALAS 设置页"
     if reason_text == "run permission denied":
@@ -225,6 +227,7 @@ def alas_embed_reason_code(reason: str) -> str:
         "config mismatch": "config_mismatch",
         "config path mismatch": "config_path_mismatch",
         "management path denied": "management_path_denied",
+        "restricted user entry denied": "restricted_user_entry_denied",
         "alas settings denied": "alas_settings_denied",
         "run permission denied": "run_permission_denied",
         "edit permission denied": "edit_permission_denied",

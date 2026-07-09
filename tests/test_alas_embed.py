@@ -456,6 +456,19 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "management path denied")
 
+    def test_user_query_home_route_denied(self):
+        """普通用户不能切到 ALAS 原首页。"""
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"config": "挂机-云", "route": "home"},
+            method="GET",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "restricted user entry denied")
+
     def test_user_body_management_event_denied(self):
         """普通用户正文中的管理事件会被拒绝。"""
         decision = proxy_decision(
@@ -548,16 +561,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("<bad>", result)
         self.assertIn("&lt;bad&gt;", result)
 
-    def test_filter_user_html_injects_request_patch_without_config_dom_hiding(self):
+    def test_filter_user_html_injects_request_patch_and_dom_blocker(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")
 
         self.assertIn("data-scrcpygate-alas-bind", result)
         self.assertIn("patchUrl", result)
         self.assertIn("configKeys", result)
         self.assertIn("blocksSensitiveEvent", result)
+        self.assertIn("hideSensitiveNavigation", result)
+        self.assertIn("textLooksLikeOtherConfig", result)
         self.assertIn("maskSensitiveText", result)
         self.assertIn("closestActionable", result)
-        self.assertNotIn('text === "alas"', result)
         self.assertNotIn("filterBoundConfigRail", result)
         self.assertNotIn("data-scrcpygate-filtered-config", result)
         self.assertNotIn("data-scrcpygate-hidden-config", result)
@@ -611,6 +625,20 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         result = filter_user_json_payload(payload, "挂机-云")
 
         self.assertEqual(result["buttons"], [{"label": "任务设置", "value": "Task"}])
+
+    def test_filter_user_json_payload_removes_restricted_left_navigation(self):
+        payload = {
+            "menus": [
+                {"label": "主页", "value": "home"},
+                {"label": "配置", "value": "config"},
+                {"label": "管理", "value": "Manage"},
+                {"label": "出击", "value": "Campaign"},
+            ]
+        }
+
+        result = filter_user_json_payload(payload, "挂机-云")
+
+        self.assertEqual(result["menus"], [{"label": "出击", "value": "Campaign"}])
 
     def test_filter_user_json_payload_removes_pywebio_alas_settings_items(self):
         payload = {
@@ -752,6 +780,28 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             {"command": "output", "spec": {"items": [{"label": "Restart", "value": "Restart"}]}},
         )
 
+    def test_filter_user_websocket_downstream_filters_restricted_left_navigation(self):
+        message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "主页", "value": "home"},
+                        {"label": "管理", "value": "Manage"},
+                        {"label": "出击", "value": "Campaign"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "挂机-云")
+
+        self.assertEqual(
+            json.loads(result),
+            {"command": "output", "spec": {"items": [{"label": "出击", "value": "Campaign"}]}},
+        )
+
     def test_filter_user_websocket_downstream_keeps_pywebio_alas_scope_output(self):
         message = json.dumps(
             {
@@ -874,6 +924,10 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
         for message in cases:
             with self.subTest(message=message):
                 self.assertFalse(websocket_message_allowed(message, "挂机-云"))
+
+    def test_message_with_home_route_is_denied(self):
+        """普通用户 WebSocket 消息不能切到 ALAS 原首页。"""
+        self.assertFalse(websocket_message_allowed('{"route":"home","config":"挂机-云"}', "挂机-云"))
 
     def test_message_with_alas_settings_task_is_denied(self):
         """普通用户 WebSocket 消息不能切到 ALAS -> ALAS 设置页。"""

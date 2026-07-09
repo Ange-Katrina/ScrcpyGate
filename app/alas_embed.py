@@ -26,6 +26,70 @@ MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topi
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
 CONFIG_OPTION_KEYS = ("label", "value", "name", "title", "text", "caption", "key", "id")
+RESTRICTED_USER_ENTRY_DENIED_REASON = "restricted user entry denied"
+RESTRICTED_USER_ENTRY_LABELS = (
+    "主页",
+    "首页",
+    "home",
+    "homepage",
+    "配置",
+    "配置列表",
+    "config",
+    "configs",
+    "configlist",
+    "管理",
+    "admin",
+    "manage",
+    "management",
+    "更新器",
+    "检查更新",
+    "update",
+    "updater",
+    "checkupdate",
+    "upgrade",
+    "远程控制",
+    "remote",
+    "remotecontrol",
+)
+RESTRICTED_USER_ENTRY_ROUTE_MARKERS = (
+    "home",
+    "homepage",
+    "configlist",
+    "admin",
+    "manage",
+    "management",
+    "updater",
+    "checkupdate",
+    "selfupdate",
+    "remotecontrol",
+)
+RESTRICTED_USER_ENTRY_KEYS = (
+    "name",
+    "label",
+    "title",
+    "text",
+    "caption",
+    "menu",
+    "category",
+    "section",
+    "module",
+    "page",
+    "route",
+    "path",
+    "scope",
+    "tab",
+    "value",
+    "key",
+    "id",
+    "href",
+    "url",
+    "onclick",
+    "data",
+    "command",
+    "action",
+    "event",
+    "method",
+)
 ALAS_SETTINGS_DENIED_REASON = "alas settings denied"
 ALAS_SETTINGS_CONTEXT_KEYS = ("menu", "category", "section", "task", "module", "page", "route", "path", "scope")
 ALAS_SETTINGS_FIELD_KEYS = ("key", "setting", "field", "argument", "option", "name")
@@ -430,6 +494,44 @@ def _is_update_notice_action(value: object) -> bool:
     return compact in {"update", "upgrade", "updater", "checkupdate", "selfupdate"}
 
 
+def _is_restricted_user_entry_label(value: object) -> bool:
+    compact = _compact_text(value)
+    if not compact:
+        return False
+    return compact in {_compact_text(marker) for marker in RESTRICTED_USER_ENTRY_LABELS}
+
+
+def _is_restricted_user_entry_route(value: object) -> bool:
+    compact = _compact_text(value)
+    if not compact:
+        return False
+    if _is_restricted_user_entry_label(value):
+        return True
+    return any(_compact_text(marker) in compact for marker in RESTRICTED_USER_ENTRY_ROUTE_MARKERS)
+
+
+def _message_targets_restricted_user_entry(value) -> bool:
+    """Return True when a request or UI payload targets a user-hidden ALAS entry."""
+    if isinstance(value, dict):
+        lowered = {str(key).lower(): item for key, item in value.items()}
+        if any(
+            key in lowered
+            and (
+                _is_restricted_user_entry_route(lowered[key])
+                if key in RESTRICTED_USER_ENTRY_KEYS
+                else False
+            )
+            for key in lowered
+        ):
+            return True
+        for item in lowered.values():
+            if isinstance(item, (dict, list, tuple)) and _message_targets_restricted_user_entry(item):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_message_targets_restricted_user_entry(item) for item in value)
+    return False
+
+
 def _json_item_targets_update_notice(value) -> bool:
     """Return True for downstream ALAS self-update prompts exposed to bound users."""
     if not isinstance(value, dict):
@@ -443,6 +545,19 @@ def _json_item_targets_update_notice(value) -> bool:
     )
     text_like = any(key in lowered and _is_update_notice_text(lowered[key]) for key in UPDATE_NOTICE_TEXT_KEYS)
     return route_like and text_like
+
+
+def _json_item_targets_restricted_user_entry(value) -> bool:
+    """Return True for downstream menu/page payloads hidden from bound users."""
+    if isinstance(value, str):
+        return _is_restricted_user_entry_label(value)
+    if not isinstance(value, dict):
+        return False
+    lowered = {str(key).lower(): item for key, item in value.items()}
+    return any(
+        key in RESTRICTED_USER_ENTRY_KEYS and _is_restricted_user_entry_route(item)
+        for key, item in lowered.items()
+    )
 
 
 def _json_item_targets_alas_settings(value) -> bool:
@@ -567,12 +682,28 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
             reason="management path denied",
         )
 
+    if _is_restricted_user_entry_route(path) or _message_targets_restricted_user_entry(query or {}):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason=RESTRICTED_USER_ENTRY_DENIED_REASON,
+        )
+
     if body is not None and _body_contains_management(body):
         return ProxyDecision(
             allowed=False,
             status_code=403,
             config_name=config_name,
             reason="management path denied",
+        )
+
+    if body is not None and _message_targets_restricted_user_entry(body):
+        return ProxyDecision(
+            allowed=False,
+            status_code=403,
+            config_name=config_name,
+            reason=RESTRICTED_USER_ENTRY_DENIED_REASON,
         )
 
     if _query_targets_alas_settings(query or {}) or (body is not None and _body_targets_alas_settings(body)):
@@ -747,6 +878,41 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
       text.indexOf("alas設定") !== -1 ||
       (text.indexOf("alas") !== -1 && (text.indexOf("setting") !== -1 || text.indexOf("设置") !== -1));
   }}
+  function textTargetsRestrictedUserEntry(value) {{
+    var text = compactText(value);
+    var restricted = {{
+      "主页": true,
+      "首页": true,
+      "home": true,
+      "homepage": true,
+      "配置": true,
+      "配置列表": true,
+      "config": true,
+      "configs": true,
+      "configlist": true,
+      "管理": true,
+      "admin": true,
+      "manage": true,
+      "management": true,
+      "更新器": true,
+      "检查更新": true,
+      "update": true,
+      "updater": true,
+      "checkupdate": true,
+      "upgrade": true,
+      "远程控制": true,
+      "remote": true,
+      "remotecontrol": true
+    }};
+    return !!restricted[text];
+  }}
+  function textLooksLikeOtherConfig(value) {{
+    var text = compactText(value);
+    var bound = compactText(boundConfig);
+    if (!text || text === bound) return false;
+    if (text === "alas") return true;
+    return /^[0-9]{{4,32}}$/.test(text);
+  }}
   function shallowElementText(element) {{
     if (!element || !element.childNodes) return "";
     var parts = [];
@@ -823,7 +989,27 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   }}
   function blocksSensitiveEvent(event) {{
     var item = closestActionable(elementFromEvent(event));
-    return !!(item && isCompactActionable(item) && textTargetsAlasSettings(collectElementSignal(item)));
+    if (!item || !isCompactActionable(item)) return false;
+    var signal = collectElementSignal(item);
+    return textTargetsAlasSettings(signal) ||
+      textTargetsRestrictedUserEntry(signal) ||
+      textLooksLikeOtherConfig(signal);
+  }}
+  function hideSensitiveNavigation() {{
+    var nodes = document.querySelectorAll(actionableSelector);
+    for (var i = 0; i < nodes.length; i += 1) {{
+      var item = nodes[i];
+      if (!item || !isCompactActionable(item)) continue;
+      var signal = collectElementSignal(item);
+      var shouldHide = textTargetsAlasSettings(signal) ||
+        textTargetsRestrictedUserEntry(signal) ||
+        textLooksLikeOtherConfig(signal);
+      if (shouldHide) {{
+        item.style.setProperty("display", "none", "important");
+        item.style.setProperty("pointer-events", "none", "important");
+        item.setAttribute("aria-hidden", "true");
+      }}
+    }}
   }}
   document.addEventListener("click", function(event) {{
     if (!blocksSensitiveEvent(event)) return;
@@ -837,6 +1023,7 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
   }}, true);
   function runScrcpyGateFilters() {{
     maskSensitiveText();
+    hideSensitiveNavigation();
   }}
   runScrcpyGateFilters();
   window.setInterval(runScrcpyGateFilters, 1000);
@@ -1157,6 +1344,12 @@ def _text_contains_management_command(text: str) -> bool:
     return any(marker in lowered_text for marker in plain_markers)
 
 
+def _text_targets_restricted_user_entry(text: str) -> bool:
+    lowered_text = str(text or "").lower()
+    plain_markers = ("/home", "/config", "/configs", "/updater", "/remote", "route=home", "route=config")
+    return any(marker in lowered_text for marker in plain_markers)
+
+
 def _text_targets_alas_settings_ui(text: str) -> bool:
     return _is_alas_settings_label(text) or _is_alas_settings_field(text)
 
@@ -1170,6 +1363,8 @@ def websocket_message_allowed(message: str | bytes, config_name: str, can_run: b
         text = str(message or "")
         if _text_contains_management_command(text):
             return False
+        if _text_targets_restricted_user_entry(text):
+            return False
         if _text_targets_alas_settings_ui(text):
             return False
         if not can_run and _text_has_action_marker(text, RUN_ACTION_MARKERS):
@@ -1178,6 +1373,8 @@ def websocket_message_allowed(message: str | bytes, config_name: str, can_run: b
             return False
         return True
     if _message_contains_management(payload):
+        return False
+    if _message_targets_restricted_user_entry(payload):
         return False
     if _message_targets_alas_settings(payload):
         return False
@@ -1249,7 +1446,7 @@ def _looks_like_config_choice_text(value: object, config_name: str) -> bool:
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
-        if _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
+        if _json_item_targets_restricted_user_entry(value) or _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
             return {}
         filtered = {}
         for key, item in value.items():
@@ -1260,6 +1457,7 @@ def filter_user_json_payload(value, config_name: str):
                         filter_user_json_payload(entry, config_name)
                         for entry in item
                         if _json_item_matches_bound_config(entry, config_name)
+                        and not _json_item_targets_restricted_user_entry(entry)
                         and not _json_item_targets_alas_settings(entry)
                         and not _json_item_targets_update_notice(entry)
                     ]
@@ -1275,7 +1473,8 @@ def filter_user_json_payload(value, config_name: str):
         return [
             filter_user_json_payload(item, config_name)
             for item in value
-            if not _json_item_targets_alas_settings(item)
+            if not _json_item_targets_restricted_user_entry(item)
+            and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
             and (
                 not has_bound_config_option
@@ -1288,7 +1487,8 @@ def filter_user_json_payload(value, config_name: str):
         return [
             filter_user_json_payload(item, config_name)
             for item in value
-            if not _json_item_targets_alas_settings(item)
+            if not _json_item_targets_restricted_user_entry(item)
+            and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
             and (
                 not has_bound_config_option
@@ -1325,6 +1525,8 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
             return None
         text = str(message or "")
         if _text_contains_management_command(text):
+            return None
+        if _text_targets_restricted_user_entry(text):
             return None
         if _text_targets_alas_settings_ui(text):
             return None
