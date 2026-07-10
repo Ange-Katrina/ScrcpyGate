@@ -26,6 +26,61 @@ MANAGEMENT_MESSAGE_KEYS = ("event", "command", "method", "action", "path", "topi
 CONFIG_QUERY_KEYS = ("config", "name", "config_name")
 CONFIG_LIST_KEYS = ("configs", "config_list", "configlist", "config_names")
 CONFIG_OPTION_KEYS = ("label", "value", "name", "title", "text", "caption", "key", "id")
+SAFE_NON_CONFIG_OPTION_TEXTS = (
+    "home",
+    "homepage",
+    "主页",
+    "首页",
+    "start",
+    "stop",
+    "pause",
+    "resume",
+    "restart",
+    "status",
+    "state",
+    "overview",
+    "dashboard",
+    "summary",
+    "info",
+    "list",
+    "get",
+    "query",
+    "normal",
+    "campaign",
+    "task",
+    "data",
+    "items",
+    "children",
+    "options",
+    "spec",
+    "content",
+    "command",
+    "scope",
+    "type",
+    "result",
+    "ok",
+    "success",
+    "message",
+    "error",
+    "errors",
+    "back",
+    "cancel",
+    "close",
+    "启动",
+    "停止",
+    "暂停",
+    "继续",
+    "重启",
+    "状态",
+    "总览",
+    "任务",
+    "任务总览",
+    "普通",
+    "出击",
+    "返回",
+    "取消",
+    "关闭",
+)
 RESTRICTED_USER_ENTRY_DENIED_REASON = "restricted user entry denied"
 RESTRICTED_USER_ENTRY_LABELS = (
     "配置",
@@ -1371,6 +1426,21 @@ def _is_config_list_key(key: object) -> bool:
     return normalized in CONFIG_LIST_KEYS
 
 
+def _dict_has_bound_config_key(value: dict, config_name: str) -> bool:
+    return bool(config_name and any(str(key or "").strip() == config_name for key in value))
+
+
+def _dict_key_is_other_config_choice(key: object, config_name: str, has_bound_config_key: bool) -> bool:
+    if not has_bound_config_key:
+        return False
+    raw = str(key or "").strip()
+    if not raw or raw == config_name:
+        return False
+    if _looks_like_config_choice_text(raw, config_name):
+        return True
+    return not _json_item_is_safe_non_config_option(raw)
+
+
 def _json_item_matches_bound_config(value, config_name: str) -> bool:
     if isinstance(value, dict):
         for key in CONFIG_QUERY_KEYS:
@@ -1397,6 +1467,56 @@ def _json_item_is_config_option(value, config_name: str) -> bool:
     if not option_values:
         return False
     return any(_looks_like_config_choice_text(item, config_name) for item in option_values)
+
+
+def _json_item_option_texts(value) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (int, float)):
+        return [str(value)]
+    if not isinstance(value, dict):
+        return []
+    texts = []
+    for key, item in value.items():
+        normalized_key = "".join(char.lower() for char in str(key or "") if char.isalnum() or char == "_")
+        if normalized_key in CONFIG_OPTION_KEYS and isinstance(item, (str, int, float)):
+            text = str(item).strip()
+            if text:
+                texts.append(text)
+    return texts
+
+
+def _json_item_is_option_shaped(value) -> bool:
+    return bool(_json_item_option_texts(value))
+
+
+def _json_item_is_safe_non_config_option(value) -> bool:
+    texts = _json_item_option_texts(value)
+    if not texts:
+        return False
+    safe_markers = {_compact_text(item) for item in SAFE_NON_CONFIG_OPTION_TEXTS}
+    for text in texts:
+        compact = _compact_text(text)
+        if not compact:
+            continue
+        if compact in safe_markers:
+            return True
+        if len(compact) <= 3 and not compact.isdigit():
+            return True
+        if "-" in str(text) and len(compact) <= 8 and any(char.isdigit() for char in compact):
+            return True
+    return False
+
+
+def _json_item_is_other_config_choice(value, config_name: str, has_bound_config_option: bool) -> bool:
+    if not has_bound_config_option or _json_item_is_bound_config_option(value, config_name):
+        return False
+    if _json_item_is_config_option(value, config_name):
+        return True
+    if not _json_item_is_option_shaped(value):
+        return False
+    return not _json_item_is_safe_non_config_option(value)
 
 
 def _json_item_is_bound_config_option(value, config_name: str) -> bool:
@@ -1430,7 +1550,10 @@ def filter_user_json_payload(value, config_name: str):
         if _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
             return {}
         filtered = {}
+        has_bound_config_key = _dict_has_bound_config_key(value, config_name)
         for key, item in value.items():
+            if _dict_key_is_other_config_choice(key, config_name, has_bound_config_key):
+                continue
             filtered_key = mask_sensitive_device_endpoints(key)
             if _is_config_list_key(key):
                 if isinstance(item, list):
@@ -1457,11 +1580,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
-            and (
-                not has_bound_config_option
-                or not _json_item_is_config_option(item, config_name)
-                or _json_item_is_bound_config_option(item, config_name)
-            )
+            and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
     if isinstance(value, tuple):
         has_bound_config_option = any(_json_item_is_bound_config_option(item, config_name) for item in value)
@@ -1471,11 +1590,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
-            and (
-                not has_bound_config_option
-                or not _json_item_is_config_option(item, config_name)
-                or _json_item_is_bound_config_option(item, config_name)
-            )
+            and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
     return mask_sensitive_device_endpoints(value)
 
@@ -1521,6 +1636,8 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
     if _json_item_targets_update_notice(payload):
         return None
     filtered = filter_user_json_payload(payload, config_name)
+    if _json_item_is_other_config_choice(filtered, config_name, True):
+        return None
     if _message_switches_downstream_config(filtered, config_name):
         return None
     text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))

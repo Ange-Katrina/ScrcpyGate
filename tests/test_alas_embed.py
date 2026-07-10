@@ -719,6 +719,38 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(result["spec"]["items"], ["3256475495", "Restart"])
 
+    def test_filter_user_json_payload_filters_named_config_options_in_bound_group(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "items": [
+                    {"label": "user-a", "value": "user-a"},
+                    {"label": "user-b", "value": "user-b"},
+                    {"label": "Restart", "value": "Restart"},
+                ]
+            },
+        }
+
+        result = filter_user_json_payload(payload, "user-a")
+
+        self.assertEqual(
+            result["spec"]["items"],
+            [{"label": "user-a", "value": "user-a"}, {"label": "Restart", "value": "Restart"}],
+        )
+
+    def test_filter_user_json_payload_filters_config_keyed_dict(self):
+        payload = {
+            "data": {
+                "3256475495": {"status": "running"},
+                "13361966861": {"status": "idle"},
+                "status": "ok",
+            }
+        }
+
+        result = filter_user_json_payload(payload, "3256475495")
+
+        self.assertEqual(result["data"], {"3256475495": {"status": "running"}, "status": "ok"})
+
     def test_filter_user_json_payload_keeps_short_numeric_dropdown_items(self):
         payload = {
             "command": "output",
@@ -771,6 +803,13 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         result = filter_user_websocket_downstream(message, "挂机-云")
 
         self.assertEqual(json.loads(result), {"configs": ["挂机-云"], "status": "ok"})
+
+    def test_filter_user_websocket_downstream_drops_single_other_config_option(self):
+        message = json.dumps({"label": "13361966861", "value": "13361966861"}, ensure_ascii=False)
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNone(result)
 
     def test_filter_user_websocket_downstream_filters_alas_settings_payload(self):
         result = filter_user_websocket_downstream('{"menu":"Alas","task":"Alas"}', "挂机-云")
