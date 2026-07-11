@@ -884,6 +884,76 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             ensure_ascii=False,
         )
 
+    def _restricted_sidebar_widget(self):
+        return {
+            "type": "custom_widget",
+            "data": {
+                "contents": [
+                    {
+                        "type": "html",
+                        "content": '<svg class="aside-icon icon-config"></svg>',
+                        "scope": "#pywebio-scope-menu",
+                    },
+                    {
+                        "type": "buttons",
+                        "buttons": [{"label": "配置", "value": "Config", "color": "aside"}],
+                        "scope": "#pywebio-scope-menu",
+                        "style": ";--aside-config--;",
+                    },
+                ]
+            },
+        }
+
+    def test_filter_user_websocket_downstream_drops_restricted_sidebar_widget_with_icon(self):
+        message = json.dumps(
+            {"command": "output", "spec": self._restricted_sidebar_widget()},
+            ensure_ascii=False,
+        )
+
+        self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
+
+    def test_filter_user_websocket_downstream_removes_restricted_sidebar_widget_from_mixed_container(self):
+        bound_widget = self._alas_instance_sidebar_item("3256475495", 1)
+        message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "type": "custom_widget",
+                    "data": {"contents": [bound_widget, self._restricted_sidebar_widget()]},
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        contents = json.loads(result)["spec"]["data"]["contents"]
+        self.assertEqual(contents, [bound_widget])
+        serialized = json.dumps(contents, ensure_ascii=False)
+        self.assertNotIn("配置", serialized)
+        self.assertNotIn("icon-config", serialized)
+
+    def test_filter_user_websocket_downstream_keeps_normal_business_custom_widget(self):
+        widget = {
+            "type": "custom_widget",
+            "data": {
+                "contents": [
+                    {"type": "html", "content": '<svg class="task-icon"></svg>'},
+                    {
+                        "type": "buttons",
+                        "buttons": [{"label": "出击", "value": "Campaign", "color": "primary"}],
+                        "scope": "#pywebio-scope-dashboard",
+                    },
+                ]
+            },
+        }
+        message = json.dumps({"command": "output", "spec": widget}, ensure_ascii=False)
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertEqual(json.loads(result), json.loads(message))
+
     def test_filter_user_websocket_downstream_drops_other_alas_instance_button(self):
         message = self._alas_instance_sidebar_message("13361966861")
 

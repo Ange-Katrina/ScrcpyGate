@@ -1714,6 +1714,52 @@ def _json_item_directly_targets_other_alas_instance(value, config_name: str) -> 
     return looks_like_instance and _json_buttons_target_other_alas_instance(buttons, config_name)
 
 
+def _json_item_directly_targets_restricted_sidebar_widget(value) -> bool:
+    """Return True when one custom widget pairs a sidebar icon with restricted buttons."""
+    if not isinstance(value, dict) or str(value.get("type") or "").strip().lower() != "custom_widget":
+        return False
+    data = value.get("data")
+    contents = data.get("contents") if isinstance(data, dict) else None
+    if not isinstance(contents, list):
+        return False
+    has_aside_icon = False
+    has_restricted_button = False
+    for item in contents:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "").strip().lower()
+        scope = str(item.get("scope") or "").strip().lower()
+        style = str(item.get("style") or "").strip().lower()
+        content = str(item.get("content") or "").strip().lower()
+        if item_type == "html" and "<svg" in content and (
+            "aside" in scope or "aside-icon" in content or "icon-config" in content
+        ):
+            has_aside_icon = True
+        if item_type != "buttons" or not isinstance(item.get("buttons"), list):
+            continue
+        buttons = item["buttons"]
+        aside_context = (
+            "aside" in scope
+            or "menu" in scope
+            or "--aside-" in style
+            or "--menu-" in style
+            or any(
+                isinstance(button, dict) and str(button.get("color") or "").strip().lower() in {"aside", "menu"}
+                for button in buttons
+            )
+        )
+        if aside_context and any(
+            isinstance(button, dict)
+            and (
+                _json_item_targets_restricted_user_entry(button)
+                or _json_item_targets_alas_settings(button)
+            )
+            for button in buttons
+        ):
+            has_restricted_button = True
+    return has_aside_icon and has_restricted_button
+
+
 def _json_item_targets_other_alas_instance(value, config_name: str) -> bool:
     """Return True for PyWebIO ALAS instance payloads that expose another config."""
     if isinstance(value, dict):
@@ -1761,6 +1807,7 @@ def filter_user_json_payload(value, config_name: str):
             _json_item_targets_alas_settings(value)
             or _json_item_targets_update_notice(value)
             or _json_item_directly_targets_other_alas_instance(value, config_name)
+            or _json_item_directly_targets_restricted_sidebar_widget(value)
         ):
             return {}
         filtered = {}
@@ -1815,6 +1862,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and not _json_item_directly_targets_restricted_sidebar_widget(item)
             and not _json_item_targets_other_alas_instance(item, config_name)
             and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
@@ -1826,6 +1874,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and not _json_item_directly_targets_restricted_sidebar_widget(item)
             and not _json_item_targets_other_alas_instance(item, config_name)
             and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
@@ -1879,6 +1928,8 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
     if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "output":
         spec = payload.get("spec")
         if isinstance(spec, dict) and str(spec.get("type") or "").strip().lower() == "custom_widget":
+            if _json_item_directly_targets_restricted_sidebar_widget(spec):
+                return None
             data = spec.get("data")
             title = data.get("title") if isinstance(data, dict) else ""
             scope = str(spec.get("scope") or "").strip().lower()
