@@ -2924,6 +2924,15 @@ def parse_limited_body(body: bytes, content_type: str, limit: int = 65536):
     return None
 
 
+def _read_upstream_response(opener, request: Request, timeout: float):
+    """Perform the blocking urllib request and consume its response."""
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.read(), response.getcode(), response.headers
+    except HTTPError as exc:
+        return exc.read(), exc.code, exc.headers
+
+
 async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision, body: bytes | None = None) -> Response:
     """转发 HTTP 请求到 ALAS Runtime，并按权限策略过滤 HTML 响应。"""
     if request.headers.get("upgrade") or "upgrade" in request.headers.get("connection", "").lower():
@@ -2944,14 +2953,8 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
     )
     opener = build_opener(ProxyHandler({}))
     try:
-        with opener.open(req, timeout=15.0) as resp:
-            raw = resp.read()
-            status = resp.getcode()
-            out_headers = _proxy_response_headers(resp.headers, target, decision)
-    except HTTPError as exc:
-        raw = exc.read()
-        status = exc.code
-        out_headers = _proxy_response_headers(exc.headers, target, decision)
+        raw, status, upstream_headers = await asyncio.to_thread(_read_upstream_response, opener, req, 15.0)
+        out_headers = _proxy_response_headers(upstream_headers, target, decision)
     except (URLError, TimeoutError, OSError) as exc:
         raise HTTPException(status_code=502, detail="ALAS Runtime unreachable") from exc
 

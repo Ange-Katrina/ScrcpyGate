@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
 
+import asyncio
 import io
 import json
 import sys
+import threading
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import app.alas_embed as alas_embed
+from starlette.requests import Request
 
 from app.alas_embed import (
     PyWebIOSessionPolicy,
@@ -1779,6 +1783,105 @@ class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
     def test_unparseable_bytes_message_is_denied(self):
         """无法安全解析的 bytes 消息按保守策略拒绝。"""
         self.assertFalse(websocket_message_allowed(b"\xff\xfe", "挂机-云"))
+
+
+class AlasEmbedHttpProxyAsyncTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _request():
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/alas/embed/proxy/api/state",
+            "query_string": b"",
+            "headers": [],
+        })
+
+    async def test_sync_upstream_request_is_offloaded_without_blocking_event_loop(self):
+        loop_thread = threading.get_ident()
+        read_started = threading.Event()
+        release_read = threading.Event()
+        worker_threads = []
+
+        class FakeResponse:
+            headers = {"Content-Type": "text/plain", "X-Upstream": "preserved"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                worker_threads.append(threading.get_ident())
+                read_started.set()
+                release_read.wait(timeout=2)
+                return b"upstream response"
+
+            def getcode(self):
+                return 201
+
+        class FakeOpener:
+            def open(self, request, timeout=0):
+                worker_threads.append(threading.get_ident())
+                self.timeout = timeout
+                return FakeResponse()
+
+        opener = FakeOpener()
+        proxy_task = None
+        with patch.object(alas_embed, "build_opener", return_value=opener):
+            try:
+                proxy_task = asyncio.create_task(alas_embed.proxy_http_request(
+                    self._request(),
+                    "http://alas.test:22267",
+                    "api/state",
+                    alas_embed.ProxyDecision(allowed=True),
+                    body=b"",
+                ))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not read_started.is_set() and asyncio.get_running_loop().time() < deadline:
+                    await asyncio.sleep(0.01)
+                self.assertTrue(read_started.is_set())
+
+                await asyncio.sleep(0)
+                self.assertTrue(worker_threads)
+                self.assertTrue(all(thread_id != loop_thread for thread_id in worker_threads))
+
+                release_read.set()
+                response = await proxy_task
+            finally:
+                release_read.set()
+                if proxy_task is not None and not proxy_task.done():
+                    proxy_task.cancel()
+                    await asyncio.gather(proxy_task, return_exceptions=True)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.body, b"upstream response")
+        self.assertEqual(response.headers["x-upstream"], "preserved")
+        self.assertEqual(opener.timeout, 15.0)
+
+    async def test_http_error_response_body_status_and_headers_are_preserved(self):
+        class FakeOpener:
+            def open(self, request, timeout=0):
+                raise HTTPError(
+                    request.full_url,
+                    404,
+                    "Not Found",
+                    {"Content-Type": "text/plain", "X-Upstream": "error"},
+                    io.BytesIO(b"missing"),
+                )
+
+        with patch.object(alas_embed, "build_opener", return_value=FakeOpener()):
+            response = await alas_embed.proxy_http_request(
+                self._request(),
+                "http://alas.test:22267",
+                "missing",
+                alas_embed.ProxyDecision(allowed=True),
+                body=b"",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.body, b"missing")
+        self.assertEqual(response.headers["x-upstream"], "error")
 
 
 if __name__ == "__main__":
