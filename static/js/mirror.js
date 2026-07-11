@@ -1,23 +1,61 @@
 const bootstrap = JSON.parse(document.getElementById("scrcpygate-bootstrap").textContent);
 const csrfToken = bootstrap.csrf_token;
 const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
+const SIDEBAR_COLLAPSED_KEY = 'scrcpygate:mirror:sidebar-collapsed';
+const MOBILE_SIDEBAR_QUERY = '(max-width: 960px)';
 const state = {
-  user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
+  user:bootstrap.user || null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
   playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, layoutFrame:null, renderFrame:null,
   idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false,
-  deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map()
+  deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map(),
+  devicesLoaded:false, deviceLoading:true, deviceLoadError:'', deviceQuery:'', deviceFilter:'all', connectionPhase:'idle', mirrorError:'',
+  sidebarTrigger:null, toolTrigger:null, sidebarCollapsed:false, controlRequest:null
 };
 const resourceRequests = Object.create(null);
+const actionRequests = new Map();
+const mobileSidebarMedia = window.matchMedia ? window.matchMedia(MOBILE_SIDEBAR_QUERY) : {matches:false};
 const $ = (id) => document.getElementById(id);
 function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
 function getDeviceId(device){ return String((device && (device.device_id || device.id)) || '').trim(); }
 function currentDevice(){ return state.devices.find(d => getDeviceId(d) === state.selectedDeviceId) || null; }
 function selectedSession(){ const id=state.selectedDeviceId; const device=currentDevice(); return id ? (state.sessions[id] || (device && device.session) || null) : null; }
 function deviceLabel(device){ return device ? (device.display_name || device.name || '设备') : '未选择设备'; }
+function deviceSelectable(device){
+  return !!(device && getDeviceId(device) && device.enabled !== false && device.can_view !== false && device.adb_state !== 'unauthorized');
+}
 function show(message, ms=3200){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),ms); }
 function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
+function actionBusy(key){ return actionRequests.has(key); }
+function setActionBusy(element, busy, label){
+  if (!element) return;
+  if (window.ScrcpyGateUI && typeof window.ScrcpyGateUI.setBusy === 'function') {
+    window.ScrcpyGateUI.setBusy(element, busy, label);
+    return;
+  }
+  element.disabled=!!busy;
+  element.toggleAttribute('aria-busy', !!busy);
+}
+async function runBusyAction(key, element, label, action){
+  if (actionRequests.has(key)) return undefined;
+  if (key === 'mirror') state.mirrorError='';
+  setActionBusy(element, true, label);
+  const request=Promise.resolve().then(action);
+  actionRequests.set(key, request);
+  scheduleRender();
+  try {
+    return await request;
+  } catch (error) {
+    if (key === 'mirror') state.mirrorError=(error && error.message) || '投屏操作失败';
+    scheduleRender();
+    throw error;
+  } finally {
+    if (actionRequests.get(key) === request) actionRequests.delete(key);
+    setActionBusy(element, false);
+    scheduleRender();
+  }
+}
 async function fetchJson(url, options={}){
   const opts = Object.assign({headers:{}}, options);
   if (opts.body && typeof opts.body !== 'string') { opts.headers['content-type']='application/json'; opts.body = JSON.stringify(opts.body); }
@@ -68,9 +106,11 @@ function scheduleRender(){
   });
 }
 function normalizeSelection(){
-  const ids = state.devices.map(getDeviceId).filter(Boolean);
+  const previous=state.selectedDeviceId;
+  const ids = state.devices.filter(deviceSelectable).map(getDeviceId);
   if (!ids.length) { state.selectedDeviceId=''; localStorage.removeItem(SELECTED_KEY); return; }
   if (!state.selectedDeviceId || !ids.includes(state.selectedDeviceId)) state.selectedDeviceId = ids[0];
+  if (state.selectedDeviceId !== previous) state.mirrorError='';
   localStorage.setItem(SELECTED_KEY, state.selectedDeviceId);
 }
 function selectDevice(id){
@@ -81,6 +121,7 @@ function selectDevice(id){
     if (oldActive && oldActive !== id) stopSwitchedMirror(oldActive).catch(()=>{});
   }
   state.selectedDeviceId=id;
+  state.mirrorError='';
   localStorage.setItem(SELECTED_KEY, id);
   closeSidebar();
   render();
@@ -227,9 +268,9 @@ function ensureQualityButtons(){
       button.className='btn';
       button.dataset.profile=profile;
       button.type='button';
-      button.onclick=()=>chooseQualityProfile(profile).catch(e=>show(e.message));
       state.qualityNodes.set(profile, button);
     }
+    button.onclick=()=>runBusyAction('quality', button, '正在应用画质', ()=>chooseQualityProfile(profile)).catch(e=>show(e.message));
     button.textContent=qualityProfileLabel(profile);
     grid.insertBefore(button, label);
   });
@@ -238,11 +279,11 @@ function renderQualityButtons(){
   ensureQualityButtons();
   document.querySelectorAll('[data-profile]').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile);
-    btn.disabled = !!state.qualityApplying;
-    btn.title = state.qualityApplying ? '画质正在应用，请稍等' : '点击切换投屏画质';
+    btn.disabled = !!state.qualityApplying || actionBusy('quality');
+    btn.title = state.qualityApplying || actionBusy('quality') ? '画质正在应用，请稍等' : '点击切换投屏画质';
   });
   const select = $('qualityStreamMode');
-  if (select) select.disabled = !!state.qualityApplying;
+  if (select) select.disabled = !!state.qualityApplying || actionBusy('quality');
 }
 async function chooseQualityProfile(profile){
   if (state.qualityApplying) return show('画质正在应用，请稍等');
@@ -250,15 +291,74 @@ async function chooseQualityProfile(profile){
   renderQualityButtons();
   await saveOrApplyQuality();
 }
+function normalizedDeviceQuery(){ return state.deviceQuery.trim().toLocaleLowerCase('zh-CN'); }
+function deviceMatchesFilters(device){
+  const online=(device.adb_state || 'unknown') === 'online';
+  if (state.deviceFilter === 'online' && !online) return false;
+  const query=normalizedDeviceQuery();
+  if (!query) return true;
+  const searchable=[deviceLabel(device), device.name, device.display_name, getDeviceId(device)]
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('zh-CN');
+  return searchable.includes(query);
+}
+function updateDeviceFilterControls(){
+  const search=$('deviceSearch');
+  if (search && search.value !== state.deviceQuery) search.value=state.deviceQuery;
+  [['deviceFilterAll','all'], ['deviceFilterOnline','online']].forEach(([id, value])=>{
+    const button=$(id);
+    if (!button) return;
+    const active=state.deviceFilter === value;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+function ensureDeviceEmpty(box){
+  let empty=box.querySelector('[data-device-empty]');
+  if (empty) return empty;
+  empty=document.createElement('div');
+  empty.className='ui-empty device-list-empty';
+  empty.dataset.deviceEmpty='true';
+  const title=document.createElement('strong');
+  title.dataset.deviceEmptyTitle='true';
+  const description=document.createElement('span');
+  description.dataset.deviceEmptyDescription='true';
+  empty.append(title, description);
+  box.appendChild(empty);
+  return empty;
+}
+function renderDeviceEmpty(empty, visibleCount){
+  let mode='';
+  let title='';
+  let description='';
+  if (!state.devicesLoaded && !state.devices.length) {
+    mode='loading'; title='正在加载设备'; description='正在获取可访问设备和连接状态';
+  } else if (state.deviceLoadError && !state.devices.length) {
+    mode='error'; title='设备加载失败'; description=state.deviceLoadError;
+  } else if (!state.devices.length) {
+    mode=state.user && !state.user.is_admin ? 'no-permission' : 'no-devices';
+    title=mode === 'no-permission' ? '没有可访问的设备' : '暂无设备';
+    description=mode === 'no-permission' ? '请联系管理员分配观看权限' : '请先在后台添加并启用设备';
+  } else if (!visibleCount) {
+    mode='filtered-empty'; title='没有匹配的设备'; description='请调整搜索词或在线状态筛选';
+  }
+  empty.dataset.emptyState=mode || 'available';
+  const titleNode=empty.querySelector('[data-device-empty-title]');
+  const descriptionNode=empty.querySelector('[data-device-empty-description]');
+  if (titleNode) titleNode.textContent=title;
+  if (descriptionNode) descriptionNode.textContent=description;
+  const hidden=!mode;
+  empty.hidden=hidden;
+  if (hidden) empty.style.display='none';
+  else empty.style.removeProperty('display');
+}
 function renderDevices(){
   const box=$('devices');
-  let empty=box.querySelector('[data-device-empty]');
-  if (!empty) {
-    empty=chip('暂无可用设备','warn');
-    empty.dataset.deviceEmpty='true';
-    box.appendChild(empty);
-  }
-  empty.hidden=state.devices.length > 0;
+  if (!box) return;
+  box.setAttribute('aria-busy', state.deviceLoading ? 'true' : 'false');
+  updateDeviceFilterControls();
+  const empty=ensureDeviceEmpty(box);
   const activeIds=new Set(state.devices.map(getDeviceId).filter(Boolean));
   state.deviceNodes.forEach((button, id)=>{
     if (!activeIds.has(id)) {
@@ -267,10 +367,13 @@ function renderDevices(){
     }
   });
   let cursor=empty.nextSibling;
+  let visibleCount=0;
   state.devices.forEach(device => {
     const id=getDeviceId(device); const session=state.sessions[id] || device.session; const active=id===state.selectedDeviceId;
     const adbState = device.adb_state || 'unknown';
     const adbBlocked = adbState === 'offline' || adbState === 'unauthorized';
+    const visible=deviceMatchesFilters(device);
+    if (visible) visibleCount+=1;
     const mirrorVisible = !!(session && session.running && (Number(session.clients || 0) > 0 || (id === state.activeDeviceId && state.videoConnected)));
     let btn=state.deviceNodes.get(id);
     if (!btn) {
@@ -295,7 +398,11 @@ function renderDevices(){
     const parts=btn._scrcpygate;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-current', active ? 'true' : 'false');
-    btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
+    btn.dataset.online=adbState === 'online' ? 'true' : 'false';
+    btn.hidden=!visible;
+    if (visible) btn.style.removeProperty('display');
+    else btn.style.display='none';
+    btn.disabled=!deviceSelectable(device);
     parts.name.textContent=deviceLabel(device);
     parts.status.textContent=mirrorVisible ? '投屏中' : (device.enabled ? adbStateLabel(adbState) : '禁用');
     parts.status.className=`chip ${mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
@@ -305,45 +412,132 @@ function renderDevices(){
     parts.adb.className=`chip ${adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
     parts.clients.textContent=`${Number((session && session.clients) || 0)} 个观看端`;
     parts.clients.hidden=!(session && session.clients);
+    btn.setAttribute('aria-label', `${deviceLabel(device)}，${parts.status.textContent}，${parts.control.textContent}`);
     btn.onclick=()=>selectDevice(id);
     if (btn !== cursor) box.insertBefore(btn, cursor);
     cursor=btn.nextSibling;
   });
+  renderDeviceEmpty(empty, visibleCount);
+}
+function controlOwnershipState(device, session){
+  const lock=session && session.control_lock;
+  const username=state.user && state.user.username;
+  if (!device) return {text:'未选择设备', tone:'neutral'};
+  if (!device.can_control) return {text:'仅可观看', tone:'neutral'};
+  if (state.hasControl || (lock && lock.username === username)) return {text:'你正在控制', tone:'owned'};
+  if (lock && lock.username) return {text:`${lock.username} 正在控制`, tone:'occupied'};
+  if (actionBusy('control') || (state.controlWs && state.controlWs.readyState === WebSocket.CONNECTING)) return {text:'正在连接控制通道', tone:'pending'};
+  return {text:'控制权空闲', tone:'available'};
+}
+function renderControlOwnership(device, session){
+  const target=$('controlOwnership');
+  const ownership=controlOwnershipState(device, session);
+  if (!target) return ownership;
+  target.textContent=ownership.text;
+  target.dataset.state=ownership.tone;
+  target.classList.toggle('ok', ownership.tone === 'owned' || ownership.tone === 'available');
+  target.classList.toggle('warn', ownership.tone === 'occupied' || ownership.tone === 'pending');
+  target.setAttribute('aria-label', `控制权：${ownership.text}`);
+  return ownership;
+}
+function stageEmptyState(device, session){
+  const running=!!(session && session.running);
+  const health=String((session && session.stream_health) || '').toLowerCase();
+  if (!state.devicesLoaded && !state.devices.length) return {type:'loading', title:'正在加载工作台', description:'正在获取设备和投屏状态'};
+  if (state.deviceLoadError && !state.devices.length) return {type:'error', title:'设备加载失败', description:state.deviceLoadError};
+  if (!device) {
+    if (!state.devices.length && state.user && !state.user.is_admin) return {type:'no-permission', title:'没有可访问的设备', description:'请联系管理员分配观看权限'};
+    if (!state.devices.length) return {type:'no-devices', title:'暂无设备', description:'请先在后台添加并启用设备'};
+    return {type:'idle', title:'选择一台设备', description:'从左侧设备列表选择后开始投屏'};
+  }
+  if (state.mirrorError || ['failed','adb_failed','invalid_h264'].includes(health)) {
+    return {type:'error', title:'投屏出现问题', description:state.mirrorError || `当前状态：${streamHealthLabel(health)}`};
+  }
+  if (state.starting || health === 'starting') return {type:'starting', title:'正在启动投屏', description:'正在连接设备并准备视频流'};
+  if (state.qualityApplying || state.connectionPhase === 'reconnecting' || device.adb_state === 'reconnecting') {
+    return {type:'reconnecting', title:'正在重新连接', description:'画面会在连接恢复后自动显示'};
+  }
+  if (state.connectionPhase === 'connecting' || (!state.videoConnected && socketLive(state.videoWs))) {
+    return {type:'connecting', title:'正在连接画面', description:'正在建立视频通道'};
+  }
+  if (running) return {type:'disconnected', title:'画面尚未连接', description:'投屏正在运行，点击“连接画面”继续'};
+  return {type:'idle', title:'尚未开始投屏', description:'确认设备在线后点击“开始投屏”'};
+}
+function ensureStageEmptyNodes(empty){
+  let title=$('emptyTitle');
+  let description=$('emptyDescription');
+  if (title && description) return {title, description};
+  title=document.createElement('strong');
+  title.id='emptyTitle';
+  description=document.createElement('span');
+  description.id='emptyDescription';
+  empty.replaceChildren(title, description);
+  return {title, description};
+}
+function renderStageEmpty(device, session){
+  const empty=$('empty');
+  if (!empty) return;
+  const view=stageEmptyState(device, session);
+  const nodes=ensureStageEmptyNodes(empty);
+  nodes.title.textContent=view.title;
+  nodes.description.textContent=view.description;
+  empty.dataset.emptyState=view.type;
+  empty.setAttribute('role', view.type === 'error' ? 'alert' : 'status');
+  empty.setAttribute('aria-live', view.type === 'error' ? 'assertive' : 'polite');
+  const hidden=state.videoConnected;
+  empty.hidden=hidden;
+  if (hidden) empty.style.display='none';
+  else empty.style.removeProperty('display');
 }
 function renderStatus(){
   const device=currentDevice(); const session=selectedSession();
   const running=!!(session && session.running);
   const localConnected=!!(state.videoConnected || state.controlConnected || socketLive(state.videoWs) || socketLive(state.controlWs));
-  $('selectedTitle').textContent = deviceLabel(device);
-  $('selectedMeta').textContent = device ? qualitySummary() : '从设备列表选择一个设备后开始投屏';
-  const topStatus=$('topStatus'); topStatus.textContent='';
+  const selectedTitle=$('selectedTitle'); if (selectedTitle) selectedTitle.textContent = deviceLabel(device);
+  const selectedMeta=$('selectedMeta'); if (selectedMeta) selectedMeta.textContent = device ? qualitySummary() : '从设备列表选择一个设备后开始投屏';
+  const ownership=renderControlOwnership(device, session);
+  const topStatus=$('topStatus'); if (topStatus) topStatus.textContent='';
   const items=[];
-  items.push(chip(device ? deviceLabel(device) : '未选择', device ? '' : 'warn'));
   items.push(chip(running ? '投屏中' : '未投屏', running ? 'ok' : 'warn'));
-  items.push(chip(state.videoConnected ? '视频已连接' : '视频未连接', state.videoConnected ? 'ok' : 'warn'));
-  items.push(chip(state.controlConnected ? '控制通道已连接' : '控制通道未连接', state.controlConnected ? 'ok' : 'warn'));
-  if (session && session.control_lock) items.push(chip(`控制: ${session.control_lock.username}`, session.control_lock.username === (state.user && state.user.username) ? 'ok' : 'warn'));
-  else items.push(chip('控制空闲'));
+  items.push(chip(state.videoConnected ? '视频已连接' : socketLive(state.videoWs) ? '视频连接中' : '视频未连接', state.videoConnected ? 'ok' : 'warn'));
+  if (!$('controlOwnership')) items.push(chip(ownership.text, ownership.tone === 'owned' || ownership.tone === 'available' ? 'ok' : 'warn'));
   if (session && session.video) items.push(chip(`流: ${session.video.max_size || '原始'} / ${session.video.max_fps || '不限'}fps`));
   if (session && session.stream_mode) items.push(chip(`流模式: ${streamModeShortLabel(session.stream_mode)}/${streamHealthLabel(session.stream_health)}`, session.stream_health === 'healthy' ? 'ok' : 'warn'));
   if (device && device.adb_state) items.push(chip(`ADB: ${adbStateLabel(device.adb_state)}`, device.adb_state === 'online' ? 'ok' : 'warn'));
   if (state.alas) items.push(chip(`ALAS: ${alasStatusLabel(state.alas.status)}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
-  items.forEach(item=>topStatus.appendChild(item));
-  $('startBtn').textContent = !device ? '开始投屏' : state.starting ? '启动中...' : running ? (state.videoConnected ? '刷新画面' : '连接画面') : '开始投屏';
-  $('startBtn').disabled = state.starting || state.qualityApplying || !device;
-  $('controlBtn').textContent = state.hasControl ? '释放控制' : '获取控制';
-  $('controlBtn').disabled = state.starting || !device || !device.can_control;
-  $('stopBtn').disabled = state.starting || state.qualityApplying || !device || (!running && !localConnected);
-  $('alasBtn').textContent = 'ALAS';
+  if (topStatus) items.forEach(item=>topStatus.appendChild(item));
+  const mirrorBusy=actionBusy('mirror');
+  const startBtn=$('startBtn');
+  if (startBtn) {
+    setButtonLabel(startBtn, !device ? '开始投屏' : state.starting ? '启动中...' : running ? (state.videoConnected ? '刷新画面' : '连接画面') : '开始投屏');
+    startBtn.disabled = mirrorBusy || state.starting || state.qualityApplying || !deviceSelectable(device);
+  }
+  const controlBtn=$('controlBtn');
+  if (controlBtn) {
+    setButtonLabel(controlBtn, actionBusy('control') ? '处理中...' : state.hasControl ? '释放控制' : '获取控制');
+    controlBtn.disabled = actionBusy('control') || state.starting || !deviceSelectable(device) || !device.can_control;
+  }
+  const stopBtn=$('stopBtn');
+  if (stopBtn) stopBtn.disabled = mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
   renderAlasPanel();
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
-  $('empty').textContent = device ? (running ? '点击连接画面' : '点击开始投屏') : '选择设备后开始投屏';
-  $('empty').style.display = state.videoConnected ? 'none' : 'grid';
-  $('phoneVideo').style.objectFit = 'contain';
+  renderStageEmpty(device, session);
+  const phoneVideo=$('phoneVideo'); if (phoneVideo) phoneVideo.style.objectFit = 'contain';
   scheduleLayout();
 }
-function render(){ renderDevices(); renderStatus(); renderAccountPanel(); $('roleChip').textContent = state.user && state.user.is_admin ? '管理员' : '普通用户'; $('adminLink').hidden = !(state.user && state.user.is_admin); }
+function setButtonLabel(button, text){
+  const label=button && button.querySelector('.action-label');
+  if (label) label.textContent=text;
+  else if (button) button.textContent=text;
+}
+function render(){
+  renderDevices();
+  renderStatus();
+  renderAccountPanel();
+  const roleChip=$('roleChip'); if (roleChip) roleChip.textContent = state.user && state.user.is_admin ? '管理员' : '普通用户';
+  const adminLink=$('adminLink'); if (adminLink) adminLink.hidden = !(state.user && state.user.is_admin);
+}
 function renderAlasPanel(){
   const box=$('alasPanelStatus'); if(!box) return; box.textContent='';
   const a=state.alas || {};
@@ -352,7 +546,7 @@ function renderAlasPanel(){
   box.appendChild(chip(a.can_run ? '可运行' : '不可运行', a.can_run ? 'ok' : 'warn'));
   if(a.error) box.appendChild(chip(a.error, 'danger'));
   $('alasToggleRun').textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';
-  $('alasToggleRun').disabled = !a.can_run;
+  $('alasToggleRun').disabled = !a.can_run || actionBusy('alas');
 }
 function renderAccountPanel(){
   const box=$('accountInfo'); if(!box) return; box.textContent='';
@@ -360,18 +554,90 @@ function renderAccountPanel(){
   box.appendChild(chip(user.username || '未登录', 'ok'));
   box.appendChild(chip(user.is_admin ? '管理员' : '普通用户'));
 }
+function setToolPanelActive(panel, active){
+  if (!panel) return;
+  panel.classList.toggle('open', active);
+  panel.hidden=!active;
+  panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+  panel.toggleAttribute('inert', !active);
+}
+function syncToolTriggerState(activePanelId){
+  [['toolBtn','tools'], ['alasBtn','alasTools'], ['accountBtn','accountTools']].forEach(([buttonId, panelId])=>{
+    const button=$(buttonId);
+    if (button) button.setAttribute('aria-expanded', activePanelId === panelId ? 'true' : 'false');
+  });
+}
+function closeStatusDetails(){
+  const details=$('statusDetails');
+  if (details) details.open=false;
+}
 function closeToolPanels(exceptId){
   ['tools','alasTools','accountTools'].forEach(id=>{
     const el=$(id);
-    if (el && id !== exceptId) el.classList.remove('open');
+    if (el && id !== exceptId) setToolPanelActive(el, false);
   });
 }
-function toggleToolPanel(id){
+function closeToolDrawer(){
+  const drawer=$('workspaceDrawer');
+  const trigger=state.toolTrigger;
+  state.toolTrigger=null;
+  syncToolTriggerState('');
+  closeToolPanels();
+  if (drawer) {
+    drawer.classList.remove('open','is-open');
+    drawer.hidden=true;
+    drawer.setAttribute('aria-hidden','true');
+    drawer.setAttribute('inert','');
+  }
+  const backdrop=$('toolDrawerBackdrop');
+  if (backdrop) {
+    backdrop.classList.remove('open','is-open');
+    backdrop.hidden=true;
+    backdrop.setAttribute('aria-hidden','true');
+  }
+  const app=document.querySelector('.app');
+  if (app) app.removeAttribute('inert');
+  if (trigger && trigger.isConnected) requestAnimationFrame(()=>trigger.focus({preventScroll:true}));
+}
+function openToolDrawer(id, trigger){
   const el=$(id);
   if (!el) return;
-  const willOpen = !el.classList.contains('open');
+  const drawer=$('workspaceDrawer');
+  state.toolTrigger=trigger || document.activeElement;
+  syncToolTriggerState(id);
+  closeStatusDetails();
+  const title=$('workspaceDrawerTitle');
+  if (title) title.textContent=({tools:'画面设置', alasTools:'ALAS', accountTools:'账户设置'}[id]) || '工作区工具';
   closeToolPanels(id);
-  el.classList.toggle('open', willOpen);
+  setToolPanelActive(el, true);
+  if (!drawer) return;
+  const app=document.querySelector('.app');
+  if (app) app.setAttribute('inert','');
+  drawer.hidden=false;
+  drawer.removeAttribute('inert');
+  drawer.setAttribute('aria-hidden','false');
+  drawer.classList.add('open','is-open');
+  const backdrop=$('toolDrawerBackdrop');
+  if (backdrop) {
+    backdrop.hidden=false;
+    backdrop.setAttribute('aria-hidden','false');
+    backdrop.classList.add('open','is-open');
+  }
+  const focusTarget=drawer.querySelector('[autofocus]') || visibleLayerFocusables(drawer)[0] || drawer;
+  if (focusTarget === drawer && !drawer.hasAttribute('tabindex')) drawer.setAttribute('tabindex','-1');
+  requestAnimationFrame(()=>focusTarget.focus({preventScroll:true}));
+}
+function toggleToolPanel(id, trigger){
+  const el=$(id);
+  if (!el) return;
+  const drawer=$('workspaceDrawer');
+  const drawerOpen=drawer && !drawer.hidden && (drawer.classList.contains('open') || drawer.classList.contains('is-open'));
+  if (el.classList.contains('open') && (!drawer || drawerOpen)) {
+    if (drawer) closeToolDrawer();
+    else { setToolPanelActive(el, false); syncToolTriggerState(''); }
+    return;
+  }
+  openToolDrawer(id, trigger);
 }
 function clearPasswordForm(){
   ['currentPassword','newPassword','confirmPassword'].forEach(id=>{ if($(id)) $(id).value=''; });
@@ -395,13 +661,25 @@ function loadUser(force=false){
   }, {force});
 }
 function loadDevices(force=false){
+  state.deviceLoading=true;
+  if (!state.devicesLoaded) scheduleRender();
   const requestRevision=state.sessionRevision;
-  return requestResource('devices', '/api/devices', data=>{
+  const request=requestResource('devices', '/api/devices', data=>{
     state.devices=data.devices || [];
     applySessionSnapshot(state.devices, data.sessions || {}, requestRevision);
     normalizeSelection();
+    state.devicesLoaded=true;
+    state.deviceLoading=false;
+    state.deviceLoadError='';
     scheduleRender();
   }, {force});
+  return request.catch(error=>{
+    state.devicesLoaded=true;
+    state.deviceLoading=false;
+    state.deviceLoadError=(error && error.message) || '无法获取设备列表';
+    scheduleRender();
+    throw error;
+  });
 }
 function loadVideoPreferences(force=false){
   return requestResource('video', '/api/video/preferences', data=>{
@@ -441,14 +719,18 @@ async function startMirror(){
   try {
     const data = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/start`, {method:'POST', body:qualityPayload()});
     replaceMutationSessions(data.sessions);
-    if (data.ok === false) return show(data.detail || data.error || '投屏启动失败，请检查 ADB 连接', 5200);
+    if (data.ok === false) {
+      state.mirrorError=data.detail || data.error || '投屏启动失败，请检查 ADB 连接';
+      render();
+      return show(state.mirrorError, 5200);
+    }
     if (state.activeDeviceId === id && socketLive(state.videoWs)) {
       schedulePlayerReset();
       if (!socketLive(state.controlWs)) openControl(id);
       show('投屏已在运行，已刷新播放器');
       return;
     }
-    reconnectSockets(id);
+    reconnectSockets(id, 'connecting');
   } finally {
     state.starting = false;
     render();
@@ -461,6 +743,8 @@ async function stopMirror(){
   const result=await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
   replaceMutationSessions(result.sessions);
   closeVideo();
+  state.connectionPhase='idle';
+  state.mirrorError='';
   render();
 }
 async function saveOrApplyQuality(){
@@ -490,7 +774,7 @@ async function saveOrApplyQuality(){
     state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
     replaceMutationSessions(result.sessions);
     if (result.restarted) {
-      reconnectSockets(id);
+      reconnectSockets(id, 'reconnecting');
       setQualityStatus('画质已应用，投屏流已重启');
       show('画质已应用，投屏已按新参数重启');
     } else {
@@ -543,6 +827,14 @@ function destroyInput(){
     try { input.destroy(); } catch (_) {}
   }
 }
+function settleControlRequest(error){
+  const pending=state.controlRequest;
+  if (!pending) return;
+  state.controlRequest=null;
+  clearTimeout(pending.timer);
+  if (error) pending.reject(error);
+  else pending.resolve();
+}
 function closeControlSocket(){
   state.controlSeq += 1;
   const ws = state.controlWs;
@@ -551,12 +843,14 @@ function closeControlSocket(){
   setControlOwnership(false);
   destroyInput();
   if (ws) { try { ws.close(); } catch(_){} }
+  settleControlRequest(new Error('控制通道已关闭'));
 }
 function closeVideo(){
   cancelInactiveStop();
   closeVideoSocket();
   closeControlSocket();
   state.activeDeviceId='';
+  state.connectionPhase='idle';
 }
 function autoStopDelayMs(){
   const minutes = Number((state.videoPrefs && state.videoPrefs.auto_stop_minutes) || 15);
@@ -582,16 +876,18 @@ async function idleStopMirror(reason){
   closeVideoSocket();
   closeControlSocket();
   state.activeDeviceId = '';
+  state.connectionPhase = 'idle';
   await new Promise(resolve=>setTimeout(resolve, 300));
   const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:reason || 'inactive'}});
   replaceMutationSessions(result.sessions);
   show(result.stopped ? '页面长时间未聚焦，投屏已自动停止' : '页面长时间未聚焦，已停止本浏览器观看');
   render();
 }
-function reconnectSockets(id){
+function reconnectSockets(id, phase='connecting'){
   closeVideo();
   state.activeDeviceId=id;
-  openVideo(id, {force:true});
+  state.connectionPhase=phase;
+  openVideo(id, {force:true, phase});
   openControl(id, {force:true});
 }
 function sendPlayerReset(){
@@ -668,13 +964,15 @@ function openVideo(id, options={}){
   if (!options.force && state.activeDeviceId === id && socketLive(state.videoWs)) return state.videoWs;
   closeVideoSocket();
   state.activeDeviceId=id;
+  state.connectionPhase=options.phase || 'connecting';
+  state.mirrorError='';
   const token = ++state.videoSeq;
   const video=$('phoneVideo');
   state.jmuxer = new JMuxer(jmuxerConfig(video));
   const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/video`));
   state.videoWs = ws;
   ws.binaryType='arraybuffer';
-  ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; render(); requestVideoPrime(ws); setTimeout(()=>{ if (state.videoSeq === token && state.videoWs === ws) requestVideoPrime(ws); }, 450); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
+  ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; state.connectionPhase='connected'; state.mirrorError=''; render(); requestVideoPrime(ws); setTimeout(()=>{ if (state.videoSeq === token && state.videoWs === ws) requestVideoPrime(ws); }, 450); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
   ws.onmessage = async (event) => {
     if (state.videoSeq !== token || state.videoWs !== ws) return;
     if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) updateRealtimeSession(id, msg.session); render(); requestVideoPrime(ws); return; }
@@ -685,8 +983,8 @@ function openVideo(id, options={}){
     trimPlaybackDelay(video);
     if (video.paused) video.play().catch(()=>{});
   };
-  ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) show('视频通道连接失败'); };
-  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; render(); };
+  ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) { state.connectionPhase='error'; state.mirrorError='视频通道连接失败'; show(state.mirrorError); render(); } };
+  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); };
   video.onloadedmetadata = () => updateInputSize();
   video.onresize = () => updateInputSize();
   return ws;
@@ -714,13 +1012,29 @@ function openControl(id, options={}){
         updateRealtimeSession(id, session);
       }
       if (msg.ok !== undefined) setControlOwnership(msg.ok);
+      if (msg.ok !== undefined) {
+        if (state.controlRequest && state.controlRequest.ws === ws && state.controlRequest.kind === 'acquire') {
+          if (msg.ok) settleControlRequest();
+          else settleControlRequest(new Error(msg.owner ? `控制权正由 ${msg.owner} 使用` : '暂时无法获取控制权'));
+        }
+      }
     }
-    if (msg.type === 'control_released') setControlOwnership(false);
-    if (msg.type === 'control_error') show(msg.error || '控制失败');
+    if (msg.type === 'control_released') {
+      setControlOwnership(false);
+      if (state.controlRequest && state.controlRequest.ws === ws && state.controlRequest.kind === 'release') {
+        if (msg.ok === false) settleControlRequest(new Error('释放控制权失败'));
+        else settleControlRequest();
+      }
+    }
+    if (msg.type === 'control_error') {
+      const error=new Error(msg.error || '控制失败');
+      settleControlRequest(error);
+      show(error.message);
+    }
     render();
   };
-  ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) show('控制通道连接失败'); };
-  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); };
+  ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) { settleControlRequest(new Error('控制通道连接失败')); show('控制通道连接失败'); } };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); settleControlRequest(new Error('控制通道已关闭')); };
   return ws;
 }
 function updateInputSize(){
@@ -732,10 +1046,10 @@ function updateInputSize(){
   scheduleLayout();
 }
 function layoutVideo(){
-  const stage=$('stage'); const wrap=$('videoWrap'); if (!stage || !wrap) return;
-  const style=getComputedStyle(stage);
-  const availW=stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  const availH=stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const stage=$('stage'); const area=$('screenArea') || stage; const wrap=$('videoWrap'); if (!area || !wrap) return;
+  const style=getComputedStyle(area);
+  const availW=Math.max(1, area.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0));
+  const availH=Math.max(1, area.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0));
   const aspect=(state.screen.w || 1280) / Math.max(1, state.screen.h || 720);
   let width=availW; let height=width / aspect;
   if (state.fit === 'original') {
@@ -776,14 +1090,45 @@ function setupInput(){
 async function toggleControl(){
   const id=state.selectedDeviceId; if (!id) return show('请先选择设备');
   const ws = openControl(id);
-  const send = () => {
-    if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) return;
-    const releasing = state.hasControl;
-    if (releasing) setControlOwnership(false);
+  await waitForSocketOpen(ws);
+  if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) throw new Error('控制通道未连接');
+  const releasing=state.hasControl;
+  if (releasing) setControlOwnership(false);
+  const response=waitForControlResponse(ws, releasing ? 'release' : 'acquire');
+  try {
     ws.send(JSON.stringify({type: releasing ? 'release_control' : 'acquire_control', force:false}));
-  };
-  if (ws.readyState === WebSocket.OPEN) send();
-  else ws.addEventListener('open', send, {once:true});
+  } catch (error) {
+    settleControlRequest(error);
+  }
+  await response;
+}
+function waitForSocketOpen(ws, timeoutMs=8000){
+  if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (ws.readyState !== WebSocket.CONNECTING) return Promise.reject(new Error('控制通道未连接'));
+  return new Promise((resolve, reject)=>{
+    let timer=null;
+    const cleanup=()=>{
+      clearTimeout(timer);
+      ws.removeEventListener('open', onOpen);
+      ws.removeEventListener('error', onError);
+      ws.removeEventListener('close', onClose);
+    };
+    const onOpen=()=>{ cleanup(); resolve(); };
+    const onError=()=>{ cleanup(); reject(new Error('控制通道连接失败')); };
+    const onClose=()=>{ cleanup(); reject(new Error('控制通道已关闭')); };
+    timer=setTimeout(()=>{ cleanup(); reject(new Error('控制通道连接超时')); }, timeoutMs);
+    ws.addEventListener('open', onOpen, {once:true});
+    ws.addEventListener('error', onError, {once:true});
+    ws.addEventListener('close', onClose, {once:true});
+  });
+}
+function waitForControlResponse(ws, kind){
+  return new Promise((resolve, reject)=>{
+    const timer=setTimeout(()=>{
+      if (state.controlRequest && state.controlRequest.ws === ws) settleControlRequest(new Error('控制权操作超时'));
+    }, 8000);
+    state.controlRequest={ws, kind, resolve, reject, timer};
+  });
 }
 function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
 async function reloadAlas(){ await loadAlasStatus(true); }
@@ -877,24 +1222,184 @@ function closeEvents(){
   clearRefreshTimers();
   if (ws) { try { ws.close(); } catch (_) {} }
 }
-function openSidebar(){ $('sidebar').classList.add('open'); $('sidebarBackdrop').classList.add('open'); }
-function closeSidebar(){ $('sidebar').classList.remove('open'); $('sidebarBackdrop').classList.remove('open'); }
-$('startBtn').onclick=()=>startMirror().catch(e=>show(e.message));
-$('stopBtn').onclick=()=>stopMirror().catch(e=>show(e.message));
-$('controlBtn').onclick=()=>toggleControl().catch(e=>show(e.message));
-$('refreshBtn').onclick=()=>loadAll({force:true}).catch(e=>show(e.message));
-$('menuBtn').onclick=()=>openSidebar();
-$('sidebarBackdrop').onclick=()=>closeSidebar();
-$('toolBtn').onclick=()=>toggleToolPanel('tools');
-$('backBtn').onclick=()=>sendKey(4);
-$('homeBtn').onclick=()=>sendKey(3);
-$('recentBtn').onclick=()=>sendKey(187);
-$('alasBtn').onclick=()=>toggleToolPanel('alasTools');
-$('accountBtn').onclick=()=>toggleToolPanel('accountTools');
-$('changePasswordBtn').onclick=()=>changePassword().catch(e=>show(e.message));
-$('alasToggleRun').onclick=()=>toggleAlas().catch(e=>show(e.message));
-$('alasReload').onclick=()=>reloadAlas().catch(e=>show(e.message));
-$('qualityStreamMode').onchange=()=>saveOrApplyQuality().catch(e=>show(e.message));
+function persistSidebarCollapsed(){
+  try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? 'true' : 'false'); } catch (_) {}
+}
+function setSidebarCollapsed(collapsed, persist=true){
+  state.sidebarCollapsed=!!collapsed;
+  const app=document.querySelector('.app');
+  if (app) app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed && !mobileSidebarMedia.matches);
+  const button=$('sidebarCollapseBtn');
+  if (button) {
+    button.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
+    button.setAttribute('aria-label', state.sidebarCollapsed ? '展开设备栏' : '收起设备栏');
+    button.title=state.sidebarCollapsed ? '展开设备栏' : '收起设备栏';
+  }
+  if (persist) persistSidebarCollapsed();
+  scheduleLayout();
+}
+function syncSidebarAccessibility(){
+  const sidebar=$('sidebar');
+  const backdrop=$('sidebarBackdrop');
+  const menu=$('menuBtn');
+  if (!sidebar) return;
+  if (!mobileSidebarMedia.matches) {
+    sidebar.classList.remove('open');
+    sidebar.removeAttribute('inert');
+    sidebar.setAttribute('aria-hidden','false');
+    if (backdrop) {
+      backdrop.classList.remove('open');
+      backdrop.hidden=true;
+      backdrop.setAttribute('aria-hidden','true');
+    }
+    if (menu) menu.setAttribute('aria-expanded','false');
+    const viewer=document.querySelector('.viewer');
+    if (viewer) viewer.removeAttribute('inert');
+    setSidebarCollapsed(state.sidebarCollapsed, false);
+    return;
+  }
+  const open=sidebar.classList.contains('open');
+  const app=document.querySelector('.app'); if (app) app.classList.remove('sidebar-collapsed');
+  sidebar.toggleAttribute('inert', !open);
+  sidebar.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (backdrop) {
+    backdrop.classList.toggle('open', open);
+    backdrop.hidden=!open;
+    backdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+  if (menu) menu.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const viewer=document.querySelector('.viewer');
+  if (viewer) viewer.toggleAttribute('inert', open);
+  const collapseButton=$('sidebarCollapseBtn');
+  if (collapseButton) {
+    collapseButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    collapseButton.setAttribute('aria-label','关闭设备栏');
+    collapseButton.title='关闭设备栏';
+  }
+}
+function openSidebar(trigger){
+  if (!mobileSidebarMedia.matches) {
+    setSidebarCollapsed(false);
+    return;
+  }
+  const sidebar=$('sidebar');
+  if (!sidebar) return;
+  closeStatusDetails();
+  state.sidebarTrigger=trigger || document.activeElement;
+  sidebar.classList.add('open');
+  syncSidebarAccessibility();
+  const search=$('deviceSearch');
+  const selectedButton=state.deviceNodes.get(state.selectedDeviceId);
+  const searchVisible=search && search.getClientRects().length > 0;
+  const focusTarget=searchVisible ? search : (selectedButton && !selectedButton.disabled ? selectedButton : visibleLayerFocusables(sidebar)[0]) || sidebar;
+  if (focusTarget === sidebar && !sidebar.hasAttribute('tabindex')) sidebar.setAttribute('tabindex','-1');
+  if (focusTarget) requestAnimationFrame(()=>{
+    if (focusTarget === selectedButton && typeof selectedButton.scrollIntoView === 'function') selectedButton.scrollIntoView({block:'nearest'});
+    focusTarget.focus({preventScroll:true});
+  });
+}
+function closeSidebar(options={}){
+  if (!mobileSidebarMedia.matches) return;
+  const sidebar=$('sidebar');
+  if (!sidebar) return;
+  const trigger=state.sidebarTrigger;
+  state.sidebarTrigger=null;
+  sidebar.classList.remove('open');
+  syncSidebarAccessibility();
+  if (options.restoreFocus !== false && trigger && trigger.isConnected) requestAnimationFrame(()=>trigger.focus({preventScroll:true}));
+}
+function bindClick(id, handler){
+  const element=$(id);
+  if (element) element.onclick=(event)=>handler(event, element);
+}
+function visibleLayerFocusables(layer){
+  if (!layer) return [];
+  return Array.from(layer.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(node=>!node.closest('[hidden], [inert], [aria-hidden="true"]') && node.getClientRects().length > 0);
+}
+function trapLayerFocus(event, layer){
+  if (event.key !== 'Tab' || !layer) return false;
+  const focusable=visibleLayerFocusables(layer);
+  if (!focusable.length) {
+    event.preventDefault();
+    layer.focus({preventScroll:true});
+    return true;
+  }
+  const first=focusable[0];
+  const last=focusable[focusable.length - 1];
+  if (!layer.contains(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({preventScroll:true});
+    return true;
+  }
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus({preventScroll:true});
+    return true;
+  }
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus({preventScroll:true});
+    return true;
+  }
+  return false;
+}
+function initializeWorkspaceInteractions(){
+  try { state.sidebarCollapsed=localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch (_) { state.sidebarCollapsed=false; }
+  syncSidebarAccessibility();
+  closeToolDrawer();
+  bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, '正在启动投屏', startMirror).catch(e=>show(e.message)));
+  bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, '正在停止投屏', stopMirror).catch(e=>show(e.message)));
+  bindClick('controlBtn', (_, button)=>runBusyAction('control', button, '正在更新控制权', toggleControl).catch(e=>show(e.message)));
+  bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, '正在刷新', ()=>loadAll({force:true})).catch(e=>show(e.message)));
+  bindClick('menuBtn', (_, button)=>openSidebar(button));
+  bindClick('sidebarCollapseBtn', ()=>{ if (mobileSidebarMedia.matches) closeSidebar(); else setSidebarCollapsed(!state.sidebarCollapsed); });
+  bindClick('sidebarBackdrop', ()=>closeSidebar());
+  bindClick('toolBtn', (_, button)=>toggleToolPanel('tools', button));
+  bindClick('backBtn', ()=>sendKey(4));
+  bindClick('homeBtn', ()=>sendKey(3));
+  bindClick('recentBtn', ()=>sendKey(187));
+  bindClick('alasBtn', (_, button)=>toggleToolPanel('alasTools', button));
+  bindClick('accountBtn', (_, button)=>toggleToolPanel('accountTools', button));
+  bindClick('toolDrawerCloseBtn', ()=>closeToolDrawer());
+  bindClick('toolDrawerBackdrop', ()=>closeToolDrawer());
+  bindClick('changePasswordBtn', (_, button)=>runBusyAction('password', button, '正在修改密码', changePassword).catch(e=>show(e.message)));
+  bindClick('alasToggleRun', (_, button)=>runBusyAction('alas', button, '正在更新 ALAS', toggleAlas).catch(e=>show(e.message)));
+  bindClick('alasReload', (_, button)=>runBusyAction('alas', button, '正在刷新 ALAS', reloadAlas).catch(e=>show(e.message)));
+  const qualityStreamMode=$('qualityStreamMode');
+  if (qualityStreamMode) qualityStreamMode.onchange=()=>runBusyAction('quality', qualityStreamMode, '正在应用画质', saveOrApplyQuality).catch(e=>show(e.message));
+  const search=$('deviceSearch');
+  if (search) search.addEventListener('input', event=>{ state.deviceQuery=event.currentTarget.value || ''; scheduleRender(); });
+  bindClick('deviceFilterAll', ()=>{ state.deviceFilter='all'; scheduleRender(); });
+  bindClick('deviceFilterOnline', ()=>{ state.deviceFilter='online'; scheduleRender(); });
+  document.addEventListener('keydown', event=>{
+    const drawer=$('workspaceDrawer');
+    const drawerOpen=drawer && !drawer.hidden && drawer.classList.contains('open');
+    const sidebar=$('sidebar');
+    const sidebarOpen=mobileSidebarMedia.matches && sidebar && sidebar.classList.contains('open');
+    if (event.key === 'Tab') {
+      if (drawerOpen) trapLayerFocus(event, drawer);
+      else if (sidebarOpen) trapLayerFocus(event, sidebar);
+      return;
+    }
+    if (event.key !== 'Escape') return;
+    if (drawerOpen) {
+      event.preventDefault();
+      closeToolDrawer();
+      return;
+    }
+    if (sidebarOpen) {
+      event.preventDefault();
+      closeSidebar();
+      return;
+    }
+    const details=$('statusDetails');
+    if (details && details.open) { event.preventDefault(); details.open=false; }
+  });
+  render();
+}
+initializeWorkspaceInteractions();
 document.querySelectorAll('[data-fit]').forEach(btn=>btn.onclick=()=>{ state.fit=btn.dataset.fit; handleViewportResize(); render(); });
 window.addEventListener('resize', handleViewportResize);
 if (window.visualViewport) {
@@ -903,8 +1408,11 @@ if (window.visualViewport) {
 }
 if (window.ResizeObserver) {
   const stageResizeObserver = new ResizeObserver(handleViewportResize);
-  stageResizeObserver.observe($('stage'));
+  const layoutTarget=$('screenArea') || $('stage');
+  if (layoutTarget) stageResizeObserver.observe(layoutTarget);
 }
+if (mobileSidebarMedia.addEventListener) mobileSidebarMedia.addEventListener('change', syncSidebarAccessibility);
+else if (mobileSidebarMedia.addListener) mobileSidebarMedia.addListener(syncSidebarAccessibility);
 window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
 window.addEventListener('focus', ()=>cancelInactiveStop());
 document.addEventListener('visibilitychange', ()=>{

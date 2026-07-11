@@ -8,130 +8,138 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=84db3b8f15da">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=60cdcb76897b">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=1c4a4c85bca0">
   <script src="/static/js/ui-core.js?v=523c6db5fdfe" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=4abd1c7fbd4d"></script>
 </head>
 <body data-ui-page="mirror">
 <div class="app">
-  <aside id="sidebar" class="sidebar">
-    <div class="brand-row">
-      <div>
-        <div class="brand">ScrcpyGate</div>
-        <div class="chips brand-chips"><span class="chip">{{ user.username }}</span><span id="roleChip" class="chip"></span></div>
+  <aside id="sidebar" class="sidebar" aria-label="设备与投屏操作">
+    <header class="sidebar-header">
+      <div class="brand-row">
+        <div class="brand-copy">
+          <div class="brand">ScrcpyGate</div>
+          <div class="chips brand-chips">
+            <span class="chip">{{ user.username }}</span>
+            <span id="roleChip" class="chip"></span>
+          </div>
+        </div>
+        <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="收起设备栏" aria-label="收起设备栏" aria-controls="sidebar" aria-expanded="true">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#panel-left-close"></use></svg>
+        </button>
       </div>
-      <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" type="submit">退出</button></form>
-    </div>
-    <a id="adminLink" class="link-btn" href="/admin" hidden>后台管理</a>
-    <div class="mirror-theme-row">
-      <span class="muted">界面主题</span>
-      <label class="ui-theme-picker">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
-        <span class="ui-sr-only">界面主题</span>
-        <select data-ui-theme-select aria-label="界面主题">
-          <option value="dark">深色</option>
-          <option value="light">浅色</option>
-          <option value="system">跟随系统</option>
-        </select>
+      <div class="sidebar-account-row">
+        <a id="adminLink" class="link-btn" href="/admin" hidden>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#settings"></use></svg>
+          <span>后台管理</span>
+        </a>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="logout ui-icon-button" type="submit" title="退出登录" aria-label="退出登录">
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#log-out"></use></svg>
+          </button>
+        </form>
+        <label class="ui-theme-picker compact-theme-picker">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
+          <span class="ui-sr-only">界面主题</span>
+          <select data-ui-theme-select aria-label="界面主题">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+            <option value="system">跟随系统</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <nav class="sidebar-menu" aria-label="工作区工具">
+      <button id="toolBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sliders-horizontal"></use></svg>
+        <span class="menu-label">画面</span>
+      </button>
+      <button id="alasBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#bot"></use></svg>
+        <span class="menu-label">ALAS</span>
+      </button>
+      <button id="accountBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#user-round"></use></svg>
+        <span class="menu-label">账户</span>
+      </button>
+    </nav>
+
+    <section class="device-browser" aria-labelledby="deviceBrowserTitle">
+      <div class="section-head">
+        <div>
+          <h2 id="deviceBrowserTitle" class="section-title">设备</h2>
+          <p class="section-description">选择要查看和控制的设备</p>
+        </div>
+        <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="刷新设备" aria-label="刷新设备">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#refresh-cw"></use></svg>
+        </button>
+      </div>
+      <label class="device-search" for="deviceSearch">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#search"></use></svg>
+        <span class="ui-sr-only">搜索设备</span>
+        <input id="deviceSearch" type="search" inputmode="search" autocomplete="off" placeholder="搜索设备名称">
       </label>
-    </div>
-    <div class="sidebar-menu">
-      <button id="toolBtn" class="btn" type="button">画面设置</button>
-      <button id="alasBtn" class="btn" type="button">ALAS</button>
-      <button id="accountBtn" class="btn" type="button">账户</button>
-    </div>
-    <div class="section-head"><div class="section-title">设备</div><button id="refreshBtn" class="link-btn" type="button">刷新</button></div>
-    <div id="devices" class="device-list"></div>
-    <div class="side-actions">
-      <button id="startBtn" class="btn primary wide" type="button">开始投屏</button>
-      <button id="controlBtn" class="btn" type="button">获取控制</button>
-      <button id="stopBtn" class="btn danger" type="button">停止投屏</button>
-    </div>
-    <div id="tools" class="tools">
-      <div class="tools-title">画面设置</div>
-      <div class="setting-group">
-        <div class="setting-group-title">
-          <span>画面大小</span>
-          <span class="setting-group-help">只影响网页显示</span>
-        </div>
-        <div class="tool-row">
-          <button class="btn" data-fit="contain" type="button">适应窗口</button>
-          <button class="btn" data-fit="original" type="button">原始大小</button>
-        </div>
+      <div class="device-filters" role="group" aria-label="设备状态筛选">
+        <button id="deviceFilterAll" class="device-filter active" type="button" aria-pressed="true">全部</button>
+        <button id="deviceFilterOnline" class="device-filter" type="button" aria-pressed="false">在线</button>
       </div>
-      <div class="setting-group">
-        <div class="setting-group-title">
-          <span>投屏画质</span>
-          <span class="setting-group-help">应用后会重启投屏流</span>
-        </div>
-        <div class="quality-grid" id="qualityProfiles">
-          <button class="btn" data-profile="smooth" type="button">流畅</button>
-          <button class="btn" data-profile="balanced" type="button">稳定</button>
-          <button class="btn" data-profile="sharp" type="button">高清</button>
-          <button class="btn" data-profile="low_latency" type="button">低延迟</button>
-          <label class="wide">scrcpy 流模式
-            <select id="qualityStreamMode">
-              <option value="raw">raw</option>
-              <option value="protocol">protocol</option>
-              <option value="legacy">legacy 诊断</option>
-            </select>
-          </label>
-        </div>
-        <div id="qualityStatus" class="quality-status"></div>
-      </div>
-      <p class="quality-note">投屏中点击预设会自动重启投屏流；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
-    </div>
-    <div id="alasTools" class="tools alas-panel">
-      <div class="tools-title">ALAS</div>
-      <div id="alasPanelStatus" class="chips"></div>
-      <div class="actions panel-actions">
-        <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
-        <button id="alasReload" class="btn" type="button">刷新</button>
-        <a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开 ALAS 页面</a>
-      </div>
-      <p class="quality-note">配置名由后台绑定决定；这里只提供启动、停止和重启，不显示或编辑配置内容。</p>
-    </div>
-    <div id="accountTools" class="tools">
-      <div class="tools-title">账户设置</div>
-      <div id="accountInfo" class="chips"></div>
-      <div class="setting-group">
-        <div class="setting-group-title">
-          <span>修改密码</span>
-          <span class="setting-group-help">至少 12 位</span>
-        </div>
-        <div class="account-grid">
-          <label>当前密码
-            <input id="currentPassword" type="password" autocomplete="current-password">
-          </label>
-          <label>新密码
-            <input id="newPassword" type="password" autocomplete="new-password">
-          </label>
-          <label>确认新密码
-            <input id="confirmPassword" type="password" autocomplete="new-password">
-          </label>
-          <button id="changePasswordBtn" class="btn primary" type="button">保存新密码</button>
-        </div>
-      </div>
-      <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
+      <div id="devices" class="device-list" aria-live="polite" aria-busy="true"></div>
+    </section>
+
+    <div class="side-actions" aria-label="投屏操作">
+      <button id="startBtn" class="btn primary wide" type="button">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#play"></use></svg>
+        <span class="action-label">开始投屏</span>
+      </button>
+      <button id="controlBtn" class="btn" type="button">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#monitor"></use></svg>
+        <span class="action-label">获取控制</span>
+      </button>
+      <button id="stopBtn" class="btn danger" type="button">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#square"></use></svg>
+        <span class="action-label">停止投屏</span>
+      </button>
     </div>
   </aside>
-  <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
   <main class="viewer">
-    <div class="viewer-top">
+    <header class="viewer-top">
       <div class="top-left">
-        <button id="menuBtn" class="btn top-menu-btn" type="button">菜单</button>
+        <button id="menuBtn" class="ui-icon-button top-menu-btn" type="button" title="打开设备栏" aria-label="打开设备栏" aria-controls="sidebar" aria-expanded="false">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#menu"></use></svg>
+        </button>
         <div class="top-copy">
           <div id="selectedTitle" class="selected-title">未选择设备</div>
           <div id="selectedMeta" class="selected-meta">从设备列表选择一个设备后开始投屏</div>
         </div>
       </div>
-      <div id="topStatus" class="top-status"></div>
-    </div>
-    <div id="notice" class="notice"></div>
+      <div class="control-overview">
+        <div class="control-primary" aria-live="polite">
+          <span class="control-label">控制权</span>
+          <span id="controlOwnership" class="control-ownership">未获取</span>
+        </div>
+        <details id="statusDetails" class="status-details">
+          <summary>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#info"></use></svg>
+            <span class="status-details-label">状态详情</span>
+          </summary>
+          <div id="topStatus" class="top-status" aria-label="设备连接状态"></div>
+        </details>
+      </div>
+    </header>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <div id="stage" class="stage">
-      <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
-      <div id="empty" class="empty">选择设备后开始投屏</div>
+      <div id="screenArea" class="screen-area">
+        <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
+        <div id="empty" class="empty ui-empty">
+          <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#monitor"></use></svg>
+          <strong id="emptyTitle">尚未选择设备</strong>
+          <span id="emptyDescription">从左侧设备栏选择设备后开始投屏</span>
+        </div>
+      </div>
       <nav class="dock" aria-label="安卓导航">
         <button id="backBtn" class="nav-btn" type="button" title="返回" aria-label="返回">
           <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">返回</span>
@@ -146,7 +154,96 @@
     </div>
   </main>
 </div>
+
+<div id="toolDrawerBackdrop" class="tool-drawer-backdrop" aria-hidden="true"></div>
+<aside id="workspaceDrawer" class="workspace-drawer" role="dialog" aria-modal="true" aria-label="工作区工具" aria-hidden="true" inert>
+  <header class="drawer-header">
+    <div>
+      <h2 id="workspaceDrawerTitle">工作区工具</h2>
+      <p>调整当前投屏和账户设置</p>
+    </div>
+    <button id="toolDrawerCloseBtn" class="ui-icon-button" type="button" title="关闭工具面板" aria-label="关闭工具面板">
+      <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg>
+    </button>
+  </header>
+
+  <section id="tools" class="tools drawer-panel" aria-labelledby="toolsTitle">
+    <h3 id="toolsTitle" class="tools-title">画面设置</h3>
+    <div class="setting-group">
+      <div class="setting-group-title">
+        <span>画面大小</span>
+        <span class="setting-group-help">只影响网页显示</span>
+      </div>
+      <div class="tool-row">
+        <button class="btn" data-fit="contain" type="button">适应窗口</button>
+        <button class="btn" data-fit="original" type="button">原始大小</button>
+      </div>
+    </div>
+    <div class="setting-group">
+      <div class="setting-group-title">
+        <span>投屏画质</span>
+        <span class="setting-group-help">应用后会重启投屏流</span>
+      </div>
+      <div class="quality-grid" id="qualityProfiles">
+        <button class="btn" data-profile="smooth" type="button">流畅</button>
+        <button class="btn" data-profile="balanced" type="button">稳定</button>
+        <button class="btn" data-profile="sharp" type="button">高清</button>
+        <button class="btn" data-profile="low_latency" type="button">低延迟</button>
+        <label class="wide" for="qualityStreamMode">scrcpy 流模式
+          <select id="qualityStreamMode">
+            <option value="raw">raw</option>
+            <option value="protocol">protocol</option>
+            <option value="legacy">legacy 诊断</option>
+          </select>
+        </label>
+      </div>
+      <div id="qualityStatus" class="quality-status" role="status" aria-live="polite"></div>
+    </div>
+    <p class="quality-note">投屏中点击预设会自动重启投屏流；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+  </section>
+
+  <section id="alasTools" class="tools drawer-panel alas-panel" aria-labelledby="alasToolsTitle">
+    <h3 id="alasToolsTitle" class="tools-title">ALAS</h3>
+    <div id="alasPanelStatus" class="chips" aria-live="polite"></div>
+    <div class="actions panel-actions">
+      <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
+      <button id="alasReload" class="btn" type="button">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#refresh-cw"></use></svg>
+        <span>刷新</span>
+      </button>
+      <a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#external-link"></use></svg>
+        <span>打开 ALAS 页面</span>
+      </a>
+    </div>
+    <p class="quality-note">配置名由后台绑定决定；这里只提供启动、停止和重启，不显示或编辑配置内容。</p>
+  </section>
+
+  <section id="accountTools" class="tools drawer-panel" aria-labelledby="accountToolsTitle">
+    <h3 id="accountToolsTitle" class="tools-title">账户设置</h3>
+    <div id="accountInfo" class="chips" aria-live="polite"></div>
+    <div class="setting-group">
+      <div class="setting-group-title">
+        <span>修改密码</span>
+        <span class="setting-group-help">至少 12 位</span>
+      </div>
+      <div class="account-grid">
+        <label for="currentPassword">当前密码
+          <input id="currentPassword" type="password" autocomplete="current-password">
+        </label>
+        <label for="newPassword">新密码
+          <input id="newPassword" type="password" autocomplete="new-password">
+        </label>
+        <label for="confirmPassword">确认新密码
+          <input id="confirmPassword" type="password" autocomplete="new-password">
+        </label>
+        <button id="changePasswordBtn" class="btn primary" type="button">保存新密码</button>
+      </div>
+    </div>
+    <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
+  </section>
+</aside>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=be9887aed8f4" defer></script>
+<script src="/static/js/mirror.js?v=cdc1a1e91003" defer></script>
 </body>
 </html>

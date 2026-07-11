@@ -95,13 +95,16 @@ class UiTemplateContractTests(unittest.TestCase):
             "login.html": {"username", "password"},
             "index.html": {
                 "sidebar", "roleChip", "adminLink", "toolBtn", "alasBtn", "accountBtn",
+                "sidebarCollapseBtn", "deviceSearch", "deviceFilterAll", "deviceFilterOnline",
                 "refreshBtn", "devices", "startBtn", "controlBtn", "stopBtn", "tools",
                 "qualityProfiles", "qualityStreamMode", "qualityStatus", "alasTools",
                 "alasPanelStatus", "alasToggleRun", "alasReload", "accountTools", "accountInfo",
                 "currentPassword", "newPassword", "confirmPassword", "changePasswordBtn",
                 "sidebarBackdrop", "menuBtn", "selectedTitle", "selectedMeta", "topStatus",
-                "notice", "stage", "videoWrap", "phoneVideo", "empty", "backBtn", "homeBtn",
-                "recentBtn", "scrcpygate-bootstrap",
+                "statusDetails", "controlOwnership", "notice", "stage", "screenArea", "videoWrap",
+                "phoneVideo", "empty", "emptyTitle", "emptyDescription", "backBtn", "homeBtn",
+                "recentBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
+                "toolDrawerCloseBtn", "scrcpygate-bootstrap",
             },
             "admin.html": {
                 "notice", "summaryMirror", "summaryAlas", "overview", "overviewDevices",
