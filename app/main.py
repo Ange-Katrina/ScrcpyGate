@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
@@ -42,16 +43,40 @@ from .video_options import (
 setup_logging()
 log = logging.getLogger("webscrcpy.main")
 api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
+mirror_autostop_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global mirror_autostop_task
+    log.info("APP_STARTUP")
+    storage.init_db()
+    await adb_monitor.start()
+    mirror_autostop_task = asyncio.create_task(mirror_autostop_loop())
+    try:
+        yield
+    finally:
+        log.info("APP_SHUTDOWN")
+        if mirror_autostop_task:
+            mirror_autostop_task.cancel()
+            try:
+                await mirror_autostop_task
+            except asyncio.CancelledError:
+                pass
+            mirror_autostop_task = None
+        await adb_monitor.stop()
+
+
 app = FastAPI(
     title="ScrcpyGate",
     version="0.1.0",
     docs_url="/docs" if api_docs_enabled else None,
     redoc_url="/redoc" if api_docs_enabled else None,
     openapi_url="/openapi.json" if api_docs_enabled else None,
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-mirror_autostop_task: asyncio.Task | None = None
 
 
 def auto_stop_minutes() -> int:
@@ -72,29 +97,6 @@ async def mirror_autostop_loop() -> None:
         stopped = await manager.stop_idle_sessions(minutes * 60)
         for device_id in stopped:
             storage.audit("system", "mirror_auto_stop", f"{device_id}: no_viewers_for_{minutes}m")
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    global mirror_autostop_task
-    log.info("APP_STARTUP")
-    storage.init_db()
-    await adb_monitor.start()
-    mirror_autostop_task = asyncio.create_task(mirror_autostop_loop())
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    global mirror_autostop_task
-    log.info("APP_SHUTDOWN")
-    if mirror_autostop_task:
-        mirror_autostop_task.cancel()
-        try:
-            await mirror_autostop_task
-        except asyncio.CancelledError:
-            pass
-        mirror_autostop_task = None
-    await adb_monitor.stop()
 
 
 @app.middleware("http")
@@ -448,7 +450,7 @@ async def healthz():
 async def login_page(request: Request):
     if security.get_current_user(request):
         return RedirectResponse("/", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": ""})
+    return templates.TemplateResponse(request, "login.html", {"error": ""})
 
 
 @app.post("/login")
@@ -460,8 +462,9 @@ async def login(request: Request):
     if rate["limited"]:
         storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
         response = templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Too many login attempts. Please try again later."},
+            {"error": "Too many login attempts. Please try again later."},
             status_code=429,
         )
         response.headers["Retry-After"] = str(rate["retry_after"])
@@ -472,7 +475,7 @@ async def login(request: Request):
         storage.audit(username or "anonymous", "login_failed", audit_detail(request))
         if rate["limited"]:
             storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password"}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", {"error": "Invalid username or password"}, status_code=401)
     security.record_login_success(request, username)
     session = storage.create_session(user["username"])
     storage.audit(user["username"], "login_success", audit_detail(request))
@@ -505,7 +508,7 @@ async def index(request: Request):
     sess = security.get_current_session(request)
     user = security.require_user(request)
     storage.audit(user["username"], "page_index", audit_detail(request))
-    return templates.TemplateResponse("index.html", {"request": request, "user": user, "csrf_token": sess["csrf_token"]})
+    return templates.TemplateResponse(request, "index.html", {"user": user, "csrf_token": sess["csrf_token"]})
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -516,7 +519,7 @@ async def admin_page(request: Request):
     user = security.require_admin(request)
     sess = security.get_current_session(request)
     storage.audit(user["username"], "page_admin", audit_detail(request))
-    return templates.TemplateResponse("admin.html", {"request": request, "user": user, "csrf_token": sess["csrf_token"]})
+    return templates.TemplateResponse(request, "admin.html", {"user": user, "csrf_token": sess["csrf_token"]})
 
 
 @app.get("/api/me")
