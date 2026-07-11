@@ -265,14 +265,10 @@ def log_alas_websocket_close(
 ) -> None:
     """记录不含路径、查询参数或载荷的 WebSocket 关闭元数据。"""
     log.warning(
-        "ALAS_WS_CLOSE connection=%s direction=handshake user=%s role=%s event=connect reason=%s permission=%s phase=%s code=%s",
+        "ALAS_WS_CLOSE connection=%s event=connect reason=%s permission=%s task=none",
         connection_id,
-        (user or {}).get("username", ""),
-        (user or {}).get("role", ""),
         reason,
         permission,
-        phase,
-        code,
     )
 
 
@@ -857,7 +853,6 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method="WEBSOCKET")
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
-        log_alas_embed_denied(user, binding, "websocket", path or "/", reason_code)
         permission = "run" if reason_code == "run_permission_denied" else (
             "edit" if reason_code == "edit_permission_denied" else "restricted"
         )
@@ -869,13 +864,11 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     raw_enabled = storage.get_setting("alas_enabled", "false")
     raw_base_url = storage.get_setting("alas_base_url", "")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
-        log_alas_embed_denied(user, binding, "websocket", path or "/", "disabled")
         log_alas_websocket_close(connection_id, user, "disabled", 1011, phase="configuration")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "disabled", path or "/"))
         await websocket.close(code=1011)
         return
     if not raw_base_url.strip():
-        log_alas_embed_denied(user, binding, "websocket", path or "/", "unconfigured")
         log_alas_websocket_close(connection_id, user, "unconfigured", 1011, phase="configuration")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)

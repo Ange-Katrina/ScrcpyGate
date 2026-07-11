@@ -1301,24 +1301,49 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(captured["sent"], [])
         self.assertEqual(captured["closed"], [1008, 1008])
 
-    def test_websocket_unknown_callback_closes_both_sides_with_1008(self):
-        """从未由服务端下发的回调 ID 按未知协议能力拒绝。"""
+    def test_websocket_unknown_protocol_frames_drop_and_later_output_renders(self):
+        """未知回调、任务和事件不转发、不关连接，后续安全输出仍可渲染。"""
         self.login("alice", "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         self.storage.set_user_alas_config("alice", "3256475495", True, True)
-        captured = self.install_fake_websocket_upstream()
+        registration = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "type": "buttons",
+                    "callback_id": "safe-callback",
+                    "buttons": [{"label": "主页", "value": "home"}],
+                },
+            },
+            ensure_ascii=False,
+        )
+        safe_output = json.dumps(
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览"}},
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[registration, safe_output])
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
-            websocket.send_text(
-                json.dumps({"event": "callback", "task_id": "unknown-callback", "data": 0})
+            self.assertIn("safe-callback", websocket.receive_text())
+            for frame in (
+                {"event": "callback", "task_id": "unknown-callback", "data": 0},
+                {"event": "from_cancel", "task_id": "unknown-task", "data": None},
+                {"event": "future_event", "task_id": "future-task", "data": {}},
+            ):
+                websocket.send_text(json.dumps(frame))
+            safe_callback = json.dumps(
+                {"event": "callback", "task_id": "safe-callback", "data": "home"}
             )
+            websocket.send_text(safe_callback)
+            rendered = json.loads(websocket.receive_text())
             close_message = websocket.receive()
 
+        self.assertEqual(rendered["spec"]["content"], "任务总览")
         self.assertEqual(close_message["type"], "websocket.close")
-        self.assertEqual(close_message["code"], 1008)
-        self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], [safe_callback])
+        self.assertEqual(captured["closed"], [1000])
 
     def test_websocket_malformed_structured_text_closes_both_sides_with_1008(self):
         """看起来像 JSON 但无法解析的文本帧按畸形协议消息拒绝。"""
@@ -1375,28 +1400,38 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
     def test_websocket_policy_warning_log_hashes_id_and_omits_payload_secrets(self):
         """策略拒绝日志只记录短哈希和元数据，不记录载荷敏感值。"""
+        username = "private-user-secret"
         bound_config = "private-bound-config"
         callback_id = "raw-callback-secret-id"
         other_config = "private-other-config"
         endpoint = "192.0.2.32:5555"
         token = "token-secret-value"
-        self.login("alice", "password123456", "user")
+        event = "private-event-secret"
+        command = "private-command-secret"
+        self.login(username, "password123456", "user")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
-        self.storage.set_user_alas_config("alice", bound_config, True, True)
-        captured = self.install_fake_websocket_upstream()
+        self.storage.set_user_alas_config(username, bound_config, True, True)
+        downstream = json.dumps({"command": command, "content": "safe"})
+        captured = self.install_fake_websocket_upstream(incoming=[downstream])
         frame = json.dumps(
             {
-                "event": "callback",
+                "event": event,
                 "task_id": callback_id,
-                "data": {"config": other_config, "serial": endpoint, "token": token},
+                "data": {
+                    "command": command,
+                    "config": other_config,
+                    "serial": endpoint,
+                    "token": token,
+                },
             }
         )
 
-        with self.assertLogs("webscrcpy.alas_embed", level="WARNING") as captured_logs:
+        with self.assertLogs("webscrcpy.alas_embed", level="DEBUG") as captured_logs:
             with self.client.websocket_connect(
                 f"/alas/embed/proxy/ws?config={bound_config}"
             ) as websocket:
+                self.assertEqual(json.loads(websocket.receive_text()), json.loads(downstream))
                 websocket.send_text(frame)
                 close_message = websocket.receive()
 
@@ -1404,10 +1439,69 @@ class AlasEmbedRouteTests(unittest.TestCase):
         task_hash = hashlib.sha256(callback_id.encode("utf-8")).hexdigest()[:12]
         self.assertEqual(close_message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertIn("reason=unknown_callback_id", logs)
+        self.assertIn("reason=config_mismatch", logs)
         self.assertIn(f"task={task_hash}", logs)
-        for secret in (callback_id, bound_config, other_config, endpoint, token, frame):
+        self.assertIn("ALAS_WS_DOWNSTREAM", logs)
+        self.assertIn("event=unknown", logs)
+        for secret in (
+            username,
+            callback_id,
+            bound_config,
+            other_config,
+            endpoint,
+            token,
+            event,
+            command,
+            frame,
+        ):
             self.assertNotIn(secret, logs)
+        for forbidden_field in (
+            "action=",
+            "direction=",
+            "user=",
+            "role=",
+            "phase=",
+            "code=",
+            "filtered=",
+            "forwarded=",
+            "allowed_callbacks=",
+            "denied_callbacks=",
+            "allowed_tasks=",
+            "denied_tasks=",
+            "exception=",
+        ):
+            self.assertNotIn(forbidden_field, logs)
+
+    def test_websocket_handshake_denial_uses_only_ws_metadata_log(self):
+        username = "private-handshake-user"
+        config = "private-handshake-config"
+        token = "private-handshake-token"
+        endpoint = "192.0.2.44:5555"
+        self.login(username, "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+
+        with self.assertLogs("webscrcpy.main", level="WARNING") as captured_logs:
+            close_code = self.websocket_close_code(
+                f"/alas/embed/proxy/ws?config={config}&token={token}&endpoint={endpoint}"
+            )
+
+        logs = "\n".join(captured_logs.output)
+        self.assertEqual(close_code, 1008)
+        self.assertIn("ALAS_WS_CLOSE", logs)
+        self.assertNotIn("ALAS_EMBED_DENIED", logs)
+        for secret in (username, config, token, endpoint):
+            self.assertNotIn(secret, logs)
+        for forbidden_field in (
+            "direction=",
+            "user=",
+            "role=",
+            "phase=",
+            "code=",
+            "filtered=",
+            "exception=",
+        ):
+            self.assertNotIn(forbidden_field, logs)
 
     def test_websocket_admin_pywebio_callback_remains_unfiltered(self):
         """管理员仍然原样透传未登记的 PyWebIO 回调。"""

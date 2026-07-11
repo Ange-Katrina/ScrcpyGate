@@ -12,6 +12,7 @@ import re
 import uuid
 import zlib
 from dataclasses import dataclass
+from enum import Enum
 from html import escape
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse, urlunparse
@@ -189,6 +190,9 @@ UPDATE_NOTICE_TEXT_KEYS = ("label", "title", "text", "caption", "message", "cont
 UPDATE_NOTICE_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action", "event", "method", "route", "path")
 PYWEBIO_EVENTS = frozenset({"callback", "from_submit", "from_cancel", "input_event", "js_yield"})
 PYWEBIO_YIELD_COMMANDS = frozenset({"pin_value", "pin_wait", "run_script"})
+PYWEBIO_LOG_COMMANDS = frozenset(
+    {"output", "input_group", "pin_onchange", "pin_value", "pin_wait", "run_script", "toast"}
+)
 PYWEBIO_CALLBACK_ID_KEYS = frozenset({"callback_id", "click_callback_id"})
 PYWEBIO_INPUT_EVENTS = frozenset({"change", "blur"})
 PYWEBIO_CONFIG_FIELDS = frozenset({"config", "config_name"})
@@ -223,15 +227,32 @@ class ParsedBody:
     valid: bool = True
 
 
+class WebSocketMessageAction(str, Enum):
+    """Action taken for one client-to-ALAS WebSocket message."""
+
+    FORWARD = "forward"
+    DROP = "drop"
+    CLOSE = "close"
+
+
 @dataclass(frozen=True)
 class WebSocketMessageDecision:
     """Structured result for one client-to-ALAS WebSocket message."""
 
-    allowed: bool
+    action: WebSocketMessageAction
     reason: str
     event: str = ""
     permission: str = ""
     task_ref: str = ""
+
+    @property
+    def allowed(self) -> bool:
+        """Compatibility view for callers that only distinguish forwarding."""
+        return self.action is WebSocketMessageAction.FORWARD
+
+    @property
+    def closes_connection(self) -> bool:
+        return self.action is WebSocketMessageAction.CLOSE
 
 
 @dataclass(frozen=True)
@@ -1480,37 +1501,57 @@ def websocket_message_decision(
     payload = _parse_websocket_message(message)
     if payload is None:
         if isinstance(message, bytes):
-            return WebSocketMessageDecision(False, "invalid_binary")
+            return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "invalid_binary")
         text = str(message or "")
         if text.lstrip().startswith(("{", "[")):
-            return WebSocketMessageDecision(False, "invalid_json")
+            return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "invalid_json")
         if _text_contains_management_command(text):
-            return WebSocketMessageDecision(False, "management_denied")
+            return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "management_denied")
         if _text_targets_restricted_user_entry(text):
-            return WebSocketMessageDecision(False, "restricted_entry_denied")
+            return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "restricted_entry_denied")
         if _text_targets_alas_settings_ui(text):
-            return WebSocketMessageDecision(False, "alas_settings_denied")
+            return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "alas_settings_denied")
         if not can_run and _text_has_action_marker(text, RUN_ACTION_MARKERS):
-            return WebSocketMessageDecision(False, "run_permission_denied", permission="run")
+            return WebSocketMessageDecision(
+                WebSocketMessageAction.CLOSE,
+                "run_permission_denied",
+                permission="run",
+            )
         if not can_edit and _text_has_action_marker(text, EDIT_ACTION_MARKERS):
-            return WebSocketMessageDecision(False, "edit_permission_denied", permission="edit")
-        return WebSocketMessageDecision(True, "plain_text_allowed")
+            return WebSocketMessageDecision(
+                WebSocketMessageAction.CLOSE,
+                "edit_permission_denied",
+                permission="edit",
+            )
+        return WebSocketMessageDecision(WebSocketMessageAction.FORWARD, "plain_text_allowed")
     if isinstance(payload, dict) and str(payload.get("event") or "").strip().lower() in PYWEBIO_EVENTS:
         event = str(payload.get("event") or "").strip().lower()
-        return WebSocketMessageDecision(False, "protocol_state_required", event=event)
+        return WebSocketMessageDecision(
+            WebSocketMessageAction.CLOSE,
+            "protocol_state_required",
+            event=event,
+        )
     if _message_contains_management(payload):
-        return WebSocketMessageDecision(False, "management_denied")
+        return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "management_denied")
     if _message_targets_restricted_user_entry(payload):
-        return WebSocketMessageDecision(False, "restricted_entry_denied")
+        return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "restricted_entry_denied")
     if _message_targets_alas_settings(payload):
-        return WebSocketMessageDecision(False, "alas_settings_denied")
+        return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "alas_settings_denied")
     if _message_switches_config(payload, config_name):
-        return WebSocketMessageDecision(False, "config_mismatch")
+        return WebSocketMessageDecision(WebSocketMessageAction.CLOSE, "config_mismatch")
     if not can_run and _message_contains_action(payload, RUN_ACTION_MARKERS):
-        return WebSocketMessageDecision(False, "run_permission_denied", permission="run")
+        return WebSocketMessageDecision(
+            WebSocketMessageAction.CLOSE,
+            "run_permission_denied",
+            permission="run",
+        )
     if not can_edit and _message_contains_action(payload, EDIT_ACTION_MARKERS):
-        return WebSocketMessageDecision(False, "edit_permission_denied", permission="edit")
-    return WebSocketMessageDecision(True, "structured_message_allowed")
+        return WebSocketMessageDecision(
+            WebSocketMessageAction.CLOSE,
+            "edit_permission_denied",
+            permission="edit",
+        )
+    return WebSocketMessageDecision(WebSocketMessageAction.FORWARD, "structured_message_allowed")
 
 
 def websocket_message_allowed(message: str | bytes, config_name: str, can_run: bool = True, can_edit: bool = True) -> bool:
@@ -1926,6 +1967,45 @@ def _field_is_restricted(field_name: object) -> bool:
     )
 
 
+def _pywebio_data_has_restricted_field(value) -> bool:
+    """Detect restricted field identifiers without inspecting ordinary values."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered_key = str(key or "").lower()
+            if _field_is_restricted(key):
+                return True
+            if lowered_key in {"field", "key", "name", "setting"} and not isinstance(
+                item,
+                (dict, list, tuple),
+            ):
+                if _field_is_restricted(item):
+                    return True
+            if isinstance(item, (dict, list, tuple)) and _pywebio_data_has_restricted_field(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_pywebio_data_has_restricted_field(item) for item in value)
+    return False
+
+
+def _pywebio_contains_explicit_action(value, markers: tuple[str, ...]) -> bool:
+    """Inspect protocol action fields, not arbitrary form values or result text."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key or "").lower() in ACTION_MESSAGE_KEYS and _text_has_action_marker(
+                str(item or ""),
+                markers,
+            ):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _pywebio_contains_explicit_action(
+                item,
+                markers,
+            ):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_pywebio_contains_explicit_action(item, markers) for item in value)
+    return False
+
+
 def _pywebio_explicit_config_mismatch(value, config_name: str) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -2168,30 +2248,176 @@ class PyWebIOSessionPolicy:
 
     def _decision(
         self,
-        allowed: bool,
+        action: WebSocketMessageAction,
         reason: str,
         event: str,
         task_id: str = "",
         permission: str = "",
     ) -> WebSocketMessageDecision:
         return WebSocketMessageDecision(
-            allowed=allowed,
+            action=action,
             reason=reason,
-            event=event,
+            event=event if event in PYWEBIO_EVENTS else ("unknown" if event else "legacy"),
             permission=permission,
             task_ref=_short_task_ref(task_id),
         )
 
+    def _explicit_violation(
+        self,
+        payload: dict,
+        event: str,
+        task_id: str,
+    ) -> WebSocketMessageDecision | None:
+        inspected_payload = {
+            key: value for key, value in payload.items() if str(key).lower() != "data"
+        }
+        structured_data = payload.get("data")
+        inspect_structured_data = event != "js_yield" and isinstance(
+            structured_data,
+            (dict, list, tuple),
+        )
+        if _message_contains_management(inspected_payload) or (
+            inspect_structured_data and _message_contains_management(structured_data)
+        ):
+            return self._decision(WebSocketMessageAction.CLOSE, "management_denied", event, task_id)
+        if _message_targets_restricted_user_entry(inspected_payload) or (
+            inspect_structured_data and _message_targets_restricted_user_entry(structured_data)
+        ):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "restricted_entry_denied",
+                event,
+                task_id,
+                "restricted",
+            )
+        if _message_targets_alas_settings(inspected_payload) or (
+            inspect_structured_data and _message_targets_alas_settings(structured_data)
+        ):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "alas_settings_denied",
+                event,
+                task_id,
+                "restricted",
+            )
+        if _message_switches_config(inspected_payload, self.config_name) or (
+            inspect_structured_data
+            and _pywebio_explicit_config_mismatch(structured_data, self.config_name)
+        ):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "config_mismatch",
+                event,
+                task_id,
+                "restricted",
+            )
+        if event != "js_yield" and _pywebio_data_has_restricted_field(payload.get("data")):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "restricted_input_field",
+                event,
+                task_id,
+                "restricted",
+            )
+
+        action_payload = inspected_payload
+        scalar_data = payload.get("data")
+        scalar_action = (
+            event == "callback" or event not in PYWEBIO_EVENTS
+        ) and not isinstance(scalar_data, (dict, list, tuple))
+        if scalar_action:
+            scalar_text = str(scalar_data or "")
+            scalar_label = _compact_text(scalar_data)
+            if scalar_label in {"manage", "admin", "management"} or _text_contains_management_command(
+                scalar_text
+            ):
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "management_denied",
+                    event,
+                    task_id,
+                    "restricted",
+                )
+            if _is_restricted_user_entry_label(scalar_data) or _is_restricted_user_entry_route(
+                scalar_text
+            ):
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "restricted_entry_denied",
+                    event,
+                    task_id,
+                    "restricted",
+                )
+            if (
+                _is_alas_settings_task(scalar_data)
+                or _is_alas_settings_label(scalar_data)
+                or _is_alas_settings_field(scalar_text)
+            ):
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "alas_settings_denied",
+                    event,
+                    task_id,
+                    "restricted",
+                )
+        if not self.can_run and (
+            _pywebio_contains_explicit_action(action_payload, RUN_ACTION_MARKERS)
+            or (
+                inspect_structured_data
+                and _pywebio_contains_explicit_action(structured_data, RUN_ACTION_MARKERS)
+            )
+            or (scalar_action and _text_has_action_marker(str(scalar_data or ""), RUN_ACTION_MARKERS))
+        ):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "run_permission_denied",
+                event,
+                task_id,
+                "run",
+            )
+        if not self.can_edit and (
+            _pywebio_contains_explicit_action(action_payload, EDIT_ACTION_MARKERS)
+            or (
+                inspect_structured_data
+                and _pywebio_contains_explicit_action(structured_data, EDIT_ACTION_MARKERS)
+            )
+            or (scalar_action and _text_has_action_marker(str(scalar_data or ""), EDIT_ACTION_MARKERS))
+        ):
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "edit_permission_denied",
+                event,
+                task_id,
+                "edit",
+            )
+        return None
+
     def _registered_task(self, task_id: str, kind: str, event: str) -> tuple[PyWebIOTaskRegistration | None, WebSocketMessageDecision | None]:
         if not task_id:
-            return None, self._decision(False, "missing_task_id", event)
+            return None, self._decision(WebSocketMessageAction.CLOSE, "missing_task_id", event)
         if task_id in self.denied_tasks:
-            return None, self._decision(False, "denied_task_id", event, task_id, "restricted")
+            return None, self._decision(
+                WebSocketMessageAction.CLOSE,
+                "denied_task_id",
+                event,
+                task_id,
+                "restricted",
+            )
         registration = self.tasks.get(task_id)
         if not registration:
-            return None, self._decision(False, "unknown_task_id", event, task_id)
+            return None, self._decision(
+                WebSocketMessageAction.DROP,
+                "unknown_task_id",
+                event,
+                task_id,
+            )
         if registration.kind != kind:
-            return None, self._decision(False, "task_kind_mismatch", event, task_id)
+            return None, self._decision(
+                WebSocketMessageAction.DROP,
+                "task_kind_mismatch",
+                event,
+                task_id,
+            )
         return registration, None
 
     def _check_input_fields(
@@ -2203,15 +2429,33 @@ class PyWebIOSessionPolicy:
     ) -> WebSocketMessageDecision | None:
         submitted_fields = {str(key or "") for key in values.keys()}
         if not submitted_fields.issubset(set(registration.fields)):
-            return self._decision(False, "unknown_input_field", event, task_id, "edit")
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "unknown_input_field",
+                event,
+                task_id,
+                "edit",
+            )
         for field_name, value in values.items():
             normalized_field = "".join(
                 char.lower() for char in str(field_name or "") if char.isalnum() or char == "_"
             )
             if field_name in registration.restricted_fields or _field_is_restricted(field_name):
-                return self._decision(False, "restricted_input_field", event, task_id, "restricted")
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "restricted_input_field",
+                    event,
+                    task_id,
+                    "restricted",
+                )
             if normalized_field in PYWEBIO_CONFIG_FIELDS and _config_value_mismatches(value, self.config_name):
-                return self._decision(False, "config_mismatch", event, task_id, "edit")
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "config_mismatch",
+                    event,
+                    task_id,
+                    "edit",
+                )
         return None
 
     def evaluate_upstream(self, message: str | bytes) -> WebSocketMessageDecision:
@@ -2223,10 +2467,14 @@ class PyWebIOSessionPolicy:
                 can_run=self.can_run,
                 can_edit=self.can_edit,
             )
-        event = str(payload.get("event") or "").strip().lower()
-        if event not in PYWEBIO_EVENTS:
-            if event and ("task_id" in payload or "data" in payload):
-                return self._decision(False, "unknown_protocol_event", event)
+        if "event" not in payload:
+            if "task_id" in payload or "data" in payload:
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "missing_event",
+                    "unknown",
+                    _pywebio_identifier(payload.get("task_id")),
+                )
             return websocket_message_decision(
                 message,
                 self.config_name,
@@ -2234,49 +2482,127 @@ class PyWebIOSessionPolicy:
                 can_edit=self.can_edit,
             )
 
+        event = str(payload.get("event") or "").strip().lower()
+        if not event:
+            return self._decision(WebSocketMessageAction.CLOSE, "missing_event", "unknown")
         task_id = _pywebio_identifier(payload.get("task_id"))
+        if not task_id:
+            return self._decision(WebSocketMessageAction.CLOSE, "missing_task_id", event)
+        violation = self._explicit_violation(payload, event, task_id)
+        if violation:
+            return violation
+        if event not in PYWEBIO_EVENTS:
+            return self._decision(
+                WebSocketMessageAction.DROP,
+                "unknown_protocol_event",
+                event,
+                task_id,
+            )
         if event == "callback":
-            if not task_id:
-                return self._decision(False, "missing_task_id", event)
             if task_id in self.denied_callbacks:
-                return self._decision(False, "denied_callback_id", event, task_id, "restricted")
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "denied_callback_id",
+                    event,
+                    task_id,
+                    "restricted",
+                )
             capability = self.callbacks.get(task_id)
             if not capability:
-                return self._decision(False, "unknown_callback_id", event, task_id)
+                return self._decision(
+                    WebSocketMessageAction.DROP,
+                    "unknown_callback_id",
+                    event,
+                    task_id,
+                )
             if capability.restricted:
-                return self._decision(False, "restricted_callback", event, task_id, capability.category)
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "restricted_callback",
+                    event,
+                    task_id,
+                    capability.category,
+                )
             if capability.requires_run and not self.can_run:
-                return self._decision(False, "run_permission_denied", event, task_id, capability.category)
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "run_permission_denied",
+                    event,
+                    task_id,
+                    capability.category,
+                )
             if capability.requires_edit and not self.can_edit:
-                return self._decision(False, "edit_permission_denied", event, task_id, capability.category)
-            return self._decision(True, "callback_allowed", event, task_id, capability.category)
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "edit_permission_denied",
+                    event,
+                    task_id,
+                    capability.category,
+                )
+            return self._decision(
+                WebSocketMessageAction.FORWARD,
+                "callback_allowed",
+                event,
+                task_id,
+                capability.category,
+            )
 
         if event == "from_cancel":
             _registration, denial = self._registered_task(task_id, "input", event)
             if denial:
                 return denial
-            return self._decision(True, "cancel_allowed", event, task_id, "navigation")
+            return self._decision(
+                WebSocketMessageAction.FORWARD,
+                "cancel_allowed",
+                event,
+                task_id,
+                "navigation",
+            )
 
         if event == "js_yield":
             _registration, denial = self._registered_task(task_id, "yield", event)
             if denial:
                 return denial
-            return self._decision(True, "yield_allowed", event, task_id, "navigation")
+            return self._decision(
+                WebSocketMessageAction.FORWARD,
+                "yield_allowed",
+                event,
+                task_id,
+                "navigation",
+            )
 
         registration, denial = self._registered_task(task_id, "input", event)
         if denial:
             return denial
         if not self.can_edit:
-            return self._decision(False, "edit_permission_denied", event, task_id, "edit")
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "edit_permission_denied",
+                event,
+                task_id,
+                "edit",
+            )
         data = payload.get("data")
         if not isinstance(data, dict):
-            return self._decision(False, "invalid_event_data", event, task_id, "edit")
+            return self._decision(
+                WebSocketMessageAction.CLOSE,
+                "invalid_event_data",
+                event,
+                task_id,
+                "edit",
+            )
 
         if event == "input_event":
             event_name = str(data.get("event_name") or "").strip().lower()
             field_name = _pywebio_identifier(data.get("name"))
             if event_name not in PYWEBIO_INPUT_EVENTS or not field_name:
-                return self._decision(False, "invalid_input_event", event, task_id, "edit")
+                return self._decision(
+                    WebSocketMessageAction.CLOSE,
+                    "invalid_input_event",
+                    event,
+                    task_id,
+                    "edit",
+                )
             field_denial = self._check_input_fields(
                 registration,
                 {field_name: data.get("value")},
@@ -2285,12 +2611,24 @@ class PyWebIOSessionPolicy:
             )
             if field_denial:
                 return field_denial
-            return self._decision(True, "input_event_allowed", event, task_id, "edit")
+            return self._decision(
+                WebSocketMessageAction.FORWARD,
+                "input_event_allowed",
+                event,
+                task_id,
+                "edit",
+            )
 
         field_denial = self._check_input_fields(registration, data, event, task_id)
         if field_denial:
             return field_denial
-        return self._decision(True, "submit_allowed", event, task_id, "edit")
+        return self._decision(
+            WebSocketMessageAction.FORWARD,
+            "submit_allowed",
+            event,
+            task_id,
+            "edit",
+        )
 
 
 def websocket_target_url(base_url: str, path: str, query_items) -> str:
@@ -2319,27 +2657,18 @@ async def _close_upstream_safely(upstream, code: int = 1000) -> None:
         pass
 
 
-def _safe_log_actor(value: object) -> str:
-    return str(value or "").replace("\r", " ").replace("\n", " ")[:64]
-
-
 def _safe_connection_id(value: object) -> str:
     return "".join(char for char in str(value or "") if char.isalnum() or char in "-_")[:32]
 
 
 def _log_upstream_decision(
     connection_id: str,
-    actor: str,
-    role: str,
     decision: WebSocketMessageDecision,
 ) -> None:
-    log_method = log.debug if decision.allowed else log.warning
+    log_method = log.debug if decision.action is WebSocketMessageAction.FORWARD else log.warning
     log_method(
-        "ALAS_WS_UPSTREAM_%s connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s task=%s",
-        "ALLOW" if decision.allowed else "DENY",
+        "ALAS_WS_POLICY connection=%s event=%s reason=%s permission=%s task=%s",
         connection_id,
-        actor,
-        role,
         decision.event or "legacy",
         decision.reason,
         decision.permission or "none",
@@ -2359,16 +2688,12 @@ async def proxy_websocket(
 ) -> None:
     """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
     connection_id = _safe_connection_id(connection_id) or uuid.uuid4().hex[:12]
-    safe_actor = _safe_log_actor(actor)
-    safe_role = _safe_log_actor(role)
     try:
         target = websocket_target_url(base_url, path, bound_config_query_items(websocket.query_params, decision))
     except ValueError:
         log.warning(
-            "ALAS_WS_CLOSE connection=%s direction=handshake user=%s role=%s event=connect reason=invalid_target permission=none phase=target code=1011",
+            "ALAS_WS_CLOSE connection=%s event=connect reason=invalid_target permission=none task=none",
             connection_id,
-            safe_actor,
-            safe_role,
         )
         await websocket.close(code=1011)
         return
@@ -2383,18 +2708,12 @@ async def proxy_websocket(
         if decision.filtered
         else None
     )
-    phase = "connect"
     log.debug(
-        "ALAS_WS_OPEN connection=%s direction=handshake user=%s role=%s event=connect reason=accepted permission=none filtered=%s",
+        "ALAS_WS_OPEN connection=%s event=connect reason=accepted permission=none task=none",
         connection_id,
-        safe_actor,
-        safe_role,
-        bool(decision.filtered),
     )
     try:
         async with websocket_connect(target, open_timeout=10.0) as upstream:
-            phase = "proxy"
-
             async def client_to_upstream() -> None:
                 """转发客户端文本或二进制消息到上游，并执行普通用户配置越权检查。"""
                 while True:
@@ -2406,18 +2725,10 @@ async def proxy_websocket(
                         text = message["text"]
                         if policy is not None:
                             message_decision = policy.evaluate_upstream(text)
-                            _log_upstream_decision(connection_id, safe_actor, safe_role, message_decision)
-                            if not message_decision.allowed:
-                                log.warning(
-                                    "ALAS_WS_CLOSE connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s phase=policy code=1008 task=%s",
-                                    connection_id,
-                                    safe_actor,
-                                    safe_role,
-                                    message_decision.event or "legacy",
-                                    message_decision.reason,
-                                    message_decision.permission or "none",
-                                    message_decision.task_ref or "none",
-                                )
+                            _log_upstream_decision(connection_id, message_decision)
+                            if message_decision.action is WebSocketMessageAction.DROP:
+                                continue
+                            if message_decision.closes_connection:
                                 await _close_upstream_safely(upstream, code=1008)
                                 await _close_websocket_safely(websocket, 1008)
                                 return 1008
@@ -2426,18 +2737,10 @@ async def proxy_websocket(
                         data = message["bytes"]
                         if policy is not None:
                             message_decision = policy.evaluate_upstream(data)
-                            _log_upstream_decision(connection_id, safe_actor, safe_role, message_decision)
-                            if not message_decision.allowed:
-                                log.warning(
-                                    "ALAS_WS_CLOSE connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s phase=policy code=1008 task=%s",
-                                    connection_id,
-                                    safe_actor,
-                                    safe_role,
-                                    message_decision.event or "legacy",
-                                    message_decision.reason,
-                                    message_decision.permission or "none",
-                                    message_decision.task_ref or "none",
-                                )
+                            _log_upstream_decision(connection_id, message_decision)
+                            if message_decision.action is WebSocketMessageAction.DROP:
+                                continue
+                            if message_decision.closes_connection:
                                 await _close_upstream_safely(upstream, code=1008)
                                 await _close_websocket_safely(websocket, 1008)
                                 return 1008
@@ -2451,19 +2754,17 @@ async def proxy_websocket(
                         message = filter_user_websocket_downstream(original_message, decision.config_name)
                         observation = policy.observe_downstream(original_message, message)
                         downstream_log = log.debug if observation.reason == "forwarded" else log.warning
+                        downstream_event = (
+                            observation.command
+                            if observation.command in PYWEBIO_LOG_COMMANDS
+                            else "unknown"
+                        )
                         downstream_log(
-                            "ALAS_WS_DOWNSTREAM connection=%s direction=downstream user=%s role=%s event=%s reason=%s permission=%s forwarded=%s allowed_callbacks=%s denied_callbacks=%s allowed_tasks=%s denied_tasks=%s",
+                            "ALAS_WS_DOWNSTREAM connection=%s event=%s reason=%s permission=%s task=none",
                             connection_id,
-                            safe_actor,
-                            safe_role,
-                            observation.command or "unknown",
+                            downstream_event,
                             observation.reason,
                             "none" if observation.reason == "forwarded" else "restricted",
-                            observation.forwarded,
-                            observation.allowed_callbacks,
-                            observation.denied_callbacks,
-                            observation.allowed_tasks,
-                            observation.denied_tasks,
                         )
                         if message is None:
                             continue
@@ -2489,21 +2790,13 @@ async def proxy_websocket(
             await _close_upstream_safely(upstream, code=close_code)
             await _close_websocket_safely(websocket, close_code)
             log.debug(
-                "ALAS_WS_CLOSE connection=%s direction=both user=%s role=%s event=close reason=completed permission=none phase=%s code=%s",
+                "ALAS_WS_CLOSE connection=%s event=close reason=completed permission=none task=none",
                 connection_id,
-                safe_actor,
-                safe_role,
-                phase,
-                close_code,
             )
-    except Exception as exc:
+    except Exception:
         log.warning(
-            "ALAS_WS_CLOSE connection=%s direction=proxy user=%s role=%s event=exception reason=exception permission=none phase=%s code=1011 exception=%s",
+            "ALAS_WS_CLOSE connection=%s event=exception reason=exception permission=none task=none",
             connection_id,
-            safe_actor,
-            safe_role,
-            phase,
-            type(exc).__name__,
         )
         await _close_websocket_safely(websocket, 1011)
 

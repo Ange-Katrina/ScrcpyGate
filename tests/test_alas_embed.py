@@ -17,6 +17,7 @@ import app.alas_embed as alas_embed
 from app.alas_embed import (
     PyWebIOSessionPolicy,
     PyWebIOTaskRegistration,
+    WebSocketMessageAction,
     bound_config_query_items,
     build_upstream_url,
     denied_page_html,
@@ -1235,6 +1236,45 @@ class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
         self.assertFalse(denied.allowed)
         self.assertEqual(denied.reason, "unknown_task_id")
 
+    def test_unknown_task_structured_data_closes_on_explicit_violation(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+
+        cases = (
+            (
+                {
+                    "event": "from_submit",
+                    "task_id": "unknown-config-task",
+                    "data": {"config": "other-config"},
+                },
+                "config_mismatch",
+            ),
+            (
+                {
+                    "event": "from_cancel",
+                    "task_id": "unknown-management-task",
+                    "data": {"command": "management"},
+                },
+                "management_denied",
+            ),
+        )
+        for payload, reason in cases:
+            with self.subTest(reason=reason):
+                decision = self.evaluate(policy, payload)
+                self.assertEqual(decision.action, WebSocketMessageAction.CLOSE)
+                self.assertTrue(decision.closes_connection)
+                self.assertEqual(decision.reason, reason)
+
+        scalar = self.evaluate(
+            policy,
+            {
+                "event": "from_cancel",
+                "task_id": "unknown-scalar-task",
+                "data": "ordinary management and config business text",
+            },
+        )
+        self.assertEqual(scalar.action, WebSocketMessageAction.DROP)
+        self.assertEqual(scalar.reason, "unknown_task_id")
+
     def test_registered_js_yield_does_not_scan_business_result_text(self):
         policy = PyWebIOSessionPolicy(self.config_name, can_run=False, can_edit=False)
         for command in ("pin_value", "pin_wait", "run_script"):
@@ -1283,12 +1323,22 @@ class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
             policy,
             {"event": "callback", "task_id": "blocked-callback", "data": 0},
         )
+        explicit_violation = self.evaluate(
+            policy,
+            {
+                "event": "callback",
+                "task_id": "safe-callback",
+                "data": {"config": "13361966861"},
+            },
+        )
 
         self.assertNotIn("blocked-callback", filtered)
         self.assertTrue(safe.allowed)
         self.assertEqual(safe.permission, "navigation")
         self.assertFalse(blocked.allowed)
         self.assertEqual(blocked.reason, "denied_callback_id")
+        self.assertEqual(explicit_violation.action, WebSocketMessageAction.CLOSE)
+        self.assertEqual(explicit_violation.reason, "config_mismatch")
 
     def test_denied_callback_id_wins_if_later_reused_by_safe_output(self):
         policy = PyWebIOSessionPolicy(self.config_name)
@@ -1361,6 +1411,71 @@ class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
         self.assertEqual(decision.reason, "edit_permission_denied")
         self.assertEqual(decision.permission, "edit")
 
+    def test_safe_callback_structured_data_obeys_action_permissions(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_run=False, can_edit=False)
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {
+                    "type": "buttons",
+                    "callback_id": "safe-callback",
+                    "buttons": [{"label": "Home", "value": "home"}],
+                },
+            },
+        )
+
+        cases = (
+            ({"action": "start"}, "run_permission_denied", "run"),
+            ({"method": "settings.save"}, "edit_permission_denied", "edit"),
+        )
+        for data, reason, permission in cases:
+            with self.subTest(reason=reason):
+                decision = self.evaluate(
+                    policy,
+                    {"event": "callback", "task_id": "safe-callback", "data": data},
+                )
+                self.assertEqual(decision.action, WebSocketMessageAction.CLOSE)
+                self.assertEqual(decision.reason, reason)
+                self.assertEqual(decision.permission, permission)
+
+    def test_safe_callback_scalar_sensitive_labels_are_closed(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {
+                    "type": "buttons",
+                    "callback_id": "safe-callback",
+                    "buttons": [{"label": "Home", "value": "home"}],
+                },
+            },
+        )
+
+        cases = (
+            ("Manage", "management_denied"),
+            ("alas.config_list", "management_denied"),
+            ("Remote", "restricted_entry_denied"),
+            ("Alas", "alas_settings_denied"),
+            ("Alas.Emulator.Serial", "alas_settings_denied"),
+        )
+        for data, reason in cases:
+            with self.subTest(data=data):
+                decision = self.evaluate(
+                    policy,
+                    {"event": "callback", "task_id": "safe-callback", "data": data},
+                )
+                self.assertEqual(decision.action, WebSocketMessageAction.CLOSE)
+                self.assertEqual(decision.reason, reason)
+
+        home = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "safe-callback", "data": "home"},
+        )
+        self.assertEqual(home.action, WebSocketMessageAction.FORWARD)
+        self.assertEqual(home.reason, "callback_allowed")
+
     def test_sensitive_pin_registration_is_forwarded_but_callback_is_denied(self):
         policy = PyWebIOSessionPolicy(self.config_name)
         filtered, observation = self.observe(
@@ -1386,8 +1501,9 @@ class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "denied_callback_id")
 
-    def test_unknown_protocol_identifiers_and_malformed_frames_fail_closed(self):
+    def test_unknown_protocol_identifiers_drop_but_malformed_frames_close(self):
         policy = PyWebIOSessionPolicy(self.config_name)
+        self.register_input(policy, "input-task", "ordinary_name")
 
         cases = [
             (
@@ -1398,19 +1514,57 @@ class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
                 {"event": "future_event", "task_id": "future-task", "data": {}},
                 "unknown_protocol_event",
             ),
+            (
+                {"event": "from_cancel", "task_id": "unknown-task", "data": None},
+                "unknown_task_id",
+            ),
+            (
+                {"event": "js_yield", "task_id": "input-task", "data": None},
+                "task_kind_mismatch",
+            ),
         ]
         for payload, reason in cases:
             with self.subTest(reason=reason):
                 decision = self.evaluate(policy, payload)
                 self.assertFalse(decision.allowed)
+                self.assertEqual(decision.action, WebSocketMessageAction.DROP)
+                self.assertFalse(decision.closes_connection)
                 self.assertEqual(decision.reason, reason)
 
         malformed = policy.evaluate_upstream("{")
         invalid_binary = policy.evaluate_upstream(b"file-upload-data")
-        self.assertFalse(malformed.allowed)
-        self.assertEqual(malformed.reason, "invalid_json")
-        self.assertFalse(invalid_binary.allowed)
-        self.assertEqual(invalid_binary.reason, "invalid_binary")
+        missing_id = self.evaluate(policy, {"event": "callback", "data": 0})
+        missing_event = self.evaluate(policy, {"event": "", "task_id": "future-task"})
+        unknown_event_only = self.evaluate(policy, {"event": "future_event"})
+        unknown_event_data_without_id = self.evaluate(
+            policy,
+            {"event": "future_event", "data": {"value": "safe"}},
+        )
+        protocol_fields_without_event = self.evaluate(
+            policy,
+            {"task_id": "future-task", "data": {}},
+        )
+        data_without_event = self.evaluate(policy, {"data": {}})
+        legacy_dict = self.evaluate(policy, {"message": "legacy status"})
+        for decision, reason in (
+            (malformed, "invalid_json"),
+            (invalid_binary, "invalid_binary"),
+            (missing_id, "missing_task_id"),
+            (missing_event, "missing_event"),
+            (unknown_event_only, "missing_task_id"),
+            (unknown_event_data_without_id, "missing_task_id"),
+            (protocol_fields_without_event, "missing_event"),
+            (data_without_event, "missing_event"),
+        ):
+            with self.subTest(reason=reason):
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.action, WebSocketMessageAction.CLOSE)
+                self.assertTrue(decision.closes_connection)
+                self.assertEqual(decision.reason, reason)
+        self.assertEqual(protocol_fields_without_event.event, "unknown")
+        self.assertEqual(data_without_event.event, "unknown")
+        self.assertEqual(legacy_dict.action, WebSocketMessageAction.FORWARD)
+        self.assertEqual(legacy_dict.reason, "structured_message_allowed")
 
 
 class AlasEmbedWebSocketPolicyTests(unittest.TestCase):
