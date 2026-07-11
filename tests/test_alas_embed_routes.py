@@ -904,7 +904,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         except Exception as exc:
             return getattr(exc, "code", None) or getattr(exc, "status_code", None)
 
-    def install_fake_websocket_upstream(self, incoming=None, connect_error=None):
+    def install_fake_websocket_upstream(self, incoming=None, connect_error=None, idle_delay=0.05):
         """安装测试用上游 WebSocket 连接器并记录转发行为。"""
         captured = {"targets": [], "sent": [], "closed": []}
         incoming_messages = list(incoming or [])
@@ -928,7 +928,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
                 return self
 
             async def __anext__(self):
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(idle_delay)
                 if not incoming_messages:
                     raise StopAsyncIteration
                 message = incoming_messages.pop(0)
@@ -1351,7 +1351,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         self.storage.set_user_alas_config("alice", "3256475495", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=1.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
             websocket.send_text("{")

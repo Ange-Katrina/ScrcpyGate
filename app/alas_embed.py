@@ -196,6 +196,7 @@ PYWEBIO_LOG_COMMANDS = frozenset(
 PYWEBIO_CALLBACK_ID_KEYS = frozenset({"callback_id", "click_callback_id"})
 PYWEBIO_INPUT_EVENTS = frozenset({"change", "blur"})
 PYWEBIO_CONFIG_FIELDS = frozenset({"config", "config_name"})
+_UNPARSED_WEBSOCKET_PAYLOAD = object()
 PYWEBIO_RESTRICTED_FIELD_PREFIXES = (
     "daemon_",
     "opsidaemon_",
@@ -1928,7 +1929,11 @@ def _message_switches_downstream_config(value, config_name: str) -> bool:
     return False
 
 
-def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> str | bytes | None:
+def _filter_user_websocket_downstream_payload(
+    message: str | bytes,
+    payload,
+    config_name: str,
+) -> tuple[str | bytes | None, object | None]:
     """Filter ALAS-to-browser WebSocket messages for bound users.
 
     Downstream messages are UI render payloads from PyWebIO.  They may contain
@@ -1936,47 +1941,49 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
     the sensitive ALAS settings page, so this path must clean fields and menu
     items instead of reusing the stricter upstream request blocker.
     """
-    payload = _parse_websocket_message(message)
     if payload is None:
         if isinstance(message, bytes):
-            return None
+            return None, None
         text = str(message or "")
         if _text_contains_management_command(text):
-            return None
+            return None, None
         if _text_targets_restricted_user_entry(text):
-            return None
+            return None, None
         if _text_targets_alas_settings_ui(text):
-            return None
+            return None, None
         if _is_update_notice_text(text):
-            return None
-        return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
+            return None, None
+        if not ADB_ENDPOINT_RE.search(text):
+            return message, None
+        filtered_text = ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
+        return filtered_text, None
     if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "pin_onchange":
         filtered_pin = mask_sensitive_device_endpoints(payload)
+        if filtered_pin == payload:
+            return message, payload
         text = json.dumps(filtered_pin, ensure_ascii=False, separators=(",", ":"))
-        if isinstance(message, bytes):
-            return text.encode("utf-8")
-        return text
+        return (text.encode("utf-8") if isinstance(message, bytes) else text), filtered_pin
     if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "output":
         spec = payload.get("spec")
         if isinstance(spec, dict) and str(spec.get("type") or "").strip().lower() == "custom_widget":
             if _json_item_directly_targets_other_alas_instance_widget(spec, config_name):
-                return None
+                return None, None
             if _json_item_directly_targets_restricted_sidebar_widget(spec):
-                return None
+                return None, None
             data = spec.get("data")
             title = data.get("title") if isinstance(data, dict) else ""
             scope = str(spec.get("scope") or "").strip().lower()
             if _is_restricted_user_entry_label(title) and scope.endswith("pywebio-scope-menu"):
-                return None
+                return None, None
     if _json_item_targets_update_notice(payload):
-        return None
+        return None, None
     if _json_item_directly_targets_other_alas_instance(payload, config_name):
-        return None
+        return None, None
     filtered = filter_user_json_payload(payload, config_name)
     if _json_item_is_other_config_choice(filtered, config_name, True):
-        return None
+        return None, None
     if _message_switches_downstream_config(filtered, config_name):
-        return None
+        return None, None
     if (
         isinstance(filtered, dict)
         and isinstance(payload, dict)
@@ -1991,11 +1998,24 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
             and isinstance(filtered_spec, dict)
             and filtered_spec.get("buttons") == []
         ):
-            return None
+            return None, None
+    if filtered == payload:
+        return message, payload
     text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
     if isinstance(message, bytes):
-        return text.encode("utf-8")
-    return text
+        return text.encode("utf-8"), filtered
+    return text, filtered
+
+
+def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> str | bytes | None:
+    """Filter one downstream frame while preserving the public compatibility API."""
+    payload = _parse_websocket_message(message)
+    filtered, _filtered_payload = _filter_user_websocket_downstream_payload(
+        message,
+        payload,
+        config_name,
+    )
+    return filtered
 
 
 def _short_task_ref(value: object) -> str:
@@ -2129,26 +2149,31 @@ def _merge_callback_capability(target: dict[str, CallbackCapability], callback_i
 def _collect_callback_capabilities(value, config_name: str) -> dict[str, CallbackCapability]:
     found: dict[str, CallbackCapability] = {}
 
-    def visit(item) -> None:
+    def visit(item, editable_callback_id: str = "") -> None:
         if isinstance(item, dict):
-            capability = _callback_capability(item, config_name)
+            callback_ids: list[str] = []
             for key, child in item.items():
                 if str(key or "").lower() in PYWEBIO_CALLBACK_ID_KEYS:
                     callback_id = _pywebio_identifier(child)
                     if callback_id:
-                        _merge_callback_capability(found, callback_id, capability)
+                        callback_ids.append(callback_id)
+            if callback_ids:
+                capability = _callback_capability(item, config_name)
+                for callback_id in callback_ids:
+                    callback_capability = (
+                        capability.merged(CallbackCapability(requires_edit=True))
+                        if callback_id == editable_callback_id
+                        else capability
+                    )
+                    _merge_callback_capability(found, callback_id, callback_capability)
             command = str(item.get("command") or "").strip().lower()
             spec = item.get("spec")
+            pin_callback_id = ""
             if command == "pin_onchange" and isinstance(spec, dict):
-                callback_id = _pywebio_identifier(spec.get("callback_id"))
-                if callback_id:
-                    pin_capability = _callback_capability(spec, config_name).merged(
-                        CallbackCapability(requires_edit=True)
-                    )
-                    _merge_callback_capability(found, callback_id, pin_capability)
+                pin_callback_id = _pywebio_identifier(spec.get("callback_id"))
             for child in item.values():
                 if isinstance(child, (dict, list, tuple)):
-                    visit(child)
+                    visit(child, pin_callback_id if child is spec else "")
         elif isinstance(item, (list, tuple)):
             for child in item:
                 visit(child)
@@ -2217,11 +2242,16 @@ def _merge_task_registration(
     )
 
 
-def _downstream_observation_reason(original, filtered, config_name: str) -> tuple[str, str]:
-    payload = _parse_websocket_message(original)
+def _downstream_observation_reason(
+    original,
+    filtered,
+    original_payload,
+    filtered_payload,
+    config_name: str,
+) -> tuple[str, str]:
+    payload = original_payload
     command = str(payload.get("command") or "").strip().lower() if isinstance(payload, dict) else ""
     if filtered is not None:
-        filtered_payload = _parse_websocket_message(filtered)
         unchanged = filtered == original or (
             payload is not None and filtered_payload is not None and payload == filtered_payload
         )
@@ -2280,13 +2310,31 @@ class PyWebIOSessionPolicy:
             return
         self.tasks[task_id] = registration
 
-    def observe_downstream(self, original, filtered) -> DownstreamObservation:
-        original_payload = _parse_websocket_message(original)
-        filtered_payload = _parse_websocket_message(filtered) if filtered is not None else None
+    def observe_downstream(
+        self,
+        original,
+        filtered,
+        *,
+        original_payload=_UNPARSED_WEBSOCKET_PAYLOAD,
+        filtered_payload=_UNPARSED_WEBSOCKET_PAYLOAD,
+    ) -> DownstreamObservation:
+        if original_payload is _UNPARSED_WEBSOCKET_PAYLOAD:
+            original_payload = _parse_websocket_message(original)
+        if filtered_payload is _UNPARSED_WEBSOCKET_PAYLOAD:
+            if filtered is None:
+                filtered_payload = None
+            elif filtered is original or filtered == original:
+                filtered_payload = original_payload
+            else:
+                filtered_payload = _parse_websocket_message(filtered)
         original_callbacks = _collect_callback_capabilities(original_payload, self.config_name)
-        allowed_callbacks = _collect_callback_capabilities(filtered_payload, self.config_name)
         original_tasks = _collect_task_registrations(original_payload, self.config_name)
-        allowed_tasks = _collect_task_registrations(filtered_payload, self.config_name)
+        if filtered_payload is original_payload:
+            allowed_callbacks = original_callbacks
+            allowed_tasks = original_tasks
+        else:
+            allowed_callbacks = _collect_callback_capabilities(filtered_payload, self.config_name)
+            allowed_tasks = _collect_task_registrations(filtered_payload, self.config_name)
 
         for callback_id, capability in original_callbacks.items():
             if callback_id not in allowed_callbacks or capability.restricted:
@@ -2322,7 +2370,13 @@ class PyWebIOSessionPolicy:
                 )
             self._allow_task(task_id, registration)
 
-        reason, command = _downstream_observation_reason(original, filtered, self.config_name)
+        reason, command = _downstream_observation_reason(
+            original,
+            filtered,
+            original_payload,
+            filtered_payload,
+            self.config_name,
+        )
         return DownstreamObservation(
             forwarded=filtered is not None,
             reason=reason,
@@ -2838,8 +2892,18 @@ async def proxy_websocket(
                 async for message in upstream:
                     if policy is not None:
                         original_message = message
-                        message = filter_user_websocket_downstream(original_message, decision.config_name)
-                        observation = policy.observe_downstream(original_message, message)
+                        original_payload = _parse_websocket_message(original_message)
+                        message, filtered_payload = _filter_user_websocket_downstream_payload(
+                            original_message,
+                            original_payload,
+                            decision.config_name,
+                        )
+                        observation = policy.observe_downstream(
+                            original_message,
+                            message,
+                            original_payload=original_payload,
+                            filtered_payload=filtered_payload,
+                        )
                         downstream_log = log.debug if observation.reason == "forwarded" else log.warning
                         downstream_event = (
                             observation.command

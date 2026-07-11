@@ -844,6 +844,115 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(json.loads(result), json.loads(message))
 
+    def test_filter_user_websocket_downstream_reuses_unchanged_frame(self):
+        message = '{ "command": "output", "spec": {"content": "ready"} }'
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIs(result, message)
+
+    def test_filter_user_websocket_downstream_reuses_safe_pin_registration_frame(self):
+        message = (
+            '{ "command": "pin_onchange", "spec": '
+            '{"name": "Fleet_Name", "callback_id": "callback-safe"}, '
+            '"task_id": "index-safe" }'
+        )
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIs(result, message)
+
+    def test_filter_user_websocket_downstream_masks_pin_registration_adb_endpoint(self):
+        message = json.dumps(
+            {
+                "command": "pin_onchange",
+                "spec": {
+                    "name": "Alas_Emulator_Serial",
+                    "value": "192.0.2.10:30100",
+                    "callback_id": "callback-sensitive",
+                },
+                "task_id": "index-sensitive",
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        self.assertNotEqual(result, message)
+        self.assertNotIn("192.0.2.10:30100", result)
+        self.assertEqual(json.loads(result)["spec"]["value"], alas_embed.SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER)
+
+    def test_filter_user_websocket_downstream_masks_escaped_pin_adb_endpoint(self):
+        message = (
+            '{"command":"pin_onchange","spec":{"name":"Alas_Emulator_Serial",'
+            '"value":"\\u0031\\u0039\\u0032\\u002e\\u0030\\u002e\\u0032\\u002e'
+            '\\u0031\\u0030\\u003a30100","callback_id":"callback-sensitive"},'
+            '"task_id":"index-sensitive"}'
+        )
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        self.assertNotEqual(result, message)
+        self.assertEqual(json.loads(result)["spec"]["value"], alas_embed.SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER)
+
+    def test_filter_and_observe_downstream_reuse_parsed_payloads(self):
+        message = '{"command":"output","spec":{"content":"ready"}}'
+        payload = json.loads(message)
+        policy = PyWebIOSessionPolicy("3256475495")
+
+        with patch.object(
+            alas_embed,
+            "_parse_websocket_message",
+            wraps=alas_embed._parse_websocket_message,
+        ) as parse_message:
+            filtered, filtered_payload = alas_embed._filter_user_websocket_downstream_payload(
+                message,
+                payload,
+                "3256475495",
+            )
+            observation = policy.observe_downstream(
+                message,
+                filtered,
+                original_payload=payload,
+                filtered_payload=filtered_payload,
+            )
+
+        self.assertIs(filtered, message)
+        self.assertIs(filtered_payload, payload)
+        self.assertTrue(observation.forwarded)
+        self.assertEqual(observation.reason, "forwarded")
+        parse_message.assert_not_called()
+
+    def test_callback_capability_is_computed_only_for_callback_nodes(self):
+        payload = {
+            "command": "output",
+            "spec": {
+                "type": "custom_widget",
+                "data": {
+                    "contents": [
+                        {"type": "html", "content": "ready"},
+                        {
+                            "type": "buttons",
+                            "callback_id": "callback-safe",
+                            "buttons": [{"label": "Home", "value": "home"}],
+                        },
+                    ]
+                },
+            },
+        }
+
+        with patch.object(
+            alas_embed,
+            "_callback_capability",
+            wraps=alas_embed._callback_capability,
+        ) as callback_capability:
+            callbacks = alas_embed._collect_callback_capabilities(payload, "3256475495")
+
+        self.assertEqual(set(callbacks), {"callback-safe"})
+        self.assertEqual(callback_capability.call_count, 1)
+
     def _aside_icon_output(self, icon_class, scope):
         return {
             "type": "custom_widget",
