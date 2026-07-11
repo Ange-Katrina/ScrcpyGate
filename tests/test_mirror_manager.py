@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app import mirror
-from app.mirror import ClientSession, MirrorManager
+from app.mirror import ClientSession, EventClient, MirrorManager
 
 
 class FakeControlWebSocket:
@@ -33,6 +33,35 @@ class FakeControlWebSocket:
         self.sent.append(payload)
 
 
+class FakeEventWebSocket:
+    def __init__(self, fail=False):
+        self.sent = []
+        self.fail = fail
+        self.closed = False
+
+    async def send_text(self, payload):
+        if self.fail:
+            raise RuntimeError("disconnected")
+        self.sent.append(json.loads(payload))
+
+    async def close(self, code=1000):
+        self.closed = True
+
+
+class FakeEventRegistrationWebSocket:
+    def __init__(self):
+        self.sent = []
+
+    async def send_json(self, payload):
+        self.sent.append(("json", payload))
+
+    async def send_text(self, payload):
+        self.sent.append(("text", json.loads(payload)))
+
+    async def receive_text(self):
+        raise mirror.WebSocketDisconnect()
+
+
 class FakeMirrorSession:
     def __init__(self, running=True, clients=0):
         self.running = running
@@ -49,6 +78,27 @@ class FakeMirrorSession:
 
 
 class MirrorManagerTests(unittest.TestCase):
+    def test_exposed_video_snapshot_uses_public_session_sanitizer(self):
+        session = SimpleNamespace(
+            device_id="real-device",
+            snapshot=lambda: {
+                "device_id": "real-device",
+                "running": True,
+                "last_error": "192.0.2.10:5555 offline",
+                "adb": {"address": "192.0.2.10:5555", "detail": "private", "state": "offline"},
+            },
+        )
+
+        payload = mirror.exposed_snapshot(session, "dev_public")
+
+        self.assertEqual(payload["device_id"], "dev_public")
+        self.assertEqual(payload["last_error"], "设备视频流不可用")
+        self.assertNotIn("address", payload["adb"])
+        self.assertEqual(payload["adb"]["detail"], "ADB 连接不可用")
+        direct_payload = mirror.exposed_snapshot(session, "real-device")
+        self.assertNotIn("address", direct_payload["adb"])
+        self.assertNotIn("192.0.2.10", json.dumps(direct_payload, ensure_ascii=False))
+
     def test_stop_other_no_client_sessions_keeps_current_and_viewed_sessions(self):
         async def run():
             manager = MirrorManager()
@@ -75,6 +125,154 @@ class MirrorManagerTests(unittest.TestCase):
             self.assertTrue(manager.sessions["denied"].running)
             self.assertEqual(len(broadcasts), 1)
             self.assertEqual(broadcasts[0]["reason"], "switch")
+
+        asyncio.run(run())
+
+    def test_device_event_is_permission_filtered_and_uses_public_id(self):
+        async def run():
+            manager = MirrorManager()
+            allowed = FakeEventWebSocket()
+            denied = FakeEventWebSocket()
+            manager.events = {
+                "allowed": EventClient("alice", allowed, ready=True),
+                "denied": EventClient("bob", denied, ready=True),
+            }
+            message = {
+                "type": "mirror_status",
+                "device_id": "real-device",
+                "session": {
+                    "device_id": "real-device",
+                    "last_error": "192.0.2.10:5555 failed",
+                    "adb": {
+                        "device_id": "real-device",
+                        "address": "192.0.2.10:5555",
+                        "detail": "192.0.2.10:5555 device",
+                        "state": "online",
+                        "ok": True,
+                    },
+                    "control_lock": {"device_id": "real-device", "username": "alice", "client_id": "private-client"},
+                },
+            }
+
+            with (
+                patch.object(mirror.storage, "user_can", side_effect=lambda username, *_: username == "alice") as user_can,
+                patch.object(mirror.storage, "public_device_id", return_value="dev_public") as public_device_id,
+            ):
+                await manager.broadcast(message)
+
+            self.assertEqual(len(allowed.sent), 1)
+            self.assertEqual(denied.sent, [])
+            self.assertEqual(allowed.sent[0]["device_id"], "dev_public")
+            self.assertEqual(allowed.sent[0]["session"]["device_id"], "dev_public")
+            self.assertEqual(allowed.sent[0]["session"]["control_lock"]["device_id"], "dev_public")
+            self.assertEqual(allowed.sent[0]["session"]["adb"]["device_id"], "dev_public")
+            self.assertEqual(allowed.sent[0]["session"]["adb"]["state"], "online")
+            encoded = json.dumps(allowed.sent[0], ensure_ascii=False)
+            self.assertNotIn("192.0.2.10", encoded)
+            self.assertNotIn("private-client", encoded)
+            self.assertEqual(allowed.sent[0]["session"]["last_error"], "设备视频流不可用")
+            self.assertEqual(message["device_id"], "real-device")
+            self.assertEqual(message["session"]["device_id"], "real-device")
+            public_device_id.assert_called_once_with("real-device")
+            user_can.assert_has_calls(
+                [
+                    unittest.mock.call("alice", "real-device", "view"),
+                    unittest.mock.call("bob", "real-device", "view"),
+                ],
+                any_order=True,
+            )
+
+        asyncio.run(run())
+
+    def test_device_event_rechecks_permission_on_every_broadcast(self):
+        async def run():
+            manager = MirrorManager()
+            websocket = FakeEventWebSocket()
+            manager.events = {"client": EventClient("alice", websocket, ready=True)}
+            message = {"type": "control_lock", "device_id": "real-device", "lock": None}
+
+            with (
+                patch.object(mirror.storage, "user_can", side_effect=[True, False]) as user_can,
+                patch.object(mirror.storage, "public_device_id", return_value="dev_public"),
+            ):
+                await manager.broadcast(message)
+                await manager.broadcast(message)
+
+            self.assertEqual(len(websocket.sent), 1)
+            self.assertEqual(user_can.call_count, 2)
+
+        asyncio.run(run())
+
+    def test_global_event_broadcasts_without_device_permission_check(self):
+        async def run():
+            manager = MirrorManager()
+            first = FakeEventWebSocket()
+            second = FakeEventWebSocket()
+            manager.events = {
+                "first": EventClient("alice", first, ready=True),
+                "second": EventClient("bob", second, ready=True),
+            }
+            message = {"type": "settings_changed", "scope": "global"}
+
+            with patch.object(mirror.storage, "user_can") as user_can:
+                await manager.broadcast(message)
+
+            self.assertEqual(first.sent, [message])
+            self.assertEqual(second.sent, [message])
+            user_can.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_broadcast_removes_disconnected_event_client(self):
+        async def run():
+            manager = MirrorManager()
+            dead = FakeEventWebSocket(fail=True)
+            manager.events = {
+                "dead": EventClient("alice", dead, ready=True),
+                "alive": EventClient("bob", FakeEventWebSocket(), ready=True),
+            }
+
+            await manager.broadcast({"type": "heartbeat"})
+
+            self.assertNotIn("dead", manager.events)
+            self.assertIn("alive", manager.events)
+            self.assertTrue(dead.closed)
+
+        asyncio.run(run())
+
+    def test_event_registration_queues_updates_until_after_hello(self):
+        async def run():
+            manager = MirrorManager()
+            websocket = FakeEventRegistrationWebSocket()
+
+            async def snapshot_with_event():
+                await manager.broadcast(
+                    {
+                        "type": "mirror_status",
+                        "device_id": "real-device",
+                        "running": True,
+                        "session": {"device_id": "real-device", "running": True},
+                    }
+                )
+                return {"real-device": {"device_id": "real-device", "running": True}}
+
+            manager.snapshot = snapshot_with_event
+            with (
+                patch.object(
+                    mirror,
+                    "event_user_devices",
+                    return_value=[{"id": "real-device"}],
+                ),
+                patch.object(mirror.storage, "user_can", return_value=True),
+                patch.object(mirror.storage, "public_device_id", return_value="dev_public"),
+            ):
+                await manager.register_event_ws(websocket, "alice")
+
+            self.assertEqual([kind for kind, _ in websocket.sent], ["json", "text"])
+            self.assertEqual(websocket.sent[0][1]["type"], "hello")
+            self.assertEqual(websocket.sent[1][1]["type"], "mirror_status")
+            self.assertEqual(websocket.sent[1][1]["device_id"], "dev_public")
+            self.assertEqual(manager.events, {})
 
         asyncio.run(run())
 

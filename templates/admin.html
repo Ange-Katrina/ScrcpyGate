@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111315">
   <title>ScrcpyGate 后台</title>
-  <script src="/static/js/theme-init.js?v=20260712"></script>
-  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=20260712">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=20260712">
-  <link rel="stylesheet" href="/static/css/admin.css?v=20260712">
-  <script src="/static/js/ui-core.js?v=20260712" defer></script>
+  <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=84db3b8f15da">
+  <link rel="stylesheet" href="/static/css/admin.css?v=456915279ce1">
+  <script src="/static/js/ui-core.js?v=523c6db5fdfe" defer></script>
 </head>
 <body data-ui-page="admin">
 <div id="notice" class="notice"></div>
@@ -21,7 +21,7 @@
     </div>
     <div class="top-actions">
       <label class="ui-theme-picker">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=20260712#sun-moon"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
         <span class="ui-sr-only">界面主题</span>
         <select data-ui-theme-select aria-label="界面主题">
           <option value="dark">深色</option>
@@ -127,6 +127,6 @@
   <section id="logs" class="panel"><div class="grid"><div class="card full"><h2>运行日志</h2><pre id="runtimeLogs" class="runtime-logs"></pre></div><div class="card full"><h2>最近审计日志</h2><div class="table-wrap"><table><thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th></tr></thead><tbody id="logRows"></tbody></table></div></div></div></section>
 </div>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=20260712" defer></script>
+<script src="/static/js/admin.js?v=a745eb259f40" defer></script>
 </body>
 </html>

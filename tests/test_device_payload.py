@@ -64,7 +64,24 @@ class DevicePayloadTests(unittest.TestCase):
             devices_mod = importlib.import_module("app.devices")
             payload = devices_mod.device_payload(
                 {"id": "192.0.2.10:30100", "name": "emu", "address": "192.0.2.10:30100", "enabled": 1},
-                {"192.0.2.10:30100": {"running": True, "device_id": "192.0.2.10:30100"}},
+                {
+                    "192.0.2.10:30100": {
+                        "running": True,
+                        "device_id": "192.0.2.10:30100",
+                        "last_error": "192.0.2.10:30100 offline",
+                        "adb": {
+                            "device_id": "192.0.2.10:30100",
+                            "address": "192.0.2.10:30100",
+                            "detail": "192.0.2.10:30100 device",
+                            "state": "online",
+                        },
+                        "control_lock": {
+                            "device_id": "192.0.2.10:30100",
+                            "username": "alice",
+                            "client_id": "private-client",
+                        },
+                    }
+                },
                 include_address=False,
                 public_id=True,
             )
@@ -74,6 +91,12 @@ class DevicePayloadTests(unittest.TestCase):
             self.assertTrue(payload["id"].startswith("dev_"))
             self.assertEqual(payload["id"], payload["device_id"])
             self.assertEqual(payload["session"]["device_id"], payload["id"])
+            self.assertEqual(payload["session"]["adb"]["device_id"], payload["id"])
+            self.assertEqual(payload["session"]["control_lock"]["device_id"], payload["id"])
+            self.assertEqual(payload["session"]["last_error"], "设备视频流不可用")
+            self.assertNotIn("address", payload["session"]["adb"])
+            self.assertEqual(payload["session"]["adb"]["detail"], "ADB 连接不可用")
+            self.assertNotIn("client_id", payload["session"]["control_lock"])
             self.assertNotIn("192.0.2.10", payload["id"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

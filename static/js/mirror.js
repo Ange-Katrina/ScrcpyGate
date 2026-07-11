@@ -4,9 +4,12 @@ const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
 const state = {
   user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
-  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0,
-  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false
+  videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
+  playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, layoutFrame:null, renderFrame:null,
+  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false,
+  deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map()
 };
+const resourceRequests = Object.create(null);
 const $ = (id) => document.getElementById(id);
 function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
 function getDeviceId(device){ return String((device && (device.device_id || device.id)) || '').trim(); }
@@ -24,6 +27,45 @@ async function fetchJson(url, options={}){
   let data = {}; try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {detail:text}; }
   if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
   return data;
+}
+function requestResource(name, url, apply, options={}){
+  const slot = resourceRequests[name] || (resourceRequests[name] = {sequence:0, controller:null, promise:null});
+  const force = !!options.force;
+  if (slot.promise && !force) return slot.promise;
+  if (force && slot.controller) slot.controller.abort();
+  const sequence = ++slot.sequence;
+  const controller = new AbortController();
+  slot.controller = controller;
+  const promise = fetchJson(url, {signal:controller.signal}).then(data=>{
+    if (sequence !== slot.sequence) return undefined;
+    apply(data);
+    return data;
+  }).catch(error=>{
+    if (error && error.name === 'AbortError') return undefined;
+    throw error;
+  }).finally(()=>{
+    if (sequence === slot.sequence) {
+      slot.controller = null;
+      slot.promise = null;
+    }
+  });
+  slot.promise = promise;
+  return promise;
+}
+function invalidateResource(name){
+  const slot=resourceRequests[name];
+  if (!slot) return;
+  slot.sequence+=1;
+  if (slot.controller) slot.controller.abort();
+  slot.controller=null;
+  slot.promise=null;
+}
+function scheduleRender(){
+  if (state.renderFrame) return;
+  state.renderFrame=requestAnimationFrame(()=>{
+    state.renderFrame=null;
+    render();
+  });
 }
 function normalizeSelection(){
   const ids = state.devices.map(getDeviceId).filter(Boolean);
@@ -48,13 +90,41 @@ async function stopSwitchedMirror(id){
   if (!session || !session.running) return;
   await new Promise(resolve=>setTimeout(resolve, 250));
   const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:'switch_device'}});
-  state.sessions = result.sessions || state.sessions;
+  replaceMutationSessions(result.sessions);
   render();
 }
 function mergeSessions(devices, sessions){
   const merged = Object.assign({}, sessions || {});
   devices.forEach(d => { const id=getDeviceId(d); if (id && d.session) merged[id]=d.session; });
   return merged;
+}
+function replaceRealtimeSessions(sessions){
+  const revision=++state.sessionRevision;
+  state.sessions=Object.assign({}, sessions || {});
+  Object.keys(state.sessions).forEach(id=>state.sessionRevisions.set(id, revision));
+}
+function updateRealtimeSession(id, session){
+  if (!id) return;
+  const revision=++state.sessionRevision;
+  state.sessions[id]=session;
+  state.sessionRevisions.set(id, revision);
+}
+function applySessionSnapshot(devices, sessions, requestRevision){
+  const incoming=mergeSessions(devices, sessions);
+  const next={};
+  devices.forEach(device=>{
+    const id=getDeviceId(device);
+    if (!id) return;
+    const eventRevision=state.sessionRevisions.get(id) || 0;
+    if (eventRevision > requestRevision && state.sessions[id]) next[id]=state.sessions[id];
+    else if (incoming[id]) next[id]=incoming[id];
+  });
+  state.sessions=next;
+}
+function replaceMutationSessions(sessions){
+  if (!sessions) return;
+  replaceRealtimeSessions(sessions);
+  invalidateResource('devices');
 }
 function socketLive(ws){
   return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
@@ -86,10 +156,14 @@ function renderQualityStreamMode(selected){
   const select = $('qualityStreamMode');
   if (!select) return;
   const modes = enabledStreamModes();
-  select.textContent = '';
+  const options=new Map(Array.from(select.options).map(option=>[option.value, option]));
+  options.forEach((option, mode)=>{ if (!modes.includes(mode)) option.remove(); });
   modes.forEach(mode=>{
-    const option=document.createElement('option');
-    option.value=mode;
+    let option=options.get(mode);
+    if (!option) {
+      option=document.createElement('option');
+      option.value=mode;
+    }
     option.textContent=streamModeLabel(mode);
     select.appendChild(option);
   });
@@ -134,14 +208,29 @@ function ensureQualityButtons(){
   const grid = $('qualityProfiles');
   if (!grid) return;
   const label = grid.querySelector('label');
-  grid.querySelectorAll('[data-profile]').forEach(btn=>btn.remove());
-  qualityProfileOrder().forEach(profile=>{
-    const button=document.createElement('button');
-    button.className='btn';
-    button.dataset.profile=profile;
-    button.type='button';
+  const profiles=qualityProfileOrder();
+  const active=new Set(profiles);
+  grid.querySelectorAll('[data-profile]').forEach(button=>{
+    const profile=button.dataset.profile;
+    if (!state.qualityNodes.has(profile)) state.qualityNodes.set(profile, button);
+  });
+  state.qualityNodes.forEach((button, profile)=>{
+    if (!active.has(profile)) {
+      button.remove();
+      state.qualityNodes.delete(profile);
+    }
+  });
+  profiles.forEach(profile=>{
+    let button=state.qualityNodes.get(profile);
+    if (!button) {
+      button=document.createElement('button');
+      button.className='btn';
+      button.dataset.profile=profile;
+      button.type='button';
+      button.onclick=()=>chooseQualityProfile(profile).catch(e=>show(e.message));
+      state.qualityNodes.set(profile, button);
+    }
     button.textContent=qualityProfileLabel(profile);
-    button.onclick=()=>chooseQualityProfile(profile).catch(e=>show(e.message));
     grid.insertBefore(button, label);
   });
 }
@@ -162,26 +251,63 @@ async function chooseQualityProfile(profile){
   await saveOrApplyQuality();
 }
 function renderDevices(){
-  const box=$('devices'); box.textContent='';
-  if (!state.devices.length) { box.appendChild(chip('暂无可用设备','warn')); return; }
+  const box=$('devices');
+  let empty=box.querySelector('[data-device-empty]');
+  if (!empty) {
+    empty=chip('暂无可用设备','warn');
+    empty.dataset.deviceEmpty='true';
+    box.appendChild(empty);
+  }
+  empty.hidden=state.devices.length > 0;
+  const activeIds=new Set(state.devices.map(getDeviceId).filter(Boolean));
+  state.deviceNodes.forEach((button, id)=>{
+    if (!activeIds.has(id)) {
+      button.remove();
+      state.deviceNodes.delete(id);
+    }
+  });
+  let cursor=empty.nextSibling;
   state.devices.forEach(device => {
     const id=getDeviceId(device); const session=state.sessions[id] || device.session; const active=id===state.selectedDeviceId;
     const adbState = device.adb_state || 'unknown';
     const adbBlocked = adbState === 'offline' || adbState === 'unauthorized';
     const mirrorVisible = !!(session && session.running && (Number(session.clients || 0) > 0 || (id === state.activeDeviceId && state.videoConnected)));
-    const btn=document.createElement('button'); btn.className='device-card' + (active?' active':''); btn.type='button'; btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
-    const title=document.createElement('div'); title.className='device-title';
-    const name=document.createElement('strong'); name.textContent=deviceLabel(device);
-    const status=chip(mirrorVisible ? '投屏中' : (device.enabled ? adbStateLabel(adbState) : '禁用'), mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn');
-    title.append(name, status);
-    const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
-    const meta=document.createElement('div'); meta.className='chips';
-    meta.appendChild(chip(device.can_control ? '可控制' : '只观看', device.can_control ? 'ok' : 'warn'));
-    meta.appendChild(chip(`ADB: ${adbStateLabel(adbState)}`, adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'));
-    if (session && session.clients) meta.appendChild(chip(`${session.clients} 个观看端`));
-    btn.append(title, metaText, meta);
+    let btn=state.deviceNodes.get(id);
+    if (!btn) {
+      btn=document.createElement('button');
+      btn.className='device-card';
+      btn.type='button';
+      btn.dataset.deviceId=id;
+      const title=document.createElement('div'); title.className='device-title';
+      const name=document.createElement('strong');
+      const status=chip('');
+      title.append(name, status);
+      const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
+      const meta=document.createElement('div'); meta.className='chips';
+      const control=chip('');
+      const adb=chip('');
+      const clients=chip('');
+      meta.append(control, adb, clients);
+      btn.append(title, metaText, meta);
+      btn._scrcpygate={name,status,control,adb,clients};
+      state.deviceNodes.set(id, btn);
+    }
+    const parts=btn._scrcpygate;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-current', active ? 'true' : 'false');
+    btn.disabled=!id || !device.enabled || adbState === 'unauthorized';
+    parts.name.textContent=deviceLabel(device);
+    parts.status.textContent=mirrorVisible ? '投屏中' : (device.enabled ? adbStateLabel(adbState) : '禁用');
+    parts.status.className=`chip ${mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
+    parts.control.textContent=device.can_control ? '可控制' : '只观看';
+    parts.control.className=`chip ${device.can_control ? 'ok' : 'warn'}`;
+    parts.adb.textContent=`ADB: ${adbStateLabel(adbState)}`;
+    parts.adb.className=`chip ${adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
+    parts.clients.textContent=`${Number((session && session.clients) || 0)} 个观看端`;
+    parts.clients.hidden=!(session && session.clients);
     btn.onclick=()=>selectDevice(id);
-    box.appendChild(btn);
+    if (btn !== cursor) box.insertBefore(btn, cursor);
+    cursor=btn.nextSibling;
   });
 }
 function renderStatus(){
@@ -215,7 +341,7 @@ function renderStatus(){
   $('empty').textContent = device ? (running ? '点击连接画面' : '点击开始投屏') : '选择设备后开始投屏';
   $('empty').style.display = state.videoConnected ? 'none' : 'grid';
   $('phoneVideo').style.objectFit = 'contain';
-  layoutVideo();
+  scheduleLayout();
 }
 function render(){ renderDevices(); renderStatus(); renderAccountPanel(); $('roleChip').textContent = state.user && state.user.is_admin ? '管理员' : '普通用户'; $('adminLink').hidden = !(state.user && state.user.is_admin); }
 function renderAlasPanel(){
@@ -262,13 +388,45 @@ async function changePassword(){
   clearPasswordForm();
   show(result.other_sessions_removed ? `密码已修改，已清理 ${result.other_sessions_removed} 个其它会话` : '密码已修改');
 }
-async function loadAll(){
-  const me = await fetchJson('/api/me'); state.user = me.user;
-  const dev = await fetchJson('/api/devices'); state.devices=dev.devices || []; state.sessions=mergeSessions(state.devices, dev.sessions || {});
-  normalizeSelection();
-  try { state.videoPrefs = await fetchJson('/api/video/preferences'); applyQualityToForm(state.videoPrefs.effective); } catch (_) {}
-  try { state.alas = await fetchJson('/api/alas/status'); } catch (_) { state.alas = null; }
-  render();
+function loadUser(force=false){
+  return requestResource('user', '/api/me', data=>{
+    state.user=data.user;
+    scheduleRender();
+  }, {force});
+}
+function loadDevices(force=false){
+  const requestRevision=state.sessionRevision;
+  return requestResource('devices', '/api/devices', data=>{
+    state.devices=data.devices || [];
+    applySessionSnapshot(state.devices, data.sessions || {}, requestRevision);
+    normalizeSelection();
+    scheduleRender();
+  }, {force});
+}
+function loadVideoPreferences(force=false){
+  return requestResource('video', '/api/video/preferences', data=>{
+    state.videoPrefs=data;
+    applyQualityToForm(data.effective);
+    scheduleRender();
+  }, {force});
+}
+function loadAlasStatus(force=false){
+  return requestResource('alas', '/api/alas/status', data=>{
+    state.alas=data;
+    scheduleRender();
+  }, {force});
+}
+async function loadAll(options={}){
+  const force=!!options.force;
+  const results=await Promise.allSettled([
+    loadUser(force),
+    loadDevices(force),
+    loadVideoPreferences(force),
+    loadAlasStatus(force)
+  ]);
+  const failures=results.filter(result=>result.status === 'rejected');
+  if (failures.length === results.length) throw failures[0].reason;
+  return results;
 }
 async function startMirror(){
   const id=state.selectedDeviceId;
@@ -282,7 +440,7 @@ async function startMirror(){
   render();
   try {
     const data = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/start`, {method:'POST', body:qualityPayload()});
-    state.sessions = data.sessions || state.sessions;
+    replaceMutationSessions(data.sessions);
     if (data.ok === false) return show(data.detail || data.error || '投屏启动失败，请检查 ADB 连接', 5200);
     if (state.activeDeviceId === id && socketLive(state.videoWs)) {
       schedulePlayerReset();
@@ -300,14 +458,17 @@ async function stopMirror(){
   const id=state.selectedDeviceId;
   if (!id) return show('请先选择设备');
   if (state.starting) return show('投屏正在启动，请稍等');
-  await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
-  closeVideo(); await loadAll();
+  const result=await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
+  replaceMutationSessions(result.sessions);
+  closeVideo();
+  render();
 }
 async function saveOrApplyQuality(){
   if (state.qualityApplying) return show('画质正在应用，请稍等');
   const id=state.selectedDeviceId;
   const payload = qualityPayload();
   const running = !!(selectedSession() && selectedSession().running);
+  invalidateResource('video');
   state.qualityApplying = true;
   setQualityStatus(running ? '正在切换画质，投屏流会短暂重启...' : '正在保存画质偏好...');
   render();
@@ -321,13 +482,13 @@ async function saveOrApplyQuality(){
     }
     const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/settings`, {method:'PUT', body:payload});
     if (result.ok === false) {
-      state.sessions = result.sessions || state.sessions;
+      replaceMutationSessions(result.sessions);
       setQualityStatus('画质应用失败');
       show(result.detail || result.error || '画质应用失败，投屏未恢复', 5200);
       return;
     }
     state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
-    state.sessions = result.sessions || state.sessions;
+    replaceMutationSessions(result.sessions);
     if (result.restarted) {
       reconnectSockets(id);
       setQualityStatus('画质已应用，投屏流已重启');
@@ -375,13 +536,20 @@ function setControlOwnership(ok){
   if (state.hasControl) startControlKeepalive();
   else stopControlKeepalive();
 }
+function destroyInput(){
+  const input=state.input;
+  state.input=null;
+  if (input && typeof input.destroy === 'function') {
+    try { input.destroy(); } catch (_) {}
+  }
+}
 function closeControlSocket(){
   state.controlSeq += 1;
   const ws = state.controlWs;
   state.controlWs = null;
   state.controlConnected = false;
   setControlOwnership(false);
-  state.input = null;
+  destroyInput();
   if (ws) { try { ws.close(); } catch(_){} }
 }
 function closeVideo(){
@@ -416,7 +584,7 @@ async function idleStopMirror(reason){
   state.activeDeviceId = '';
   await new Promise(resolve=>setTimeout(resolve, 300));
   const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:reason || 'inactive'}});
-  state.sessions = result.sessions || state.sessions;
+  replaceMutationSessions(result.sessions);
   show(result.stopped ? '页面长时间未聚焦，投屏已自动停止' : '页面长时间未聚焦，已停止本浏览器观看');
   render();
 }
@@ -509,7 +677,7 @@ function openVideo(id, options={}){
   ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; render(); requestVideoPrime(ws); setTimeout(()=>{ if (state.videoSeq === token && state.videoWs === ws) requestVideoPrime(ws); }, 450); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
   ws.onmessage = async (event) => {
     if (state.videoSeq !== token || state.videoWs !== ws) return;
-    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) state.sessions[id]=msg.session; render(); requestVideoPrime(ws); return; }
+    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) updateRealtimeSession(id, msg.session); render(); requestVideoPrime(ws); return; }
     const buf = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
     if (state.videoSeq !== token || state.videoWs !== ws) return;
     if (!state.jmuxer) return;
@@ -536,9 +704,15 @@ function openControl(id, options={}){
     if (state.controlSeq !== token || state.controlWs !== ws) return;
     if (typeof event.data !== 'string') return;
     const msg=JSON.parse(event.data);
-    if (msg.type === 'hello' && state.sessions[id]) state.sessions[id].control_lock = msg.lock || null;
+    if (msg.type === 'hello' && state.sessions[id]) {
+      const session=Object.assign({}, state.sessions[id], {control_lock:msg.lock || null});
+      updateRealtimeSession(id, session);
+    }
     if (msg.type === 'control_lock') {
-      if ('lock' in msg && state.sessions[id]) state.sessions[id].control_lock = msg.lock || null;
+      if ('lock' in msg && state.sessions[id]) {
+        const session=Object.assign({}, state.sessions[id], {control_lock:msg.lock || null});
+        updateRealtimeSession(id, session);
+      }
       if (msg.ok !== undefined) setControlOwnership(msg.ok);
     }
     if (msg.type === 'control_released') setControlOwnership(false);
@@ -546,7 +720,7 @@ function openControl(id, options={}){
     render();
   };
   ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) show('控制通道连接失败'); };
-  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); render(); };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); };
   return ws;
 }
 function updateInputSize(){
@@ -555,7 +729,7 @@ function updateInputSize(){
   const h=video.videoHeight || state.screen.h;
   state.screen={w,h};
   if (state.input && state.input.resizeScreen) state.input.resizeScreen(w,h);
-  layoutVideo();
+  scheduleLayout();
 }
 function layoutVideo(){
   const stage=$('stage'); const wrap=$('videoWrap'); if (!stage || !wrap) return;
@@ -577,12 +751,19 @@ function layoutVideo(){
   wrap.style.height=`${Math.max(1, Math.floor(height))}px`;
   if (state.input && state.input.invalidateGeometry) state.input.invalidateGeometry();
 }
+function scheduleLayout(){
+  if (state.layoutFrame) return;
+  state.layoutFrame=requestAnimationFrame(()=>{
+    state.layoutFrame=null;
+    layoutVideo();
+  });
+}
 function handleViewportResize(){
-  layoutVideo();
-  if (state.input && state.input.invalidateGeometry) state.input.invalidateGeometry();
+  scheduleLayout();
 }
 function setupInput(){
   const video=$('phoneVideo');
+  destroyInput();
   updateInputSize();
   state.input = new ScrcpyInput((data) => {
     if (!state.hasControl || !state.controlWs || state.controlWs.readyState !== WebSocket.OPEN) return;
@@ -605,25 +786,103 @@ async function toggleControl(){
   else ws.addEventListener('open', send, {once:true});
 }
 function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
-async function reloadAlas(){ state.alas = await fetchJson('/api/alas/status'); render(); }
-async function toggleAlas(){ const result = await fetchJson('/api/alas/toggle', {method:'POST'}); if(result.ok === false) return show(result.error || 'ALAS 操作失败'); state.alas = result.alas || result; render(); show(state.alas.status === 'running' ? 'ALAS 已启动' : 'ALAS 状态已更新'); }
-function scheduleRefresh(){ clearTimeout(state.eventRefreshTimer); state.eventRefreshTimer=setTimeout(()=>loadAll().catch(()=>{}), 300); }
+async function reloadAlas(){ await loadAlasStatus(true); }
+async function toggleAlas(){ invalidateResource('alas'); const result = await fetchJson('/api/alas/toggle', {method:'POST'}); if(result.ok === false) return show(result.error || 'ALAS 操作失败'); state.alas = result.alas || result; render(); show(state.alas.status === 'running' ? 'ALAS 已启动' : 'ALAS 状态已更新'); }
+function applyEventMessage(msg){
+  if (msg.sessions) replaceRealtimeSessions(msg.sessions);
+  const id=String(msg.device_id || '').trim();
+  if (id && msg.type === 'mirror_status') {
+    if (msg.session) updateRealtimeSession(id, msg.session);
+    else updateRealtimeSession(id, Object.assign({}, state.sessions[id] || {}, {device_id:id, running:!!msg.running}));
+  }
+  if (id && msg.type === 'control_lock') {
+    const device=state.devices.find(item=>getDeviceId(item) === id);
+    const session=Object.assign({}, state.sessions[id] || (device && device.session) || {device_id:id});
+    session.control_lock=msg.lock || null;
+    updateRealtimeSession(id, session);
+    if (!msg.lock || msg.lock.username !== (state.user && state.user.username)) setControlOwnership(false);
+  }
+  scheduleRender();
+}
+function loadDynamicStatus(force=false){
+  return Promise.allSettled([
+    loadDevices(force),
+    loadVideoPreferences(force),
+    loadAlasStatus(force)
+  ]);
+}
+function clearRefreshTimers(){
+  if (state.calibrationTimer) clearTimeout(state.calibrationTimer);
+  if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
+  state.calibrationTimer=null;
+  state.recoveryTimer=null;
+}
+function scheduleCalibration(){
+  if (state.calibrationTimer) clearTimeout(state.calibrationTimer);
+  state.calibrationTimer=null;
+  if (document.hidden || !state.eventConnected || state.pageLeaving) return;
+  state.calibrationTimer=setTimeout(async()=>{
+    state.calibrationTimer=null;
+    if (!document.hidden && state.eventConnected) await loadDynamicStatus(true);
+    scheduleCalibration();
+  }, 60000);
+}
+function scheduleRecovery(){
+  if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
+  state.recoveryTimer=null;
+  if (document.hidden || state.eventConnected || state.pageLeaving) return;
+  state.recoveryTimer=setTimeout(async()=>{
+    state.recoveryTimer=null;
+    if (!document.hidden && !state.eventConnected) await loadDynamicStatus(true);
+    scheduleRecovery();
+  }, 5000);
+}
+function syncRefreshLoops(){
+  clearRefreshTimers();
+  if (document.hidden) return;
+  if (state.eventConnected) scheduleCalibration();
+  else scheduleRecovery();
+}
 function openEvents(){
-  state.eventWs = new WebSocket(wsUrl('/ws/events'));
-  state.eventWs.onmessage = (event) => {
-    const msg=JSON.parse(event.data);
-    if (msg.sessions) state.sessions=msg.sessions;
-    if (msg.type === 'mirror_status' || msg.type === 'control_lock') scheduleRefresh();
-    render();
+  if (state.pageLeaving || socketLive(state.eventWs)) return state.eventWs;
+  if (state.eventReconnectTimer) { clearTimeout(state.eventReconnectTimer); state.eventReconnectTimer=null; }
+  const token=++state.eventSeq;
+  const ws=new WebSocket(wsUrl('/ws/events'));
+  state.eventWs=ws;
+  ws.onopen=()=>{
+    if (state.eventSeq !== token || state.eventWs !== ws) return;
+    state.eventConnected=true;
+    syncRefreshLoops();
   };
-  state.eventWs.onclose = () => setTimeout(openEvents, 2500);
+  ws.onmessage = (event) => {
+    if (state.eventSeq !== token || state.eventWs !== ws) return;
+    try { applyEventMessage(JSON.parse(event.data)); } catch (_) {}
+  };
+  ws.onclose = () => {
+    if (state.eventSeq !== token || state.eventWs !== ws) return;
+    state.eventWs=null;
+    state.eventConnected=false;
+    syncRefreshLoops();
+    if (!state.pageLeaving) state.eventReconnectTimer=setTimeout(openEvents, 2500);
+  };
+  return ws;
+}
+function closeEvents(){
+  state.eventSeq+=1;
+  const ws=state.eventWs;
+  state.eventWs=null;
+  state.eventConnected=false;
+  if (state.eventReconnectTimer) clearTimeout(state.eventReconnectTimer);
+  state.eventReconnectTimer=null;
+  clearRefreshTimers();
+  if (ws) { try { ws.close(); } catch (_) {} }
 }
 function openSidebar(){ $('sidebar').classList.add('open'); $('sidebarBackdrop').classList.add('open'); }
 function closeSidebar(){ $('sidebar').classList.remove('open'); $('sidebarBackdrop').classList.remove('open'); }
 $('startBtn').onclick=()=>startMirror().catch(e=>show(e.message));
 $('stopBtn').onclick=()=>stopMirror().catch(e=>show(e.message));
 $('controlBtn').onclick=()=>toggleControl().catch(e=>show(e.message));
-$('refreshBtn').onclick=()=>loadAll().catch(e=>show(e.message));
+$('refreshBtn').onclick=()=>loadAll({force:true}).catch(e=>show(e.message));
 $('menuBtn').onclick=()=>openSidebar();
 $('sidebarBackdrop').onclick=()=>closeSidebar();
 $('toolBtn').onclick=()=>toggleToolPanel('tools');
@@ -648,6 +907,21 @@ if (window.ResizeObserver) {
 }
 window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
 window.addEventListener('focus', ()=>cancelInactiveStop());
-document.addEventListener('visibilitychange', ()=>{ if (document.hidden) scheduleInactiveStop('document_hidden'); else cancelInactiveStop(); });
-loadAll().then(openEvents).catch(e=>show(e.message));
-setInterval(()=>loadAll().catch(()=>{}), 15000);
+document.addEventListener('visibilitychange', ()=>{
+  if (document.hidden) scheduleInactiveStop('document_hidden');
+  else cancelInactiveStop();
+  syncRefreshLoops();
+});
+window.addEventListener('pagehide', ()=>{
+  state.pageLeaving=true;
+  closeEvents();
+  closeVideo();
+});
+window.addEventListener('pageshow', event=>{
+  if (!event.persisted) return;
+  state.pageLeaving=false;
+  openEvents();
+  loadAll({force:true}).catch(e=>show(e.message));
+});
+openEvents();
+loadAll().catch(e=>show(e.message));

@@ -17,11 +17,57 @@ def bool_value(value: Any, default: bool = True) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def session_payload(session: dict[str, Any] | None, device_id: str, exposed_id: str) -> dict[str, Any] | None:
+PUBLIC_ADB_FIELDS = (
+    "ok",
+    "state",
+    "adb_state",
+    "adb_ok",
+    "status_label",
+    "last_checked_at",
+    "last_seen_at",
+)
+
+
+def public_adb_payload(status: dict[str, Any] | None, exposed_id: str) -> dict[str, Any] | None:
+    if not isinstance(status, dict):
+        return None
+    payload = {key: status.get(key) for key in PUBLIC_ADB_FIELDS if key in status}
+    payload["device_id"] = exposed_id
+    if "detail" in status:
+        payload["detail"] = "" if status.get("ok") else "ADB 连接不可用"
+    if "last_error" in status:
+        payload["last_error"] = "" if status.get("ok") else "ADB 连接不可用"
+    return payload
+
+
+def public_lock_payload(lock: dict[str, Any] | None, exposed_id: str) -> dict[str, Any] | None:
+    if not isinstance(lock, dict):
+        return None
+    payload = {key: lock.get(key) for key in ("username", "acquired_at", "expires_at") if key in lock}
+    payload["device_id"] = exposed_id
+    return payload
+
+
+def session_payload(
+    session: dict[str, Any] | None,
+    device_id: str,
+    exposed_id: str,
+    *,
+    public: bool = False,
+) -> dict[str, Any] | None:
     if not session:
         return None
     data = dict(session)
     data["device_id"] = exposed_id
+    if public:
+        data.pop("address", None)
+        data.pop("real_device_id", None)
+        if "last_error" in data:
+            data["last_error"] = "" if not data.get("last_error") else "设备视频流不可用"
+        if "adb" in data:
+            data["adb"] = public_adb_payload(data.get("adb"), exposed_id)
+        if "control_lock" in data:
+            data["control_lock"] = public_lock_payload(data.get("control_lock"), exposed_id)
     return data
 
 
@@ -37,7 +83,12 @@ def device_payload(
     statuses = statuses or {}
     real_id = device_id_of(device)
     exposed_id = storage.public_device_id(real_id) if public_id else real_id
-    session = session_payload(sessions.get(real_id) or device.get("session") or None, real_id, exposed_id)
+    session = session_payload(
+        sessions.get(real_id) or device.get("session") or None,
+        real_id,
+        exposed_id,
+        public=public_id or not include_address,
+    )
     status = dict(statuses.get(real_id) or {})
     name = str(device.get("name") or "Device").strip() or "Device"
     payload = {
@@ -87,5 +138,5 @@ def sessions_payload(
         if real_id not in sessions:
             continue
         exposed_id = storage.public_device_id(real_id) if public_id else real_id
-        payload[exposed_id] = session_payload(sessions[real_id], real_id, exposed_id)
+        payload[exposed_id] = session_payload(sessions[real_id], real_id, exposed_id, public=public_id)
     return payload

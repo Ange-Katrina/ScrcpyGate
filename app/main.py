@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode
@@ -10,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 
 from adb_manager import ADBManager
 
@@ -44,6 +46,15 @@ setup_logging()
 log = logging.getLogger("webscrcpy.main")
 api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
 mirror_autostop_task: asyncio.Task | None = None
+STATIC_ASSET_VERSION_RE = re.compile(r"[a-f0-9]{12}")
+
+
+class SelectiveGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and str(scope.get("path") or "").startswith("/alas/embed/proxy"):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
 
 
 @asynccontextmanager
@@ -75,6 +86,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if api_docs_enabled else None,
     lifespan=lifespan,
 )
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=500)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -107,6 +119,13 @@ async def security_middleware(request: Request, call_next):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     response = await call_next(request)
     is_alas_proxy = request.url.path.startswith("/alas/embed/proxy")
+    is_static_asset = request.url.path.startswith("/static/")
+    if is_static_asset:
+        versions = request.query_params.getlist("v")
+        if len(versions) == 1 and STATIC_ASSET_VERSION_RE.fullmatch(versions[0]):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     if not is_alas_proxy:
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -738,7 +757,7 @@ async def api_alas_status(request: Request):
         config_name = alas.sanitize_config_name(binding.get("config_name"))
     except ValueError:
         return {"ok": False, "configured": False, "status": "invalid_config", "config": "", "can_run": False, "can_edit": False}
-    result = alas.status_for_config(config_name, include_configs=False)
+    result = await asyncio.to_thread(alas.status_for_config, config_name, False)
     binding["config_name"] = config_name
     return public_alas_status(result, binding)
 
@@ -748,7 +767,7 @@ async def api_alas_toggle(request: Request):
     security.verify_csrf(request)
     user = security.require_user(request)
     binding = require_alas_binding(user, run=True)
-    result = alas.control_for_config("toggle", binding["config_name"])
+    result = await asyncio.to_thread(alas.control_for_config, "toggle", binding["config_name"])
     if not result.get("ok"):
         storage.audit(user["username"], "alas_toggle_failed", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
         return {"ok": False, "error": result.get("error") or "ALAS operation failed", "status_code": result.get("status_code"), "config": binding["config_name"]}
@@ -891,15 +910,18 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
 async def admin_overview(request: Request):
     user = security.require_admin(request)
     devices = storage.list_all_devices()
-    sessions = await manager.snapshot()
-    statuses = adb_monitor.snapshot()
     alas_bindings = storage.list_user_alas_configs()
+    sessions, alas_status = await asyncio.gather(
+        manager.snapshot(),
+        asyncio.to_thread(admin_alas_status_for_config, None, alas_bindings)
+    )
+    statuses = adb_monitor.snapshot()
     return {
         "user": user_payload(user),
         "devices": devices_payload(devices, sessions, statuses),
         "sessions": sessions,
         "users": storage.list_users(),
-        "alas": admin_alas_status_for_config(bindings=alas_bindings),
+        "alas": alas_status,
     }
 
 
@@ -1122,7 +1144,7 @@ async def admin_save_video_settings(request: Request):
 async def admin_alas(request: Request):
     security.require_admin(request)
     config_name = request.query_params.get("config")
-    return admin_alas_payload(config_name)
+    return await asyncio.to_thread(admin_alas_payload, config_name)
 
 
 @app.put("/api/admin/alas")
@@ -1131,11 +1153,11 @@ async def admin_save_alas(request: Request):
     admin = security.require_admin(request)
     payload = await parse_body(request)
     try:
-        alas.save_settings(payload)
+        await asyncio.to_thread(alas.save_settings, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     storage.audit(admin["username"], "alas_settings", "updated")
-    return {"ok": True, **admin_alas_payload()}
+    return {"ok": True, **await asyncio.to_thread(admin_alas_payload)}
 
 
 @app.post("/api/admin/alas/toggle")
@@ -1150,7 +1172,7 @@ async def admin_toggle_alas(request: Request):
         config_name = alas.sanitize_config_name(config_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
-    result = alas.control_for_config("toggle", config_name)
+    result = await asyncio.to_thread(alas.control_for_config, "toggle", config_name)
     storage.audit(admin["username"], "alas_admin_toggle", json.dumps(result, ensure_ascii=False)[:400])
     return result
 
@@ -1161,7 +1183,7 @@ async def admin_alas_config(request: Request):
     config_name = str(request.query_params.get("config") or "").strip()
     if not config_name:
         raise HTTPException(status_code=400, detail="ALAS config name is required")
-    return alas.get_config(config_name)
+    return await asyncio.to_thread(alas.get_config, config_name)
 
 
 @app.put("/api/admin/alas/config")
@@ -1181,7 +1203,7 @@ async def admin_save_alas_config(request: Request):
             raise HTTPException(status_code=400, detail="config must be valid JSON") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="config data must be a JSON object")
-    result = alas.save_config(source, target, data, update_current=False)
+    result = await asyncio.to_thread(alas.save_config, source, target, data, False)
     storage.audit(admin["username"], "alas_config_save", target or source)
     return result
 

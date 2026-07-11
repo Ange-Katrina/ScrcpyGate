@@ -1,9 +1,11 @@
+import hashlib
 import json
 import re
 import unittest
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -19,6 +21,7 @@ class TemplateParser(HTMLParser):
         self.scripts = []
         self.stylesheets = []
         self.forms = []
+        self.static_assets = []
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
@@ -26,8 +29,14 @@ class TemplateParser(HTMLParser):
             self.ids.append(values["id"])
         if tag == "script":
             self.scripts.append(values)
+            if values.get("src", "").startswith("/static/"):
+                self.static_assets.append(values["src"])
         elif tag == "link" and "stylesheet" in (values.get("rel") or "").split():
             self.stylesheets.append(values)
+            if values.get("href", "").startswith("/static/"):
+                self.static_assets.append(values["href"])
+        elif tag == "use" and values.get("href", "").startswith("/static/"):
+            self.static_assets.append(values["href"])
         elif tag == "form":
             self.forms.append(values)
 
@@ -41,21 +50,29 @@ class UiTemplateContractTests(unittest.TestCase):
         parser.feed(self.read(f"templates/{name}"))
         return parser
 
+    def assert_content_version(self, url):
+        parsed = urlsplit(url)
+        versions = parse_qs(parsed.query).get("v", [])
+        self.assertEqual(len(versions), 1, url)
+        asset = ROOT / parsed.path.lstrip("/")
+        expected = hashlib.sha256(asset.read_bytes()).hexdigest()[:12]
+        self.assertEqual(versions[0], expected, url)
+
     def test_pages_use_self_hosted_design_system_without_inline_styles(self):
         expected_page_css = {
-            "login.html": "/static/css/login.css?v=20260712",
-            "index.html": "/static/css/mirror.css?v=20260712",
-            "admin.html": "/static/css/admin.css?v=20260712",
+            "login.html": "/static/css/login.css",
+            "index.html": "/static/css/mirror.css",
+            "admin.html": "/static/css/admin.css",
         }
         for name, page_css in expected_page_css.items():
             with self.subTest(name=name):
                 source = self.read(f"templates/{name}")
                 parser = self.parse_template(name)
-                hrefs = {item.get("href") for item in parser.stylesheets}
+                hrefs = {urlsplit(item.get("href") or "").path for item in parser.stylesheets}
                 self.assertNotIn("<style", source.lower())
                 self.assertNotRegex(source, r"\sstyle\s*=")
-                self.assertIn("/static/css/ui-tokens.css?v=20260712", hrefs)
-                self.assertIn("/static/css/ui-components.css?v=20260712", hrefs)
+                self.assertIn("/static/css/ui-tokens.css", hrefs)
+                self.assertIn("/static/css/ui-components.css", hrefs)
                 self.assertIn(page_css, hrefs)
                 self.assertTrue(all((item.get("href") or "").startswith("/static/") for item in parser.stylesheets))
                 for script in parser.scripts:
@@ -64,6 +81,14 @@ class UiTemplateContractTests(unittest.TestCase):
                     else:
                         self.assertEqual(script.get("type"), "application/json")
                         self.assertEqual(script.get("id"), "scrcpygate-bootstrap")
+                for asset_url in parser.static_assets:
+                    self.assert_content_version(asset_url)
+
+    def test_runtime_icon_sprite_url_uses_its_content_hash(self):
+        core = self.read("static/js/ui-core.js")
+        match = re.search(r'const iconUrl = "([^"]+)#";', core)
+        self.assertIsNotNone(match)
+        self.assert_content_version(match.group(1))
 
     def test_template_ids_remain_unique_and_core_bindings_exist(self):
         required = {

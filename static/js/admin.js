@@ -8,6 +8,18 @@ const customProfiles = {};
 const $ = (id)=>document.getElementById(id);
 const ADMIN_TAB_KEY = 'scrcpygate:admin:tab';
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
+const resourceRequests = new Map();
+const resourceSequences = new Map();
+const loadedResources = new Set();
+const TAB_RESOURCES = {
+  overview:['overview'],
+  devices:['devices'],
+  users:['users','permissions'],
+  video:['video'],
+  alas:['alas'],
+  logs:['logs','runtimeLogs']
+};
+let activeTab = 'overview';
 function getDeviceId(device){ return String((device && (device.device_id || device.id || device.address)) || '').trim(); }
 function statusLabel(value){ const key=String(value || 'unknown').trim(); return STATUS_LABELS[key] || key || '未知'; }
 function setBusy(el, busy, text='处理中'){
@@ -33,7 +45,46 @@ function bindAction(id, fn, text){
   el.onclick=()=>withBusy(el, fn, text).catch(e=>show(e.message));
 }
 function show(message){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),3200); }
-async function api(url, options={}){ const opts=Object.assign({headers:{}}, options); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`); return data; }
+async function api(url, options={}){ const opts=Object.assign({}, options, {headers:Object.assign({}, options.headers || {})}); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`); return data; }
+function isAbortError(error){ return !!error && (error.name === 'AbortError' || error.code === 20); }
+function reportRequestError(error, prefix='数据加载失败'){
+  if(!isAbortError(error)) show(`${prefix}${error && error.message ? `：${error.message}` : ''}`);
+}
+function requestResource(name, request, apply, options={}){
+  const force=!!options.force;
+  const previous=resourceRequests.get(name);
+  if(previous && !force) return previous.promise;
+  if(previous) previous.controller.abort();
+  const controller=new AbortController();
+  const sequence=(resourceSequences.get(name) || 0) + 1;
+  resourceSequences.set(name, sequence);
+  const record={controller, sequence, promise:null};
+  const promise=(async()=>{
+    try{
+      const data=await request(controller.signal);
+      if(controller.signal.aborted || resourceSequences.get(name)!==sequence) return undefined;
+      apply(data || {});
+      loadedResources.add(name);
+      return data;
+    } finally {
+      if(resourceRequests.get(name)===record) resourceRequests.delete(name);
+    }
+  })();
+  record.promise=promise;
+  resourceRequests.set(name, record);
+  return promise;
+}
+function loadIfNeeded(name, loader, options={}){
+  if(!options.force && loadedResources.has(name)) return Promise.resolve();
+  return loader(options);
+}
+function markResourceStale(name){
+  loadedResources.delete(name);
+  resourceSequences.set(name, (resourceSequences.get(name) || 0) + 1);
+  const previous=resourceRequests.get(name);
+  if(previous) previous.controller.abort();
+  resourceRequests.delete(name);
+}
 function clear(el){ el.textContent=''; }
 function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
 function td(text){ const cell=document.createElement('td'); cell.textContent=text == null ? '' : String(text); return cell; }
@@ -64,35 +115,101 @@ function selectedAlasConfig(){ return (($('alasOperateConfig') && $('alasOperate
 function syncAlasConfigSelectors(configName){ const config=(configName || selectedAlasConfig()).trim(); if($('alasOperateConfig') && config) $('alasOperateConfig').value=config; if($('configSource') && config) $('configSource').value=config; if($('configTarget')) $('configTarget').value=config; return config; }
 function currentAlasBinding(username){ return alasBindings().find(b=>b.username===username) || null; }
 function fillAlasBindingForm(binding){ const b=binding || currentAlasBinding($('alasBindUser').value) || {}; $('alasBindUser').value=b.username || $('alasBindUser').value || ''; $('alasBindConfig').value=b.config_name || ''; $('alasBindRun').value=b.can_run ? 'true' : 'false'; $('alasBindEnabled').value=b.config_name ? 'true' : 'false'; }
-function renderAlas(){ const a=state.alas || {}; const settings=a.settings || {}; const status=a.status || {}; const configs=uniqueAlasConfigs(); const selected=fillConfigSelect($('alasOperateConfig'), configs, status.config || selectedAlasConfig()); fillConfigSelect($('configSource'), configs, selected); syncAlasConfigSelectors(selected); $('alasBaseUrl').value=settings.base_url || ''; $('alasToken').value=''; const box=$('alasStatus'); clear(box); box.appendChild(chip(settings.enabled?'启用':'未启用', settings.enabled?'ok':'warn')); box.appendChild(chip(settings.token_set?'Token 已配置':'Token 未配置', settings.token_set?'ok':'warn')); if(!configs.length){ box.appendChild(chip('未绑定配置','warn')); } else { box.appendChild(chip(`配置 ${selected}`)); box.appendChild(chip(statusLabel(status.status), status.status==='running'?'ok':status.status==='error'?'warn':'')); } if(status.error) box.appendChild(chip(status.error, 'danger')); $('toggleAlas').textContent=status.status==='error'?'重启 ALAS':status.status==='running'?'停止 ALAS':'启动 ALAS'; $('toggleAlas').disabled=!configs.length; $('loadConfig').disabled=!configs.length; $('saveConfig').disabled=!configs.length; fillSelect($('alasBindUser'), state.users.map(u=>({value:u.username, text:u.username})), v=>v.text); if(!$('alasBindUser').value && state.users[0]) $('alasBindUser').value=state.users[0].username; fillAlasBindingForm(currentAlasBinding($('alasBindUser').value)); const rows=$('alasBindRows'); clear(rows); alasBindings().forEach(b=>{ const tr=document.createElement('tr'); tr.append(td(b.username), td(b.role==='admin'?'管理员':'普通用户'), td(b.config_name || '未绑定'), td(b.can_run?'允许':'拒绝')); const act=document.createElement('td'); act.className='actions'; act.append(btn('编辑','',()=>{ fillAlasBindingForm(b); if(b.config_name) syncAlasConfigSelectors(b.config_name); })); if(b.config_name) act.append(btn('取消绑定','danger',async()=>{ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:b.username, enabled:false}}); show('ALAS 绑定已取消'); await loadAll(); })); tr.appendChild(act); rows.appendChild(tr); }); }
+function renderAlas(){ const a=state.alas || {}; const settings=a.settings || {}; const status=a.status || {}; const configs=uniqueAlasConfigs(); const selected=fillConfigSelect($('alasOperateConfig'), configs, status.config || selectedAlasConfig()); fillConfigSelect($('configSource'), configs, selected); syncAlasConfigSelectors(selected); $('alasBaseUrl').value=settings.base_url || ''; $('alasToken').value=''; const box=$('alasStatus'); clear(box); box.appendChild(chip(settings.enabled?'启用':'未启用', settings.enabled?'ok':'warn')); box.appendChild(chip(settings.token_set?'Token 已配置':'Token 未配置', settings.token_set?'ok':'warn')); if(!configs.length){ box.appendChild(chip('未绑定配置','warn')); } else { box.appendChild(chip(`配置 ${selected}`)); box.appendChild(chip(statusLabel(status.status), status.status==='running'?'ok':status.status==='error'?'warn':'')); } if(status.error) box.appendChild(chip(status.error, 'danger')); $('toggleAlas').textContent=status.status==='error'?'重启 ALAS':status.status==='running'?'停止 ALAS':'启动 ALAS'; $('toggleAlas').disabled=!configs.length; $('loadConfig').disabled=!configs.length; $('saveConfig').disabled=!configs.length; fillSelect($('alasBindUser'), state.users.map(u=>({value:u.username, text:u.username})), v=>v.text); if(!$('alasBindUser').value && state.users[0]) $('alasBindUser').value=state.users[0].username; fillAlasBindingForm(currentAlasBinding($('alasBindUser').value)); const rows=$('alasBindRows'); clear(rows); alasBindings().forEach(b=>{ const tr=document.createElement('tr'); tr.append(td(b.username), td(b.role==='admin'?'管理员':'普通用户'), td(b.config_name || '未绑定'), td(b.can_run?'允许':'拒绝')); const act=document.createElement('td'); act.className='actions'; act.append(btn('编辑','',()=>{ fillAlasBindingForm(b); if(b.config_name) syncAlasConfigSelectors(b.config_name); })); if(b.config_name) act.append(btn('取消绑定','danger',async()=>{ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:b.username, enabled:false}}); show('ALAS 绑定已取消'); await refreshDomains('overview','alas'); })); tr.appendChild(act); rows.appendChild(tr); }); }
 function renderLogs(){ $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n'); const rows=$('logRows'); clear(rows); [...state.logs].reverse().forEach(l=>{ const tr=document.createElement('tr'); tr.append(td(ts(l.ts)), td(l.username), td(actionText(l.action)), td(l.detail)); rows.appendChild(tr); }); }
 function render(){ renderOverview(); renderDevices(); renderVideo(); renderUsers(); renderPermissions(); renderAlas(); renderLogs(); }
-async function loadAll(){ state.overview=await api('/api/admin/overview'); state.users=state.overview.users || []; state.devices=state.overview.devices || []; state.alas={settings:{}, status:state.overview.alas || {}}; const perms=await api('/api/admin/permissions'); state.permissions=perms.permissions || []; try{ state.video=await api('/api/admin/video'); }catch(_){ state.video={}; } const alasResp=await api('/api/admin/alas'); state.alas=alasResp; const logs=await api('/api/admin/logs'); state.logs=logs.logs || []; try{ const runtime=await api('/api/admin/runtime-logs?lines=400'); state.runtimeLogs=runtime.logs || []; }catch(_){ state.runtimeLogs=[]; } render(); }
-async function saveUser(){ await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value}}); show('用户已保存'); await loadAll(); }
-async function deleteUser(username){ if(!confirm(`删除用户 ${username}?`)) return; await api(`/api/admin/users/${encodeURIComponent(username)}`,{method:'DELETE'}); show('用户已删除'); await loadAll(); }
-async function saveDevice(){ const id=$('deviceId').value.trim(); await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}}); show('设备已保存'); clearDeviceForm(); await loadAll(); }
-async function deleteDevice(id){ if(!confirm(`删除设备 ${id}?`)) return; await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'}); show('设备已删除'); await loadAll(); }
+function applyOverview(data){
+  state.overview=data;
+  if(!loadedResources.has('users')) state.users=data.users || [];
+  if(!loadedResources.has('devices')) state.devices=data.devices || [];
+  if(!loadedResources.has('alas')) state.alas={settings:{}, status:data.alas || {}};
+  renderOverview();
+  if(loadedResources.has('devices')) renderDevices();
+  if(loadedResources.has('users')) renderUsers();
+  if(loadedResources.has('permissions')) renderPermissions();
+  if(loadedResources.has('alas')) renderAlas();
+}
+function applyDevices(data){ state.devices=data.devices || []; renderDevices(); renderOverview(); if(loadedResources.has('permissions')) renderPermissions(); }
+function applyUsers(data){ state.users=data.users || []; renderUsers(); if(loadedResources.has('permissions')) renderPermissions(); if(loadedResources.has('alas')) renderAlas(); }
+function applyPermissions(data){
+  state.permissions=data.permissions || [];
+  if(data.users && !loadedResources.has('users')) state.users=data.users;
+  if(data.devices && !loadedResources.has('devices')) state.devices=data.devices;
+  renderPermissions();
+  if(loadedResources.has('users')) renderUsers();
+  if(loadedResources.has('devices')) renderDevices();
+  renderOverview();
+}
+function applyVideo(data){ state.video=data; renderVideo(); }
+function applyAlas(data){ state.alas=data; renderAlas(); renderOverview(); }
+function applyLogs(data){ state.logs=data.logs || []; renderLogs(); }
+function applyRuntimeLogs(data){ state.runtimeLogs=data.logs || []; renderLogs(); }
+function loadOverview(options={}){ return requestResource('overview', signal=>api('/api/admin/overview',{signal}), applyOverview, options); }
+function loadDevices(options={}){ return requestResource('devices', signal=>api('/api/admin/devices',{signal}), applyDevices, options); }
+function loadUsers(options={}){ return requestResource('users', signal=>api('/api/admin/users',{signal}), applyUsers, options); }
+function loadPermissions(options={}){ return requestResource('permissions', signal=>api('/api/admin/permissions',{signal}), applyPermissions, options); }
+function loadVideo(options={}){ return requestResource('video', signal=>api('/api/admin/video',{signal}), applyVideo, options); }
+function loadAlas(options={}){
+  const config=String(options.config === undefined ? selectedAlasConfig() : options.config || '').trim();
+  const url='/api/admin/alas' + (config ? `?config=${encodeURIComponent(config)}` : '');
+  return requestResource('alas', signal=>api(url,{signal}), applyAlas, options);
+}
+function loadLogs(options={}){ return requestResource('logs', signal=>api('/api/admin/logs',{signal}), applyLogs, options); }
+function loadRuntimeLogs(options={}){ return requestResource('runtimeLogs', signal=>api('/api/admin/runtime-logs?lines=400',{signal}), applyRuntimeLogs, options); }
+const RESOURCE_LOADERS = {overview:loadOverview, devices:loadDevices, users:loadUsers, permissions:loadPermissions, video:loadVideo, alas:loadAlas, logs:loadLogs, runtimeLogs:loadRuntimeLogs};
+async function loadTab(tabId, options={}){
+  const names=TAB_RESOURCES[tabId] || TAB_RESOURCES.overview;
+  const force=!!options.force;
+  const results=await Promise.allSettled(names.map(name=>loadIfNeeded(name, RESOURCE_LOADERS[name], {force})));
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${names[index]} 加载失败`); });
+  return results;
+}
+async function loadAll(){
+  const names=Object.keys(RESOURCE_LOADERS);
+  const results=await Promise.allSettled(names.map(name=>RESOURCE_LOADERS[name]({force:true})));
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${names[index]} 加载失败`); });
+  return results;
+}
+async function refreshDomains(...names){
+  const unique=[...new Set(names)];
+  const visible=new Set(TAB_RESOURCES[activeTab] || []);
+  const refresh=[];
+  unique.forEach(name=>{
+    const wasLoaded=loadedResources.has(name);
+    markResourceStale(name);
+    if(name === 'overview' || wasLoaded || visible.has(name)) refresh.push(name);
+  });
+  const results=await Promise.allSettled(refresh.map(name=>RESOURCE_LOADERS[name]({force:true})));
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${refresh[index]} 刷新失败`); });
+}
+async function saveUser(){ await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value}}); show('用户已保存'); await refreshDomains('overview','users','permissions','alas'); }
+async function deleteUser(username){ if(!confirm(`删除用户 ${username}?`)) return; await api(`/api/admin/users/${encodeURIComponent(username)}`,{method:'DELETE'}); show('用户已删除'); await refreshDomains('overview','users','permissions','alas'); }
+async function saveDevice(){ const id=$('deviceId').value.trim(); await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}}); show('设备已保存'); clearDeviceForm(); await refreshDomains('overview','devices','permissions'); }
+async function deleteDevice(id){ if(!confirm(`删除设备 ${id}?`)) return; await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'}); show('设备已删除'); await refreshDomains('overview','devices','permissions'); }
 async function testDevice(id){ const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'}); show(`ADB ${id}: ${result.state}${result.detail ? ' - ' + result.detail : ''}`, 5200); }
-async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await loadAll(); }
-async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await loadAll(); }
-async function savePermission(){ await api('/api/admin/permissions',{method:'PUT', body:{username:$('permUser').value, device_id:$('permDevice').value, can_view:$('permView').value==='true', can_control:$('permControl').value==='true'}}); show('权限已保存'); await loadAll(); }
+async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await refreshDomains('overview','devices','permissions'); }
+async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await refreshDomains('overview','devices','permissions'); }
+async function savePermission(){ await api('/api/admin/permissions',{method:'PUT', body:{username:$('permUser').value, device_id:$('permDevice').value, can_view:$('permView').value==='true', can_control:$('permControl').value==='true'}}); show('权限已保存'); await refreshDomains('permissions'); }
 function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=Number(input.value); }); return presets; }
 function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:Number($('customProfileBitrate').value || 900000), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
-async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; const result=await api('/api/admin/video',{method:'PUT', body:payload}); state.video=result; show('画质设置已保存'); await loadAll(); }
-async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); show('ALAS 设置已保存'); await loadAll(); }
-async function reloadAlas(){ const config=selectedAlasConfig(); state.alas=await api('/api/admin/alas' + (config ? `?config=${encodeURIComponent(config)}` : '')); renderAlas(); }
-async function toggleAlas(){ const config=selectedAlasConfig(); if(!config) return show('请先为用户绑定 ALAS 配置'); await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}); show('ALAS 状态已更新'); await loadAll(); }
+async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
+async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); show('ALAS 设置已保存'); await refreshDomains('overview','alas'); }
+async function reloadAlas(){ await loadAlas({force:true}); }
+async function toggleAlas(){ const config=selectedAlasConfig(); if(!config) return show('请先为用户绑定 ALAS 配置'); await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}); show('ALAS 状态已更新'); await refreshDomains('overview','alas'); }
 async function loadConfig(){ const config=selectedAlasConfig(); if(!config) return show('请先选择绑定配置'); const data=await api(`/api/admin/alas/config?config=${encodeURIComponent(config)}`); syncAlasConfigSelectors(data.config || config); $('configEditor').value=JSON.stringify(data.data || {}, null, 2); show('绑定配置已读取'); }
-async function saveConfig(){ const config=selectedAlasConfig(); if(!config) return show('请先选择绑定配置'); let data; try{ data=JSON.parse($('configEditor').value); }catch(e){ show('JSON 格式错误'); return; } await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}}); show('配置已保存'); await loadAll(); }
-async function saveAlasBinding(){ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:$('alasBindUser').value, config_name:$('alasBindConfig').value, enabled:$('alasBindEnabled').value==='true', can_run:$('alasBindRun').value==='true', can_edit:false}}); show('ALAS 绑定已保存'); await loadAll(); }
+async function saveConfig(){ const config=selectedAlasConfig(); if(!config) return show('请先选择绑定配置'); let data; try{ data=JSON.parse($('configEditor').value); }catch(e){ show('JSON 格式错误'); return; } await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}}); show('配置已保存'); await refreshDomains('alas'); }
+async function saveAlasBinding(){ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:$('alasBindUser').value, config_name:$('alasBindConfig').value, enabled:$('alasBindEnabled').value==='true', can_run:$('alasBindRun').value==='true', can_edit:false}}); show('ALAS 绑定已保存'); await refreshDomains('overview','alas'); }
 function activateTab(tabId, save=true){
   const target=$(tabId) ? tabId : 'overview';
+  activeTab=target;
   document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active', x.dataset.tab===target));
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active', p.id===target));
   if(save) localStorage.setItem(ADMIN_TAB_KEY, target);
+  loadTab(target).catch(error=>reportRequestError(error));
 }
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>activateTab(b.dataset.tab));
-activateTab(localStorage.getItem(ADMIN_TAB_KEY) || 'overview', false);
+const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
+activateTab('overview', false);
 bindAction('reloadAll', loadAll, '刷新中');
 bindAction('saveUser', saveUser, '保存中');
 bindAction('saveDevice', saveDevice, '保存中');
@@ -109,4 +226,6 @@ bindAction('saveAlasBinding', saveAlasBinding, '保存中');
 $('alasBindUser').onchange=()=>fillAlasBindingForm();
 $('alasOperateConfig').onchange=()=>{ syncAlasConfigSelectors($('alasOperateConfig').value); reloadAlas().catch(e=>show(e.message)); };
 $('configSource').onchange=()=>syncAlasConfigSelectors($('configSource').value);
-loadAll().catch(e=>show(e.message));
+loadOverview()
+  .then(()=>{ if(savedInitialTab !== 'overview') activateTab(savedInitialTab, false); })
+  .catch(error=>reportRequestError(error));

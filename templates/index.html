@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111315">
   <title>ScrcpyGate</title>
-  <script src="/static/js/theme-init.js?v=20260712"></script>
-  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=20260712">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=20260712">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=20260712">
-  <script src="/static/js/ui-core.js?v=20260712" defer></script>
-  <script src="/static/js/jmuxer.min.js?v=20260712"></script>
-  <script src="/static/js/input.js?v=20260712"></script>
+  <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=84db3b8f15da">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=60cdcb76897b">
+  <script src="/static/js/ui-core.js?v=523c6db5fdfe" defer></script>
+  <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
+  <script src="/static/js/input.js?v=4abd1c7fbd4d"></script>
 </head>
 <body data-ui-page="mirror">
 <div class="app">
@@ -27,7 +27,7 @@
     <div class="mirror-theme-row">
       <span class="muted">界面主题</span>
       <label class="ui-theme-picker">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=20260712#sun-moon"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
         <span class="ui-sr-only">界面主题</span>
         <select data-ui-theme-select aria-label="界面主题">
           <option value="dark">深色</option>
@@ -147,6 +147,6 @@
   </main>
 </div>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=20260712" defer></script>
+<script src="/static/js/mirror.js?v=be9887aed8f4" defer></script>
 </body>
 </html>

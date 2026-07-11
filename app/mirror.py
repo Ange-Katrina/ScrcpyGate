@@ -15,6 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 from scrcpy import Scrcpy
 from . import storage
 from .adb_monitor import adb_monitor
+from .devices import public_adb_payload, public_lock_payload, session_payload, sessions_payload
 from .h264 import (
     H264AnnexBParser,
     H264_NAL_IDR,
@@ -90,6 +91,15 @@ class ClientSession:
             self.clear_queue()
             self.drops += 1
             self.needs_keyframe = True
+
+
+@dataclass
+class EventClient:
+    username: str
+    websocket: WebSocket
+    ready: bool = False
+    pending: list[str] = field(default_factory=list)
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class MirrorSession:
@@ -410,7 +420,7 @@ class MirrorSession:
 class MirrorManager:
     def __init__(self):
         self.sessions: dict[str, MirrorSession] = {}
-        self.events: dict[str, WebSocket] = {}
+        self.events: dict[str, EventClient] = {}
         self._lock = asyncio.Lock()
 
     async def get_or_create(self, device_id: str) -> MirrorSession:
@@ -484,25 +494,55 @@ class MirrorManager:
         return {device_id: session.snapshot() for device_id, session in self.sessions.items()}
 
     async def broadcast(self, message: dict[str, Any]) -> None:
-        dead = []
-        encoded = json.dumps(message, ensure_ascii=False)
-        for client_id, ws in list(self.events.items()):
-            try:
-                await ws.send_text(encoded)
-            except Exception:
-                dead.append(client_id)
-        for client_id in dead:
-            self.events.pop(client_id, None)
+        clients = list(self.events.items())
+        if not clients:
+            return
+        real_device_id = str(message.get("device_id") or "").strip()
+        public_device_id = ""
+        allowed_users: set[str] | None = None
+        if real_device_id:
+            usernames = {client.username for _, client in clients}
+            public_device_id, allowed_users = await asyncio.to_thread(event_public_context, usernames, real_device_id)
+        device_encoded = json.dumps(public_event_payload(message, real_device_id, public_device_id), ensure_ascii=False) if real_device_id else ""
+        global_encoded = json.dumps(message, ensure_ascii=False) if not real_device_id else ""
+        recipients = [
+            (client_id, client, device_encoded if real_device_id else global_encoded)
+            for client_id, client in clients
+            if allowed_users is None or client.username in allowed_users
+        ]
+
+        async def send_event(client: EventClient, encoded: str) -> None:
+            async with client.send_lock:
+                if not client.ready:
+                    client.pending.append(encoded)
+                    return
+                await client.websocket.send_text(encoded)
+
+        results = await asyncio.gather(
+            *(asyncio.wait_for(send_event(client, encoded), timeout=1.0) for _, client, encoded in recipients),
+            return_exceptions=True,
+        )
+        for (client_id, client, _), result in zip(recipients, results):
+            if isinstance(result, Exception):
+                self.events.pop(client_id, None)
+                try:
+                    await asyncio.wait_for(client.websocket.close(code=1011), timeout=0.5)
+                except Exception:
+                    pass
 
     async def register_event_ws(self, websocket: WebSocket, username: str) -> None:
-        from .devices import sessions_payload
-
         client_id = str(uuid.uuid4())
-        self.events[client_id] = websocket
+        client = EventClient(username=username, websocket=websocket)
+        self.events[client_id] = client
         try:
-            user = storage.get_user(username)
-            devices = storage.list_devices_for_user(username, bool(user and user["role"] == "admin"))
-            await websocket.send_json({"type": "hello", "client_id": client_id, "username": username, "sessions": sessions_payload(devices, await self.snapshot(), public_id=True)})
+            devices = await asyncio.to_thread(event_user_devices, username)
+            snapshot = sessions_payload(devices, await self.snapshot(), public_id=True)
+            async with client.send_lock:
+                await websocket.send_json({"type": "hello", "client_id": client_id, "username": username, "sessions": snapshot})
+                for encoded in client.pending:
+                    await websocket.send_text(encoded)
+                client.pending.clear()
+                client.ready = True
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
@@ -511,13 +551,58 @@ class MirrorManager:
             self.events.pop(client_id, None)
 
 
+def event_user_devices(username: str) -> list[dict[str, Any]]:
+    user = storage.get_user(username)
+    return storage.list_devices_for_user(username, bool(user and user["role"] == "admin"))
+
+
+def event_users_with_view_access(usernames: set[str], device_id: str) -> set[str]:
+    allowed: set[str] = set()
+    for username in usernames:
+        try:
+            if storage.user_can(username, device_id, "view"):
+                allowed.add(username)
+        except Exception:
+            log.exception("EVENT_PERMISSION_CHECK_FAILED user=%s device=%s", username, device_id)
+    return allowed
+
+
+def event_public_context(usernames: set[str], device_id: str) -> tuple[str, set[str]]:
+    return storage.public_device_id(device_id), event_users_with_view_access(usernames, device_id)
+
+
 manager = MirrorManager()
+
+
+def public_event_payload(value: Any, real_device_id: str, public_device_id: str) -> Any:
+    if isinstance(value, dict):
+        payload: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "device_id" and item == real_device_id:
+                payload[key] = public_device_id
+            elif key == "session" and isinstance(item, dict):
+                payload[key] = session_payload(item, real_device_id, public_device_id, public=True)
+            elif key in {"lock", "control_lock"} and isinstance(item, dict):
+                payload[key] = public_lock_payload(item, public_device_id)
+            elif key == "adb" and isinstance(item, dict):
+                payload[key] = public_adb_payload(item, public_device_id)
+            else:
+                payload[key] = public_event_payload(item, real_device_id, public_device_id)
+        return payload
+    if isinstance(value, list):
+        return [public_event_payload(item, real_device_id, public_device_id) for item in value]
+    return value
 
 
 def exposed_snapshot(session: MirrorSession, exposed_device_id: str | None = None) -> dict[str, Any]:
     data = session.snapshot()
     if exposed_device_id:
-        data["device_id"] = exposed_device_id
+        return session_payload(
+            data,
+            session.device_id,
+            exposed_device_id,
+            public=True,
+        ) or {}
     return data
 
 
