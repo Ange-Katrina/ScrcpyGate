@@ -15,6 +15,8 @@ if str(ROOT) not in sys.path:
 import app.alas_embed as alas_embed
 
 from app.alas_embed import (
+    PyWebIOSessionPolicy,
+    PyWebIOTaskRegistration,
     bound_config_query_items,
     build_upstream_url,
     denied_page_html,
@@ -811,6 +813,104 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_filter_user_websocket_downstream_keeps_pywebio_pin_registration(self):
+        message = json.dumps(
+            {
+                "command": "pin_onchange",
+                "spec": {
+                    "name": "Alas_Emulator_Serial",
+                    "callback_id": "CB-put_queue-test",
+                    "clear": False,
+                },
+                "task_id": "index-test",
+            },
+            ensure_ascii=False,
+        )
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertEqual(json.loads(result), json.loads(message))
+
+    def _alas_instance_sidebar_item(self, label, index=1):
+        return {
+            "type": "custom_widget",
+            "data": {
+                "contents": [
+                    {
+                        "type": "html",
+                        "content": '<svg class="aside-icon icon-run"></svg>',
+                        "scope": f"#pywebio-scope-alas-instance-{index}",
+                    },
+                    {
+                        "type": "buttons",
+                        "callback_id": f"callback-{index}",
+                        "buttons": [
+                            {
+                                "label": label,
+                                "value": 0,
+                                "color": "aside",
+                            }
+                        ],
+                        "scope": f"#pywebio-scope-alas-instance-{index}",
+                        "style": f";z-index: 2; --aside-{label}--;",
+                    },
+                ]
+            },
+        }
+
+    def _alas_instance_sidebar_message(self, *labels):
+        return json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "type": "custom_widget",
+                    "data": {
+                        "contents": [
+                            self._alas_instance_sidebar_item(label, index)
+                            for index, label in enumerate(labels, start=1)
+                        ]
+                    },
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    def test_filter_user_websocket_downstream_drops_other_alas_instance_button(self):
+        message = self._alas_instance_sidebar_message("13361966861")
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(json.loads(result)["spec"]["data"]["contents"], [])
+
+    def test_filter_user_websocket_downstream_drops_default_alas_instance_button(self):
+        message = self._alas_instance_sidebar_message("alas")
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(json.loads(result)["spec"]["data"]["contents"], [])
+
+    def test_filter_user_websocket_downstream_keeps_bound_alas_instance_button(self):
+        message = self._alas_instance_sidebar_message("3256475495")
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(json.loads(result), json.loads(message))
+
+    def test_filter_user_websocket_downstream_filters_mixed_alas_instance_buttons(self):
+        message = self._alas_instance_sidebar_message("3256475495", "13361966861", "alas")
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
+        self.assertIsNotNone(result)
+        contents = json.loads(result)["spec"]["data"]["contents"]
+        self.assertEqual(contents, [self._alas_instance_sidebar_item("3256475495", 1)])
+        serialized = json.dumps(contents, ensure_ascii=False)
+        self.assertNotIn("13361966861", serialized)
+        self.assertNotIn("--aside-alas--", serialized)
+
     def test_filter_user_websocket_downstream_filters_alas_settings_payload(self):
         result = filter_user_websocket_downstream('{"menu":"Alas","task":"Alas"}', "挂机-云")
 
@@ -862,6 +962,66 @@ class AlasEmbedPolicyTests(unittest.TestCase):
                 "spec": {"items": [{"label": "主页", "value": "home"}, {"label": "出击", "value": "Campaign"}]},
             },
         )
+
+    def test_filter_user_websocket_downstream_drops_restricted_single_menu_buttons(self):
+        for label, style in (
+            ("更新器", ";--menu-Update--"),
+            ("远程控制", ";--menu-Remote--"),
+            ("工具", ";--menu-Utils--"),
+        ):
+            with self.subTest(label=label):
+                message = json.dumps(
+                    {
+                        "command": "output",
+                        "spec": {
+                            "type": "buttons",
+                            "callback_id": f"callback-{label}",
+                            "buttons": [
+                                {"label": label, "value": 0, "color": "menu", "disabled": False}
+                            ],
+                            "scope": "#pywebio-scope-menu",
+                            "position": -1,
+                            "style": style,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+
+                self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
+
+    def test_filter_user_websocket_downstream_drops_restricted_custom_widget_group(self):
+        message = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "type": "custom_widget",
+                    "template": "<details><summary>{{title}}</summary>{{#contents}}{{& pywebio_output_parse}}{{/contents}}</details>",
+                    "data": {
+                        "title": "工具",
+                        "contents": [
+                            {
+                                "type": "buttons",
+                                "callback_id": "callback-daemon",
+                                "buttons": [{"label": "半自动点击", "value": 0, "color": "menu"}],
+                                "scope": "#pywebio-scope-menu",
+                                "style": ";--menu-Daemon--",
+                            },
+                            {
+                                "type": "buttons",
+                                "callback_id": "callback-benchmark",
+                                "buttons": [{"label": "性能测试", "value": 0, "color": "menu"}],
+                                "scope": "#pywebio-scope-menu",
+                                "style": ";--menu-Benchmark--",
+                            },
+                        ],
+                    },
+                    "scope": "#pywebio-scope-menu",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
 
     def test_filter_user_websocket_downstream_keeps_locale_dict_with_config_label(self):
         message = json.dumps(
@@ -928,6 +1088,329 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         result = filter_user_websocket_downstream('{"config":"其它"}', "挂机-云")
 
         self.assertIsNone(result)
+
+
+class AlasEmbedPyWebIOSessionPolicyTests(unittest.TestCase):
+    """验证每连接 PyWebIO 回调和输入任务授权状态。"""
+
+    config_name = "3256475495"
+
+    def observe(self, policy, payload):
+        original = json.dumps(payload, ensure_ascii=False)
+        filtered = filter_user_websocket_downstream(original, self.config_name)
+        observation = policy.observe_downstream(original, filtered)
+        return filtered, observation
+
+    @staticmethod
+    def evaluate(policy, payload):
+        return policy.evaluate_upstream(json.dumps(payload, ensure_ascii=False))
+
+    def register_input(self, policy, task_id="input-task", *fields):
+        payload = {
+            "command": "input_group",
+            "task_id": task_id,
+            "spec": {
+                "inputs": [
+                    {"name": field, "label": f"Field {index}"}
+                    for index, field in enumerate(fields or ("ordinary_name",), start=1)
+                ]
+            },
+        }
+        return self.observe(policy, payload)
+
+    def test_registered_input_event_treats_name_as_control_name(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        filtered, observation = self.register_input(policy, "input-task", "ordinary_name")
+
+        decision = self.evaluate(
+            policy,
+            {
+                "event": "input_event",
+                "task_id": "input-task",
+                "data": {
+                    "event_name": "change",
+                    "name": "ordinary_name",
+                    "value": "13361966861",
+                },
+            },
+        )
+
+        self.assertIsNotNone(filtered)
+        self.assertTrue(observation.forwarded)
+        self.assertEqual(observation.reason, "forwarded")
+        self.assertEqual(
+            policy.tasks["input-task"],
+            PyWebIOTaskRegistration(kind="input", fields=frozenset({"ordinary_name"})),
+        )
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.reason, "input_event_allowed")
+
+    def test_input_event_requires_edit_permission(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_edit=False)
+        self.register_input(policy, "input-task", "ordinary_name")
+
+        decision = self.evaluate(
+            policy,
+            {
+                "event": "input_event",
+                "task_id": "input-task",
+                "data": {
+                    "event_name": "blur",
+                    "name": "ordinary_name",
+                    "value": "safe",
+                },
+            },
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "edit_permission_denied")
+        self.assertEqual(decision.permission, "edit")
+
+    def test_from_submit_allows_only_registered_safe_fields(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        self.register_input(policy, "input-task", "ordinary_name", "region")
+
+        allowed = self.evaluate(
+            policy,
+            {
+                "event": "from_submit",
+                "task_id": "input-task",
+                "data": {"ordinary_name": "fleet", "region": "cn"},
+            },
+        )
+        denied = self.evaluate(
+            policy,
+            {
+                "event": "from_submit",
+                "task_id": "input-task",
+                "data": {"ordinary_name": "fleet", "unregistered": "value"},
+            },
+        )
+
+        self.assertTrue(allowed.allowed)
+        self.assertEqual(allowed.reason, "submit_allowed")
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "unknown_input_field")
+
+    def test_explicit_config_selector_allows_bound_value_and_rejects_mismatch(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        self.register_input(policy, "config-task", "config")
+
+        allowed = self.evaluate(
+            policy,
+            {
+                "event": "from_submit",
+                "task_id": "config-task",
+                "data": {"config": self.config_name},
+            },
+        )
+        denied = self.evaluate(
+            policy,
+            {
+                "event": "from_submit",
+                "task_id": "config-task",
+                "data": {"config": "13361966861"},
+            },
+        )
+
+        self.assertTrue(allowed.allowed)
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "config_mismatch")
+
+    def test_from_cancel_needs_registered_input_but_not_edit_permission(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_edit=False)
+        self.register_input(policy, "input-task", "ordinary_name")
+
+        allowed = self.evaluate(
+            policy,
+            {"event": "from_cancel", "task_id": "input-task", "data": None},
+        )
+        denied = self.evaluate(
+            policy,
+            {"event": "from_cancel", "task_id": "unknown-task", "data": None},
+        )
+
+        self.assertTrue(allowed.allowed)
+        self.assertEqual(allowed.reason, "cancel_allowed")
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "unknown_task_id")
+
+    def test_registered_js_yield_does_not_scan_business_result_text(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_run=False, can_edit=False)
+        for command in ("pin_value", "pin_wait", "run_script"):
+            task_id = f"yield-{command}"
+            spec = {"name": "status_pin"} if command != "run_script" else {"code": "return 1"}
+            self.observe(
+                policy,
+                {"command": command, "task_id": task_id, "spec": spec},
+            )
+            decision = self.evaluate(
+                policy,
+                {
+                    "event": "js_yield",
+                    "task_id": task_id,
+                    "data": {
+                        "message": "ordinary config and settings status text",
+                        "config": "this is business text, not a selector",
+                    },
+                },
+            )
+
+            with self.subTest(command=command):
+                self.assertTrue(decision.allowed)
+                self.assertEqual(decision.reason, "yield_allowed")
+
+    def test_safe_callback_is_allowed_and_filtered_callback_is_denied(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        filtered, _observation = self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "主页", "value": "home", "callback_id": "safe-callback"},
+                        {"label": "管理", "value": "Manage", "callback_id": "blocked-callback"},
+                    ]
+                },
+            },
+        )
+
+        safe = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "safe-callback", "data": 0},
+        )
+        blocked = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "blocked-callback", "data": 0},
+        )
+
+        self.assertNotIn("blocked-callback", filtered)
+        self.assertTrue(safe.allowed)
+        self.assertEqual(safe.permission, "navigation")
+        self.assertFalse(blocked.allowed)
+        self.assertEqual(blocked.reason, "denied_callback_id")
+
+    def test_denied_callback_id_wins_if_later_reused_by_safe_output(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {"items": [{"label": "管理", "value": "Manage", "callback_id": "reused-id"}]},
+            },
+        )
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {"items": [{"label": "主页", "value": "home", "callback_id": "reused-id"}]},
+            },
+        )
+
+        decision = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "reused-id", "data": 0},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "denied_callback_id")
+
+    def test_run_callback_obeys_run_permission_category(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_run=False)
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {
+                    "type": "buttons",
+                    "callback_id": "run-callback",
+                    "buttons": [{"label": "Start", "value": "start"}],
+                },
+            },
+        )
+
+        decision = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "run-callback", "data": "start"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "run_permission_denied")
+        self.assertEqual(decision.permission, "run")
+
+    def test_edit_callback_obeys_edit_permission_category(self):
+        policy = PyWebIOSessionPolicy(self.config_name, can_edit=False)
+        self.observe(
+            policy,
+            {
+                "command": "output",
+                "spec": {
+                    "type": "buttons",
+                    "callback_id": "edit-callback",
+                    "buttons": [{"label": "Save", "value": "save"}],
+                },
+            },
+        )
+
+        decision = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "edit-callback", "data": "save"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "edit_permission_denied")
+        self.assertEqual(decision.permission, "edit")
+
+    def test_sensitive_pin_registration_is_forwarded_but_callback_is_denied(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+        filtered, observation = self.observe(
+            policy,
+            {
+                "command": "pin_onchange",
+                "task_id": "index-task",
+                "spec": {
+                    "name": "Alas_Emulator_Serial",
+                    "callback_id": "sensitive-pin-callback",
+                    "clear": False,
+                },
+            },
+        )
+
+        decision = self.evaluate(
+            policy,
+            {"event": "callback", "task_id": "sensitive-pin-callback", "data": "changed"},
+        )
+
+        self.assertIsNotNone(filtered)
+        self.assertTrue(observation.forwarded)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "denied_callback_id")
+
+    def test_unknown_protocol_identifiers_and_malformed_frames_fail_closed(self):
+        policy = PyWebIOSessionPolicy(self.config_name)
+
+        cases = [
+            (
+                {"event": "callback", "task_id": "unknown-callback", "data": 0},
+                "unknown_callback_id",
+            ),
+            (
+                {"event": "future_event", "task_id": "future-task", "data": {}},
+                "unknown_protocol_event",
+            ),
+        ]
+        for payload, reason in cases:
+            with self.subTest(reason=reason):
+                decision = self.evaluate(policy, payload)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.reason, reason)
+
+        malformed = policy.evaluate_upstream("{")
+        invalid_binary = policy.evaluate_upstream(b"file-upload-data")
+        self.assertFalse(malformed.allowed)
+        self.assertEqual(malformed.reason, "invalid_json")
+        self.assertFalse(invalid_binary.allowed)
+        self.assertEqual(invalid_binary.reason, "invalid_binary")
 
 
 class AlasEmbedWebSocketPolicyTests(unittest.TestCase):

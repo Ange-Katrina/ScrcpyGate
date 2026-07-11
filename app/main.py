@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
@@ -168,8 +169,15 @@ def audit_detail(request: Request, extra: str = "") -> str:
 def alas_embed_denial_detail(request: Request, reason: str, path: str = "") -> str:
     """生成 ALAS 嵌入拒绝审计详情，避免记录敏感正文和完整凭据。"""
     safe_reason = str(reason or "unknown").replace("\r", " ").replace("\n", " ")[:80]
-    safe_path = str(path or "/").replace("\r", " ").replace("\n", " ")[:160]
-    return audit_detail(request, f"reason={safe_reason} path={safe_path}")
+    return audit_detail(request, f"reason={safe_reason} route={alas_embed_route_class(path)}")
+
+
+def alas_embed_route_class(path: str) -> str:
+    """只记录代理路径类别，避免配置名或设备 endpoint 进入日志。"""
+    first_segment = str(path or "").replace("\\", "/").strip("/").split("/", 1)[0].lower()
+    if first_segment in {"api", "ajax", "pywebio", "static", "assets", "config"}:
+        return first_segment
+    return "root" if not first_segment else "other"
 
 
 def alas_embed_denied_message(reason: str) -> str:
@@ -236,13 +244,35 @@ def alas_embed_reason_code(reason: str) -> str:
 
 def log_alas_embed_denied(user: dict, binding: dict | None, channel: str, path: str, reason: str) -> None:
     log.warning(
-        "ALAS_EMBED_DENIED channel=%s user=%s role=%s bound=%s path=%s reason=%s",
+        "ALAS_EMBED_DENIED channel=%s user=%s role=%s bound=%s route=%s reason=%s",
         channel,
         (user or {}).get("username", ""),
         (user or {}).get("role", ""),
         bool(binding and binding.get("config_name")),
-        path or "/",
+        alas_embed_route_class(path),
         reason,
+    )
+
+
+def log_alas_websocket_close(
+    connection_id: str,
+    user: dict | None,
+    reason: str,
+    code: int,
+    *,
+    permission: str = "none",
+    phase: str = "authorization",
+) -> None:
+    """记录不含路径、查询参数或载荷的 WebSocket 关闭元数据。"""
+    log.warning(
+        "ALAS_WS_CLOSE connection=%s direction=handshake user=%s role=%s event=connect reason=%s permission=%s phase=%s code=%s",
+        connection_id,
+        (user or {}).get("username", ""),
+        (user or {}).get("role", ""),
+        reason,
+        permission,
+        phase,
+        code,
     )
 
 
@@ -812,11 +842,14 @@ async def alas_embed_proxy(request: Request, path: str = ""):
 @app.websocket("/alas/embed/proxy/{path:path}")
 async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     """执行 ALAS WebSocket 代理入口权限检查并转发到 Runtime。"""
+    connection_id = uuid.uuid4().hex[:12]
     if not security.websocket_origin_allowed(websocket):
+        log_alas_websocket_close(connection_id, None, "origin_denied", 4403)
         await websocket.close(code=4403)
         return
     user = security.get_current_user(websocket)
     if not user:
+        log_alas_websocket_close(connection_id, None, "authentication_required", 1008)
         await websocket.close(code=1008)
         return
     binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
@@ -825,6 +858,10 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
         log_alas_embed_denied(user, binding, "websocket", path or "/", reason_code)
+        permission = "run" if reason_code == "run_permission_denied" else (
+            "edit" if reason_code == "edit_permission_denied" else "restricted"
+        )
+        log_alas_websocket_close(connection_id, user, reason_code, 1008, permission=permission)
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, reason_code, path or "/"))
         await websocket.close(code=1008)
         return
@@ -833,15 +870,25 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     raw_base_url = storage.get_setting("alas_base_url", "")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
         log_alas_embed_denied(user, binding, "websocket", path or "/", "disabled")
+        log_alas_websocket_close(connection_id, user, "disabled", 1011, phase="configuration")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "disabled", path or "/"))
         await websocket.close(code=1011)
         return
     if not raw_base_url.strip():
         log_alas_embed_denied(user, binding, "websocket", path or "/", "unconfigured")
+        log_alas_websocket_close(connection_id, user, "unconfigured", 1011, phase="configuration")
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)
         return
-    await alas_embed.proxy_websocket(websocket, settings.get("base_url") or raw_base_url, path, decision)
+    await alas_embed.proxy_websocket(
+        websocket,
+        settings.get("base_url") or raw_base_url,
+        path,
+        decision,
+        actor=user.get("username", ""),
+        role=user.get("role", ""),
+        connection_id=connection_id,
+    )
 
 
 @app.get("/api/admin/overview")

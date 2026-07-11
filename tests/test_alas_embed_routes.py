@@ -4,6 +4,7 @@
 
 import asyncio
 import gzip
+import hashlib
 import importlib
 import json
 import os
@@ -146,6 +147,27 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
         res = self.client.get("/alas/embed/proxy/?config=挂机-云&config=其它")
         self.assertEqual(res.status_code, 403)
+
+    def test_proxy_denial_logs_redact_config_names_and_endpoint_paths(self):
+        """入口拒绝日志和审计只保留路径类别，不保存配置名或 endpoint。"""
+        bound_config = "private-bound-config"
+        other_config = "private-other-config"
+        endpoint = "192.0.2.32:5555"
+        self.login("alice", "password123456", "user")
+        self.storage.set_user_alas_config("alice", bound_config, True, True)
+        path = f"/alas/embed/proxy/config/{other_config}/serial/{endpoint}"
+
+        with self.assertLogs("webscrcpy.main", level="WARNING") as captured_logs:
+            response = self.client.get(path)
+
+        application_logs = "\n".join(captured_logs.output)
+        audit_logs = "\n".join(row["detail"] for row in self.storage.recent_audit(5))
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("route=config", application_logs)
+        self.assertIn("route=config", audit_logs)
+        for secret in (bound_config, other_config, endpoint, path):
+            self.assertNotIn(secret, application_logs)
+            self.assertNotIn(secret, audit_logs)
 
     def install_fake_upstream(self, status=200, headers=None, body=b""):
         """安装测试用上游 HTTP 客户端并记录转发请求。"""
@@ -1211,6 +1233,199 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["type"], "websocket.close")
         self.assertEqual(close_message["code"], 1000)
         self.assertEqual(captured["closed"], [1000])
+
+    def test_websocket_registers_filtered_callbacks_and_forwards_safe_callback(self):
+        """浏览器只能回调实际收到的安全按钮，且安全回调会转发到上游。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        downstream = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "主页", "value": "home", "callback_id": "safe-callback"},
+                        {"label": "管理", "value": "Manage", "callback_id": "blocked-callback"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+        callback = json.dumps(
+            {"event": "callback", "task_id": "safe-callback", "data": 0},
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[downstream])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
+            filtered = websocket.receive_text()
+            websocket.send_text(callback)
+            close_message = websocket.receive()
+
+        self.assertIn("safe-callback", filtered)
+        self.assertNotIn("blocked-callback", filtered)
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], [callback])
+
+    def test_websocket_filtered_callback_closes_both_sides_with_1008(self):
+        """被下行过滤的回调 ID 不得到达上游，并以 1008 关闭双方。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        downstream = json.dumps(
+            {
+                "command": "output",
+                "spec": {
+                    "items": [
+                        {"label": "主页", "value": "home", "callback_id": "safe-callback"},
+                        {"label": "管理", "value": "Manage", "callback_id": "blocked-callback"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[downstream])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
+            websocket.receive_text()
+            websocket.send_text(
+                json.dumps({"event": "callback", "task_id": "blocked-callback", "data": 0})
+            )
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_unknown_callback_closes_both_sides_with_1008(self):
+        """从未由服务端下发的回调 ID 按未知协议能力拒绝。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
+            websocket.send_text(
+                json.dumps({"event": "callback", "task_id": "unknown-callback", "data": 0})
+            )
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_malformed_structured_text_closes_both_sides_with_1008(self):
+        """看起来像 JSON 但无法解析的文本帧按畸形协议消息拒绝。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        captured = self.install_fake_websocket_upstream()
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
+            websocket.send_text("{")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertEqual(captured["closed"], [1008, 1008])
+
+    def test_websocket_pin_onchange_registration_does_not_blank_user_stream(self):
+        """敏感 pin 注册继续下发并遮罩 endpoint，后续正常输出仍可渲染。"""
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", "3256475495", True, True)
+        pin_registration = json.dumps(
+            {
+                "command": "pin_onchange",
+                "task_id": "index-task",
+                "spec": {
+                    "name": "Alas_Emulator_Serial",
+                    "callback_id": "sensitive-pin-callback",
+                    "serial": "192.0.2.32:5555",
+                    "clear": False,
+                },
+            },
+            ensure_ascii=False,
+        )
+        normal_output = json.dumps(
+            {"command": "output", "scope": "Alas", "spec": {"content": "任务总览"}},
+            ensure_ascii=False,
+        )
+        captured = self.install_fake_websocket_upstream(incoming=[pin_registration, normal_output])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
+            pin = json.loads(websocket.receive_text())
+            output = json.loads(websocket.receive_text())
+            close_message = websocket.receive()
+
+        self.assertEqual(pin["command"], "pin_onchange")
+        self.assertEqual(pin["spec"]["callback_id"], "sensitive-pin-callback")
+        self.assertEqual(pin["spec"]["serial"], "已隐藏")
+        self.assertEqual(output["spec"]["content"], "任务总览")
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["closed"], [1000])
+
+    def test_websocket_policy_warning_log_hashes_id_and_omits_payload_secrets(self):
+        """策略拒绝日志只记录短哈希和元数据，不记录载荷敏感值。"""
+        bound_config = "private-bound-config"
+        callback_id = "raw-callback-secret-id"
+        other_config = "private-other-config"
+        endpoint = "192.0.2.32:5555"
+        token = "token-secret-value"
+        self.login("alice", "password123456", "user")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        self.storage.set_user_alas_config("alice", bound_config, True, True)
+        captured = self.install_fake_websocket_upstream()
+        frame = json.dumps(
+            {
+                "event": "callback",
+                "task_id": callback_id,
+                "data": {"config": other_config, "serial": endpoint, "token": token},
+            }
+        )
+
+        with self.assertLogs("webscrcpy.alas_embed", level="WARNING") as captured_logs:
+            with self.client.websocket_connect(
+                f"/alas/embed/proxy/ws?config={bound_config}"
+            ) as websocket:
+                websocket.send_text(frame)
+                close_message = websocket.receive()
+
+        logs = "\n".join(captured_logs.output)
+        task_hash = hashlib.sha256(callback_id.encode("utf-8")).hexdigest()[:12]
+        self.assertEqual(close_message["code"], 1008)
+        self.assertEqual(captured["sent"], [])
+        self.assertIn("reason=unknown_callback_id", logs)
+        self.assertIn(f"task={task_hash}", logs)
+        for secret in (callback_id, bound_config, other_config, endpoint, token, frame):
+            self.assertNotIn(secret, logs)
+
+    def test_websocket_admin_pywebio_callback_remains_unfiltered(self):
+        """管理员仍然原样透传未登记的 PyWebIO 回调。"""
+        self.login("admin", "password123456", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_base_url", "http://alas.test:22267")
+        callback = json.dumps(
+            {"event": "callback", "task_id": "admin-unregistered", "data": "Manage"}
+        )
+        captured = self.install_fake_websocket_upstream(incoming=["admin-ok"])
+
+        with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
+            websocket.send_text(callback)
+            self.assertEqual(websocket.receive_text(), "admin-ok")
+            close_message = websocket.receive()
+
+        self.assertEqual(close_message["code"], 1000)
+        self.assertEqual(captured["sent"], [callback])
 
     def test_websocket_keeps_bound_user_pywebio_alas_scope_output(self):
         """ALAS/PyWebIO 正常输出包可包含 scope=Alas，不应被当成 ALAS 设置页而断开。"""

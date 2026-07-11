@@ -3,10 +3,13 @@
 
 import asyncio
 import gzip
+import hashlib
 import html as html_utils
 import ipaddress
 import json
+import logging
 import re
+import uuid
 import zlib
 from dataclasses import dataclass
 from html import escape
@@ -17,6 +20,8 @@ from urllib.request import Request, build_opener, ProxyHandler
 from fastapi import HTTPException, Request as FastAPIRequest
 from fastapi.responses import Response
 from websockets import connect as websocket_connect
+
+log = logging.getLogger("webscrcpy.alas_embed")
 
 ALAS_EMBED_PREFIX = "/alas/embed"
 ALAS_DEFAULT_PORT = 22267
@@ -182,6 +187,19 @@ ALAS_SETTINGS_LABEL_KEYS = ("label", "title", "text", "caption", "aria-label", "
 ALAS_SETTINGS_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action")
 UPDATE_NOTICE_TEXT_KEYS = ("label", "title", "text", "caption", "message", "content", "toast", "notification")
 UPDATE_NOTICE_ROUTE_KEYS = ("value", "key", "id", "href", "url", "onclick", "data", "command", "action", "event", "method", "route", "path")
+PYWEBIO_EVENTS = frozenset({"callback", "from_submit", "from_cancel", "input_event", "js_yield"})
+PYWEBIO_YIELD_COMMANDS = frozenset({"pin_value", "pin_wait", "run_script"})
+PYWEBIO_CALLBACK_ID_KEYS = frozenset({"callback_id", "click_callback_id"})
+PYWEBIO_INPUT_EVENTS = frozenset({"change", "blur"})
+PYWEBIO_CONFIG_FIELDS = frozenset({"config", "config_name"})
+PYWEBIO_RESTRICTED_FIELD_PREFIXES = (
+    "daemon_",
+    "opsidaemon_",
+    "eventstory_",
+    "benchmark_",
+    "azurlaneuncensored_",
+    "gamemanager_",
+)
 
 
 @dataclass(frozen=True)
@@ -203,6 +221,68 @@ class ParsedBody:
 
     value: object
     valid: bool = True
+
+
+@dataclass(frozen=True)
+class WebSocketMessageDecision:
+    """Structured result for one client-to-ALAS WebSocket message."""
+
+    allowed: bool
+    reason: str
+    event: str = ""
+    permission: str = ""
+    task_ref: str = ""
+
+
+@dataclass(frozen=True)
+class CallbackCapability:
+    """Permissions attached to a callback identifier emitted by PyWebIO."""
+
+    restricted: bool = False
+    requires_run: bool = False
+    requires_edit: bool = False
+
+    def merged(self, other: "CallbackCapability") -> "CallbackCapability":
+        return CallbackCapability(
+            restricted=self.restricted or other.restricted,
+            requires_run=self.requires_run or other.requires_run,
+            requires_edit=self.requires_edit or other.requires_edit,
+        )
+
+    @property
+    def category(self) -> str:
+        if self.restricted:
+            return "restricted"
+        if self.requires_run and self.requires_edit:
+            return "run+edit"
+        if self.requires_edit:
+            return "edit"
+        if self.requires_run:
+            return "run"
+        return "navigation"
+
+
+@dataclass(frozen=True)
+class PyWebIOTaskRegistration:
+    """Server-issued PyWebIO task that the browser may answer."""
+
+    kind: str
+    fields: frozenset[str] = frozenset()
+    restricted_fields: frozenset[str] = frozenset()
+    restricted: bool = False
+
+
+@dataclass(frozen=True)
+class DownstreamObservation:
+    """Metadata-only result of observing one ALAS-to-browser message."""
+
+    forwarded: bool
+    reason: str
+    command: str = ""
+    allowed_callbacks: int = 0
+    denied_callbacks: int = 0
+    allowed_tasks: int = 0
+    denied_tasks: int = 0
 
 
 PARSED_BODY_INVALID = ParsedBody(None, False)
@@ -1390,35 +1470,52 @@ def _text_targets_alas_settings_ui(text: str) -> bool:
     return _is_alas_settings_label(text) or _is_alas_settings_field(text)
 
 
-def websocket_message_allowed(message: str | bytes, config_name: str, can_run: bool = True, can_edit: bool = True) -> bool:
-    """检查 WebSocket 消息是否试图越权访问配置、管理或运行编辑操作。"""
+def websocket_message_decision(
+    message: str | bytes,
+    config_name: str,
+    can_run: bool = True,
+    can_edit: bool = True,
+) -> WebSocketMessageDecision:
+    """Apply the stateless policy used by non-PyWebIO compatibility messages."""
     payload = _parse_websocket_message(message)
     if payload is None:
         if isinstance(message, bytes):
-            return False
+            return WebSocketMessageDecision(False, "invalid_binary")
         text = str(message or "")
+        if text.lstrip().startswith(("{", "[")):
+            return WebSocketMessageDecision(False, "invalid_json")
         if _text_contains_management_command(text):
-            return False
+            return WebSocketMessageDecision(False, "management_denied")
         if _text_targets_restricted_user_entry(text):
-            return False
+            return WebSocketMessageDecision(False, "restricted_entry_denied")
         if _text_targets_alas_settings_ui(text):
-            return False
+            return WebSocketMessageDecision(False, "alas_settings_denied")
         if not can_run and _text_has_action_marker(text, RUN_ACTION_MARKERS):
-            return False
+            return WebSocketMessageDecision(False, "run_permission_denied", permission="run")
         if not can_edit and _text_has_action_marker(text, EDIT_ACTION_MARKERS):
-            return False
-        return True
+            return WebSocketMessageDecision(False, "edit_permission_denied", permission="edit")
+        return WebSocketMessageDecision(True, "plain_text_allowed")
+    if isinstance(payload, dict) and str(payload.get("event") or "").strip().lower() in PYWEBIO_EVENTS:
+        event = str(payload.get("event") or "").strip().lower()
+        return WebSocketMessageDecision(False, "protocol_state_required", event=event)
     if _message_contains_management(payload):
-        return False
+        return WebSocketMessageDecision(False, "management_denied")
     if _message_targets_restricted_user_entry(payload):
-        return False
+        return WebSocketMessageDecision(False, "restricted_entry_denied")
     if _message_targets_alas_settings(payload):
-        return False
+        return WebSocketMessageDecision(False, "alas_settings_denied")
     if _message_switches_config(payload, config_name):
-        return False
-    if _message_denied_by_action_permission(payload, can_run, can_edit):
-        return False
-    return True
+        return WebSocketMessageDecision(False, "config_mismatch")
+    if not can_run and _message_contains_action(payload, RUN_ACTION_MARKERS):
+        return WebSocketMessageDecision(False, "run_permission_denied", permission="run")
+    if not can_edit and _message_contains_action(payload, EDIT_ACTION_MARKERS):
+        return WebSocketMessageDecision(False, "edit_permission_denied", permission="edit")
+    return WebSocketMessageDecision(True, "structured_message_allowed")
+
+
+def websocket_message_allowed(message: str | bytes, config_name: str, can_run: bool = True, can_edit: bool = True) -> bool:
+    """Compatibility boolean wrapper around :func:`websocket_message_decision`."""
+    return websocket_message_decision(message, config_name, can_run=can_run, can_edit=can_edit).allowed
 
 
 def _is_config_list_key(key: object) -> bool:
@@ -1519,6 +1616,75 @@ def _json_item_is_other_config_choice(value, config_name: str, has_bound_config_
     return not _json_item_is_safe_non_config_option(value)
 
 
+def _is_alas_instance_scope(value: object) -> bool:
+    return "alas-instance" in str(value or "").lower()
+
+
+def _is_alas_instance_aside_style(value: object) -> bool:
+    return "--aside-" in str(value or "").lower()
+
+
+def _json_buttons_target_other_alas_instance(buttons, config_name: str) -> bool:
+    if not isinstance(buttons, list):
+        return False
+    labels = [
+        str(button.get("label") or "").strip()
+        for button in buttons
+        if isinstance(button, dict) and str(button.get("label") or "").strip()
+    ]
+    if not labels:
+        return False
+    if any(label == config_name for label in labels):
+        return False
+    return any(
+        _json_item_is_config_option(label, config_name)
+        or not _json_item_is_safe_non_config_option(label)
+        for label in labels
+    )
+
+
+def _json_item_directly_targets_other_alas_instance(value, config_name: str) -> bool:
+    """Return True for one PyWebIO ALAS instance button that exposes another config."""
+    if not isinstance(value, dict):
+        return False
+    lowered = {str(key).lower(): item for key, item in value.items()}
+    buttons = lowered.get("buttons")
+    if buttons is None:
+        return False
+    context_values = (
+        lowered.get("scope"),
+        lowered.get("container"),
+        lowered.get("dom_id"),
+        lowered.get("style"),
+        lowered.get("color"),
+        lowered.get("type"),
+    )
+    looks_like_instance = (
+        any(_is_alas_instance_scope(item) for item in context_values)
+        or any(_is_alas_instance_aside_style(item) for item in context_values)
+        or any(
+            isinstance(button, dict) and str(button.get("color") or "").lower() == "aside"
+            for button in buttons
+        )
+    )
+    return looks_like_instance and _json_buttons_target_other_alas_instance(buttons, config_name)
+
+
+def _json_item_targets_other_alas_instance(value, config_name: str) -> bool:
+    """Return True for PyWebIO ALAS instance payloads that expose another config."""
+    if isinstance(value, dict):
+        if _json_item_directly_targets_other_alas_instance(value, config_name):
+            return True
+        return any(
+            _json_item_targets_other_alas_instance(item, config_name)
+            for item in value.values()
+            if isinstance(item, (dict, list, tuple))
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_json_item_targets_other_alas_instance(item, config_name) for item in value)
+    return False
+
+
 def _json_item_is_bound_config_option(value, config_name: str) -> bool:
     if isinstance(value, str):
         return value.strip() == config_name
@@ -1547,7 +1713,11 @@ def _looks_like_config_choice_text(value: object, config_name: str) -> bool:
 def filter_user_json_payload(value, config_name: str):
     """Filter obvious ALAS config-list payloads down to the bound config."""
     if isinstance(value, dict):
-        if _json_item_targets_alas_settings(value) or _json_item_targets_update_notice(value):
+        if (
+            _json_item_targets_alas_settings(value)
+            or _json_item_targets_update_notice(value)
+            or _json_item_directly_targets_other_alas_instance(value, config_name)
+        ):
             return {}
         filtered = {}
         has_bound_config_key = _dict_has_bound_config_key(value, config_name)
@@ -1555,6 +1725,26 @@ def filter_user_json_payload(value, config_name: str):
             if _dict_key_is_other_config_choice(key, config_name, has_bound_config_key):
                 continue
             filtered_key = mask_sensitive_device_endpoints(key)
+            if str(key or "").strip().lower() == "inputs" and isinstance(item, (list, tuple)):
+                filtered_inputs = []
+                for entry in item:
+                    if not isinstance(entry, dict):
+                        continue
+                    field_name = _pywebio_identifier(entry.get("name"))
+                    normalized_field = "".join(
+                        char.lower() for char in field_name if char.isalnum() or char == "_"
+                    )
+                    explicit_config_selector = normalized_field in PYWEBIO_CONFIG_FIELDS
+                    if (
+                        (not explicit_config_selector and _json_item_targets_restricted_user_entry(entry))
+                        or _json_item_targets_alas_settings(entry)
+                        or _json_item_targets_update_notice(entry)
+                        or _json_item_targets_other_alas_instance(entry, config_name)
+                    ):
+                        continue
+                    filtered_inputs.append(filter_user_json_payload(entry, config_name))
+                filtered[filtered_key] = filtered_inputs
+                continue
             if _is_config_list_key(key):
                 if isinstance(item, list):
                     filtered[filtered_key] = [
@@ -1564,6 +1754,7 @@ def filter_user_json_payload(value, config_name: str):
                         and not _json_item_targets_restricted_user_entry(entry)
                         and not _json_item_targets_alas_settings(entry)
                         and not _json_item_targets_update_notice(entry)
+                        and not _json_item_targets_other_alas_instance(entry, config_name)
                     ]
                 elif _json_item_matches_bound_config(item, config_name):
                     filtered[filtered_key] = filter_user_json_payload(item, config_name)
@@ -1580,6 +1771,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and not _json_item_targets_other_alas_instance(item, config_name)
             and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
     if isinstance(value, tuple):
@@ -1590,6 +1782,7 @@ def filter_user_json_payload(value, config_name: str):
             if not _json_item_targets_restricted_user_entry(item)
             and not _json_item_targets_alas_settings(item)
             and not _json_item_targets_update_notice(item)
+            and not _json_item_targets_other_alas_instance(item, config_name)
             and not _json_item_is_other_config_choice(item, config_name, has_bound_config_option)
         ]
     return mask_sensitive_device_endpoints(value)
@@ -1633,17 +1826,471 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
         if _is_update_notice_text(text):
             return None
         return ADB_ENDPOINT_RE.sub(SENSITIVE_DEVICE_ENDPOINT_PLACEHOLDER, text)
+    if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "pin_onchange":
+        filtered_pin = mask_sensitive_device_endpoints(payload)
+        text = json.dumps(filtered_pin, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(message, bytes):
+            return text.encode("utf-8")
+        return text
+    if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "output":
+        spec = payload.get("spec")
+        if isinstance(spec, dict) and str(spec.get("type") or "").strip().lower() == "custom_widget":
+            data = spec.get("data")
+            title = data.get("title") if isinstance(data, dict) else ""
+            scope = str(spec.get("scope") or "").strip().lower()
+            if _is_restricted_user_entry_label(title) and scope.endswith("pywebio-scope-menu"):
+                return None
     if _json_item_targets_update_notice(payload):
+        return None
+    if _json_item_directly_targets_other_alas_instance(payload, config_name):
         return None
     filtered = filter_user_json_payload(payload, config_name)
     if _json_item_is_other_config_choice(filtered, config_name, True):
         return None
     if _message_switches_downstream_config(filtered, config_name):
         return None
+    if (
+        isinstance(filtered, dict)
+        and isinstance(payload, dict)
+        and str(payload.get("command") or "").strip().lower() == "output"
+    ):
+        original_spec = payload.get("spec")
+        filtered_spec = filtered.get("spec")
+        if (
+            isinstance(original_spec, dict)
+            and isinstance(original_spec.get("buttons"), list)
+            and original_spec.get("buttons")
+            and isinstance(filtered_spec, dict)
+            and filtered_spec.get("buttons") == []
+        ):
+            return None
     text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
     if isinstance(message, bytes):
         return text.encode("utf-8")
     return text
+
+
+def _short_task_ref(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _pywebio_identifier(value: object) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return ""
+    identifier = str(value or "").strip()
+    if not identifier or len(identifier) > 512:
+        return ""
+    return identifier
+
+
+def _policy_texts(value) -> list[str]:
+    keys = set(CONFIG_OPTION_KEYS) | set(ACTION_MESSAGE_KEYS) | {
+        "menu",
+        "category",
+        "section",
+        "module",
+        "page",
+        "tab",
+    }
+    texts: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered_key = str(key or "").lower()
+            if lowered_key in PYWEBIO_CALLBACK_ID_KEYS or lowered_key == "task_id":
+                continue
+            if lowered_key in keys and not isinstance(item, (dict, list, tuple)):
+                text = str(item or "").strip()
+                if text:
+                    texts.append(text)
+            if isinstance(item, (dict, list, tuple)):
+                texts.extend(_policy_texts(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            texts.extend(_policy_texts(item))
+    return texts
+
+
+def _field_is_restricted(field_name: object) -> bool:
+    normalized_field = "".join(
+        char.lower() for char in str(field_name or "") if char.isalnum() or char == "_"
+    )
+    if normalized_field in PYWEBIO_CONFIG_FIELDS:
+        return False
+    return (
+        normalized_field.startswith(PYWEBIO_RESTRICTED_FIELD_PREFIXES)
+        or _is_alas_settings_field(field_name)
+        or _is_restricted_user_entry_route(field_name)
+    )
+
+
+def _pywebio_explicit_config_mismatch(value, config_name: str) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key or "").lower() in PYWEBIO_CONFIG_FIELDS and _config_value_mismatches(item, config_name):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _pywebio_explicit_config_mismatch(item, config_name):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_pywebio_explicit_config_mismatch(item, config_name) for item in value)
+    return False
+
+
+def _callback_capability(value, config_name: str) -> CallbackCapability:
+    restricted = (
+        _json_item_targets_restricted_user_entry(value)
+        or _json_item_targets_alas_settings(value)
+        or _json_item_targets_update_notice(value)
+        or _json_item_targets_other_alas_instance(value, config_name)
+        or _pywebio_explicit_config_mismatch(value, config_name)
+    )
+    action_text = " ".join(_policy_texts(value))
+    return CallbackCapability(
+        restricted=restricted,
+        requires_run=_text_has_action_marker(action_text, RUN_ACTION_MARKERS),
+        requires_edit=_text_has_action_marker(action_text, EDIT_ACTION_MARKERS),
+    )
+
+
+def _merge_callback_capability(target: dict[str, CallbackCapability], callback_id: str, capability: CallbackCapability) -> None:
+    current = target.get(callback_id)
+    target[callback_id] = current.merged(capability) if current else capability
+
+
+def _collect_callback_capabilities(value, config_name: str) -> dict[str, CallbackCapability]:
+    found: dict[str, CallbackCapability] = {}
+
+    def visit(item) -> None:
+        if isinstance(item, dict):
+            capability = _callback_capability(item, config_name)
+            for key, child in item.items():
+                if str(key or "").lower() in PYWEBIO_CALLBACK_ID_KEYS:
+                    callback_id = _pywebio_identifier(child)
+                    if callback_id:
+                        _merge_callback_capability(found, callback_id, capability)
+            command = str(item.get("command") or "").strip().lower()
+            spec = item.get("spec")
+            if command == "pin_onchange" and isinstance(spec, dict):
+                callback_id = _pywebio_identifier(spec.get("callback_id"))
+                if callback_id:
+                    pin_capability = _callback_capability(spec, config_name).merged(
+                        CallbackCapability(requires_edit=True)
+                    )
+                    _merge_callback_capability(found, callback_id, pin_capability)
+            for child in item.values():
+                if isinstance(child, (dict, list, tuple)):
+                    visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return found
+
+
+def _task_fields_from_spec(command: str, spec) -> tuple[frozenset[str], frozenset[str]]:
+    fields: set[str] = set()
+    if not isinstance(spec, dict):
+        return frozenset(), frozenset()
+    if command == "input_group":
+        inputs = spec.get("inputs")
+        if isinstance(inputs, list):
+            for item in inputs:
+                if not isinstance(item, dict):
+                    continue
+                name = _pywebio_identifier(item.get("name"))
+                if name:
+                    fields.add(name)
+    elif command in PYWEBIO_YIELD_COMMANDS:
+        name = _pywebio_identifier(spec.get("name"))
+        if name:
+            fields.add(name)
+        names = spec.get("names")
+        if isinstance(names, (list, tuple)):
+            for item in names:
+                name = _pywebio_identifier(item)
+                if name:
+                    fields.add(name)
+    restricted = {name for name in fields if _field_is_restricted(name)}
+    return frozenset(fields), frozenset(restricted)
+
+
+def _collect_task_registrations(value, config_name: str) -> dict[str, PyWebIOTaskRegistration]:
+    if not isinstance(value, dict):
+        return {}
+    command = str(value.get("command") or "").strip().lower()
+    if command != "input_group" and command not in PYWEBIO_YIELD_COMMANDS:
+        return {}
+    task_id = _pywebio_identifier(value.get("task_id"))
+    if not task_id:
+        return {}
+    fields, restricted_fields = _task_fields_from_spec(command, value.get("spec"))
+    registration = PyWebIOTaskRegistration(
+        kind="input" if command == "input_group" else "yield",
+        fields=fields,
+        restricted_fields=restricted_fields,
+        restricted=bool(restricted_fields) or _pywebio_explicit_config_mismatch(value, config_name),
+    )
+    return {task_id: registration}
+
+
+def _merge_task_registration(
+    current: PyWebIOTaskRegistration,
+    other: PyWebIOTaskRegistration,
+) -> PyWebIOTaskRegistration:
+    if current.kind != other.kind:
+        return PyWebIOTaskRegistration(kind="conflict", restricted=True)
+    return PyWebIOTaskRegistration(
+        kind=current.kind,
+        fields=frozenset(set(current.fields) | set(other.fields)),
+        restricted_fields=frozenset(set(current.restricted_fields) | set(other.restricted_fields)),
+        restricted=current.restricted or other.restricted,
+    )
+
+
+def _downstream_observation_reason(original, filtered, config_name: str) -> tuple[str, str]:
+    payload = _parse_websocket_message(original)
+    command = str(payload.get("command") or "").strip().lower() if isinstance(payload, dict) else ""
+    if filtered is not None:
+        filtered_payload = _parse_websocket_message(filtered)
+        unchanged = filtered == original or (
+            payload is not None and filtered_payload is not None and payload == filtered_payload
+        )
+        return ("forwarded" if unchanged else "filtered", command)
+    if payload is None:
+        return "invalid_downstream", command
+    if _json_item_targets_update_notice(payload):
+        return "update_notice_dropped", command
+    if _json_item_targets_other_alas_instance(payload, config_name):
+        return "other_instance_dropped", command
+    if _json_item_targets_restricted_user_entry(payload):
+        return "restricted_entry_dropped", command
+    if _json_item_targets_alas_settings(payload):
+        return "alas_settings_dropped", command
+    if _message_switches_downstream_config(payload, config_name):
+        return "config_mismatch_dropped", command
+    return "downstream_dropped", command
+
+
+class PyWebIOSessionPolicy:
+    """Stateful authorization for one filtered ALAS/PyWebIO WebSocket."""
+
+    def __init__(self, config_name: str, can_run: bool = True, can_edit: bool = True) -> None:
+        self.config_name = str(config_name or "").strip()
+        self.can_run = bool(can_run)
+        self.can_edit = bool(can_edit)
+        self.callbacks: dict[str, CallbackCapability] = {}
+        self.denied_callbacks: set[str] = set()
+        self.tasks: dict[str, PyWebIOTaskRegistration] = {}
+        self.denied_tasks: set[str] = set()
+
+    def _deny_callback(self, callback_id: str) -> None:
+        self.callbacks.pop(callback_id, None)
+        self.denied_callbacks.add(callback_id)
+
+    def _allow_callback(self, callback_id: str, capability: CallbackCapability) -> None:
+        if callback_id in self.denied_callbacks or capability.restricted:
+            self._deny_callback(callback_id)
+            return
+        current = self.callbacks.get(callback_id)
+        self.callbacks[callback_id] = current.merged(capability) if current else capability
+
+    def _deny_task(self, task_id: str) -> None:
+        self.tasks.pop(task_id, None)
+        self.denied_tasks.add(task_id)
+
+    def _allow_task(self, task_id: str, registration: PyWebIOTaskRegistration) -> None:
+        if task_id in self.denied_tasks or registration.restricted:
+            self._deny_task(task_id)
+            return
+        current = self.tasks.get(task_id)
+        if current:
+            registration = _merge_task_registration(current, registration)
+        if registration.restricted:
+            self._deny_task(task_id)
+            return
+        self.tasks[task_id] = registration
+
+    def observe_downstream(self, original, filtered) -> DownstreamObservation:
+        original_payload = _parse_websocket_message(original)
+        filtered_payload = _parse_websocket_message(filtered) if filtered is not None else None
+        original_callbacks = _collect_callback_capabilities(original_payload, self.config_name)
+        allowed_callbacks = _collect_callback_capabilities(filtered_payload, self.config_name)
+        original_tasks = _collect_task_registrations(original_payload, self.config_name)
+        allowed_tasks = _collect_task_registrations(filtered_payload, self.config_name)
+
+        for callback_id, capability in original_callbacks.items():
+            if callback_id not in allowed_callbacks or capability.restricted:
+                self._deny_callback(callback_id)
+        for callback_id, capability in allowed_callbacks.items():
+            original_capability = original_callbacks.get(callback_id, capability)
+            self._allow_callback(callback_id, capability.merged(original_capability))
+
+        for task_id, registration in original_tasks.items():
+            allowed_registration = allowed_tasks.get(task_id)
+            if not allowed_registration or registration.kind != allowed_registration.kind:
+                self._deny_task(task_id)
+        for task_id, registration in allowed_tasks.items():
+            original_registration = original_tasks.get(task_id, registration)
+            if registration.kind == "input":
+                removed_fields = set(original_registration.fields) - set(registration.fields)
+                registration = PyWebIOTaskRegistration(
+                    kind="input",
+                    fields=registration.fields,
+                    restricted_fields=frozenset(
+                        set(registration.restricted_fields)
+                        | set(original_registration.restricted_fields)
+                        | removed_fields
+                    ),
+                    restricted=False,
+                )
+            elif original_registration.restricted:
+                registration = PyWebIOTaskRegistration(
+                    kind=registration.kind,
+                    fields=registration.fields,
+                    restricted_fields=original_registration.restricted_fields,
+                    restricted=True,
+                )
+            self._allow_task(task_id, registration)
+
+        reason, command = _downstream_observation_reason(original, filtered, self.config_name)
+        return DownstreamObservation(
+            forwarded=filtered is not None,
+            reason=reason,
+            command=command,
+            allowed_callbacks=len(self.callbacks),
+            denied_callbacks=len(self.denied_callbacks),
+            allowed_tasks=len(self.tasks),
+            denied_tasks=len(self.denied_tasks),
+        )
+
+    def _decision(
+        self,
+        allowed: bool,
+        reason: str,
+        event: str,
+        task_id: str = "",
+        permission: str = "",
+    ) -> WebSocketMessageDecision:
+        return WebSocketMessageDecision(
+            allowed=allowed,
+            reason=reason,
+            event=event,
+            permission=permission,
+            task_ref=_short_task_ref(task_id),
+        )
+
+    def _registered_task(self, task_id: str, kind: str, event: str) -> tuple[PyWebIOTaskRegistration | None, WebSocketMessageDecision | None]:
+        if not task_id:
+            return None, self._decision(False, "missing_task_id", event)
+        if task_id in self.denied_tasks:
+            return None, self._decision(False, "denied_task_id", event, task_id, "restricted")
+        registration = self.tasks.get(task_id)
+        if not registration:
+            return None, self._decision(False, "unknown_task_id", event, task_id)
+        if registration.kind != kind:
+            return None, self._decision(False, "task_kind_mismatch", event, task_id)
+        return registration, None
+
+    def _check_input_fields(
+        self,
+        registration: PyWebIOTaskRegistration,
+        values: dict,
+        event: str,
+        task_id: str,
+    ) -> WebSocketMessageDecision | None:
+        submitted_fields = {str(key or "") for key in values.keys()}
+        if not submitted_fields.issubset(set(registration.fields)):
+            return self._decision(False, "unknown_input_field", event, task_id, "edit")
+        for field_name, value in values.items():
+            normalized_field = "".join(
+                char.lower() for char in str(field_name or "") if char.isalnum() or char == "_"
+            )
+            if field_name in registration.restricted_fields or _field_is_restricted(field_name):
+                return self._decision(False, "restricted_input_field", event, task_id, "restricted")
+            if normalized_field in PYWEBIO_CONFIG_FIELDS and _config_value_mismatches(value, self.config_name):
+                return self._decision(False, "config_mismatch", event, task_id, "edit")
+        return None
+
+    def evaluate_upstream(self, message: str | bytes) -> WebSocketMessageDecision:
+        payload = _parse_websocket_message(message)
+        if not isinstance(payload, dict):
+            return websocket_message_decision(
+                message,
+                self.config_name,
+                can_run=self.can_run,
+                can_edit=self.can_edit,
+            )
+        event = str(payload.get("event") or "").strip().lower()
+        if event not in PYWEBIO_EVENTS:
+            if event and ("task_id" in payload or "data" in payload):
+                return self._decision(False, "unknown_protocol_event", event)
+            return websocket_message_decision(
+                message,
+                self.config_name,
+                can_run=self.can_run,
+                can_edit=self.can_edit,
+            )
+
+        task_id = _pywebio_identifier(payload.get("task_id"))
+        if event == "callback":
+            if not task_id:
+                return self._decision(False, "missing_task_id", event)
+            if task_id in self.denied_callbacks:
+                return self._decision(False, "denied_callback_id", event, task_id, "restricted")
+            capability = self.callbacks.get(task_id)
+            if not capability:
+                return self._decision(False, "unknown_callback_id", event, task_id)
+            if capability.restricted:
+                return self._decision(False, "restricted_callback", event, task_id, capability.category)
+            if capability.requires_run and not self.can_run:
+                return self._decision(False, "run_permission_denied", event, task_id, capability.category)
+            if capability.requires_edit and not self.can_edit:
+                return self._decision(False, "edit_permission_denied", event, task_id, capability.category)
+            return self._decision(True, "callback_allowed", event, task_id, capability.category)
+
+        if event == "from_cancel":
+            _registration, denial = self._registered_task(task_id, "input", event)
+            if denial:
+                return denial
+            return self._decision(True, "cancel_allowed", event, task_id, "navigation")
+
+        if event == "js_yield":
+            _registration, denial = self._registered_task(task_id, "yield", event)
+            if denial:
+                return denial
+            return self._decision(True, "yield_allowed", event, task_id, "navigation")
+
+        registration, denial = self._registered_task(task_id, "input", event)
+        if denial:
+            return denial
+        if not self.can_edit:
+            return self._decision(False, "edit_permission_denied", event, task_id, "edit")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return self._decision(False, "invalid_event_data", event, task_id, "edit")
+
+        if event == "input_event":
+            event_name = str(data.get("event_name") or "").strip().lower()
+            field_name = _pywebio_identifier(data.get("name"))
+            if event_name not in PYWEBIO_INPUT_EVENTS or not field_name:
+                return self._decision(False, "invalid_input_event", event, task_id, "edit")
+            field_denial = self._check_input_fields(
+                registration,
+                {field_name: data.get("value")},
+                event,
+                task_id,
+            )
+            if field_denial:
+                return field_denial
+            return self._decision(True, "input_event_allowed", event, task_id, "edit")
+
+        field_denial = self._check_input_fields(registration, data, event, task_id)
+        if field_denial:
+            return field_denial
+        return self._decision(True, "submit_allowed", event, task_id, "edit")
 
 
 def websocket_target_url(base_url: str, path: str, query_items) -> str:
@@ -1672,17 +2319,82 @@ async def _close_upstream_safely(upstream, code: int = 1000) -> None:
         pass
 
 
-async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDecision) -> None:
+def _safe_log_actor(value: object) -> str:
+    return str(value or "").replace("\r", " ").replace("\n", " ")[:64]
+
+
+def _safe_connection_id(value: object) -> str:
+    return "".join(char for char in str(value or "") if char.isalnum() or char in "-_")[:32]
+
+
+def _log_upstream_decision(
+    connection_id: str,
+    actor: str,
+    role: str,
+    decision: WebSocketMessageDecision,
+) -> None:
+    log_method = log.debug if decision.allowed else log.warning
+    log_method(
+        "ALAS_WS_UPSTREAM_%s connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s task=%s",
+        "ALLOW" if decision.allowed else "DENY",
+        connection_id,
+        actor,
+        role,
+        decision.event or "legacy",
+        decision.reason,
+        decision.permission or "none",
+        decision.task_ref or "none",
+    )
+
+
+async def proxy_websocket(
+    websocket,
+    base_url: str,
+    path: str,
+    decision: ProxyDecision,
+    *,
+    actor: str = "",
+    role: str = "",
+    connection_id: str = "",
+) -> None:
     """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
+    connection_id = _safe_connection_id(connection_id) or uuid.uuid4().hex[:12]
+    safe_actor = _safe_log_actor(actor)
+    safe_role = _safe_log_actor(role)
     try:
         target = websocket_target_url(base_url, path, bound_config_query_items(websocket.query_params, decision))
     except ValueError:
+        log.warning(
+            "ALAS_WS_CLOSE connection=%s direction=handshake user=%s role=%s event=connect reason=invalid_target permission=none phase=target code=1011",
+            connection_id,
+            safe_actor,
+            safe_role,
+        )
         await websocket.close(code=1011)
         return
 
     await websocket.accept()
+    policy = (
+        PyWebIOSessionPolicy(
+            decision.config_name,
+            can_run=getattr(decision, "can_run", True),
+            can_edit=getattr(decision, "can_edit", True),
+        )
+        if decision.filtered
+        else None
+    )
+    phase = "connect"
+    log.debug(
+        "ALAS_WS_OPEN connection=%s direction=handshake user=%s role=%s event=connect reason=accepted permission=none filtered=%s",
+        connection_id,
+        safe_actor,
+        safe_role,
+        bool(decision.filtered),
+    )
     try:
         async with websocket_connect(target, open_timeout=10.0) as upstream:
+            phase = "proxy"
+
             async def client_to_upstream() -> None:
                 """转发客户端文本或二进制消息到上游，并执行普通用户配置越权检查。"""
                 while True:
@@ -1692,34 +2404,67 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
                         return 1000
                     if "text" in message:
                         text = message["text"]
-                        if decision.filtered and not websocket_message_allowed(
-                            text,
-                            decision.config_name,
-                            can_run=getattr(decision, "can_run", True),
-                            can_edit=getattr(decision, "can_edit", True),
-                        ):
-                            await _close_upstream_safely(upstream, code=1008)
-                            await _close_websocket_safely(websocket, 1008)
-                            return 1008
+                        if policy is not None:
+                            message_decision = policy.evaluate_upstream(text)
+                            _log_upstream_decision(connection_id, safe_actor, safe_role, message_decision)
+                            if not message_decision.allowed:
+                                log.warning(
+                                    "ALAS_WS_CLOSE connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s phase=policy code=1008 task=%s",
+                                    connection_id,
+                                    safe_actor,
+                                    safe_role,
+                                    message_decision.event or "legacy",
+                                    message_decision.reason,
+                                    message_decision.permission or "none",
+                                    message_decision.task_ref or "none",
+                                )
+                                await _close_upstream_safely(upstream, code=1008)
+                                await _close_websocket_safely(websocket, 1008)
+                                return 1008
                         await upstream.send(text)
                     elif "bytes" in message:
                         data = message["bytes"]
-                        if decision.filtered and not websocket_message_allowed(
-                            data,
-                            decision.config_name,
-                            can_run=getattr(decision, "can_run", True),
-                            can_edit=getattr(decision, "can_edit", True),
-                        ):
-                            await _close_upstream_safely(upstream, code=1008)
-                            await _close_websocket_safely(websocket, 1008)
-                            return 1008
+                        if policy is not None:
+                            message_decision = policy.evaluate_upstream(data)
+                            _log_upstream_decision(connection_id, safe_actor, safe_role, message_decision)
+                            if not message_decision.allowed:
+                                log.warning(
+                                    "ALAS_WS_CLOSE connection=%s direction=upstream user=%s role=%s event=%s reason=%s permission=%s phase=policy code=1008 task=%s",
+                                    connection_id,
+                                    safe_actor,
+                                    safe_role,
+                                    message_decision.event or "legacy",
+                                    message_decision.reason,
+                                    message_decision.permission or "none",
+                                    message_decision.task_ref or "none",
+                                )
+                                await _close_upstream_safely(upstream, code=1008)
+                                await _close_websocket_safely(websocket, 1008)
+                                return 1008
                         await upstream.send(data)
 
             async def upstream_to_client() -> None:
                 """转发上游文本或二进制消息回客户端。"""
                 async for message in upstream:
-                    if decision.filtered:
-                        message = filter_user_websocket_downstream(message, decision.config_name)
+                    if policy is not None:
+                        original_message = message
+                        message = filter_user_websocket_downstream(original_message, decision.config_name)
+                        observation = policy.observe_downstream(original_message, message)
+                        downstream_log = log.debug if observation.reason == "forwarded" else log.warning
+                        downstream_log(
+                            "ALAS_WS_DOWNSTREAM connection=%s direction=downstream user=%s role=%s event=%s reason=%s permission=%s forwarded=%s allowed_callbacks=%s denied_callbacks=%s allowed_tasks=%s denied_tasks=%s",
+                            connection_id,
+                            safe_actor,
+                            safe_role,
+                            observation.command or "unknown",
+                            observation.reason,
+                            "none" if observation.reason == "forwarded" else "restricted",
+                            observation.forwarded,
+                            observation.allowed_callbacks,
+                            observation.denied_callbacks,
+                            observation.allowed_tasks,
+                            observation.denied_tasks,
+                        )
                         if message is None:
                             continue
                     if isinstance(message, bytes):
@@ -1743,7 +2488,23 @@ async def proxy_websocket(websocket, base_url: str, path: str, decision: ProxyDe
                     close_code = result
             await _close_upstream_safely(upstream, code=close_code)
             await _close_websocket_safely(websocket, close_code)
-    except Exception:
+            log.debug(
+                "ALAS_WS_CLOSE connection=%s direction=both user=%s role=%s event=close reason=completed permission=none phase=%s code=%s",
+                connection_id,
+                safe_actor,
+                safe_role,
+                phase,
+                close_code,
+            )
+    except Exception as exc:
+        log.warning(
+            "ALAS_WS_CLOSE connection=%s direction=proxy user=%s role=%s event=exception reason=exception permission=none phase=%s code=1011 exception=%s",
+            connection_id,
+            safe_actor,
+            safe_role,
+            phase,
+            type(exc).__name__,
+        )
         await _close_websocket_safely(websocket, 1011)
 
 

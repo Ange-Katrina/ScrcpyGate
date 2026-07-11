@@ -7,10 +7,20 @@ from pathlib import Path
 DATA_DIR = Path(os.environ.get("WEB_SCRCPY_DATA_DIR", "data"))
 LOG_FILE = DATA_DIR / "webscrcpy.log"
 _configured = False
+SENSITIVE_PROTOCOL_LOGGERS = ("websockets", "uvicorn.error")
+
+
+def _protect_protocol_logs() -> None:
+    """Keep WebSocket frames and handshake credentials out of debug logs."""
+    for logger_name in SENSITIVE_PROTOCOL_LOGGERS:
+        protocol_logger = logging.getLogger(logger_name)
+        if protocol_logger.level == logging.NOTSET or protocol_logger.level < logging.INFO:
+            protocol_logger.setLevel(logging.INFO)
 
 
 def setup_logging() -> None:
     global _configured
+    _protect_protocol_logs()
     if _configured:
         return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
