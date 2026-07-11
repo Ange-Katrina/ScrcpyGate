@@ -1733,6 +1733,20 @@ def _json_item_is_aside_icon_output(value) -> bool:
     )
 
 
+def _json_item_directly_targets_other_alas_instance_widget(value, config_name: str) -> bool:
+    """Return True when one aside widget pairs an icon with another ALAS instance."""
+    if not isinstance(value, dict) or str(value.get("type") or "").strip().lower() != "custom_widget":
+        return False
+    data = value.get("data")
+    contents = data.get("contents") if isinstance(data, dict) else None
+    if not isinstance(contents, list):
+        return False
+    return any(_json_item_is_aside_icon_output(item) for item in contents) and any(
+        _json_item_directly_targets_other_alas_instance(item, config_name)
+        for item in contents
+    )
+
+
 def _json_item_directly_targets_restricted_sidebar_widget(value) -> bool:
     """Return True when one custom widget pairs a sidebar icon with restricted buttons."""
     if not isinstance(value, dict) or str(value.get("type") or "").strip().lower() != "custom_widget":
@@ -1823,6 +1837,7 @@ def filter_user_json_payload(value, config_name: str):
             _json_item_targets_alas_settings(value)
             or _json_item_targets_update_notice(value)
             or _json_item_directly_targets_other_alas_instance(value, config_name)
+            or _json_item_directly_targets_other_alas_instance_widget(value, config_name)
             or _json_item_directly_targets_restricted_sidebar_widget(value)
         ):
             return {}
@@ -1944,6 +1959,8 @@ def filter_user_websocket_downstream(message: str | bytes, config_name: str) -> 
     if isinstance(payload, dict) and str(payload.get("command") or "").strip().lower() == "output":
         spec = payload.get("spec")
         if isinstance(spec, dict) and str(spec.get("type") or "").strip().lower() == "custom_widget":
+            if _json_item_directly_targets_other_alas_instance_widget(spec, config_name):
+                return None
             if _json_item_directly_targets_restricted_sidebar_widget(spec):
                 return None
             data = spec.get("data")

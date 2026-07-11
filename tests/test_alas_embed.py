@@ -901,6 +901,15 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             ensure_ascii=False,
         )
 
+    def _single_alas_instance_sidebar_message(self, label, index=1):
+        return json.dumps(
+            {
+                "command": "output",
+                "spec": self._alas_instance_sidebar_item(label, index),
+            },
+            ensure_ascii=False,
+        )
+
     def _restricted_sidebar_widget(self, label="Manage"):
         scope = "#pywebio-scope-aside"
         return {
@@ -979,6 +988,16 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(json.loads(result)["spec"]["data"]["contents"], [])
 
+    def test_filter_user_websocket_downstream_drops_single_other_alas_instance_widget(self):
+        message = self._single_alas_instance_sidebar_message("13361966861")
+
+        self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
+
+    def test_filter_user_json_payload_drops_single_other_alas_instance_widget(self):
+        widget = self._alas_instance_sidebar_item("13361966861")
+
+        self.assertEqual(filter_user_json_payload(widget, "3256475495"), {})
+
     def test_filter_user_websocket_downstream_drops_default_alas_instance_button(self):
         message = self._alas_instance_sidebar_message("alas")
 
@@ -987,12 +1006,24 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(json.loads(result)["spec"]["data"]["contents"], [])
 
+    def test_filter_user_websocket_downstream_drops_single_default_alas_instance_widget(self):
+        message = self._single_alas_instance_sidebar_message("alas")
+
+        self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
+
     def test_filter_user_websocket_downstream_keeps_bound_alas_instance_button(self):
         message = self._alas_instance_sidebar_message("3256475495")
 
         result = filter_user_websocket_downstream(message, "3256475495")
 
         self.assertIsNotNone(result)
+        self.assertEqual(json.loads(result), json.loads(message))
+
+    def test_filter_user_websocket_downstream_keeps_single_bound_alas_instance_widget(self):
+        message = self._single_alas_instance_sidebar_message("3256475495")
+
+        result = filter_user_websocket_downstream(message, "3256475495")
+
         self.assertEqual(json.loads(result), json.loads(message))
 
     def test_filter_user_websocket_downstream_filters_mixed_alas_instance_buttons(self):
