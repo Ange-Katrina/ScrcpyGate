@@ -716,28 +716,76 @@ def acquire_lock(device_id: str, username: str, client_id: str, force: bool = Fa
     ts = now_ts()
     expires = ts + ttl_seconds
     with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         current = conn.execute("SELECT * FROM control_locks WHERE device_id=?", (device_id,)).fetchone()
-        if current and current["expires_at"] >= ts and current["username"] != username and not force:
-            return {"ok": False, "owner": current["username"], "expires_at": current["expires_at"]}
+        if current and current["expires_at"] < ts:
+            conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
+            current = None
+
+        if current and not force:
+            same_user = current["username"] == username
+            same_client = same_user and current["client_id"] == client_id
+            http_upgrade = same_user and current["client_id"] == "http" and client_id != "http"
+            if not same_client and not http_upgrade:
+                conn.commit()
+                return {"ok": False, "owner": current["username"], "expires_at": current["expires_at"]}
+
+            conn.execute(
+                "UPDATE control_locks SET client_id=?, expires_at=? WHERE device_id=?",
+                (client_id, expires, device_id),
+            )
+            conn.commit()
+            return {"ok": True, "owner": username, "expires_at": expires}
+
         conn.execute("INSERT OR REPLACE INTO control_locks(device_id,username,client_id,acquired_at,expires_at) VALUES(?,?,?,?,?)", (device_id, username, client_id, ts, expires))
         conn.commit()
     return {"ok": True, "owner": username, "expires_at": expires}
 
 
-def release_lock(device_id: str, username: str, force: bool = False, client_id: str | None = None) -> bool:
+def renew_lock(device_id: str, username: str, client_id: str, ttl_seconds: int = 90) -> bool:
+    ts = now_ts()
+    expires = ts + ttl_seconds
     with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM control_locks WHERE device_id=?", (device_id,)).fetchone()
         if not row:
+            conn.commit()
+            return False
+        if row["expires_at"] < ts:
+            conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
+            conn.commit()
+            return False
+        if row["username"] != username or row["client_id"] != client_id:
+            conn.commit()
+            return False
+        conn.execute("UPDATE control_locks SET expires_at=? WHERE device_id=?", (expires, device_id))
+        conn.commit()
+    return True
+
+
+def release_lock(device_id: str, username: str, force: bool = False, client_id: str | None = None) -> bool:
+    ts = now_ts()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM control_locks WHERE device_id=?", (device_id,)).fetchone()
+        if not row:
+            conn.commit()
+            return True
+        if row["expires_at"] < ts:
+            conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
+            conn.commit()
             return True
         if force:
             conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
             conn.commit()
             return True
-        if row["username"] != username:
+        if row["username"] != username or client_id is None or row["client_id"] != client_id:
+            conn.commit()
             return False
-        if client_id is not None and row["client_id"] != client_id:
-            return False
-        conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
+        conn.execute(
+            "DELETE FROM control_locks WHERE device_id=? AND username=? AND client_id=?",
+            (device_id, username, client_id),
+        )
         conn.commit()
     return True
 
@@ -753,9 +801,9 @@ def get_lock(device_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def lock_owned_by(device_id: str, username: str) -> bool:
+def lock_owned_by(device_id: str, username: str, client_id: str) -> bool:
     lock = get_lock(device_id)
-    return bool(lock and lock["username"] == username)
+    return bool(lock and lock["username"] == username and lock["client_id"] == client_id)
 
 
 def recent_audit(limit: int = 100) -> list[dict]:

@@ -711,7 +711,7 @@ async def api_control_release(device_id: str, request: Request):
     security.verify_csrf(request)
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
-    ok = storage.release_lock(real_device_id, user["username"], force=user["role"] == "admin")
+    ok = storage.release_lock(real_device_id, user["username"], force=user["role"] == "admin", client_id="http")
     await manager.broadcast({"type": "control_lock", "device_id": real_device_id, "lock": storage.get_lock(real_device_id)})
     return {"ok": ok}
 

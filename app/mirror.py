@@ -592,7 +592,7 @@ async def control_socket(websocket: WebSocket, user: dict, device_id: str, expos
             if message.get("text") is not None:
                 await handle_control_text(websocket, user, device_id, client_id, message["text"])
             elif message.get("bytes") is not None:
-                await handle_control_bytes(websocket, user, device_id, message["bytes"])
+                await handle_control_bytes(websocket, user, device_id, client_id, message["bytes"])
     except WebSocketDisconnect:
         pass
     finally:
@@ -610,8 +610,21 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
     if msg_type == "acquire_control":
         force = bool(data.get("force") and user.get("role") == "admin")
         result = storage.acquire_lock(device_id, user["username"], client_id, force=force)
-        await websocket.send_json({"type": "control_lock", **result})
+        await websocket.send_json({"type": "control_lock", **result, "lock": storage.get_lock(device_id)})
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
+        return
+    if msg_type == "control_keepalive":
+        ok = storage.renew_lock(device_id, user["username"], client_id, ttl_seconds=90)
+        lock = storage.get_lock(device_id)
+        await websocket.send_json(
+            {
+                "type": "control_lock",
+                "ok": ok,
+                "owner": lock.get("username") if lock else None,
+                "expires_at": lock.get("expires_at") if lock else None,
+                "lock": lock,
+            }
+        )
         return
     if msg_type == "release_control":
         ok = storage.release_lock(device_id, user["username"], force=user.get("role") == "admin", client_id=client_id)
@@ -619,12 +632,19 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
         return
     if msg_type == "control_base64":
+        encoded = data.get("data")
+        if not isinstance(encoded, str) or not encoded:
+            await websocket.send_json({"type": "error", "error": "invalid control payload"})
+            return
         try:
-            payload = base64.b64decode(data.get("data") or "")
+            payload = base64.b64decode(encoded, validate=True)
         except Exception:
             await websocket.send_json({"type": "error", "error": "invalid control payload"})
             return
-        await handle_control_bytes(websocket, user, device_id, payload)
+        if not payload:
+            await websocket.send_json({"type": "error", "error": "invalid control payload"})
+            return
+        await handle_control_bytes(websocket, user, device_id, client_id, payload)
         return
     if msg_type == "player_reset":
         session = await manager.get_or_create(device_id)
@@ -635,9 +655,12 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
     await websocket.send_json({"type": "error", "error": "unknown control message"})
 
 
-async def handle_control_bytes(websocket: WebSocket, user: dict, device_id: str, payload: bytes):
-    if not storage.lock_owned_by(device_id, user["username"]):
-        await websocket.send_json({"type": "control_error", "error": "control lock required"})
+async def handle_control_bytes(websocket: WebSocket, user: dict, device_id: str, client_id: str, payload: bytes):
+    if not payload:
+        await websocket.send_json({"type": "error", "error": "invalid control payload"})
+        return
+    if not storage.renew_lock(device_id, user["username"], client_id, ttl_seconds=90):
+        await websocket.send_json({"type": "control_lock", "ok": False, "lock": storage.get_lock(device_id)})
         return
     session = await manager.get_or_create(device_id)
     ok = await asyncio.to_thread(session.send_control, payload)

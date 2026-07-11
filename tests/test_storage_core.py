@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -108,11 +109,112 @@ class StorageCoreTests(unittest.TestCase):
         self.assertFalse(blocked["ok"])
         forced = storage.acquire_lock("dev1", "admin", "client-admin", force=True)
         self.assertTrue(forced["ok"])
-        self.assertTrue(storage.lock_owned_by("dev1", "admin"))
+        self.assertTrue(storage.lock_owned_by("dev1", "admin", "client-admin"))
         self.assertFalse(storage.release_lock("dev1", "admin", client_id="stale-client"))
-        self.assertTrue(storage.lock_owned_by("dev1", "admin"))
+        self.assertTrue(storage.lock_owned_by("dev1", "admin", "client-admin"))
         self.assertTrue(storage.release_lock("dev1", "admin", client_id="client-admin"))
-        self.assertFalse(storage.lock_owned_by("dev1", "admin"))
+        self.assertFalse(storage.lock_owned_by("dev1", "admin", "client-admin"))
+
+    def test_control_lock_reacquire_requires_same_user_and_client(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        clock = [1000]
+        storage.now_ts = lambda: clock[0]
+
+        first = storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=90)
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["expires_at"], 1090)
+
+        clock[0] = 1010
+        repeated = storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=90)
+        self.assertTrue(repeated["ok"])
+        self.assertEqual(repeated["expires_at"], 1100)
+        self.assertEqual(storage.get_lock("dev1")["expires_at"], 1100)
+
+        self.assertFalse(storage.acquire_lock("dev1", "alice", "client-b")["ok"])
+        self.assertFalse(storage.acquire_lock("dev1", "bob", "client-a")["ok"])
+        self.assertTrue(storage.lock_owned_by("dev1", "alice", "client-a"))
+        self.assertFalse(storage.lock_owned_by("dev1", "alice", "client-b"))
+        self.assertFalse(storage.lock_owned_by("dev1", "bob", "client-a"))
+
+    def test_http_control_lock_can_be_upgraded_only_once(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "http")["ok"])
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a")["ok"])
+        self.assertEqual(storage.get_lock("dev1")["client_id"], "client-a")
+        self.assertFalse(storage.acquire_lock("dev1", "alice", "client-b")["ok"])
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a")["ok"])
+
+    def test_concurrent_http_control_lock_upgrade_has_one_winner(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "http")["ok"])
+
+        barrier = threading.Barrier(3)
+        results = {}
+
+        def upgrade(client_id):
+            barrier.wait()
+            results[client_id] = storage.acquire_lock("dev1", "alice", client_id)["ok"]
+
+        threads = [
+            threading.Thread(target=upgrade, args=("client-a",)),
+            threading.Thread(target=upgrade, args=("client-b",)),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+
+        winners = [client_id for client_id, ok in results.items() if ok]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(storage.get_lock("dev1")["client_id"], winners[0])
+
+    def test_control_lock_force_takeover_and_exact_release(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a")["ok"])
+        self.assertTrue(storage.acquire_lock("dev1", "admin", "client-admin", force=True)["ok"])
+        self.assertFalse(storage.release_lock("dev1", "alice", client_id="client-a"))
+        self.assertFalse(storage.release_lock("dev1", "admin", client_id="stale-client"))
+        self.assertFalse(storage.release_lock("dev1", "admin"))
+        self.assertTrue(storage.lock_owned_by("dev1", "admin", "client-admin"))
+        self.assertTrue(storage.release_lock("dev1", "admin", client_id="client-admin"))
+
+    def test_control_lock_renew_requires_active_exact_owner(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        clock = [1000]
+        storage.now_ts = lambda: clock[0]
+
+        self.assertFalse(storage.renew_lock("missing", "alice", "client-a"))
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=10)["ok"])
+        clock[0] = 1005
+        self.assertFalse(storage.renew_lock("dev1", "alice", "client-b", ttl_seconds=20))
+        self.assertFalse(storage.renew_lock("dev1", "bob", "client-a", ttl_seconds=20))
+        self.assertEqual(storage.get_lock("dev1")["expires_at"], 1010)
+
+        self.assertTrue(storage.renew_lock("dev1", "alice", "client-a", ttl_seconds=20))
+        self.assertEqual(storage.get_lock("dev1")["expires_at"], 1025)
+        clock[0] = 1026
+        self.assertFalse(storage.renew_lock("dev1", "alice", "client-a", ttl_seconds=20))
+        self.assertIsNone(storage.get_lock("dev1"))
+
+    def test_expired_control_lock_can_be_replaced(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        clock = [1000]
+        storage.now_ts = lambda: clock[0]
+
+        self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=5)["ok"])
+        clock[0] = 1006
+        self.assertTrue(storage.acquire_lock("dev1", "bob", "client-b")["ok"])
+        self.assertFalse(storage.release_lock("dev1", "alice", client_id="client-a"))
+        self.assertTrue(storage.lock_owned_by("dev1", "bob", "client-b"))
 
     def test_user_video_preference_and_public_device_id(self):
         storage = load_storage(self.tmp)

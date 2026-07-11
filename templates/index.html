@@ -238,7 +238,7 @@ const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
 const state = {
   user:null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
-  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0,
+  videoConnected:false, controlConnected:false, videoPrefs:null, eventRefreshTimer:null, playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0,
   idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false
 };
 const $ = (id) => document.getElementById(id);
@@ -535,7 +535,7 @@ async function stopMirror(){
   if (!id) return show('请先选择设备');
   if (state.starting) return show('投屏正在启动，请稍等');
   await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
-  closeVideo(); state.hasControl=false; await loadAll();
+  closeVideo(); await loadAll();
 }
 async function saveOrApplyQuality(){
   if (state.qualityApplying) return show('画质正在应用，请稍等');
@@ -588,12 +588,33 @@ function closeVideoSocket(){
   resetVideoElement();
   if (state.playerResetTimer) { clearTimeout(state.playerResetTimer); state.playerResetTimer=null; }
 }
+function stopControlKeepalive(){
+  if (state.controlKeepaliveTimer) clearInterval(state.controlKeepaliveTimer);
+  state.controlKeepaliveTimer = null;
+}
+function startControlKeepalive(){
+  if (state.controlKeepaliveTimer) return;
+  const ws = state.controlWs;
+  if (!state.hasControl || !ws || ws.readyState !== WebSocket.OPEN) return;
+  state.controlKeepaliveTimer = setInterval(()=>{
+    if (!state.hasControl || state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) {
+      stopControlKeepalive();
+      return;
+    }
+    ws.send(JSON.stringify({type:'control_keepalive'}));
+  }, 30000);
+}
+function setControlOwnership(ok){
+  state.hasControl = !!ok;
+  if (state.hasControl) startControlKeepalive();
+  else stopControlKeepalive();
+}
 function closeControlSocket(){
   state.controlSeq += 1;
   const ws = state.controlWs;
   state.controlWs = null;
   state.controlConnected = false;
-  state.hasControl = false;
+  setControlOwnership(false);
   state.input = null;
   if (ws) { try { ws.close(); } catch(_){} }
 }
@@ -749,14 +770,17 @@ function openControl(id, options={}){
     if (state.controlSeq !== token || state.controlWs !== ws) return;
     if (typeof event.data !== 'string') return;
     const msg=JSON.parse(event.data);
-    if (msg.type === 'hello' && msg.lock && state.sessions[id]) state.sessions[id].control_lock = msg.lock;
-    if (msg.type === 'control_lock') { if (msg.ok !== undefined) state.hasControl = !!msg.ok; if (msg.lock && state.sessions[id]) state.sessions[id].control_lock = msg.lock; }
-    if (msg.type === 'control_released') state.hasControl=false;
+    if (msg.type === 'hello' && state.sessions[id]) state.sessions[id].control_lock = msg.lock || null;
+    if (msg.type === 'control_lock') {
+      if ('lock' in msg && state.sessions[id]) state.sessions[id].control_lock = msg.lock || null;
+      if (msg.ok !== undefined) setControlOwnership(msg.ok);
+    }
+    if (msg.type === 'control_released') setControlOwnership(false);
     if (msg.type === 'control_error') show(msg.error || '控制失败');
     render();
   };
   ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) show('控制通道连接失败'); };
-  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; state.hasControl=false; render(); };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); render(); };
   return ws;
 }
 function updateInputSize(){
@@ -807,7 +831,9 @@ async function toggleControl(){
   const ws = openControl(id);
   const send = () => {
     if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({type: state.hasControl ? 'release_control' : 'acquire_control', force:false}));
+    const releasing = state.hasControl;
+    if (releasing) setControlOwnership(false);
+    ws.send(JSON.stringify({type: releasing ? 'release_control' : 'acquire_control', force:false}));
   };
   if (ws.readyState === WebSocket.OPEN) send();
   else ws.addEventListener('open', send, {once:true});
