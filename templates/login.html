@@ -3,32 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111315">
   <title>ScrcpyGate 登录</title>
-  <style>
-    :root { color-scheme: dark; --bg:#111421; --panel:#1d2130; --line:#33384d; --text:#eef2ff; --muted:#9aa3b8; --primary:#1a73e8; --danger:#ff6b6b; }
-    * { box-sizing: border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; background:linear-gradient(145deg,#10131d,#1b1e30); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    main { width:min(420px, calc(100vw - 32px)); padding:28px; border:1px solid var(--line); background:rgba(29,33,48,.96); border-radius:8px; box-shadow:0 24px 70px rgba(0,0,0,.35); }
-    h1 { margin:0 0 8px; font-size:24px; font-weight:700; letter-spacing:0; }
-    p { margin:0 0 24px; color:var(--muted); line-height:1.5; }
-    label { display:block; margin:14px 0 8px; color:var(--muted); font-size:13px; }
-    input { width:100%; height:44px; padding:0 12px; border:1px solid var(--line); border-radius:6px; background:#25293a; color:var(--text); font-size:16px; outline:none; }
-    input:focus { border-color:var(--primary); }
-    button { width:100%; height:44px; margin-top:20px; border:0; border-radius:6px; background:var(--primary); color:white; font-weight:700; font-size:15px; cursor:pointer; }
-    .error { margin:0 0 16px; padding:10px 12px; border:1px solid rgba(255,107,107,.4); background:rgba(255,107,107,.12); color:#ffd1d1; border-radius:6px; }
-  </style>
+  <script src="/static/js/theme-init.js?v=20260712"></script>
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=20260712">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=20260712">
+  <link rel="stylesheet" href="/static/css/login.css?v=20260712">
+  <script src="/static/js/ui-core.js?v=20260712" defer></script>
 </head>
-<body>
-  <main>
+<body data-ui-page="login">
+  <label class="ui-theme-picker ui-theme-corner">
+    <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=20260712#sun-moon"></use></svg>
+    <span class="ui-sr-only">界面主题</span>
+    <select data-ui-theme-select aria-label="界面主题">
+      <option value="dark">深色</option>
+      <option value="light">浅色</option>
+      <option value="system">跟随系统</option>
+    </select>
+  </label>
+  <main class="login-panel">
     <h1>ScrcpyGate</h1>
-    <p>登录后选择设备投屏并获取控制权。</p>
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
-    <form method="post" action="/login">
-      <label for="username">用户名</label>
-      <input id="username" name="username" autocomplete="username" autofocus required>
-      <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <button type="submit">登录</button>
+    <p class="login-intro">登录后选择设备投屏并获取控制权。</p>
+    {% if error %}<div class="login-error" role="alert">{{ error }}</div>{% endif %}
+    <form class="login-form" method="post" action="/login">
+      <label class="ui-field" for="username">用户名
+        <input class="ui-input" id="username" name="username" autocomplete="username" autofocus required>
+      </label>
+      <label class="ui-field" for="password">密码
+        <input class="ui-input" id="password" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="ui-button ui-button--primary login-submit" type="submit">登录</button>
     </form>
   </main>
 </body>

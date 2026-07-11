@@ -1,0 +1,187 @@
+import json
+import re
+import unittest
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+
+ROOT = Path(__file__).resolve().parents[1]
+TEMPLATES = ROOT / "templates"
+
+
+class TemplateParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ids = []
+        self.scripts = []
+        self.stylesheets = []
+        self.forms = []
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if values.get("id"):
+            self.ids.append(values["id"])
+        if tag == "script":
+            self.scripts.append(values)
+        elif tag == "link" and "stylesheet" in (values.get("rel") or "").split():
+            self.stylesheets.append(values)
+        elif tag == "form":
+            self.forms.append(values)
+
+
+class UiTemplateContractTests(unittest.TestCase):
+    def read(self, relative_path):
+        return (ROOT / relative_path).read_text(encoding="utf-8")
+
+    def parse_template(self, name):
+        parser = TemplateParser()
+        parser.feed(self.read(f"templates/{name}"))
+        return parser
+
+    def test_pages_use_self_hosted_design_system_without_inline_styles(self):
+        expected_page_css = {
+            "login.html": "/static/css/login.css?v=20260712",
+            "index.html": "/static/css/mirror.css?v=20260712",
+            "admin.html": "/static/css/admin.css?v=20260712",
+        }
+        for name, page_css in expected_page_css.items():
+            with self.subTest(name=name):
+                source = self.read(f"templates/{name}")
+                parser = self.parse_template(name)
+                hrefs = {item.get("href") for item in parser.stylesheets}
+                self.assertNotIn("<style", source.lower())
+                self.assertNotRegex(source, r"\sstyle\s*=")
+                self.assertIn("/static/css/ui-tokens.css?v=20260712", hrefs)
+                self.assertIn("/static/css/ui-components.css?v=20260712", hrefs)
+                self.assertIn(page_css, hrefs)
+                self.assertTrue(all((item.get("href") or "").startswith("/static/") for item in parser.stylesheets))
+                for script in parser.scripts:
+                    if script.get("src"):
+                        self.assertTrue(script["src"].startswith("/static/"))
+                    else:
+                        self.assertEqual(script.get("type"), "application/json")
+                        self.assertEqual(script.get("id"), "scrcpygate-bootstrap")
+
+    def test_template_ids_remain_unique_and_core_bindings_exist(self):
+        required = {
+            "login.html": {"username", "password"},
+            "index.html": {
+                "sidebar", "roleChip", "adminLink", "toolBtn", "alasBtn", "accountBtn",
+                "refreshBtn", "devices", "startBtn", "controlBtn", "stopBtn", "tools",
+                "qualityProfiles", "qualityStreamMode", "qualityStatus", "alasTools",
+                "alasPanelStatus", "alasToggleRun", "alasReload", "accountTools", "accountInfo",
+                "currentPassword", "newPassword", "confirmPassword", "changePasswordBtn",
+                "sidebarBackdrop", "menuBtn", "selectedTitle", "selectedMeta", "topStatus",
+                "notice", "stage", "videoWrap", "phoneVideo", "empty", "backBtn", "homeBtn",
+                "recentBtn", "scrcpygate-bootstrap",
+            },
+            "admin.html": {
+                "notice", "summaryMirror", "summaryAlas", "overview", "overviewDevices",
+                "overviewMirror", "overviewAlas", "reloadAll", "devices", "deviceCards",
+                "deviceId", "deviceName", "deviceAddress", "deviceEnabled", "saveDevice",
+                "clearDeviceForm", "video", "videoProfile", "videoStreamMode", "videoAutoStop",
+                "saveVideo", "streamModeToggles", "bandwidthPresetActions", "videoPresetRows",
+                "customProfileId", "customProfileLabel", "customProfileBitrate", "customProfileSize",
+                "customProfileFps", "addCustomProfile", "customProfileRows", "users", "userRows",
+                "newUsername", "newPassword", "newRole", "saveUser", "permUser", "permDevice",
+                "permView", "permControl", "savePermission", "permissionRows", "alas",
+                "alasBaseUrl", "alasToken", "saveAlas", "alasOperateConfig", "alasStatus",
+                "toggleAlas", "reloadAlas", "alasBindUser", "alasBindConfig", "alasBindRun",
+                "alasBindEnabled", "saveAlasBinding", "alasBindRows", "configSource", "configTarget",
+                "loadConfig", "configEditor", "saveConfig", "logs", "runtimeLogs", "logRows",
+                "scrcpygate-bootstrap",
+            },
+        }
+        for name, expected in required.items():
+            with self.subTest(name=name):
+                parser = self.parse_template(name)
+                self.assertEqual(len(parser.ids), len(set(parser.ids)))
+                self.assertFalse(expected.difference(parser.ids))
+
+    def test_logout_and_alas_links_keep_existing_contracts(self):
+        index = self.read("templates/index.html")
+        admin = self.read("templates/admin.html")
+        for source in (index, admin):
+            self.assertRegex(source, r'<form\s+method="post"\s+action="/logout"')
+            self.assertIn('name="csrf_token"', source)
+        self.assertIn('href="/alas/embed/"', index)
+        self.assertIn("打开 ALAS 页面", index)
+        self.assertIn('href="/alas/embed/"', admin)
+        self.assertIn("打开完整 ALAS 页面", admin)
+        self.assertIn("Runtime URL 可填写 IP、域名或完整 URL", admin)
+
+    def test_json_bootstrap_escapes_untrusted_user_data(self):
+        environment = Environment(
+            loader=FileSystemLoader(TEMPLATES),
+            autoescape=select_autoescape(["html"]),
+        )
+        malicious = '</script><script>alert("owned")</script>'
+        user = {"username": malicious, "role": "admin", "password_hash": "must-not-leak"}
+        pattern = re.compile(
+            r'<script type="application/json" id="scrcpygate-bootstrap">(.*?)</script>',
+            re.DOTALL,
+        )
+        for name in ("index.html", "admin.html"):
+            with self.subTest(name=name):
+                rendered = environment.get_template(name).render(user=user, csrf_token=malicious)
+                match = pattern.search(rendered)
+                self.assertIsNotNone(match)
+                payload = json.loads(match.group(1))
+                self.assertEqual(payload["user"]["username"], malicious)
+                self.assertEqual(payload["csrf_token"], malicious)
+                self.assertNotIn(malicious, match.group(1))
+                self.assertNotIn("password_hash", match.group(1))
+
+    def test_theme_runtime_and_accessibility_tokens_are_present(self):
+        init = self.read("static/js/theme-init.js")
+        core = self.read("static/js/ui-core.js")
+        tokens = self.read("static/css/ui-tokens.css")
+        components = self.read("static/css/ui-components.css")
+        self.assertIn('scrcpygate:theme', init)
+        self.assertIn('theme = "dark"', init)
+        for value in ("system", "dark", "light"):
+            self.assertIn(value, init)
+        self.assertIn('addEventListener("storage"', core)
+        self.assertIn("prefers-color-scheme: light", core)
+        for color in ("#111315", "#191c20", "#20242a", "#363c44", "#f1f3f5", "#b0b7c0", "#2563eb"):
+            self.assertIn(color, tokens)
+        self.assertIn(':root[data-theme="light"]', tokens)
+        self.assertIn(':root[data-theme="system"]', tokens)
+        self.assertIn(":focus-visible", components)
+        self.assertIn("prefers-reduced-motion: reduce", components)
+        for primitive in (".ui-button", ".ui-toast", ".ui-drawer", ".ui-dialog", ".ui-empty", ".ui-skeleton"):
+            self.assertIn(primitive, components)
+
+    def test_scripts_avoid_template_code_and_unsafe_html_sinks(self):
+        for name in ("mirror.js", "admin.js", "ui-core.js", "theme-init.js"):
+            with self.subTest(name=name):
+                source = self.read(f"static/js/{name}")
+                self.assertNotIn("{{", source)
+                self.assertNotIn("{%", source)
+                self.assertNotIn(".innerHTML", source)
+                self.assertNotIn("insertAdjacentHTML", source)
+                self.assertNotIn("document.write", source)
+
+    def test_lucide_sprite_and_attribution_are_complete(self):
+        sprite_path = ROOT / "static/icons/lucide.svg"
+        root = ET.parse(sprite_path).getroot()
+        symbols = root.findall("{http://www.w3.org/2000/svg}symbol")
+        ids = [symbol.attrib.get("id") for symbol in symbols]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(ids))
+        self.assertTrue(all(symbol.attrib.get("viewBox") == "0 0 24 24" for symbol in symbols))
+        for required in ("menu", "refresh-cw", "settings", "user-round", "log-out", "sun", "moon", "monitor", "eye", "eye-off", "x", "check", "info", "external-link", "loader-circle"):
+            self.assertIn(required, ids)
+        third_party = self.read("THIRD_PARTY.md")
+        self.assertIn("Lucide Icons", third_party)
+        self.assertIn("static/icons/lucide.svg", third_party)
+        self.assertIn("ISC", third_party)
+        self.assertTrue((ROOT / "static/icons/LUCIDE_LICENSE").is_file())
+        self.assertFalse((ROOT / "static/css/local-ui.css").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

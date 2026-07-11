@@ -32,3 +32,13 @@ The Docker image also installs Alpine's `android-tools`; the bundled files remai
 - Purpose: H264 remuxing and MSE playback in the browser.
 
 Keep upstream license notices when replacing this file.
+
+## Lucide Icons
+
+- Files: `static/icons/lucide.svg`, `static/icons/LUCIDE_LICENSE`
+- Upstream: https://github.com/lucide-icons/lucide
+- Purpose: Self-hosted interface icons used by the ScrcpyGate shell.
+- License: ISC
+
+Only the symbols used by the product shell are vendored. Keep the bundled ISC
+license and this attribution when updating or redistributing the sprite.

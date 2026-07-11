@@ -1,0 +1,127 @@
+:root {
+  color-scheme: dark;
+
+  /* ScrcpyGate graphite palette */
+  --ui-color-canvas: #111315;
+  --ui-color-surface: #191c20;
+  --ui-color-surface-raised: #20242a;
+  --ui-color-surface-hover: #292e35;
+  --ui-color-border: #363c44;
+  --ui-color-border-strong: #4b535d;
+  --ui-color-text: #f1f3f5;
+  --ui-color-text-muted: #b0b7c0;
+  --ui-color-primary: #2563eb;
+  --ui-color-primary-hover: #1d4ed8;
+  --ui-color-primary-soft: rgba(37, 99, 235, 0.16);
+  --ui-color-success: #35c987;
+  --ui-color-success-soft: rgba(53, 201, 135, 0.14);
+  --ui-color-warning: #f2bd55;
+  --ui-color-warning-soft: rgba(242, 189, 85, 0.14);
+  --ui-color-danger: #ff7070;
+  --ui-color-danger-soft: rgba(255, 112, 112, 0.14);
+  --ui-color-info: #5aa2ff;
+  --ui-color-info-soft: rgba(90, 162, 255, 0.14);
+  --ui-color-on-primary: #ffffff;
+  --ui-color-backdrop: rgba(0, 0, 0, 0.58);
+
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+
+  --ui-radius-sm: 4px;
+  --ui-radius-md: 6px;
+  --ui-radius-lg: 8px;
+  --ui-radius-pill: 999px;
+
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-semibold: 600;
+  --ui-weight-bold: 700;
+
+  --ui-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --ui-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --ui-duration-fast: 120ms;
+  --ui-duration-normal: 160ms;
+  --ui-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ui-shadow-raised: 0 16px 40px rgba(0, 0, 0, 0.3);
+  --ui-focus-ring: 0 0 0 3px rgba(90, 162, 255, 0.32);
+
+  /* Compatibility aliases used by the existing pages. */
+  --bg: var(--ui-color-canvas);
+  --surface: var(--ui-color-surface);
+  --panel: var(--ui-color-surface-raised);
+  --panel-soft: var(--ui-color-surface-hover);
+  --line: var(--ui-color-border);
+  --text: var(--ui-color-text);
+  --muted: var(--ui-color-text-muted);
+  --primary: var(--ui-color-primary);
+  --teal: #2bb5aa;
+  --ok: var(--ui-color-success);
+  --warn: var(--ui-color-warning);
+  --danger: var(--ui-color-danger);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ui-color-canvas: #f6f7f9;
+  --ui-color-surface: #ffffff;
+  --ui-color-surface-raised: #f0f2f5;
+  --ui-color-surface-hover: #e7eaf0;
+  --ui-color-border: #c9cfd8;
+  --ui-color-border-strong: #929baa;
+  --ui-color-text: #17191c;
+  --ui-color-text-muted: #5f6670;
+  --ui-color-primary: #1d4ed8;
+  --ui-color-primary-hover: #1e40af;
+  --ui-color-primary-soft: rgba(29, 78, 216, 0.11);
+  --ui-color-success: #167a50;
+  --ui-color-success-soft: rgba(22, 122, 80, 0.11);
+  --ui-color-warning: #8a5a00;
+  --ui-color-warning-soft: rgba(138, 90, 0, 0.11);
+  --ui-color-danger: #b4232c;
+  --ui-color-danger-soft: rgba(180, 35, 44, 0.1);
+  --ui-color-info: #1e5fbf;
+  --ui-color-info-soft: rgba(30, 95, 191, 0.1);
+  --ui-color-on-primary: #ffffff;
+  --ui-color-backdrop: rgba(16, 24, 40, 0.38);
+  --ui-shadow-raised: 0 16px 40px rgba(24, 32, 44, 0.16);
+  --ui-focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.24);
+  --teal: #087f76;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --ui-color-canvas: #f6f7f9;
+    --ui-color-surface: #ffffff;
+    --ui-color-surface-raised: #f0f2f5;
+    --ui-color-surface-hover: #e7eaf0;
+    --ui-color-border: #c9cfd8;
+    --ui-color-border-strong: #929baa;
+    --ui-color-text: #17191c;
+    --ui-color-text-muted: #5f6670;
+    --ui-color-primary: #1d4ed8;
+    --ui-color-primary-hover: #1e40af;
+    --ui-color-primary-soft: rgba(29, 78, 216, 0.11);
+    --ui-color-success: #167a50;
+    --ui-color-success-soft: rgba(22, 122, 80, 0.11);
+    --ui-color-warning: #8a5a00;
+    --ui-color-warning-soft: rgba(138, 90, 0, 0.11);
+    --ui-color-danger: #b4232c;
+    --ui-color-danger-soft: rgba(180, 35, 44, 0.1);
+    --ui-color-info: #1e5fbf;
+    --ui-color-info-soft: rgba(30, 95, 191, 0.1);
+    --ui-color-on-primary: #ffffff;
+    --ui-color-backdrop: rgba(16, 24, 40, 0.38);
+    --ui-shadow-raised: 0 16px 40px rgba(24, 32, 44, 0.16);
+    --ui-focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.24);
+    --teal: #087f76;
+  }
+}

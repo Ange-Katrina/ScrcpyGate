@@ -264,7 +264,7 @@ class MirrorControlTests(unittest.TestCase):
 class MirrorControlTemplateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.template = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        cls.template = (ROOT / "static" / "js" / "mirror.js").read_text(encoding="utf-8")
 
     def test_control_keepalive_is_single_30_second_timer(self):
         self.assertIn("controlKeepaliveTimer:null", self.template)
