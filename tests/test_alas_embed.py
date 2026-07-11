@@ -844,16 +844,29 @@ class AlasEmbedPolicyTests(unittest.TestCase):
 
         self.assertEqual(json.loads(result), json.loads(message))
 
-    def _alas_instance_sidebar_item(self, label, index=1):
+    def _aside_icon_output(self, icon_class, scope):
         return {
             "type": "custom_widget",
             "data": {
                 "contents": [
                     {
                         "type": "html",
-                        "content": '<svg class="aside-icon icon-run"></svg>',
-                        "scope": f"#pywebio-scope-alas-instance-{index}",
-                    },
+                        "content": f'<svg class="aside-icon {icon_class}"></svg>',
+                        "scope": scope,
+                    }
+                ]
+            },
+            "scope": scope,
+            "style": "z-index: 1; margin-left: 8px;text-align: center",
+        }
+
+    def _alas_instance_sidebar_item(self, label, index=1):
+        scope = f"#pywebio-scope-alas-instance-{index}"
+        return {
+            "type": "custom_widget",
+            "data": {
+                "contents": [
+                    self._aside_icon_output("icon-run", scope),
                     {
                         "type": "buttons",
                         "callback_id": f"callback-{index}",
@@ -864,7 +877,7 @@ class AlasEmbedPolicyTests(unittest.TestCase):
                                 "color": "aside",
                             }
                         ],
-                        "scope": f"#pywebio-scope-alas-instance-{index}",
+                        "scope": scope,
                         "style": f";z-index: 2; --aside-{label}--;",
                     },
                 ]
@@ -888,33 +901,33 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             ensure_ascii=False,
         )
 
-    def _restricted_sidebar_widget(self):
+    def _restricted_sidebar_widget(self, label="Manage"):
+        scope = "#pywebio-scope-aside"
         return {
             "type": "custom_widget",
             "data": {
                 "contents": [
-                    {
-                        "type": "html",
-                        "content": '<svg class="aside-icon icon-config"></svg>',
-                        "scope": "#pywebio-scope-menu",
-                    },
+                    self._aside_icon_output("icon-setting", scope),
                     {
                         "type": "buttons",
-                        "buttons": [{"label": "配置", "value": "Config", "color": "aside"}],
-                        "scope": "#pywebio-scope-menu",
-                        "style": ";--aside-config--;",
+                        "buttons": [{"label": label, "value": 0, "color": "aside"}],
+                        "scope": scope,
+                        "style": "z-index: 2; --aside-AddAlas--;",
                     },
                 ]
             },
+            "scope": scope,
         }
 
     def test_filter_user_websocket_downstream_drops_restricted_sidebar_widget_with_icon(self):
-        message = json.dumps(
-            {"command": "output", "spec": self._restricted_sidebar_widget()},
-            ensure_ascii=False,
-        )
+        for label in ("Manage", "\u7ba1\u7406"):
+            with self.subTest(label=label):
+                message = json.dumps(
+                    {"command": "output", "spec": self._restricted_sidebar_widget(label)},
+                    ensure_ascii=False,
+                )
 
-        self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
+                self.assertIsNone(filter_user_websocket_downstream(message, "3256475495"))
 
     def test_filter_user_websocket_downstream_removes_restricted_sidebar_widget_from_mixed_container(self):
         bound_widget = self._alas_instance_sidebar_item("3256475495", 1)
@@ -935,8 +948,8 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         contents = json.loads(result)["spec"]["data"]["contents"]
         self.assertEqual(contents, [bound_widget])
         serialized = json.dumps(contents, ensure_ascii=False)
-        self.assertNotIn("配置", serialized)
-        self.assertNotIn("icon-config", serialized)
+        self.assertNotIn("Manage", serialized)
+        self.assertNotIn("icon-setting", serialized)
 
     def test_filter_user_websocket_downstream_keeps_normal_business_custom_widget(self):
         widget = {

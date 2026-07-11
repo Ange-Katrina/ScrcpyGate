@@ -1714,6 +1714,25 @@ def _json_item_directly_targets_other_alas_instance(value, config_name: str) -> 
     return looks_like_instance and _json_buttons_target_other_alas_instance(buttons, config_name)
 
 
+def _json_item_is_aside_icon_output(value) -> bool:
+    """Return True for ALAS' direct or PyWebIO-wrapped aside SVG output."""
+    if not isinstance(value, dict):
+        return False
+    item_type = str(value.get("type") or "").strip().lower()
+    content = str(value.get("content") or "").strip().lower()
+    if item_type == "html":
+        return "<svg" in content and ("aside-icon" in content or "icon-setting" in content)
+    if item_type != "custom_widget":
+        return False
+    data = value.get("data")
+    contents = data.get("contents") if isinstance(data, dict) else None
+    return (
+        isinstance(contents, list)
+        and len(contents) == 1
+        and _json_item_is_aside_icon_output(contents[0])
+    )
+
+
 def _json_item_directly_targets_restricted_sidebar_widget(value) -> bool:
     """Return True when one custom widget pairs a sidebar icon with restricted buttons."""
     if not isinstance(value, dict) or str(value.get("type") or "").strip().lower() != "custom_widget":
@@ -1727,14 +1746,11 @@ def _json_item_directly_targets_restricted_sidebar_widget(value) -> bool:
     for item in contents:
         if not isinstance(item, dict):
             continue
-        item_type = str(item.get("type") or "").strip().lower()
         scope = str(item.get("scope") or "").strip().lower()
         style = str(item.get("style") or "").strip().lower()
-        content = str(item.get("content") or "").strip().lower()
-        if item_type == "html" and "<svg" in content and (
-            "aside" in scope or "aside-icon" in content or "icon-config" in content
-        ):
+        if _json_item_is_aside_icon_output(item):
             has_aside_icon = True
+        item_type = str(item.get("type") or "").strip().lower()
         if item_type != "buttons" or not isinstance(item.get("buttons"), list):
             continue
         buttons = item["buttons"]
