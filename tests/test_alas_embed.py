@@ -582,6 +582,14 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("filterConfigRail", result)
         self.assertNotIn("filterAlasSettings", result)
 
+    def test_filter_user_html_proxies_alas_root_static_asset_paths(self):
+        result = filter_user_html("<html><body></body></html>", "3256475495")
+
+        self.assertIn('pathname.indexOf("/static/") === 0', result)
+        self.assertIn('pathname.indexOf("/assets/") === 0', result)
+        self.assertIn('pathname === "/favicon.ico"', result)
+        self.assertIn("url.pathname = proxyPrefix +", result)
+
     def test_denied_page_html_redirects_back_to_bound_alas(self):
         result = denied_page_html("无权访问 ALAS 管理入口", "/alas/embed/proxy/?config=3256475495", seconds=3)
 

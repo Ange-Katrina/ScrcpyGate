@@ -977,7 +977,10 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     return pathname.indexOf(proxyPrefix) === 0 ||
       pathname.indexOf("/pywebio") === 0 ||
       pathname.indexOf("/api") === 0 ||
-      pathname.indexOf("/ajax") === 0;
+      pathname.indexOf("/ajax") === 0 ||
+      pathname.indexOf("/static/") === 0 ||
+      pathname.indexOf("/assets/") === 0 ||
+      pathname === "/favicon.ico";
   }}
   function isSameScrcpyGateHost(url) {{
     if (url.origin === window.location.origin) return true;
