@@ -8,125 +8,263 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=84db3b8f15da">
-  <link rel="stylesheet" href="/static/css/admin.css?v=456915279ce1">
+  <link rel="stylesheet" href="/static/css/admin.css?v=e34985c07f20">
   <script src="/static/js/ui-core.js?v=523c6db5fdfe" defer></script>
 </head>
 <body data-ui-page="admin">
-<div id="notice" class="notice"></div>
-<div class="shell">
-  <header>
-    <div>
-      <h1>后台管理</h1>
-      <div class="chips"><span class="chip ok">{{ user.username }}</span><span id="summaryMirror" class="chip">投屏 0</span><span id="summaryAlas" class="chip">ALAS</span></div>
+<div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true"></div>
+<button id="adminNavBackdrop" class="admin-nav-backdrop" type="button" aria-label="关闭后台导航" aria-controls="adminNav" hidden></button>
+
+<div class="admin-app">
+  <aside id="adminNav" class="admin-nav" aria-label="后台导航">
+    <div class="admin-nav__header">
+      <a class="admin-brand" href="/" aria-label="ScrcpyGate 投屏工作台">
+        <span class="admin-brand__mark" aria-hidden="true">S</span>
+        <span><strong>ScrcpyGate</strong><small>管理工作台</small></span>
+      </a>
+      <button id="adminNavClose" class="ui-icon-button admin-nav__close" type="button" aria-label="关闭后台导航" aria-controls="adminNav">
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg>
+      </button>
     </div>
-    <div class="top-actions">
-      <label class="ui-theme-picker">
+
+    <nav class="tabs" aria-label="管理区域">
+      <button id="adminTabOverview" data-tab="overview" class="active" type="button" aria-controls="overview" aria-current="page"><span aria-hidden="true">01</span>总览</button>
+      <button id="adminTabDevices" data-tab="devices" type="button" aria-controls="devices"><span aria-hidden="true">02</span>设备</button>
+      <button id="adminTabUsers" data-tab="users" type="button" aria-controls="users"><span aria-hidden="true">03</span>用户权限</button>
+      <button id="adminTabVideo" data-tab="video" type="button" aria-controls="video"><span aria-hidden="true">04</span>画质</button>
+      <button id="adminTabAlas" data-tab="alas" type="button" aria-controls="alas"><span aria-hidden="true">05</span>ALAS</button>
+      <button id="adminTabLogs" data-tab="logs" type="button" aria-controls="logs"><span aria-hidden="true">06</span>安全日志</button>
+    </nav>
+
+    <div class="admin-nav__footer">
+      <div class="admin-user">
+        <span class="admin-user__avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
+        <span><strong>{{ user.username }}</strong><small>管理员</small></span>
+      </div>
+      <label class="ui-theme-picker" for="adminTheme">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
         <span class="ui-sr-only">界面主题</span>
-        <select data-ui-theme-select aria-label="界面主题">
+        <select id="adminTheme" data-ui-theme-select aria-label="界面主题">
           <option value="dark">深色</option>
           <option value="light">浅色</option>
           <option value="system">跟随系统</option>
         </select>
       </label>
-      <a href="/">返回投屏页</a>
-      <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" type="submit">退出登录</button></form>
+      <a class="admin-nav__link" href="/">返回投屏页</a>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="logout admin-nav__link" type="submit">退出登录</button>
+      </form>
     </div>
-  </header>
-  <nav class="tabs">
-    <button data-tab="overview" class="active" type="button">总览</button>
-    <button data-tab="devices" type="button">设备</button>
-    <button data-tab="users" type="button">用户权限</button>
-    <button data-tab="alas" type="button">ALAS</button>
-    <button data-tab="logs" type="button">安全日志</button>
-    <button data-tab="video" type="button">画质</button>
-  </nav>
+  </aside>
 
-  <section id="overview" class="panel active">
-    <div class="grid">
-      <div class="card third"><h2>设备</h2><div id="overviewDevices" class="chips"></div></div>
-      <div class="card third"><h2>投屏</h2><div id="overviewMirror" class="chips"></div></div>
-      <div class="card third"><h2>ALAS</h2><div id="overviewAlas" class="chips"></div></div>
-      <div class="card full"><h2>快速操作</h2><div class="quick-actions"><button id="reloadAll" class="btn primary" type="button">刷新数据</button><a class="btn" href="/">打开投屏页</a></div></div>
-    </div>
-  </section>
-
-  <section id="devices" class="panel">
-    <div class="grid">
-      <div class="card full"><h2>设备列表</h2><div id="deviceCards" class="device-grid"></div></div>
-      <div class="card"><h2>保存设备</h2><div class="form-grid"><div class="col-6"><label>设备 ID</label><input id="deviceId" placeholder="emulator-1"></div><div class="col-6"><label>名称</label><input id="deviceName" placeholder="模拟器 1"></div><div class="col-8"><label>ADB 地址</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT"></div><div class="col-4"><label>状态</label><select id="deviceEnabled"><option value="true">启用</option><option value="false">禁用</option></select></div><div class="col-12 actions"><button id="saveDevice" class="btn primary" type="button">保存设备</button><button id="clearDeviceForm" class="btn" type="button">清空</button></div></div><p class="muted">设备 ID 建议使用别名；ADB 地址填写实际连接地址，仅管理员后台可见。</p></div>
-    </div>
-  </section>
-
-  <section id="video" class="panel">
-    <div class="grid">
-      <div class="card full">
-        <h2>画质默认值</h2>
-        <div class="form-grid">
-          <div class="col-3"><label>默认预设</label><select id="videoProfile"><option value="smooth">流畅</option><option value="balanced">稳定</option><option value="sharp">高清</option><option value="low_latency">低延迟</option></select></div>
-          <div class="col-3"><label>默认流模式</label><select id="videoStreamMode"><option value="raw">raw</option><option value="protocol">protocol</option><option value="legacy">legacy 诊断</option></select></div>
-          <div class="col-3"><label>自动停止分钟</label><input id="videoAutoStop" type="number" min="0" max="1440" step="1" placeholder="15"></div>
-          <div class="col-3"><button id="saveVideo" class="btn primary" type="button">保存画质设置</button></div>
-          <div class="col-12"><label>启用 scrcpy 流模式</label><div id="streamModeToggles" class="actions"></div></div>
+  <div class="admin-workspace">
+    <header class="admin-topbar">
+      <div class="admin-topbar__title">
+        <button id="adminNavToggle" class="ui-icon-button admin-nav__toggle" type="button" aria-label="打开后台导航" aria-controls="adminNav" aria-expanded="false">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#menu"></use></svg>
+        </button>
+        <div>
+          <p>ScrcpyGate</p>
+          <h1>后台管理</h1>
         </div>
-        <p class="muted">页面失焦或没有观看端超过此时间会自动停流，0 表示关闭。网页画质只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
       </div>
-      <div class="card full">
-        <h2>预设参数</h2>
-        <div class="actions spaced-bottom-12" id="bandwidthPresetActions"></div>
-        <div class="table-wrap"><table><thead><tr><th>预设</th><th>码率 bps</th><th>输出尺寸</th><th>帧率</th><th>建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
-        <p class="muted">点击 2/5/10/20Mbps 会自动填入推荐值；不用推荐就直接手动输入每个选项。上行有限时优先调低码率，其次输出尺寸；帧率建议保持 20-30，输出尺寸最低 480。</p>
+      <div class="top-status" aria-label="系统摘要">
+        <span class="chip ok">{{ user.username }}</span>
+        <span id="summaryMirror" class="chip">投屏 0</span>
+        <span id="summaryAlas" class="chip">ALAS</span>
       </div>
-      <div class="card full">
-        <h2>专属画质设定</h2>
-        <div class="form-grid">
-          <div class="col-3"><label>档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
-          <div class="col-3"><label>显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
-          <div class="col-2"><label>码率 bps</label><input id="customProfileBitrate" type="number" min="100000" step="100000" value="900000"></div>
-          <div class="col-2"><label>输出尺寸</label><input id="customProfileSize" type="number" min="480" step="1" value="480"></div>
-          <div class="col-2"><label>帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
-          <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加专属设定</button></div>
+    </header>
+
+    <main id="adminContent" class="admin-content">
+      <section id="overview" class="panel active" aria-labelledby="adminTabOverview" tabindex="-1">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Overview</p><h2>运行总览</h2><p>优先查看设备、投屏、控制权与 ALAS 的关键状态。</p></div>
         </div>
-        <div class="table-wrap spaced-top-12"><table><thead><tr><th>ID</th><th>名称</th><th>码率</th><th>输出尺寸</th><th>帧率</th><th>操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="users" class="panel">
-    <div class="grid">
-      <div class="card full"><h2>用户列表</h2><div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="userRows"></tbody></table></div></div>
-      <div class="card"><h2>保存用户</h2><div class="form-grid"><div class="col-5"><label>用户名</label><input id="newUsername"></div><div class="col-4"><label>密码</label><input id="newPassword" type="password" placeholder="至少12位"></div><div class="col-3"><label>角色</label><select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div><div class="col-12"><button id="saveUser" class="btn primary" type="button">保存用户</button></div></div></div>
-      <div class="card"><h2>设备权限</h2><div class="form-grid"><div class="col-4"><label>用户</label><select id="permUser"></select></div><div class="col-4"><label>设备</label><select id="permDevice"></select></div><div class="col-2"><label>查看</label><select id="permView"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-2"><label>控制</label><select id="permControl"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-12"><button id="savePermission" class="btn primary" type="button">保存权限</button></div></div><div class="table-wrap spaced-top-14"><table><thead><tr><th>用户</th><th>设备</th><th>查看</th><th>控制</th></tr></thead><tbody id="permissionRows"></tbody></table></div></div>
-    </div>
-  </section>
-
-  <section id="alas" class="panel">
-    <div class="grid">
-      <div class="card full">
-        <h2>ALAS 使用教程</h2>
-        <ol class="guide-list">
-          <li>必须先安装并启动 <strong>Alas-Gyre 的 Overlay Runtime</strong>。只有 Overlay 正常运行后，ScrcpyGate 才能使用 ALAS 的启动、停止、重启功能。</li>
-          <li>ScrcpyGate 只是代理控制入口，不会直接运行 ALAS，也不会替代 Overlay。普通用户前台只调用自己绑定配置的启动/停止/重启。</li>
-          <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code> 和访问 <code>Token</code>，然后在“用户 ALAS 配置绑定”中为每个用户绑定自己的配置名。</li>
-          <li>如果状态显示 token 未配置、连接失败或 ALAS control is disabled，先检查 Overlay 是否已启动、URL 是否能从服务器访问、Token 是否一致。</li>
-          <li>用户绑定配置后，用户只能操作绑定的单个配置；不会在前台暴露全部配置列表、配置内容和 Runtime Token。</li>
-        </ol>
-        <div class="guide-links">
-          <a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">ALAS 官方仓库</a>
-          <a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">Alas-Gyre Overlay 仓库</a>
+        <div class="overview-summary">
+          <section class="overview-summary__item" aria-labelledby="overviewDevicesTitle"><h3 id="overviewDevicesTitle">设备</h3><div id="overviewDevices" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
+          <section class="overview-summary__item" aria-labelledby="overviewMirrorTitle"><h3 id="overviewMirrorTitle">投屏</h3><div id="overviewMirror" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
+          <section class="overview-summary__item" aria-labelledby="overviewControlTitle"><h3 id="overviewControlTitle">控制锁</h3><div id="overviewControl" class="chips" aria-live="polite"><span class="chip">等待状态</span></div></section>
+          <section class="overview-summary__item" aria-labelledby="overviewAlasTitle"><h3 id="overviewAlasTitle">ALAS</h3><div id="overviewAlas" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
         </div>
-        <p class="muted">默认 Runtime 地址通常类似 <code>http://127.0.0.1:22267</code>。如果 ScrcpyGate 在 Docker 或另一台服务器上，需填写容器/服务器可访问的 Overlay 地址。</p>
-      </div>
-      <div class="card"><h2>连接设置</h2><div class="form-grid"><div class="col-12"><label>Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267"></div><div class="col-12"><label>访问 Token</label><input id="alasToken" type="password"></div><div class="col-12 actions"><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button><a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开完整 ALAS 页面</a></div></div><p class="setting-note">Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267。这里不再保存“默认配置”，普通用户实际操作完全以“用户 ALAS 配置绑定”为准，后续可扩展为“用户 + 设备 -> ALAS 配置”。</p></div>
-      <div class="card"><h2>运行状态</h2><div class="form-grid"><div class="col-12"><label>操作配置</label><select id="alasOperateConfig"></select></div><div class="col-12"><div id="alasStatus" class="chips"></div></div><div class="col-12 actions"><button id="toggleAlas" class="btn warn" type="button">启动/重启 ALAS</button><button id="reloadAlas" class="btn" type="button">刷新 ALAS</button></div></div><p class="setting-note">管理员运行操作也必须选择一个已绑定配置；没有绑定配置时不会使用兜底配置。</p></div>
-      <div class="card full"><h2>用户 ALAS 配置绑定</h2><div class="form-grid"><div class="col-4"><label>用户</label><select id="alasBindUser"></select></div><div class="col-4"><label>绑定配置名</label><input id="alasBindConfig" placeholder="例如 user-001 或 device-a"></div><div class="col-2"><label>运行</label><select id="alasBindRun"><option value="true">允许</option><option value="false">拒绝</option></select></div><div class="col-2"><label>绑定</label><select id="alasBindEnabled"><option value="true">启用</option><option value="false">取消</option></select></div><div class="col-12 actions"><button id="saveAlasBinding" class="btn primary" type="button">保存绑定</button></div></div><p class="setting-note">当前版本按用户绑定 ALAS 配置；后续扩展多设备时可在这里演进为“用户 + 设备 -> ALAS 配置”。普通用户前台只会操作绑定配置，不暴露配置列表、配置内容和 Runtime Token。</p><div class="table-wrap spaced-top-14"><table><thead><tr><th>用户</th><th>角色</th><th>绑定配置</th><th>运行</th><th>操作</th></tr></thead><tbody id="alasBindRows"></tbody></table></div></div>
-      <div class="card full"><h2>绑定配置工具</h2><div class="form-grid"><div class="col-5"><label>维护配置</label><select id="configSource"></select></div><div class="col-5"><label>保存目标</label><input id="configTarget" readonly placeholder="选择维护配置后自动填充"></div><div class="col-2"><button id="loadConfig" class="btn" type="button">读取</button></div><div class="col-12"><textarea id="configEditor" spellcheck="false" placeholder="选择已绑定配置后读取 JSON"></textarea></div><div class="col-12"><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div></div><p class="setting-note">这个工具只维护已经绑定给用户的配置。配置名来自上方绑定表；保存时会写回同名配置，不再使用全局默认配置。</p></div>
-    </div>
-  </section>
+        <section class="workspace-section" aria-labelledby="quickActionsTitle">
+          <div class="section-heading"><div><h3 id="quickActionsTitle">快速操作</h3><p>刷新当前已加载的数据，或返回投屏工作台。</p></div></div>
+          <div class="quick-actions"><button id="reloadAll" class="btn primary" type="button">刷新数据</button><a class="btn" href="/">打开投屏页</a></div>
+        </section>
+      </section>
 
-  <section id="logs" class="panel"><div class="grid"><div class="card full"><h2>运行日志</h2><pre id="runtimeLogs" class="runtime-logs"></pre></div><div class="card full"><h2>最近审计日志</h2><div class="table-wrap"><table><thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th></tr></thead><tbody id="logRows"></tbody></table></div></div></div></section>
+      <section id="devices" class="panel" aria-labelledby="adminTabDevices" tabindex="-1">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Devices</p><h2>设备管理</h2><p>管理 ADB 连接、投屏状态和设备可用性。</p></div>
+          <button id="openDeviceDrawer" class="btn primary" type="button">新建设备</button>
+        </div>
+        <section class="workspace-section" aria-labelledby="deviceListTitle">
+          <div class="section-heading"><div><h3 id="deviceListTitle">设备列表</h3><p>设备操作保持在同一行，状态变化不会打断浏览位置。</p></div></div>
+          <div id="deviceCards" class="device-grid" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <section id="video" class="panel" aria-labelledby="adminTabVideo" tabindex="-1">
+        <div class="panel-heading"><div><p class="eyebrow">Video</p><h2>画质管理</h2><p>统一默认画质、流模式与自定义档位。</p></div></div>
+        <section class="workspace-section" aria-labelledby="videoDefaultsTitle">
+          <div class="section-heading"><div><h3 id="videoDefaultsTitle">画质默认值</h3><p>页面失焦或没有观看端超过设定时间会自动停流，0 表示关闭。</p></div></div>
+          <div class="form-grid">
+            <div class="col-3"><label for="videoProfile">默认预设</label><select id="videoProfile"><option value="smooth">流畅</option><option value="balanced">稳定</option><option value="sharp">高清</option><option value="low_latency">低延迟</option></select></div>
+            <div class="col-3"><label for="videoStreamMode">默认流模式</label><select id="videoStreamMode"><option value="raw">raw</option><option value="protocol">protocol</option><option value="legacy">legacy 诊断</option></select></div>
+            <div class="col-3"><label for="videoAutoStop">自动停止分钟</label><input id="videoAutoStop" type="number" min="0" max="1440" step="1" placeholder="15"></div>
+            <div class="col-3 form-action"><button id="saveVideo" class="btn primary" type="button">保存画质设置</button></div>
+            <fieldset class="col-12 field-group"><legend>启用 scrcpy 流模式</legend><div id="streamModeToggles" class="actions"></div></fieldset>
+          </div>
+          <p class="muted">网页画质只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+        </section>
+        <section class="workspace-section" aria-labelledby="presetParamsTitle">
+          <div class="section-heading"><div><h3 id="presetParamsTitle">预设参数</h3><p>上行有限时优先调低码率，其次调整输出尺寸。</p></div></div>
+          <div class="actions spaced-bottom-12" id="bandwidthPresetActions"></div>
+          <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">预设</th><th scope="col">码率 bps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
+          <p class="muted">点击 2/5/10/20Mbps 会自动填入推荐值；帧率建议保持 20-30，输出尺寸最低 480。</p>
+        </section>
+        <section class="workspace-section" aria-labelledby="customProfilesTitle">
+          <div class="section-heading"><div><h3 id="customProfilesTitle">专属画质设定</h3><p>添加适合特定网络或设备的画质档位。</p></div></div>
+          <div class="form-grid">
+            <div class="col-3"><label for="customProfileId">档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
+            <div class="col-3"><label for="customProfileLabel">显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
+            <div class="col-2"><label for="customProfileBitrate">码率 bps</label><input id="customProfileBitrate" type="number" min="100000" step="100000" value="900000"></div>
+            <div class="col-2"><label for="customProfileSize">输出尺寸</label><input id="customProfileSize" type="number" min="480" step="1" value="480"></div>
+            <div class="col-2"><label for="customProfileFps">帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
+            <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加专属设定</button></div>
+          </div>
+          <div class="table-wrap spaced-top-12"><table class="responsive-table" data-table="custom-profiles"><thead><tr><th scope="col">ID</th><th scope="col">名称</th><th scope="col">码率</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="users" class="panel" aria-labelledby="adminTabUsers" tabindex="-1">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Access</p><h2>用户与权限</h2><p>集中管理用户角色和设备访问权限。</p></div>
+          <button id="openUserDrawer" class="btn primary" type="button">新建用户</button>
+        </div>
+        <section class="workspace-section" aria-labelledby="userListTitle">
+          <div class="section-heading"><div><h3 id="userListTitle">用户列表</h3><p>编辑用户时会在侧边显示当前对象，避免误操作。</p></div></div>
+          <div class="table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
+        </section>
+        <section class="workspace-section" aria-labelledby="permissionsTitle">
+          <div class="section-heading"><div><h3 id="permissionsTitle">设备权限</h3><p>查看与控制权限分别配置，拒绝控制不影响只读投屏。</p></div></div>
+          <div class="form-grid">
+            <div class="col-4"><label for="permUser">用户</label><select id="permUser"></select></div>
+            <div class="col-4"><label for="permDevice">设备</label><select id="permDevice"></select></div>
+            <div class="col-2"><label for="permView">查看</label><select id="permView"><option value="true">允许</option><option value="false">拒绝</option></select></div>
+            <div class="col-2"><label for="permControl">控制</label><select id="permControl"><option value="true">允许</option><option value="false">拒绝</option></select></div>
+            <div class="col-12 actions"><button id="savePermission" class="btn primary" type="button">保存权限</button></div>
+          </div>
+          <div class="table-wrap spaced-top-14"><table class="responsive-table" data-table="permissions"><thead><tr><th scope="col">用户</th><th scope="col">设备</th><th scope="col">查看</th><th scope="col">控制</th></tr></thead><tbody id="permissionRows"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="alas" class="panel" aria-labelledby="adminTabAlas" tabindex="-1">
+        <div class="panel-heading"><div><p class="eyebrow">Automation</p><h2>ALAS 管理</h2><p>先确认运行状态，再调整连接、绑定与配置。</p></div></div>
+        <section class="workspace-section workspace-section--prominent" aria-labelledby="alasRuntimeTitle">
+          <div class="section-heading"><div><h3 id="alasRuntimeTitle">运行状态</h3><p>管理员操作也必须选择一个已绑定配置。</p></div><button id="reloadAlas" class="btn" type="button">刷新 ALAS</button></div>
+          <div class="form-grid">
+            <div class="col-6"><label for="alasOperateConfig">操作配置</label><select id="alasOperateConfig"></select></div>
+            <div class="col-6 status-field"><span class="field-label">当前状态</span><div id="alasStatus" class="chips" aria-live="polite"></div></div>
+            <div class="col-12 actions"><button id="toggleAlas" class="btn warn" type="button">启动/重启 ALAS</button></div>
+          </div>
+          <p class="setting-note">没有绑定配置时不会使用兜底配置。</p>
+        </section>
+        <section class="workspace-section" aria-labelledby="alasConnectionTitle">
+          <div class="section-heading"><div><h3 id="alasConnectionTitle">连接设置</h3><p>连接 Alas-Gyre Overlay Runtime，并安全保存访问凭据。</p></div><a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开完整 ALAS 页面</a></div>
+          <div class="form-grid">
+            <div class="col-6"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267"></div>
+            <div class="col-6"><label for="alasToken">访问 Token</label><input id="alasToken" type="password" autocomplete="new-password"></div>
+            <div class="col-12 actions"><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button></div>
+          </div>
+          <p class="setting-note">Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267。这里不再保存“默认配置”，普通用户实际操作完全以“用户 ALAS 配置绑定”为准，后续可扩展为“用户 + 设备 -&gt; ALAS 配置”。</p>
+        </section>
+        <section class="workspace-section" aria-labelledby="alasBindingsTitle">
+          <div class="section-heading"><div><h3 id="alasBindingsTitle">用户 ALAS 配置绑定</h3><p>普通用户前台只会操作自己的绑定配置。</p></div></div>
+          <div class="form-grid">
+            <div class="col-4"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
+            <div class="col-4"><label for="alasBindConfig">绑定配置名</label><input id="alasBindConfig" placeholder="例如 user-001 或 device-a"></div>
+            <div class="col-2"><label for="alasBindRun">运行</label><select id="alasBindRun"><option value="true">允许</option><option value="false">拒绝</option></select></div>
+            <div class="col-2"><label for="alasBindEnabled">绑定</label><select id="alasBindEnabled"><option value="true">启用</option><option value="false">取消</option></select></div>
+            <div class="col-12 actions"><button id="saveAlasBinding" class="btn primary" type="button">保存绑定</button></div>
+          </div>
+          <p class="setting-note">当前版本按用户绑定 ALAS 配置；后续扩展多设备时可演进为“用户 + 设备 -&gt; ALAS 配置”。前台不会暴露配置列表、配置内容和 Runtime Token。</p>
+          <div class="table-wrap spaced-top-14"><table class="responsive-table" data-table="alas-bindings"><thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">绑定配置</th><th scope="col">运行</th><th scope="col">操作</th></tr></thead><tbody id="alasBindRows"></tbody></table></div>
+        </section>
+        <section class="workspace-section" aria-labelledby="alasConfigTitle">
+          <div class="section-heading"><div><h3 id="alasConfigTitle">绑定配置工具</h3><p>只维护已经绑定给用户的配置，不使用全局默认配置。</p></div></div>
+          <div class="form-grid">
+            <div class="col-5"><label for="configSource">维护配置</label><select id="configSource"></select></div>
+            <div class="col-5"><label for="configTarget">保存目标</label><input id="configTarget" readonly placeholder="选择维护配置后自动填充"></div>
+            <div class="col-2 form-action"><button id="loadConfig" class="btn" type="button">读取</button></div>
+            <div class="col-12"><label for="configEditor">配置 JSON</label><textarea id="configEditor" spellcheck="false" placeholder="选择已绑定配置后读取 JSON"></textarea></div>
+            <div class="col-12"><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div>
+          </div>
+          <p class="setting-note">配置名来自上方绑定表；保存时会写回同名配置。</p>
+        </section>
+        <details class="help-details">
+          <summary>ALAS 使用帮助</summary>
+          <div class="help-details__content">
+            <ol class="guide-list">
+              <li>必须先安装并启动 <strong>Alas-Gyre 的 Overlay Runtime</strong>。只有 Overlay 正常运行后，ScrcpyGate 才能使用 ALAS 的启动、停止、重启功能。</li>
+              <li>ScrcpyGate 只是代理控制入口，不会直接运行 ALAS，也不会替代 Overlay。普通用户前台只调用自己绑定配置的启动/停止/重启。</li>
+              <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code> 和访问 <code>Token</code>，然后在“用户 ALAS 配置绑定”中为每个用户绑定自己的配置名。</li>
+              <li>如果状态显示 token 未配置、连接失败或 ALAS control is disabled，先检查 Overlay 是否已启动、URL 是否能从服务器访问、Token 是否一致。</li>
+              <li>用户绑定配置后，只能操作绑定的单个配置；不会在前台暴露全部配置列表、配置内容和 Runtime Token。</li>
+            </ol>
+            <div class="guide-links"><a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">ALAS 官方仓库</a><a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">Alas-Gyre Overlay 仓库</a></div>
+            <p class="muted">默认 Runtime 地址通常类似 <code>http://127.0.0.1:22267</code>。如果 ScrcpyGate 在 Docker 或另一台服务器上，需填写容器/服务器可访问的 Overlay 地址。</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="logs" class="panel" aria-labelledby="adminTabLogs" tabindex="-1">
+        <div class="panel-heading"><div><p class="eyebrow">Audit</p><h2>日志与审计</h2><p>运行日志和安全审计独立加载，单项失败不会阻塞另一项。</p></div></div>
+        <section class="workspace-section log-section" aria-labelledby="runtimeLogsTitle">
+          <div class="section-heading"><div><h3 id="runtimeLogsTitle">运行日志</h3><p id="runtimeLogsStatus" class="load-status" role="status" aria-live="polite">打开此区域后加载</p></div><button id="reloadRuntimeLogs" class="btn" type="button">刷新运行日志</button></div>
+          <pre id="runtimeLogs" class="runtime-logs" tabindex="0" aria-label="ScrcpyGate 运行日志"></pre>
+        </section>
+        <section class="workspace-section log-section" aria-labelledby="auditLogsTitle">
+          <div class="section-heading"><div><h3 id="auditLogsTitle">最近审计日志</h3><p id="auditLogsStatus" class="load-status" role="status" aria-live="polite">打开此区域后加载</p></div><button id="reloadAuditLogs" class="btn" type="button">刷新审计日志</button></div>
+          <div class="table-wrap audit-log-table"><table class="responsive-table" data-table="audit-logs"><thead><tr><th scope="col">时间</th><th scope="col">用户</th><th scope="col">动作</th><th scope="col">详情</th></tr></thead><tbody id="logRows"></tbody></table></div>
+        </section>
+      </section>
+    </main>
+  </div>
 </div>
+
+<div id="deviceDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
+<aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
+  <div class="drawer-heading"><div><p class="eyebrow">Device</p><h2 id="deviceDrawerTitle">保存设备</h2><p id="deviceDrawerContext" class="drawer-context">新建设备</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="关闭设备编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div class="form-grid drawer-form">
+    <div class="col-6"><label for="deviceId">设备 ID</label><input id="deviceId" placeholder="emulator-1" autocomplete="off"></div>
+    <div class="col-6"><label for="deviceName">名称</label><input id="deviceName" placeholder="模拟器 1" autocomplete="off"></div>
+    <div class="col-8"><label for="deviceAddress">ADB 地址</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
+    <div class="col-4"><label for="deviceEnabled">状态</label><select id="deviceEnabled"><option value="true">启用</option><option value="false">禁用</option></select></div>
+  </div>
+  <p class="muted drawer-note">设备 ID 建议使用别名；ADB 地址填写实际连接地址，仅管理员后台可见。</p>
+  <div class="drawer-actions"><button id="clearDeviceForm" class="btn" type="button">清空</button><button id="cancelDeviceForm" class="btn" type="button">取消</button><button id="saveDevice" class="btn primary" type="button">保存设备</button></div>
+</aside>
+
+<div id="userDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
+<aside id="userDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="userDrawerTitle" aria-describedby="userDrawerContext" aria-hidden="true" inert>
+  <div class="drawer-heading"><div><p class="eyebrow">User</p><h2 id="userDrawerTitle">保存用户</h2><p id="userDrawerContext" class="drawer-context">新建用户</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="关闭用户编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div class="form-grid drawer-form">
+    <div class="col-12"><label for="newUsername">用户名</label><input id="newUsername" autocomplete="username"></div>
+    <div class="col-12"><label for="newPassword">密码</label><input id="newPassword" type="password" placeholder="至少12位" autocomplete="new-password"></div>
+    <div class="col-12"><label for="newRole">角色</label><select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div>
+  </div>
+  <p class="muted drawer-note">编辑用户时留空密码即可保留原密码。</p>
+  <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">取消</button><button id="saveUser" class="btn primary" type="button">保存用户</button></div>
+</aside>
+
+<dialog id="confirmDialog" class="ui-dialog confirm-dialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
+  <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#triangle-alert"></use></svg></div>
+  <div><p class="eyebrow">需要确认</p><h2 id="confirmDialogTitle">确认危险操作</h2><p id="confirmDialogMessage">此操作可能无法撤销，请确认后继续。</p></div>
+  <div class="confirm-dialog__actions"><button id="confirmDialogCancel" class="btn" type="button">取消</button><button id="confirmDialogConfirm" class="btn danger" type="button">确认操作</button></div>
+</dialog>
+
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=a745eb259f40" defer></script>
+<script src="/static/js/admin.js?v=2085b5520d2d" defer></script>
 </body>
 </html>
