@@ -44,13 +44,17 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
 
     def test_sidebar_and_video_layout_have_stable_responsive_tracks(self):
         for token in (
-            "--mirror-sidebar-width: 296px",
+            "--mirror-sidebar-width: 320px",
             "--mirror-sidebar-collapsed-width: 64px",
+            "--mirror-video-text: #f1f3f5",
+            "--mirror-video-muted: #b0b7c0",
+            ':root[data-theme="light"] body[data-ui-page="mirror"] .viewer',
             "grid-template-rows: minmax(0, 1fr) calc(var(--mirror-navigation-row)",
             ".nav-btn",
             "width: 64px",
             "height: 44px",
             "@media (max-width: 960px)",
+            "@media (max-width: 640px), (pointer: coarse)",
             "transform: translateY(calc(100% + 8px))",
             ".device-search,\n  .device-filters {\n    display: none",
         ):
@@ -63,6 +67,34 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("node.getClientRects().length > 0", self.script)
         self.assertIn(".device-card {\n    min-height: 48px", self.styles)
         self.assertIn("selectedButton.scrollIntoView({block:'nearest'})", self.script)
+        self.assertIn(".sidebar-menu .sidebar-menu-btn {\n  justify-content: flex-start", self.styles)
+        self.assertIn(".app.sidebar-collapsed .sidebar-menu .sidebar-menu-btn {\n  justify-content: center", self.styles)
+
+    def test_sidebar_identity_and_device_rows_use_compact_information_hierarchy(self):
+        for token in (
+            'class="sidebar-user"',
+            'class="sidebar-account-actions"',
+            'id="deviceSummary"',
+            ".device-presence",
+            ".device-name-block",
+            ".device-card-summary",
+            'device-status[data-tone="ok"]',
+            "function deviceIdentifier(device)",
+            "summaryParts.join(' · ')",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, self.template + self.styles + self.script)
+        self.assertNotIn("ADB 地址已隐藏", self.script)
+        self.assertIn("!/^dev_[a-f0-9]+$/i.test(value)", self.script)
+        self.assertIn("adbState === 'unauthorized' ? '等待设备端授权'", self.script)
+        self.assertIn("visibleCount === total", self.script)
+        self.assertIn("if (summary.textContent !== summaryText)", self.script)
+
+    def test_mobile_sidebar_focus_skips_filtered_or_hidden_devices(self):
+        self.assertIn("!selectedButton.hidden", self.script)
+        self.assertIn("selectedButton.getClientRects().length > 0", self.script)
+        self.assertIn("const visibleDevice=Array.from(state.deviceNodes.values()).find", self.script)
+        self.assertIn("!button.disabled && !button.hidden && button.getClientRects().length > 0", self.script)
 
     def test_async_commands_are_guarded_and_empty_states_are_structured(self):
         self.assertIn("const actionRequests = new Map()", self.script)

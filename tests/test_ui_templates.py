@@ -99,7 +99,7 @@ class UiTemplateContractTests(unittest.TestCase):
             "index.html": {
                 "sidebar", "roleChip", "adminLink", "toolBtn", "alasBtn", "accountBtn",
                 "sidebarCollapseBtn", "deviceSearch", "deviceFilterAll", "deviceFilterOnline",
-                "refreshBtn", "devices", "startBtn", "controlBtn", "stopBtn", "tools",
+                "refreshBtn", "deviceSummary", "devices", "startBtn", "controlBtn", "stopBtn", "tools",
                 "qualityProfiles", "qualityStreamMode", "qualityStatus", "alasTools",
                 "alasPanelStatus", "alasToggleRun", "alasReload", "accountTools", "accountInfo",
                 "currentPassword", "newPassword", "confirmPassword", "changePasswordBtn",

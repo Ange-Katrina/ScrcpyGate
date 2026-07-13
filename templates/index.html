@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=1c4a4c85bca0">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=ee5358718d82">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=4abd1c7fbd4d"></script>
@@ -20,34 +20,38 @@
       <div class="brand-row">
         <div class="brand-copy">
           <div class="brand">ScrcpyGate</div>
-          <div class="chips brand-chips">
-            <span class="chip">{{ user.username }}</span>
-            <span id="roleChip" class="chip"></span>
-          </div>
         </div>
         <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="收起设备栏" aria-label="收起设备栏" aria-controls="sidebar" aria-expanded="true">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#panel-left-close"></use></svg>
         </button>
       </div>
       <div class="sidebar-account-row">
-        <a id="adminLink" class="link-btn" href="/admin" hidden>
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#settings"></use></svg>
-          <span>后台管理</span>
-        </a>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="logout ui-icon-button" type="submit" title="退出登录" aria-label="退出登录">
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#log-out"></use></svg>
-          </button>
-        </form>
-        <div class="ui-theme-picker compact-theme-picker">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
-          <span class="ui-sr-only">界面主题</span>
-          <select data-ui-theme-select aria-label="界面主题">
-            <option value="dark">深色</option>
-            <option value="light">浅色</option>
-            <option value="system">跟随系统</option>
-          </select>
+        <div class="sidebar-user">
+          <span class="sidebar-user-avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
+          <span class="sidebar-user-copy">
+            <strong>{{ user.username }}</strong>
+            <span id="roleChip" class="sidebar-user-role"></span>
+          </span>
+        </div>
+        <div class="sidebar-account-actions" aria-label="账户与界面">
+          <a id="adminLink" class="ui-icon-button sidebar-utility-btn" href="/admin" title="后台管理" aria-label="后台管理" hidden>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#settings"></use></svg>
+          </a>
+          <div class="ui-theme-picker compact-theme-picker">
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
+            <span class="ui-sr-only">界面主题</span>
+            <select data-ui-theme-select aria-label="界面主题">
+              <option value="dark">深色</option>
+              <option value="light">浅色</option>
+              <option value="system">跟随系统</option>
+            </select>
+          </div>
+          <form method="post" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="logout ui-icon-button sidebar-utility-btn" type="submit" title="退出登录" aria-label="退出登录">
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#log-out"></use></svg>
+            </button>
+          </form>
         </div>
       </div>
     </header>
@@ -69,9 +73,9 @@
 
     <section class="device-browser" aria-labelledby="deviceBrowserTitle">
       <div class="section-head">
-        <div>
+        <div class="section-heading">
           <h2 id="deviceBrowserTitle" class="section-title">设备</h2>
-          <p class="section-description">选择要查看和控制的设备</p>
+          <span id="deviceSummary" class="device-summary" aria-live="polite">加载中</span>
         </div>
         <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="刷新设备" aria-label="刷新设备">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#refresh-cw"></use></svg>
@@ -244,6 +248,6 @@
   </section>
 </aside>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=cdc1a1e91003" defer></script>
+<script src="/static/js/mirror.js?v=069c702626a7" defer></script>
 </body>
 </html>

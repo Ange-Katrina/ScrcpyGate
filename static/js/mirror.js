@@ -22,6 +22,13 @@ function getDeviceId(device){ return String((device && (device.device_id || devi
 function currentDevice(){ return state.devices.find(d => getDeviceId(d) === state.selectedDeviceId) || null; }
 function selectedSession(){ const id=state.selectedDeviceId; const device=currentDevice(); return id ? (state.sessions[id] || (device && device.session) || null) : null; }
 function deviceLabel(device){ return device ? (device.display_name || device.name || '设备') : '未选择设备'; }
+function deviceIdentifier(device){
+  if (!device) return '';
+  const primary=String(deviceLabel(device) || '').trim();
+  return [device.name, getDeviceId(device)]
+    .map(value=>String(value || '').trim())
+    .find(value=>value && value !== primary && !/^dev_[a-f0-9]+$/i.test(value)) || '';
+}
 function deviceSelectable(device){
   return !!(device && getDeviceId(device) && device.enabled !== false && device.can_view !== false && device.adb_state !== 'unauthorized');
 }
@@ -381,18 +388,17 @@ function renderDevices(){
       btn.className='device-card';
       btn.type='button';
       btn.dataset.deviceId=id;
-      const title=document.createElement('div'); title.className='device-title';
+      const title=document.createElement('span'); title.className='device-title';
+      const presence=document.createElement('span'); presence.className='device-presence'; presence.setAttribute('aria-hidden','true');
+      const nameBlock=document.createElement('span'); nameBlock.className='device-name-block';
       const name=document.createElement('strong');
-      const status=chip('');
-      title.append(name, status);
-      const metaText=document.createElement('div'); metaText.className='device-meta'; metaText.textContent='ADB 地址已隐藏';
-      const meta=document.createElement('div'); meta.className='chips';
-      const control=chip('');
-      const adb=chip('');
-      const clients=chip('');
-      meta.append(control, adb, clients);
-      btn.append(title, metaText, meta);
-      btn._scrcpygate={name,status,control,adb,clients};
+      const identifier=document.createElement('span'); identifier.className='device-identifier';
+      const status=document.createElement('span'); status.className='device-status';
+      const summary=document.createElement('span'); summary.className='device-card-summary';
+      nameBlock.append(name, identifier);
+      title.append(presence, nameBlock, status);
+      btn.append(title, summary);
+      btn._scrcpygate={name,identifier,presence,status,summary};
       state.deviceNodes.set(id, btn);
     }
     const parts=btn._scrcpygate;
@@ -404,19 +410,32 @@ function renderDevices(){
     else btn.style.display='none';
     btn.disabled=!deviceSelectable(device);
     parts.name.textContent=deviceLabel(device);
-    parts.status.textContent=mirrorVisible ? '投屏中' : (device.enabled ? adbStateLabel(adbState) : '禁用');
-    parts.status.className=`chip ${mirrorVisible ? 'ok' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
-    parts.control.textContent=device.can_control ? '可控制' : '只观看';
-    parts.control.className=`chip ${device.can_control ? 'ok' : 'warn'}`;
-    parts.adb.textContent=`ADB: ${adbStateLabel(adbState)}`;
-    parts.adb.className=`chip ${adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn'}`;
-    parts.clients.textContent=`${Number((session && session.clients) || 0)} 个观看端`;
-    parts.clients.hidden=!(session && session.clients);
-    btn.setAttribute('aria-label', `${deviceLabel(device)}，${parts.status.textContent}，${parts.control.textContent}`);
+    const identifier=deviceIdentifier(device);
+    parts.identifier.textContent=identifier;
+    parts.identifier.hidden=!identifier;
+    const statusText=mirrorVisible ? '投屏中' : (device.enabled === false ? '已禁用' : adbStateLabel(adbState));
+    const statusTone=mirrorVisible ? 'ok' : device.enabled === false ? 'muted' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn';
+    parts.status.textContent=statusText;
+    parts.status.dataset.tone=statusTone;
+    parts.presence.dataset.tone=statusTone;
+    btn.dataset.status=statusTone;
+    const viewers=Number((session && session.clients) || 0);
+    const summaryParts=[
+      device.enabled === false ? '设备已停用' : adbState === 'unauthorized' ? '等待设备端授权' : device.can_control ? '可控制' : '仅观看'
+    ];
+    if (viewers > 0) summaryParts.push(`${viewers} 个观看端`);
+    parts.summary.textContent=summaryParts.join(' · ');
+    btn.setAttribute('aria-label', `${deviceLabel(device)}，${statusText}，${parts.summary.textContent}`);
     btn.onclick=()=>selectDevice(id);
     if (btn !== cursor) box.insertBefore(btn, cursor);
     cursor=btn.nextSibling;
   });
+  const summary=$('deviceSummary');
+  if (summary) {
+    const total=state.devices.length;
+    const summaryText=!state.devicesLoaded && !total ? '加载中' : (visibleCount === total ? `${total} 台` : `${visibleCount}/${total} 台`);
+    if (summary.textContent !== summaryText) summary.textContent=summaryText;
+  }
   renderDeviceEmpty(empty, visibleCount);
 }
 function controlOwnershipState(device, session){
@@ -1291,7 +1310,9 @@ function openSidebar(trigger){
   const search=$('deviceSearch');
   const selectedButton=state.deviceNodes.get(state.selectedDeviceId);
   const searchVisible=search && search.getClientRects().length > 0;
-  const focusTarget=searchVisible ? search : (selectedButton && !selectedButton.disabled ? selectedButton : visibleLayerFocusables(sidebar)[0]) || sidebar;
+  const selectedVisible=selectedButton && !selectedButton.disabled && !selectedButton.hidden && selectedButton.getClientRects().length > 0;
+  const visibleDevice=Array.from(state.deviceNodes.values()).find(button=>!button.disabled && !button.hidden && button.getClientRects().length > 0);
+  const focusTarget=searchVisible ? search : (selectedVisible ? selectedButton : visibleDevice || visibleLayerFocusables(sidebar)[0]) || sidebar;
   if (focusTarget === sidebar && !sidebar.hasAttribute('tabindex')) sidebar.setAttribute('tabindex','-1');
   if (focusTarget) requestAnimationFrame(()=>{
     if (focusTarget === selectedButton && typeof selectedButton.scrollIntoView === 'function') selectedButton.scrollIntoView({block:'nearest'});
