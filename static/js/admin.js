@@ -7,8 +7,11 @@ const profileHints = {smooth:'\u6700\u4f4e\u4e0a\u884c\u8d1f\u8f7d', balanced:'\
 const customProfiles = {};
 const $ = (id)=>document.getElementById(id);
 const ADMIN_TAB_KEY = 'scrcpygate:admin:tab';
+const ACCESS_VIEW_KEY = 'scrcpygate:admin:access:view';
+const PERMISSION_USER_KEY = 'scrcpygate:admin:permissions:user';
 const ALAS_USER_KEY = 'scrcpygate:admin:alas:user';
 const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
+const USER_PAGE_SIZE = 20;
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
 const resourceRequests = new Map();
 const resourceSequences = new Map();
@@ -22,6 +25,16 @@ const TAB_RESOURCES = {
   logs:['logs','runtimeLogs']
 };
 let activeTab = 'overview';
+let activeAccessView = localStorage.getItem(ACCESS_VIEW_KEY)==='permissions' ? 'permissions' : 'accounts';
+let userAccountPage = 1;
+let selectedPermissionUsername = localStorage.getItem(PERMISSION_USER_KEY) || '';
+const permissionDrafts = new Map();
+const permissionIndex = new Map();
+let permissionsEpoch = 0;
+let permissionsMutations = 0;
+let permissionsNeedsRefresh = false;
+let permissionsLoadPhase = 'idle';
+let permissionsLoadError = '';
 let activeAlasView = 'users';
 let selectedAlasUsername = localStorage.getItem(ALAS_USER_KEY) || '';
 let selectedAlasConfigName = localStorage.getItem(ALAS_CONFIG_KEY) || '';
@@ -496,12 +509,32 @@ function editUser(user){
   $('userDrawerContext').textContent=`正在编辑 ${user.username}，留空密码将保留原密码`;
   openEditorDrawer('user', document.activeElement);
 }
+function accessRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
+function appendTableEmpty(rows, columns, message){
+  const row=document.createElement('tr');
+  row.className='access-empty-row';
+  const cell=document.createElement('td');
+  cell.className='access-empty-cell';
+  cell.colSpan=columns;
+  cell.textContent=message;
+  row.appendChild(cell);
+  rows.appendChild(row);
+}
+function filteredAccountUsers(){
+  const query=String($('userSearch').value || '').trim().toLocaleLowerCase();
+  const role=$('userRoleFilter').value || 'all';
+  return state.users.filter(user=>(!query || user.username.toLocaleLowerCase().includes(query)) && (role==='all' || user.role===role));
+}
 function renderUsers(){
   const rows=$('userRows');
+  const filtered=filteredAccountUsers();
+  const pageCount=Math.max(1,Math.ceil(filtered.length/USER_PAGE_SIZE));
+  userAccountPage=Math.max(1,Math.min(userAccountPage,pageCount));
+  const pageUsers=filtered.slice((userAccountPage-1)*USER_PAGE_SIZE,userAccountPage*USER_PAGE_SIZE);
   clear(rows);
-  state.users.forEach(user=>{
+  pageUsers.forEach(user=>{
     const tr=document.createElement('tr');
-    tr.append(td(user.username), td(user.role==='admin'?'管理员':'普通用户'), td(user.created_at));
+    tr.append(td(user.username), td(accessRoleLabel(user.role)), td(user.created_at));
     const actions=document.createElement('td');
     actions.className='actions';
     actions.append(btn('编辑','',()=>editUser(user)));
@@ -509,20 +542,294 @@ function renderUsers(){
     tr.appendChild(actions);
     rows.appendChild(tr);
   });
+  if(!pageUsers.length) appendTableEmpty(rows,4,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
+  $('userResultCount').textContent=filtered.length===state.users.length ? `${filtered.length} 位` : `${filtered.length} / ${state.users.length} 位`;
+  $('userPageStatus').textContent=`第 ${userAccountPage} / ${pageCount} 页`;
+  $('userPagePrevious').disabled=userAccountPage<=1;
+  $('userPageNext').disabled=userAccountPage>=pageCount || !filtered.length;
   applyTableLabels(rows);
 }
 function fillSelect(sel, values, label){ clear(sel); values.forEach(v=>{ const o=document.createElement('option'); o.value=v.value; o.textContent=label(v); sel.appendChild(o); }); }
-function renderPermissions(){
-  fillSelect($('permUser'), state.users.map(user=>({value:user.username, text:user.username})), value=>value.text);
-  fillSelect($('permDevice'), state.devices.map(device=>({value:getDeviceId(device), text:device.name || getDeviceId(device)})), value=>value.text);
-  const rows=$('permissionRows');
-  clear(rows);
-  state.permissions.forEach(permission=>{
-    const tr=document.createElement('tr');
-    tr.append(td(permission.username), td(permission.device_id), td(permission.can_view?'允许':'拒绝'), td(permission.can_control?'允许':'拒绝'));
-    rows.appendChild(tr);
+function permissionDraftKey(username,deviceId){ return `${username}\u0000${deviceId}`; }
+function rebuildPermissionIndex(permissions=state.permissions){
+  permissionIndex.clear();
+  permissions.forEach(permission=>{
+    const username=String(permission && permission.username || '').trim();
+    const deviceId=String(permission && permission.device_id || '').trim();
+    if(username && deviceId) permissionIndex.set(permissionDraftKey(username,deviceId),permission);
   });
+}
+function explicitPermissionFor(username,deviceId){
+  return permissionIndex.get(permissionDraftKey(username,deviceId)) || null;
+}
+function basePermissionFor(user,deviceId){
+  if(user && user.role==='admin') return {can_view:true,can_control:true};
+  const permission=user ? explicitPermissionFor(user.username,deviceId) : null;
+  return {can_view:!!(permission && permission.can_view),can_control:!!(permission && permission.can_control)};
+}
+function effectivePermissionFor(user,deviceId){
+  if(!user) return {can_view:false,can_control:false};
+  const base=basePermissionFor(user,deviceId);
+  if(user.role==='admin') return base;
+  const draft=permissionDrafts.get(permissionDraftKey(user.username,deviceId));
+  return draft ? {can_view:!!draft.can_view,can_control:!!draft.can_control} : base;
+}
+function permissionsAreReady(){ return permissionsLoadPhase==='ready' && loadedResources.has('permissions'); }
+function permissionChangesForUser(username){
+  const deviceIds=new Set(state.devices.map(getDeviceId));
+  return [...permissionDrafts.values()].filter(change=>change.username===username && deviceIds.has(change.device_id));
+}
+function permissionDraftCounts(){
+  const counts=new Map();
+  const deviceIds=new Set(state.devices.map(getDeviceId));
+  permissionDrafts.forEach(change=>{
+    if(!deviceIds.has(change.device_id)) return;
+    counts.set(change.username,(counts.get(change.username) || 0) + 1);
+  });
+  return counts;
+}
+function permissionDraftCount(username,counts=permissionDraftCounts()){ return counts.get(username) || 0; }
+function totalPermissionDraftCount(counts=permissionDraftCounts()){ return [...counts.values()].reduce((total,count)=>total+count,0); }
+function permissionUserMeta(user,count=permissionDraftCount(user.username)){
+  return `${accessRoleLabel(user.role)}${count ? ` · ${count} 项待保存` : ''}`;
+}
+function syncPermissionDraftIndicators(){
+  const counts=permissionDraftCounts();
+  const total=totalPermissionDraftCount(counts);
+  const users=new Map(state.users.map(user=>[user.username,user]));
+  const summary=$('accessPermissionDraftSummary');
+  summary.textContent=total ? `${total} 项待保存` : '按用户配置';
+  $('accessPermissionsTab').classList.toggle('has-drafts',!!total);
+  $('permissionUserList').querySelectorAll('.permission-user-choice').forEach(option=>{
+    const user=users.get(option.dataset.username);
+    if(!user) return;
+    const count=permissionDraftCount(user.username,counts);
+    option.classList.toggle('has-drafts',!!count);
+    option.dataset.draftCount=String(count);
+    const meta=option.querySelector('.permission-user-choice__meta');
+    if(meta) meta.textContent=permissionUserMeta(user,count);
+  });
+  const select=$('permUser');
+  [...select.options].forEach(option=>{
+    const user=users.get(option.value);
+    if(user) option.textContent=`${user.username} · ${permissionUserMeta(user,permissionDraftCount(user.username,counts))}`;
+  });
+}
+function updatePermissionDraft(user,deviceId,field,value){
+  if(!user || user.role==='admin') return;
+  const key=permissionDraftKey(user.username,deviceId);
+  const current=effectivePermissionFor(user,deviceId);
+  const next={username:user.username,device_id:deviceId,can_view:current.can_view,can_control:current.can_control,[field]:!!value};
+  const base=basePermissionFor(user,deviceId);
+  if(next.can_view===base.can_view && next.can_control===base.can_control) permissionDrafts.delete(key);
+  else permissionDrafts.set(key,next);
+}
+function reconcilePermissionDrafts(){
+  const users=new Map(state.users.map(user=>[user.username,user]));
+  const deviceIds=new Set(state.devices.map(getDeviceId));
+  permissionDrafts.forEach((change,key)=>{
+    const user=users.get(change.username);
+    if(!user || user.role==='admin' || !deviceIds.has(change.device_id)){ permissionDrafts.delete(key); return; }
+    const base=basePermissionFor(user,change.device_id);
+    if(base.can_view===change.can_view && base.can_control===change.can_control) permissionDrafts.delete(key);
+  });
+}
+function permissionUsersMatchingSearch(){
+  const query=String($('permissionUserSearch').value || '').trim().toLocaleLowerCase();
+  return state.users.filter(user=>!query || user.username.toLocaleLowerCase().includes(query));
+}
+function selectedPermissionUser(){ return state.users.find(user=>user.username===selectedPermissionUsername) || null; }
+function ensureSelectedPermissionUser(visibleUsers){
+  if(!state.users.length) return;
+  if(!state.users.some(user=>user.username===selectedPermissionUsername)) selectedPermissionUsername=(visibleUsers[0] || state.users[0] || {}).username || '';
+  if(visibleUsers.length && !visibleUsers.some(user=>user.username===selectedPermissionUsername)) selectedPermissionUsername=visibleUsers[0].username;
+  if(selectedPermissionUsername) localStorage.setItem(PERMISSION_USER_KEY,selectedPermissionUsername);
+  else localStorage.removeItem(PERMISSION_USER_KEY);
+}
+function disabledPermissionOption(message){
+  const option=document.createElement('div');
+  option.className='permission-user-empty';
+  option.setAttribute('role','option');
+  option.setAttribute('aria-disabled','true');
+  option.tabIndex=-1;
+  option.textContent=message;
+  return option;
+}
+function fillPermissionUserSelect(draftCounts=permissionDraftCounts()){
+  const select=$('permUser');
+  clear(select);
+  if(!state.users.length){
+    const option=document.createElement('option');
+    option.value='';
+    option.textContent='暂无用户';
+    option.disabled=true;
+    option.selected=true;
+    select.appendChild(option);
+    select.disabled=true;
+    return;
+  }
+  select.disabled=false;
+  state.users.forEach(user=>{
+    const option=document.createElement('option');
+    option.value=user.username;
+    option.textContent=`${user.username} · ${permissionUserMeta(user,permissionDraftCount(user.username,draftCounts))}`;
+    select.appendChild(option);
+  });
+  select.value=selectedPermissionUsername;
+}
+function renderPermissionUserList(focusUsername=''){
+  const list=$('permissionUserList');
+  const draftCounts=permissionDraftCounts();
+  const active=document.activeElement;
+  const previousFocus=list.contains(active) && active.classList.contains('permission-user-choice') ? active.dataset.username : '';
+  const visibleUsers=permissionUsersMatchingSearch();
+  ensureSelectedPermissionUser(visibleUsers);
+  clear(list);
+  visibleUsers.forEach(user=>{
+    const selected=user.username===selectedPermissionUsername;
+    const option=document.createElement('button');
+    option.type='button';
+    option.className='permission-user-choice';
+    option.dataset.username=user.username;
+    option.setAttribute('role','option');
+    option.setAttribute('aria-selected',String(selected));
+    option.tabIndex=selected?0:-1;
+    const draftCount=permissionDraftCount(user.username,draftCounts);
+    option.classList.toggle('has-drafts',draftCount>0);
+    const name=document.createElement('strong');
+    name.textContent=user.username;
+    const meta=document.createElement('small');
+    meta.className='permission-user-choice__meta';
+    meta.textContent=permissionUserMeta(user,draftCount);
+    option.append(name,meta);
+    option.onclick=()=>selectPermissionUser(user.username,true);
+    list.appendChild(option);
+  });
+  if(!visibleUsers.length) list.appendChild(disabledPermissionOption(state.users.length?'没有符合搜索条件的用户。':'暂无用户。'));
+  $('permissionUserResultCount').textContent=visibleUsers.length===state.users.length ? `${visibleUsers.length} 位` : `${visibleUsers.length} / ${state.users.length} 位`;
+  fillPermissionUserSelect(draftCounts);
+  syncPermissionDraftIndicators();
+  const targetUsername=focusUsername || previousFocus;
+  if(targetUsername) requestAnimationFrame(()=>{
+    const target=[...list.querySelectorAll('.permission-user-choice')].find(option=>option.dataset.username===targetUsername);
+    if(target) target.focus({preventScroll:true});
+  });
+}
+function selectPermissionUser(username,focus=false){
+  if(!state.users.some(user=>user.username===username)) return;
+  selectedPermissionUsername=username;
+  localStorage.setItem(PERMISSION_USER_KEY,username);
+  renderPermissionUserList(focus?username:'');
+  renderPermissionDetail();
+}
+function permissionDeviceCell(device){
+  const cell=document.createElement('td');
+  const identity=document.createElement('div');
+  identity.className='permission-device-identity';
+  const name=document.createElement('strong');
+  name.textContent=device.name || getDeviceId(device);
+  const meta=document.createElement('small');
+  meta.textContent=`${getDeviceId(device)} · ${device.enabled?'已启用':'已禁用'}`;
+  identity.append(name,meta);
+  cell.appendChild(identity);
+  return cell;
+}
+function permissionCheckboxCell(user,device,field,labelText,checked){
+  const cell=document.createElement('td');
+  const label=document.createElement('label');
+  label.className='permission-toggle';
+  const input=document.createElement('input');
+  input.type='checkbox';
+  input.checked=checked;
+  input.disabled=!user || user.role==='admin' || permissionsMutations>0;
+  input.dataset.deviceId=getDeviceId(device);
+  input.dataset.permissionField=field;
+  input.setAttribute('aria-label',`${device.name || getDeviceId(device)}：${labelText}`);
+  const text=document.createElement('span');
+  text.textContent=labelText;
+  input.onchange=()=>{
+    updatePermissionDraft(user,getDeviceId(device),field,input.checked);
+    syncPermissionDraftIndicators();
+    renderPermissionDetail({deviceId:getDeviceId(device),field});
+  };
+  label.append(input,text);
+  cell.appendChild(label);
+  return cell;
+}
+function permissionDevicesFor(user){
+  const query=String($('permissionDeviceSearch').value || '').trim().toLocaleLowerCase();
+  const filter=$('permissionDeviceFilter').value || 'all';
+  return state.devices.filter(device=>{
+    const id=getDeviceId(device);
+    const name=String(device.name || id);
+    const permission=effectivePermissionFor(user,id);
+    const queryMatches=!query || `${name}\n${id}`.toLocaleLowerCase().includes(query);
+    const filterMatches=filter==='all' || (filter==='view' && permission.can_view) || (filter==='control' && permission.can_control) || (filter==='none' && !permission.can_view && !permission.can_control);
+    return queryMatches && filterMatches;
+  });
+}
+function renderPermissionLoadState(){
+  const status=$('permissionLoadState');
+  const container=status.parentElement;
+  const ready=permissionsAreReady();
+  const phase=ready?'ready':permissionsLoadPhase;
+  container.dataset.state=phase;
+  if(phase==='loading') status.textContent='正在加载设备权限…';
+  else if(phase==='error') status.textContent=`设备权限加载失败：${permissionsLoadError || '未知错误'}`;
+  else if(phase==='ready') status.textContent='设备权限已与服务器同步。';
+  else status.textContent='等待加载设备权限。';
+  status.setAttribute('role',phase==='error'?'alert':'status');
+  $('permissionRetry').hidden=phase!=='error';
+}
+function renderPermissionDetail(focusTarget=null){
+  const user=selectedPermissionUser();
+  const rows=$('permissionRows');
+  const isAdmin=!!user && user.role==='admin';
+  const ready=permissionsAreReady();
+  const permissionKnown=!!user && (isAdmin || ready);
+  const dirtyCount=user ? permissionChangesForUser(user.username).length : 0;
+  renderPermissionLoadState();
+  $('permissionSelectedUser').textContent=user ? user.username : '请选择用户';
+  $('permissionUserRole').textContent=user ? accessRoleLabel(user.role) : '未选择';
+  $('permissionUserRole').className=`chip ${isAdmin?'ok':''}`.trim();
+  $('permissionAdminNotice').hidden=!isAdmin;
+  $('permissionDirtyCount').textContent=`${dirtyCount} 项待保存`;
+  $('permissionDirtyCount').className=`chip ${dirtyCount?'warn':''}`.trim();
+  const visibleDevices=permissionKnown ? permissionDevicesFor(user) : [];
+  const totalDevices=state.devices.length;
+  const allowedView=permissionKnown ? state.devices.filter(device=>effectivePermissionFor(user,getDeviceId(device)).can_view).length : 0;
+  const allowedControl=permissionKnown ? state.devices.filter(device=>effectivePermissionFor(user,getDeviceId(device)).can_control).length : 0;
+  $('permissionSelectedUserMeta').textContent=!user ? '选择用户后，仅显示该用户的设备访问权限。' : isAdmin ? `角色权限已覆盖 ${totalDevices} 台设备，当前页面仅供核对。` : !ready ? (permissionsLoadPhase==='error'?'设备权限读取失败，当前数据不可编辑。':'正在读取该用户的设备权限…') : `共 ${totalDevices} 台设备 · 可查看 ${allowedView} 台 · 可控制 ${allowedControl} 台`;
+  $('permissionDeviceResultCount').textContent=permissionKnown ? (visibleDevices.length===totalDevices ? `${visibleDevices.length} 台` : `${visibleDevices.length} / ${totalDevices} 台`) : '— 台';
+  clear(rows);
+  visibleDevices.forEach(device=>{
+    const id=getDeviceId(device);
+    const permission=effectivePermissionFor(user,id);
+    const row=document.createElement('tr');
+    row.dataset.deviceId=id;
+    row.classList.toggle('is-dirty',permissionDrafts.has(permissionDraftKey(user.username,id)));
+    row.append(permissionDeviceCell(device),permissionCheckboxCell(user,device,'can_view','允许查看',permission.can_view),permissionCheckboxCell(user,device,'can_control','允许控制',permission.can_control));
+    rows.appendChild(row);
+  });
+  if(!visibleDevices.length){
+    const emptyMessage=!user?'请先选择用户。':!permissionKnown?(permissionsLoadPhase==='error'?'设备权限加载失败，无法确认当前权限。':'正在加载设备权限…'):totalDevices?'没有符合筛选条件的设备。':'暂无设备。';
+    appendTableEmpty(rows,3,emptyMessage);
+  }
   applyTableLabels(rows);
+  const saveButton=$('savePermission');
+  saveButton.disabled=!user || isAdmin || !ready || !dirtyCount || permissionsMutations>0;
+  $('permissionSaveStatus').textContent=!user ? '请先选择用户。' : isAdmin ? '管理员权限由角色统一授予，不需要保存。' : !ready ? (dirtyCount?`仍有 ${dirtyCount} 台设备的草稿；权限重新加载成功后才能保存。`:'权限加载成功后才能编辑和保存。') : dirtyCount ? `有 ${dirtyCount} 台设备的权限尚未保存。` : '当前权限已与服务器同步。';
+  if(focusTarget) requestAnimationFrame(()=>{
+    const selector=`input[data-device-id="${CSS.escape(focusTarget.deviceId)}"][data-permission-field="${focusTarget.field}"]`;
+    const target=rows.querySelector(selector);
+    if(target) target.focus({preventScroll:true});
+    else $('permissionDeviceFilter').focus({preventScroll:true});
+  });
+}
+function renderPermissions(){
+  reconcilePermissionDrafts();
+  renderPermissionUserList();
+  renderPermissionDetail();
 }
 function alasBindings(){ return (state.alas && Array.isArray(state.alas.bindings) && state.alas.bindings) || []; }
 function alasAssignments(){
@@ -1056,14 +1363,17 @@ function applyOverview(data){
 }
 function applyDevices(data){ state.devices=data.devices || []; renderDevices(); renderOverview(); if(loadedResources.has('permissions')) renderPermissions(); }
 function applyUsers(data){ state.users=data.users || []; renderUsers(); if(loadedResources.has('permissions')) renderPermissions(); if(loadedResources.has('alas')) renderAlas(); }
-function applyPermissions(data){
-  state.permissions=data.permissions || [];
+function applyPermissions(data,epoch=permissionsEpoch){
+  if(epoch!==permissionsEpoch) return false;
+  state.permissions=Array.isArray(data.permissions) ? data.permissions : [];
+  rebuildPermissionIndex(state.permissions);
   if(data.users && !loadedResources.has('users')) state.users=data.users;
   if(data.devices && !loadedResources.has('devices')) state.devices=data.devices;
   renderPermissions();
   if(loadedResources.has('users')) renderUsers();
   if(loadedResources.has('devices')) renderDevices();
   renderOverview();
+  return true;
 }
 function applyVideo(data){ state.video=data; renderVideo(); }
 function applyAlas(data){
@@ -1117,7 +1427,55 @@ function applyRuntimeLogs(data){
 function loadOverview(options={}){ return requestResource('overview', signal=>api('/api/admin/overview',{signal}), applyOverview, options); }
 function loadDevices(options={}){ return requestResource('devices', signal=>api('/api/admin/devices',{signal}), applyDevices, options); }
 function loadUsers(options={}){ return requestResource('users', signal=>api('/api/admin/users',{signal}), applyUsers, options); }
-function loadPermissions(options={}){ return requestResource('permissions', signal=>api('/api/admin/permissions',{signal}), applyPermissions, options); }
+function loadPermissions(options={}){
+  const epoch=permissionsEpoch;
+  permissionsLoadPhase='loading';
+  permissionsLoadError='';
+  renderPermissionDetail();
+  const request=requestResource('permissions',signal=>api('/api/admin/permissions',{signal}),data=>{
+    if(permissionsMutations || epoch!==permissionsEpoch) return;
+    applyPermissions(data,epoch);
+  },options);
+  return request.then(data=>{
+    if(data===undefined || permissionsMutations || epoch!==permissionsEpoch) return data;
+    permissionsLoadPhase='ready';
+    permissionsLoadError='';
+    renderPermissions();
+    return data;
+  }).catch(error=>{
+    if(!isAbortError(error) && !permissionsMutations && epoch===permissionsEpoch){
+      permissionsLoadPhase='error';
+      permissionsLoadError=String(error && error.message || '未知错误');
+      renderPermissions();
+    }
+    throw error;
+  });
+}
+function beginPermissionsMutation(){
+  permissionsMutations+=1;
+  permissionsEpoch+=1;
+  permissionsNeedsRefresh=true;
+  permissionsLoadPhase='loading';
+  permissionsLoadError='';
+  markResourceStale('permissions');
+  renderPermissionDetail();
+  return permissionsEpoch;
+}
+async function finishPermissionsMutation(epoch){
+  permissionsMutations=Math.max(0,permissionsMutations-1);
+  if(epoch!==permissionsEpoch) permissionsNeedsRefresh=true;
+  if(permissionsMutations || !permissionsNeedsRefresh){ renderPermissionDetail(); return; }
+  permissionsNeedsRefresh=false;
+  markResourceStale('permissions');
+  try{
+    await loadPermissions({force:true});
+  } catch(error){
+    if(isAbortError(error) && permissionsMutations){ permissionsNeedsRefresh=true; return; }
+    throw error;
+  } finally {
+    renderPermissionDetail();
+  }
+}
 function loadVideo(options={}){ return requestResource('video', signal=>api('/api/admin/video',{signal}), applyVideo, options); }
 function loadAlasPermissions(options={}){
   const epoch=alasPermissionsEpoch;
@@ -1269,7 +1627,30 @@ async function deleteDevice(id){
 async function testDevice(id){ const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'}); show(`ADB ${id}: ${result.state}${result.detail ? ' - ' + result.detail : ''}`, 5200); }
 async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await refreshDomains('overview','devices','permissions'); }
 async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await refreshDomains('overview','devices','permissions'); }
-async function savePermission(){ await api('/api/admin/permissions',{method:'PUT', body:{username:$('permUser').value, device_id:$('permDevice').value, can_view:$('permView').value==='true', can_control:$('permControl').value==='true'}}); show('权限已保存'); await refreshDomains('permissions'); }
+async function savePermission(){
+  const user=selectedPermissionUser();
+  if(!user) throw new Error('请先选择用户');
+  if(user.role==='admin') throw new Error('管理员权限由角色统一授予，无需保存');
+  if(!permissionsAreReady()) throw new Error('设备权限尚未加载完成，请稍后重试');
+  const changes=permissionChangesForUser(user.username);
+  if(!changes.length) return show('没有待保存的权限修改');
+  const epoch=beginPermissionsMutation();
+  let results=[];
+  let refreshError=null;
+  try{
+    results=await Promise.allSettled(changes.map(change=>api('/api/admin/permissions',{
+      method:'PUT',
+      body:{username:change.username,device_id:change.device_id,can_view:change.can_view,can_control:change.can_control}
+    })));
+  } finally {
+    try{ await finishPermissionsMutation(epoch); }
+    catch(error){ refreshError=error; }
+  }
+  if(refreshError) throw new Error(`权限已提交，但权威状态刷新失败：${refreshError.message || '未知错误'}`);
+  const failed=results.filter(result=>result.status==='rejected');
+  if(failed.length) throw new Error(`${failed.length} 台设备权限保存失败，已重新读取服务器状态`);
+  show(`已保存 ${changes.length} 台设备的权限`);
+}
 function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=Number(input.value); }); return presets; }
 function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:Number($('customProfileBitrate').value || 900000), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
 async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
@@ -1443,6 +1824,65 @@ function initializeEditorDrawers(){
   $('alasConfigDrawerClose').onclick=()=>closeEditorDrawer('alasConfig');
   $('cancelAlasConfig').onclick=()=>closeEditorDrawer('alasConfig');
 }
+function activateAccessView(view,focus=false){
+  activeAccessView=view==='permissions'?'permissions':'accounts';
+  const accountsSelected=activeAccessView==='accounts';
+  $('accessAccountsTab').classList.toggle('active',accountsSelected);
+  $('accessAccountsTab').setAttribute('aria-selected',String(accountsSelected));
+  $('accessAccountsTab').tabIndex=accountsSelected?0:-1;
+  $('accessPermissionsTab').classList.toggle('active',!accountsSelected);
+  $('accessPermissionsTab').setAttribute('aria-selected',String(!accountsSelected));
+  $('accessPermissionsTab').tabIndex=accountsSelected?-1:0;
+  $('accessAccountsView').hidden=!accountsSelected;
+  $('accessPermissionsView').hidden=accountsSelected;
+  localStorage.setItem(ACCESS_VIEW_KEY,activeAccessView);
+  if(!accountsSelected) renderPermissions();
+  if(focus) (accountsSelected?$('accessAccountsTab'):$('accessPermissionsTab')).focus({preventScroll:true});
+}
+function handlePermissionUserListKeydown(event){
+  const choices=[...$('permissionUserList').querySelectorAll('.permission-user-choice')];
+  if(!choices.length) return;
+  const active=event.target.closest && event.target.closest('.permission-user-choice');
+  const index=Math.max(0,choices.indexOf(active));
+  let target=null;
+  if(event.key==='Home') target=choices[0];
+  else if(event.key==='End') target=choices[choices.length-1];
+  else if(event.key==='ArrowDown' || event.key==='ArrowRight') target=choices[(index+1)%choices.length];
+  else if(event.key==='ArrowUp' || event.key==='ArrowLeft') target=choices[(index-1+choices.length)%choices.length];
+  else if((event.key==='Enter' || event.key===' ') && active) target=active;
+  if(!target) return;
+  event.preventDefault();
+  selectPermissionUser(target.dataset.username,true);
+}
+function handlePermissionBeforeUnload(event){
+  if(!totalPermissionDraftCount()) return;
+  event.preventDefault();
+  event.returnValue='';
+}
+function initializeAccessWorkspace(){
+  const tabs=[$('accessAccountsTab'),$('accessPermissionsTab')];
+  tabs.forEach((tab,index)=>{
+    tab.onclick=()=>activateAccessView(index?'permissions':'accounts');
+    tab.onkeydown=event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+      event.preventDefault();
+      const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:event.key==='ArrowRight'?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;
+      activateAccessView(next?'permissions':'accounts',true);
+    };
+  });
+  $('userSearch').oninput=()=>{ userAccountPage=1; renderUsers(); };
+  $('userRoleFilter').onchange=()=>{ userAccountPage=1; renderUsers(); };
+  $('userPagePrevious').onclick=()=>{ userAccountPage=Math.max(1,userAccountPage-1); renderUsers(); };
+  $('userPageNext').onclick=()=>{ userAccountPage+=1; renderUsers(); };
+  $('permissionUserSearch').oninput=()=>{ renderPermissionUserList(); renderPermissionDetail(); };
+  $('permissionUserList').onkeydown=handlePermissionUserListKeydown;
+  $('permUser').onchange=()=>selectPermissionUser($('permUser').value);
+  $('permissionDeviceSearch').oninput=()=>renderPermissionDetail();
+  $('permissionDeviceFilter').onchange=()=>renderPermissionDetail();
+  $('permissionRetry').onclick=()=>withBusy($('permissionRetry'),()=>loadPermissions({force:true}),'加载中').catch(error=>reportRequestError(error,'设备权限加载失败'));
+  window.addEventListener('beforeunload',handlePermissionBeforeUnload);
+  activateAccessView(activeAccessView);
+}
 function initializeAlasWorkspace(){
   $('alasUsersTab').onclick=()=>activateAlasView('users');
   $('alasConfigsTab').onclick=()=>activateAlasView('configs');
@@ -1489,6 +1929,7 @@ initializeAdminNavigation();
 initializeEditorDrawers();
 initializeConfirmDialog();
 initializeTabs();
+initializeAccessWorkspace();
 initializeAlasWorkspace();
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
 activateTab('overview', false);
@@ -1498,7 +1939,7 @@ bindAction('saveDevice', saveDevice, '保存中');
 $('clearDeviceForm').onclick=()=>clearDeviceForm();
 bindAction('reloadRuntimeLogs', ()=>loadRuntimeLogs({force:true}), '刷新中');
 bindAction('reloadAuditLogs', ()=>loadLogs({force:true}), '刷新中');
-bindAction('savePermission', savePermission, '保存中');
+$('savePermission').onclick=()=>withBusy($('savePermission'),savePermission,'保存中').catch(error=>show(error.message)).finally(()=>renderPermissionDetail());
 bindAction('saveVideo', saveVideo, '保存中');
 bindAction('addCustomProfile', async()=>addCustomProfile(), '添加中');
 bindAction('saveAlas', saveAlas, '保存中');

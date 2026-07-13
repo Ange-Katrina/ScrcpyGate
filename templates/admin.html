@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=529481b27f05">
+  <link rel="stylesheet" href="/static/css/admin.css?v=3cc0b693d0b0">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -142,20 +142,59 @@
           <div><p class="eyebrow">Access</p><h2>用户与权限</h2><p>集中管理用户角色和设备访问权限。</p></div>
           <button id="openUserDrawer" class="btn primary" type="button">新建用户</button>
         </div>
-        <section class="workspace-section" aria-labelledby="userListTitle">
-          <div class="section-heading"><div><h3 id="userListTitle">用户列表</h3><p>编辑用户时会在侧边显示当前对象，避免误操作。</p></div></div>
-          <div class="table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
-        </section>
-        <section class="workspace-section" aria-labelledby="permissionsTitle">
-          <div class="section-heading"><div><h3 id="permissionsTitle">设备权限</h3><p>查看与控制权限分别配置，拒绝控制不影响只读投屏。</p></div></div>
-          <div class="form-grid">
-            <div class="col-4"><label for="permUser">用户</label><select id="permUser"></select></div>
-            <div class="col-4"><label for="permDevice">设备</label><select id="permDevice"></select></div>
-            <div class="col-2"><label for="permView">查看</label><select id="permView"><option value="true">允许</option><option value="false">拒绝</option></select></div>
-            <div class="col-2"><label for="permControl">控制</label><select id="permControl"><option value="true">允许</option><option value="false">拒绝</option></select></div>
-            <div class="col-12 actions"><button id="savePermission" class="btn primary" type="button">保存权限</button></div>
+        <div class="access-view-tabs" role="tablist" aria-label="用户与权限视图">
+          <button id="accessAccountsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="accessAccountsView">用户账户 <small>账户与角色</small></button>
+          <button id="accessPermissionsTab" type="button" role="tab" aria-selected="false" aria-controls="accessPermissionsView" tabindex="-1">设备权限 <small id="accessPermissionDraftSummary">按用户配置</small></button>
+        </div>
+
+        <section id="accessAccountsView" class="access-view" role="tabpanel" aria-labelledby="accessAccountsTab">
+          <div class="access-view-heading"><div><h3>用户账户</h3><p>每页最多显示 20 位用户，可按用户名和角色快速定位。</p></div><span id="userResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
+          <div class="access-toolbar">
+            <div><label for="userSearch">搜索用户名</label><input id="userSearch" type="search" placeholder="输入用户名" autocomplete="off"></div>
+            <div><label for="userRoleFilter">角色筛选</label><select id="userRoleFilter"><option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option></select></div>
           </div>
-          <div class="table-wrap spaced-top-14"><table class="responsive-table" data-table="permissions"><thead><tr><th scope="col">用户</th><th scope="col">设备</th><th scope="col">查看</th><th scope="col">控制</th></tr></thead><tbody id="permissionRows"></tbody></table></div>
+          <div class="table-wrap access-account-table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
+          <nav class="access-pagination" aria-label="用户账户分页">
+            <button id="userPagePrevious" class="btn" type="button">上一页</button>
+            <span id="userPageStatus" role="status" aria-live="polite">第 1 / 1 页</span>
+            <button id="userPageNext" class="btn" type="button">下一页</button>
+          </nav>
+        </section>
+
+        <section id="accessPermissionsView" class="access-view" role="tabpanel" aria-labelledby="accessPermissionsTab" hidden>
+          <div class="permission-workspace">
+            <aside class="permission-user-pane" aria-labelledby="permissionUserListTitle">
+              <div class="permission-pane-heading"><h3 id="permissionUserListTitle">选择用户</h3><span id="permissionUserResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
+              <div class="permission-user-pane__desktop">
+                <label for="permissionUserSearch">搜索用户名</label>
+                <input id="permissionUserSearch" type="search" placeholder="输入用户名" autocomplete="off">
+                <div id="permissionUserList" class="permission-user-list" role="listbox" aria-label="设备权限用户" aria-orientation="vertical"></div>
+              </div>
+              <div class="permission-user-pane__mobile">
+                <label for="permUser">用户</label>
+                <select id="permUser" aria-controls="permissionRows"></select>
+              </div>
+            </aside>
+
+            <section class="permission-detail" aria-labelledby="permissionSelectedUser">
+              <div class="permission-detail-heading">
+                <div><p class="eyebrow">设备权限</p><h3 id="permissionSelectedUser">请选择用户</h3><p id="permissionSelectedUserMeta">选择用户后，仅显示该用户的设备访问权限。</p></div>
+                <div class="permission-detail-summary"><span id="permissionUserRole" class="chip">未选择</span><span id="permissionDirtyCount" class="chip">0 项待保存</span></div>
+              </div>
+              <div class="permission-load-state" data-state="idle"><p id="permissionLoadState" role="status" aria-live="polite">等待加载设备权限。</p><button id="permissionRetry" class="btn" type="button" hidden>重新加载</button></div>
+              <p id="permissionAdminNotice" class="permission-admin-notice" role="status" hidden>管理员始终拥有全部设备的查看和控制权限，无需逐设备配置。</p>
+              <div class="permission-toolbar">
+                <div><label for="permissionDeviceSearch">搜索设备</label><input id="permissionDeviceSearch" type="search" placeholder="设备名称或 ID" autocomplete="off"></div>
+                <div><label for="permissionDeviceFilter">权限筛选</label><select id="permissionDeviceFilter"><option value="all">全部设备</option><option value="view">可查看</option><option value="control">可控制</option><option value="none">无权限</option></select></div>
+                <span id="permissionDeviceResultCount" class="chip" role="status" aria-live="polite">0 台</span>
+              </div>
+              <div class="table-wrap permission-device-table-wrap"><table class="responsive-table" data-table="permissions"><thead><tr><th scope="col">设备</th><th scope="col">查看权限</th><th scope="col">控制权限</th></tr></thead><tbody id="permissionRows"></tbody></table></div>
+              <div class="permission-save-bar">
+                <p id="permissionSaveStatus" role="status" aria-live="polite">修改设备权限后统一保存。</p>
+                <button id="savePermission" class="btn primary" type="button" disabled>保存权限</button>
+              </div>
+            </section>
+          </div>
         </section>
       </section>
 
@@ -360,6 +399,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=ec644ca5276b" defer></script>
+<script src="/static/js/admin.js?v=3a57d478469a" defer></script>
 </body>
 </html>

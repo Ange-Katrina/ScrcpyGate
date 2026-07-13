@@ -49,7 +49,8 @@ class AdminUiPerformanceContractTests(unittest.TestCase):
         self.assertIn("refreshDomains('overview','devices','permissions')", self.source)
         self.assertIn("refreshDomains('overview','users','permissions','alas')", self.source)
         self.assertIn("refreshDomains('alas')", self.source)
-        self.assertIn("refreshDomains('permissions')", self.source)
+        self.assertIn("await loadPermissions({force:true})", self.source)
+        self.assertIn("markResourceStale('permissions')", self.source)
         self.assertIn("const visible=new Set(TAB_RESOURCES[activeTab] || [])", self.source)
         self.assertIn("if(name === 'overview' || wasLoaded || visible.has(name))", self.source)
 
