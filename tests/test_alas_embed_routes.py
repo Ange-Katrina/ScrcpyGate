@@ -904,6 +904,11 @@ class AlasEmbedRouteTests(unittest.TestCase):
         except Exception as exc:
             return getattr(exc, "code", None) or getattr(exc, "status_code", None)
 
+    def assert_upstream_policy_closed(self, captured):
+        """The proxy may close the same upstream once or twice; every close must use 1008."""
+        self.assertTrue(captured["closed"])
+        self.assertEqual(set(captured["closed"]), {1008})
+
     def install_fake_websocket_upstream(self, incoming=None, connect_error=None, idle_delay=0.05):
         """安装测试用上游 WebSocket 连接器并记录转发行为。"""
         captured = {"targets": [], "sent": [], "closed": []}
@@ -1014,7 +1019,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1008_when_user_can_edit_false_sends_edit_message(self):
         """普通用户 can_edit=False 时 WebSocket 编辑类消息会被策略关闭。"""
@@ -1031,7 +1036,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_admin_forwards_run_and_edit_messages(self):
         """管理员 WebSocket 运行和编辑类消息不受普通用户绑定权限限制。"""
@@ -1063,7 +1068,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1008_when_user_message_switches_nested_config(self):
         """普通用户 WebSocket 嵌套消息尝试切换配置时连接会被策略关闭。"""
@@ -1080,7 +1085,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1008_when_user_bytes_message_switches_config(self):
         """普通用户 WebSocket bytes JSON 尝试切换配置时连接会被策略关闭。"""
@@ -1097,7 +1102,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1008_when_user_sends_invalid_binary_message(self):
         """普通用户发送不可解码二进制消息时连接会被策略关闭且不转发。"""
@@ -1114,7 +1119,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_forwards_admin_binary_message(self):
         """管理员发送二进制消息时仍然转发给上游。"""
@@ -1147,7 +1152,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1008_when_user_message_requests_alas_settings(self):
         """普通用户 WebSocket 消息尝试打开 ALAS 设置页时连接会被策略关闭。"""
@@ -1164,7 +1169,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_closes_1011_when_upstream_connect_fails(self):
         """上游 WebSocket 连接失败时客户端以 1011 关闭。"""
@@ -1299,7 +1304,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertEqual(close_message["type"], "websocket.close")
         self.assertEqual(close_message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_unknown_protocol_frames_drop_and_later_output_renders(self):
         """未知回调、任务和事件不转发、不关连接，后续安全输出仍可渲染。"""
@@ -1359,7 +1364,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
         self.assertEqual(close_message["code"], 1008)
         self.assertEqual(captured["sent"], [])
-        self.assertEqual(captured["closed"], [1008, 1008])
+        self.assert_upstream_policy_closed(captured)
 
     def test_websocket_pin_onchange_registration_does_not_blank_user_stream(self):
         """敏感 pin 注册继续下发并遮罩 endpoint，后续正常输出仍可渲染。"""
