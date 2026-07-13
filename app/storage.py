@@ -177,11 +177,13 @@ def init_db() -> None:
                 FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS user_alas_configs (
-                username TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
                 config_name TEXT NOT NULL,
-                can_run INTEGER NOT NULL DEFAULT 1,
-                can_edit INTEGER NOT NULL DEFAULT 0,
+                can_run INTEGER NOT NULL DEFAULT 1 CHECK(can_run IN (0, 1)),
+                can_edit INTEGER NOT NULL DEFAULT 0 CHECK(can_edit IN (0, 1)),
+                is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)),
                 updated_at INTEGER NOT NULL,
+                PRIMARY KEY(username, config_name),
                 FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -207,6 +209,7 @@ def init_db() -> None:
             );
             """
         )
+        _migrate_user_alas_configs(conn)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(user_video_preferences)").fetchall()}
         if "scrcpy_stream_mode" not in columns:
             conn.execute("ALTER TABLE user_video_preferences ADD COLUMN scrcpy_stream_mode TEXT NOT NULL DEFAULT 'raw'")
@@ -215,6 +218,78 @@ def init_db() -> None:
         _migrate_video_defaults(conn)
         conn.commit()
     migrate_legacy_data()
+
+
+def _create_user_alas_configs_table(conn: sqlite3.Connection, name: str = "user_alas_configs") -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE {name} (
+            username TEXT NOT NULL,
+            config_name TEXT NOT NULL,
+            can_run INTEGER NOT NULL DEFAULT 1 CHECK(can_run IN (0, 1)),
+            can_edit INTEGER NOT NULL DEFAULT 0 CHECK(can_edit IN (0, 1)),
+            is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)),
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY(username, config_name),
+            FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_user_alas_default(conn: sqlite3.Connection, username: str) -> None:
+    rows = conn.execute(
+        "SELECT config_name, is_default FROM user_alas_configs WHERE username=? ORDER BY is_default DESC, config_name",
+        (username,),
+    ).fetchall()
+    if not rows:
+        return
+    defaults = [row["config_name"] for row in rows if row["is_default"]]
+    if len(defaults) == 1:
+        return
+    selected = defaults[0] if defaults else rows[0]["config_name"]
+    conn.execute("UPDATE user_alas_configs SET is_default=0 WHERE username=?", (username,))
+    conn.execute(
+        "UPDATE user_alas_configs SET is_default=1 WHERE username=? AND config_name=?",
+        (username, selected),
+    )
+
+
+def _migrate_user_alas_configs(conn: sqlite3.Connection) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = conn.execute("PRAGMA table_info(user_alas_configs)").fetchall()
+        column_names = {row[1] for row in columns}
+        primary_key = [row[1] for row in sorted((row for row in columns if row[5]), key=lambda row: row[5])]
+        if "is_default" not in column_names or primary_key != ["username", "config_name"]:
+            conn.execute("DROP TABLE IF EXISTS user_alas_configs_new")
+            _create_user_alas_configs_table(conn, "user_alas_configs_new")
+            conn.execute(
+                """
+                INSERT INTO user_alas_configs_new(username,config_name,can_run,can_edit,is_default,updated_at)
+                SELECT old.username,
+                       old.config_name,
+                       CASE WHEN old.can_run <> 0 THEN 1 ELSE 0 END,
+                       CASE WHEN old.can_edit <> 0 THEN 1 ELSE 0 END,
+                       1,
+                       old.updated_at
+                FROM user_alas_configs old JOIN users u ON u.username=old.username
+                WHERE TRIM(old.config_name) <> ''
+                """
+            )
+            conn.execute("DROP TABLE user_alas_configs")
+            conn.execute("ALTER TABLE user_alas_configs_new RENAME TO user_alas_configs")
+        usernames = conn.execute("SELECT DISTINCT username FROM user_alas_configs ORDER BY username").fetchall()
+        for row in usernames:
+            _ensure_user_alas_default(conn, row["username"])
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_alas_configs_one_default "
+            "ON user_alas_configs(username) WHERE is_default=1"
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
 
 
 def _setting_value(conn: sqlite3.Connection, key: str, default: str = "") -> str:
@@ -536,42 +611,173 @@ def set_user_video_preference(username: str, options: dict) -> None:
         conn.commit()
 
 
-def get_user_alas_config(username: str) -> dict | None:
-    with db_connect() as conn:
-        row = conn.execute("SELECT * FROM user_alas_configs WHERE username=?", (username,)).fetchone()
+def _alas_binding_payload(row) -> dict | None:
     if not row:
         return None
-    return {
+    payload = {
         "username": row["username"],
         "config_name": row["config_name"],
         "can_run": bool(row["can_run"]),
         "can_edit": bool(row["can_edit"]),
+        "is_default": bool(row["is_default"]),
         "updated_at": int(row["updated_at"]),
     }
+    if "role" in row.keys():
+        payload["role"] = row["role"]
+    return payload
+
+
+def get_user_alas_binding(username: str, config_name: str) -> dict | None:
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_alas_configs WHERE username=? AND config_name=?",
+            ((username or "").strip(), (config_name or "").strip()),
+        ).fetchone()
+    return _alas_binding_payload(row)
+
+
+def get_user_alas_config(username: str) -> dict | None:
+    with db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM user_alas_configs
+            WHERE username=?
+            ORDER BY is_default DESC, config_name
+            LIMIT 1
+            """,
+            ((username or "").strip(),),
+        ).fetchone()
+    return _alas_binding_payload(row)
+
+
+def list_user_alas_bindings(username: str | None = None) -> list[dict]:
+    params: tuple = ()
+    where = ""
+    if username is not None:
+        where = "WHERE uac.username=?"
+        params = ((username or "").strip(),)
+    with db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT uac.username,u.role,uac.config_name,uac.can_run,uac.can_edit,uac.is_default,uac.updated_at
+            FROM user_alas_configs uac JOIN users u ON u.username=uac.username
+            {where}
+            ORDER BY uac.username,uac.is_default DESC,uac.config_name
+            """,
+            params,
+        ).fetchall()
+    return [_alas_binding_payload(row) for row in rows]
 
 
 def list_user_alas_configs() -> list[dict]:
-    with db_connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT u.username, u.role, uac.config_name, uac.can_run, uac.can_edit, uac.updated_at
-            FROM users u LEFT JOIN user_alas_configs uac ON u.username=uac.username
-            ORDER BY u.username
-            """
-        ).fetchall()
+    bindings = list_user_alas_bindings()
+    defaults: dict[str, dict] = {}
+    for binding in bindings:
+        defaults.setdefault(binding["username"], binding)
     result = []
-    for row in rows:
+    for user in list_users():
+        binding = defaults.get(user["username"])
         result.append(
             {
-                "username": row["username"],
-                "role": row["role"],
-                "config_name": row["config_name"] or "",
-                "can_run": bool(row["can_run"]) if row["config_name"] else False,
-                "can_edit": bool(row["can_edit"]) if row["config_name"] else False,
-                "updated_at": int(row["updated_at"]) if row["updated_at"] else 0,
+                "username": user["username"],
+                "role": user["role"],
+                "config_name": binding["config_name"] if binding else "",
+                "can_run": bool(binding and binding["can_run"]),
+                "can_edit": bool(binding and binding["can_edit"]),
+                "is_default": bool(binding and binding["is_default"]),
+                "updated_at": binding["updated_at"] if binding else 0,
             }
         )
     return result
+
+
+def upsert_user_alas_binding(
+    username: str,
+    config_name: str,
+    can_run: bool,
+    can_edit: bool,
+    is_default: bool | None = None,
+) -> None:
+    username = (username or "").strip()
+    config_name = (config_name or "").strip()
+    if not username:
+        raise ValueError("invalid_username")
+    if not config_name:
+        raise ValueError("invalid_config_name")
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+                raise ValueError("invalid_username")
+            existing = conn.execute(
+                "SELECT is_default FROM user_alas_configs WHERE username=? AND config_name=?",
+                (username, config_name),
+            ).fetchone()
+            count = conn.execute("SELECT COUNT(*) FROM user_alas_configs WHERE username=?", (username,)).fetchone()[0]
+            default_value = bool(existing and existing["is_default"]) if is_default is None else bool(is_default)
+            if count == 0:
+                default_value = True
+            if default_value:
+                conn.execute("UPDATE user_alas_configs SET is_default=0 WHERE username=?", (username,))
+            conn.execute(
+                """
+                INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,is_default,updated_at)
+                VALUES(?,?,?,?,?,?)
+                ON CONFLICT(username,config_name) DO UPDATE SET
+                  can_run=excluded.can_run,
+                  can_edit=excluded.can_edit,
+                  is_default=excluded.is_default,
+                  updated_at=excluded.updated_at
+                """,
+                (username, config_name, 1 if can_run else 0, 1 if can_edit else 0, 1 if default_value else 0, now_ts()),
+            )
+            _ensure_user_alas_default(conn, username)
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise ValueError("invalid_alas_binding") from exc
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
+def set_default_user_alas_config(username: str, config_name: str) -> None:
+    username = (username or "").strip()
+    config_name = (config_name or "").strip()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not conn.execute(
+                "SELECT 1 FROM user_alas_configs WHERE username=? AND config_name=?",
+                (username, config_name),
+            ).fetchone():
+                raise ValueError("invalid_alas_binding")
+            conn.execute("UPDATE user_alas_configs SET is_default=0 WHERE username=?", (username,))
+            updated = conn.execute(
+                "UPDATE user_alas_configs SET is_default=1,updated_at=? WHERE username=? AND config_name=?",
+                (now_ts(), username, config_name),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("invalid_alas_binding")
+            _ensure_user_alas_default(conn, username)
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
+def delete_user_alas_binding(username: str, config_name: str) -> None:
+    username = (username or "").strip()
+    config_name = (config_name or "").strip()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("DELETE FROM user_alas_configs WHERE username=? AND config_name=?", (username, config_name))
+            _ensure_user_alas_default(conn, username)
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
 
 
 def set_user_alas_config(username: str, config_name: str, can_run: bool, can_edit: bool) -> None:
@@ -582,10 +788,11 @@ def set_user_alas_config(username: str, config_name: str, can_run: bool, can_edi
     if not config_name:
         raise ValueError("invalid_config_name")
     with db_connect() as conn:
+        conn.execute("DELETE FROM user_alas_configs WHERE username=?", (username,))
         conn.execute(
             """
-            INSERT OR REPLACE INTO user_alas_configs(username,config_name,can_run,can_edit,updated_at)
-            VALUES(?,?,?,?,?)
+            INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,is_default,updated_at)
+            VALUES(?,?,?,?,1,?)
             """,
             (username, config_name, 1 if can_run else 0, 1 if can_edit else 0, now_ts()),
         )

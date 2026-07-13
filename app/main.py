@@ -237,6 +237,12 @@ def alas_embed_return_url(binding: dict | None) -> str:
     return "/alas/embed/"
 
 
+def requested_alas_config(query_params) -> str | None:
+    values = alas_embed.config_query_values(query_params)
+    unique = {value for value in values}
+    return values[0] if len(unique) == 1 else None
+
+
 def alas_embed_denied_html_response(request: Request, binding: dict | None, status_code: int, message: str):
     accept = request.headers.get("accept", "")
     if request.method.upper() not in ("GET", "HEAD") or "text/html" not in accept.lower():
@@ -304,24 +310,53 @@ def user_video_options(username: str, payload: dict | None = None) -> dict:
     return normalize_video_options(payload or {}, fallback, profiles=profile_payloads(settings), enabled_stream_modes=enabled_modes)
 
 
-def alas_binding_for_user(user: dict, allow_admin_global: bool = False) -> dict | None:
-    binding = storage.get_user_alas_config(user["username"])
+def alas_binding_for_user(
+    user: dict,
+    allow_admin_global: bool = False,
+    config_name: str | None = None,
+) -> dict | None:
+    requested = str(config_name or "").strip()
+    if requested:
+        try:
+            requested = alas.sanitize_config_name(requested)
+        except ValueError:
+            return None
+        binding = storage.get_user_alas_binding(user["username"], requested)
+    else:
+        binding = storage.get_user_alas_config(user["username"])
     if binding and binding.get("config_name"):
         return binding
     if allow_admin_global and user.get("role") == "admin":
         return {
             "username": user["username"],
-            "config_name": alas.legacy_config_name(),
+            "config_name": requested or alas.legacy_config_name(),
             "can_run": True,
             "can_edit": True,
+            "is_default": not requested,
             "updated_at": 0,
             "admin_fallback": True,
         }
     return None
 
 
-def require_alas_binding(user: dict, *, run: bool = False, edit: bool = False) -> dict:
-    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+def require_alas_binding(
+    user: dict,
+    *,
+    config_name: str | None = None,
+    run: bool = False,
+    edit: bool = False,
+) -> dict:
+    requested = str(config_name or "").strip()
+    if requested:
+        try:
+            requested = alas.sanitize_config_name(requested)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid ALAS config") from exc
+    binding = alas_binding_for_user(
+        user,
+        allow_admin_global=user.get("role") == "admin",
+        config_name=requested or None,
+    )
     if not binding:
         raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
     if run and not binding.get("can_run"):
@@ -333,6 +368,25 @@ def require_alas_binding(user: dict, *, run: bool = False, edit: bool = False) -
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid bound ALAS config") from exc
     return binding
+
+
+def public_user_alas_bindings(user: dict) -> list[dict]:
+    if user.get("role") == "admin":
+        bindings = storage.list_user_alas_bindings(user["username"])
+        if not bindings:
+            bindings = [alas_binding_for_user(user, allow_admin_global=True)]
+    else:
+        bindings = storage.list_user_alas_bindings(user["username"])
+    return [
+        {
+            "config_name": binding["config_name"],
+            "can_run": bool(binding.get("can_run")),
+            "can_edit": bool(binding.get("can_edit")),
+            "is_default": bool(binding.get("is_default")),
+        }
+        for binding in bindings
+        if binding and binding.get("config_name")
+    ]
 
 
 def public_alas_status(result: dict, binding: dict) -> dict:
@@ -349,7 +403,7 @@ def bound_alas_config_names(bindings: list[dict] | None = None) -> list[str]:
     """Return unique ALAS config names that are explicitly bound to users."""
     seen: set[str] = set()
     names: list[str] = []
-    for binding in bindings if bindings is not None else storage.list_user_alas_configs():
+    for binding in bindings if bindings is not None else storage.list_user_alas_bindings():
         raw = str(binding.get("config_name") or "").strip()
         if not raw:
             continue
@@ -398,11 +452,21 @@ def admin_alas_status_for_config(config_name: str | None = None, bindings: list[
 
 def admin_alas_payload(config_name: str | None = None) -> dict:
     bindings = storage.list_user_alas_configs()
+    assignments = storage.list_user_alas_bindings()
     return {
         "settings": alas.public_settings(),
-        "status": admin_alas_status_for_config(config_name, bindings),
+        "status": admin_alas_status_for_config(config_name, assignments),
         "bindings": bindings,
-        "bound_configs": bound_alas_config_names(bindings),
+        "assignments": assignments,
+        "bound_configs": bound_alas_config_names(assignments),
+    }
+
+
+def admin_alas_permissions_payload() -> dict:
+    return {
+        "bindings": storage.list_user_alas_configs(),
+        "assignments": storage.list_user_alas_bindings(),
+        "users": storage.list_users(),
     }
 
 
@@ -746,7 +810,14 @@ async def api_control_release(device_id: str, request: Request):
 @app.get("/api/alas/status")
 async def api_alas_status(request: Request):
     user = security.require_user(request)
-    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+    requested = str(request.query_params.get("config") or "").strip()
+    binding = alas_binding_for_user(
+        user,
+        allow_admin_global=user.get("role") == "admin",
+        config_name=requested or None,
+    )
+    if requested and not binding:
+        raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
     if not binding:
         return {
             "ok": False,
@@ -767,11 +838,23 @@ async def api_alas_status(request: Request):
     return public_alas_status(result, binding)
 
 
+@app.get("/api/alas/configs")
+async def api_alas_configs(request: Request):
+    user = security.require_user(request)
+    configs = public_user_alas_bindings(user)
+    default_config = next((item["config_name"] for item in configs if item["is_default"]), "")
+    if not default_config and len(configs) == 1:
+        default_config = configs[0]["config_name"]
+    return {"configs": configs, "default_config": default_config}
+
+
 @app.post("/api/alas/toggle")
 async def api_alas_toggle(request: Request):
     security.verify_csrf(request)
     user = security.require_user(request)
-    binding = require_alas_binding(user, run=True)
+    payload = await parse_body(request)
+    requested = str(payload.get("config_name") or payload.get("config") or "").strip()
+    binding = require_alas_binding(user, config_name=requested or None, run=True)
     result = await asyncio.to_thread(alas.control_for_config, "toggle", binding["config_name"])
     if not result.get("ok"):
         storage.audit(user["username"], "alas_toggle_failed", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
@@ -790,7 +873,12 @@ async def alas_embed_page(request: Request):
     if redirect:
         return redirect
     user = security.require_user(request)
-    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
+    requested = str(request.query_params.get("config") or "").strip()
+    binding = alas_binding_for_user(
+        user,
+        allow_admin_global=user.get("role") == "admin",
+        config_name=requested or None,
+    )
     if user.get("role") != "admin" and not binding:
         storage.audit(
             user["username"],
@@ -798,9 +886,13 @@ async def alas_embed_page(request: Request):
             alas_embed_denial_detail(request, "missing_binding", "/alas/embed/"),
         )
         raise HTTPException(status_code=403, detail=alas_embed_denied_message("missing_binding"))
+    if not binding:
+        raise HTTPException(status_code=400 if requested else 403, detail="invalid ALAS config")
     if user.get("role") == "admin":
-        storage.audit(user["username"], "alas_embed_open", "admin")
-        return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", "/alas/embed/proxy/", "管理员完整访问"))
+        config_name = alas.sanitize_config_name(binding.get("config_name"))
+        iframe_src = f"/alas/embed/proxy/?{urlencode({'config': config_name})}" if requested else "/alas/embed/proxy/"
+        storage.audit(user["username"], "alas_embed_open", f"admin:{config_name}" if requested else "admin")
+        return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", iframe_src, "管理员完整访问"))
     config_name = alas.sanitize_config_name(binding.get("config_name"))
     storage.audit(user["username"], "alas_embed_open", config_name)
     return HTMLResponse(
@@ -823,8 +915,14 @@ async def alas_embed_proxy(request: Request, path: str = ""):
         body = await request.body()
         parsed_body = alas_embed.parse_limited_body(body, request.headers.get("content-type", ""))
     user = security.require_user(request)
-    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: request.query_params.getlist(key) for key in request.query_params.keys()}
+    binding = alas_binding_for_user(
+        user,
+        allow_admin_global=user.get("role") == "admin",
+        config_name=requested_alas_config(request.query_params),
+    )
+    if not binding and user.get("role") != "admin":
+        binding = alas_binding_for_user(user)
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method=request.method, body=parsed_body)
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
@@ -875,8 +973,14 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         log_alas_websocket_close(connection_id, None, "authentication_required", 1008)
         await websocket.close(code=1008)
         return
-    binding = alas_binding_for_user(user, allow_admin_global=user.get("role") == "admin")
     query_params = {key: websocket.query_params.getlist(key) for key in websocket.query_params.keys()}
+    binding = alas_binding_for_user(
+        user,
+        allow_admin_global=user.get("role") == "admin",
+        config_name=requested_alas_config(websocket.query_params),
+    )
+    if not binding and user.get("role") != "admin":
+        binding = alas_binding_for_user(user)
     decision = alas_embed.proxy_decision(user, binding, path, query_params, method="WEBSOCKET")
     if not decision.allowed:
         reason_code = alas_embed_reason_code(decision.reason)
@@ -900,6 +1004,16 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
         await websocket.close(code=1011)
         return
+
+    async def refresh_binding():
+        if not decision.filtered:
+            return None
+        return await asyncio.to_thread(
+            storage.get_user_alas_binding,
+            user.get("username", ""),
+            decision.config_name,
+        )
+
     await alas_embed.proxy_websocket(
         websocket,
         settings.get("base_url") or raw_base_url,
@@ -908,6 +1022,7 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
         actor=user.get("username", ""),
         role=user.get("role", ""),
         connection_id=connection_id,
+        authorization_check=refresh_binding if decision.filtered else None,
     )
 
 
@@ -915,7 +1030,7 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
 async def admin_overview(request: Request):
     user = security.require_admin(request)
     devices = storage.list_all_devices()
-    alas_bindings = storage.list_user_alas_configs()
+    alas_bindings = storage.list_user_alas_bindings()
     sessions, alas_status = await asyncio.gather(
         manager.snapshot(),
         asyncio.to_thread(admin_alas_status_for_config, None, alas_bindings)
@@ -1191,6 +1306,40 @@ async def admin_alas_config(request: Request):
     return await asyncio.to_thread(alas.get_config, config_name)
 
 
+@app.get("/api/admin/alas/configs")
+async def admin_alas_configs(request: Request):
+    security.require_admin(request)
+    bound_configs = await asyncio.to_thread(bound_alas_config_names)
+    settings = alas.public_settings()
+    runtime_configs: list[str] = []
+    error = ""
+    if settings.get("enabled") and settings.get("token_set"):
+        selected = str(request.query_params.get("config") or "").strip() or (bound_configs[0] if bound_configs else alas.legacy_config_name())
+        try:
+            selected = alas.sanitize_config_name(selected)
+            result = await asyncio.to_thread(alas.status_for_config, selected, True)
+            error = str(result.get("error") or "")
+            for raw in result.get("configs") or []:
+                try:
+                    name = alas.sanitize_config_name(raw)
+                except ValueError:
+                    continue
+                if name not in runtime_configs:
+                    runtime_configs.append(name)
+        except ValueError:
+            error = "invalid ALAS config name"
+    configs = list(bound_configs)
+    for name in runtime_configs:
+        if name not in configs:
+            configs.append(name)
+    return {
+        "configs": configs,
+        "runtime_configs": runtime_configs,
+        "bound_configs": bound_configs,
+        "error": error,
+    }
+
+
 @app.put("/api/admin/alas/config")
 async def admin_save_alas_config(request: Request):
     security.verify_csrf(request)
@@ -1216,7 +1365,7 @@ async def admin_save_alas_config(request: Request):
 @app.get("/api/admin/alas/permissions")
 async def admin_alas_permissions(request: Request):
     security.require_admin(request)
-    return {"bindings": storage.list_user_alas_configs(), "users": storage.list_users()}
+    return admin_alas_permissions_payload()
 
 
 @app.put("/api/admin/alas/permissions")
@@ -1226,25 +1375,39 @@ async def admin_set_alas_permission(request: Request):
     payload = await parse_body(request)
     username = str(payload.get("username", "")).strip()
     config_name = str(payload.get("config_name", "")).strip()
+    multi_config_request = "is_default" in payload
     enabled = parse_bool(payload.get("enabled"), bool(config_name))
     if not storage.get_user(username):
         raise HTTPException(status_code=400, detail="invalid username")
+    if config_name:
+        try:
+            config_name = alas.sanitize_config_name(config_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
     if not enabled:
-        storage.delete_user_alas_config(username)
-        storage.audit(admin["username"], "alas_binding_delete", username)
-        return {"ok": True, "bindings": storage.list_user_alas_configs()}
-    try:
-        config_name = alas.sanitize_config_name(config_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+        if multi_config_request and config_name:
+            storage.delete_user_alas_binding(username, config_name)
+            detail = f"{username}:{config_name}"
+        else:
+            storage.delete_user_alas_config(username)
+            detail = username
+        storage.audit(admin["username"], "alas_binding_delete", detail)
+        return {"ok": True, **admin_alas_permissions_payload()}
+    if not config_name:
+        raise HTTPException(status_code=400, detail="ALAS config name is required")
     can_run = parse_bool(payload.get("can_run"), True)
     can_edit = parse_bool(payload.get("can_edit"), False)
+    raw_default = payload.get("is_default")
+    is_default = None if raw_default is None else parse_bool(raw_default, False)
     try:
-        storage.set_user_alas_config(username, config_name, can_run, can_edit)
+        if multi_config_request:
+            storage.upsert_user_alas_binding(username, config_name, can_run, can_edit, is_default)
+        else:
+            storage.set_user_alas_config(username, config_name, can_run, can_edit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    storage.audit(admin["username"], "alas_binding_set", f"{username}:{config_name}:{can_run}:{can_edit}")
-    return {"ok": True, "bindings": storage.list_user_alas_configs()}
+    storage.audit(admin["username"], "alas_binding_set", f"{username}:{config_name}:{can_run}:{can_edit}:{bool(is_default)}")
+    return {"ok": True, **admin_alas_permissions_payload()}
 
 
 @app.get("/api/admin/logs")

@@ -5,6 +5,7 @@ import asyncio
 import gzip
 import hashlib
 import html as html_utils
+import inspect
 import ipaddress
 import json
 import logging
@@ -518,11 +519,8 @@ def _request_requires_explicit_config(method: str, path: str) -> bool:
 
 def _has_explicit_bound_config(query: dict, config_name: str) -> bool:
     """判断请求查询参数是否显式指定了绑定配置。"""
-    for key in CONFIG_QUERY_KEYS:
-        values = _query_values(query or {}, key)
-        if values and all(value == config_name for value in values):
-            return True
-    return False
+    values = config_query_values(query)
+    return bool(values) and all(value == config_name for value in values)
 
 
 def _iter_query_items(query_items) -> list[tuple[str, object]]:
@@ -540,17 +538,27 @@ def _iter_query_items(query_items) -> list[tuple[str, object]]:
     return list(query_items or [])
 
 
+def config_query_values(query_items) -> list[str]:
+    """Return all non-empty config selector values using case-insensitive keys."""
+    return [
+        str(value).strip()
+        for key, value in _iter_query_items(query_items)
+        if str(key).lower() in CONFIG_QUERY_KEYS and str(value or "").strip()
+    ]
+
+
 def bound_config_query_items(query_items, decision: ProxyDecision) -> list[tuple[str, object]]:
-    """Append the bound ALAS config for filtered users when the browser omitted it."""
+    """Forward exactly one canonical config selector for filtered users."""
     params = []
-    has_config = False
+    inserted_config = False
     for key, value in _iter_query_items(query_items):
-        if str(key).lower() in CONFIG_QUERY_KEYS:
-            if not str(value or "").strip():
-                continue
-            has_config = True
+        if decision.filtered and str(key).lower() in CONFIG_QUERY_KEYS:
+            if decision.config_name and not inserted_config:
+                params.append(("config", decision.config_name))
+                inserted_config = True
+            continue
         params.append((key, value))
-    if decision.filtered and decision.config_name and not has_config:
+    if decision.filtered and decision.config_name and not inserted_config:
         params.append(("config", decision.config_name))
     return params
 
@@ -936,15 +944,14 @@ def proxy_decision(user: dict, binding: dict | None, path: str, query: dict, met
             reason="config path mismatch",
         )
 
-    for key in CONFIG_QUERY_KEYS:
-        for requested_config in _query_values(query or {}, key):
-            if requested_config != config_name:
-                return ProxyDecision(
-                    allowed=False,
-                    status_code=403,
-                    config_name=config_name,
-                    reason="config mismatch",
-                )
+    for requested_config in config_query_values(query or {}):
+        if requested_config != config_name:
+            return ProxyDecision(
+                allowed=False,
+                status_code=403,
+                config_name=config_name,
+                reason="config mismatch",
+            )
 
     if body is not None and _body_switches_config(body, config_name):
         return ProxyDecision(
@@ -1441,10 +1448,10 @@ def _append_config_to_embed_url(value: str, config_name: str) -> str:
     if not parsed.path.startswith(f"{ALAS_EMBED_PREFIX}/proxy"):
         return value
     query = parse_qs(parsed.query, keep_blank_values=True)
-    if any(key in query and any(str(item or "").strip() for item in query[key]) for key in CONFIG_QUERY_KEYS):
-        return value
     pairs = []
     for key, values in query.items():
+        if str(key).lower() in CONFIG_QUERY_KEYS:
+            continue
         if values:
             pairs.extend((key, item) for item in values)
         else:
@@ -2932,6 +2939,7 @@ async def proxy_websocket(
     actor: str = "",
     role: str = "",
     connection_id: str = "",
+    authorization_check=None,
 ) -> None:
     """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
     connection_id = _safe_connection_id(connection_id) or uuid.uuid4().hex[:12]
@@ -2955,10 +2963,31 @@ async def proxy_websocket(
         if decision.filtered
         else None
     )
+    authorization_lock = asyncio.Lock()
     log.debug(
         "ALAS_WS_OPEN connection=%s event=connect reason=accepted permission=none task=none",
         connection_id,
     )
+
+    async def refresh_authorization() -> bool:
+        if policy is None or authorization_check is None:
+            return True
+        try:
+            current = authorization_check()
+            if inspect.isawaitable(current):
+                current = await current
+        except Exception:
+            current = None
+        if not current or str(current.get("config_name") or "").strip() != policy.config_name:
+            log.warning(
+                "ALAS_WS_POLICY connection=%s event=authorization reason=binding_revoked permission=restricted task=none",
+                connection_id,
+            )
+            return False
+        policy.can_run = bool(current.get("can_run"))
+        policy.can_edit = bool(current.get("can_edit"))
+        return True
+
     try:
         async with websocket_connect(target, open_timeout=10.0) as upstream:
             async def client_to_upstream() -> None:
@@ -2971,7 +3000,12 @@ async def proxy_websocket(
                     if "text" in message:
                         text = message["text"]
                         if policy is not None:
-                            message_decision = policy.evaluate_upstream(text)
+                            async with authorization_lock:
+                                if not await refresh_authorization():
+                                    await _close_upstream_safely(upstream, code=1008)
+                                    await _close_websocket_safely(websocket, 1008)
+                                    return 1008
+                                message_decision = policy.evaluate_upstream(text)
                             _log_upstream_decision(connection_id, message_decision)
                             if message_decision.action is WebSocketMessageAction.DROP:
                                 continue
@@ -2983,7 +3017,12 @@ async def proxy_websocket(
                     elif "bytes" in message:
                         data = message["bytes"]
                         if policy is not None:
-                            message_decision = policy.evaluate_upstream(data)
+                            async with authorization_lock:
+                                if not await refresh_authorization():
+                                    await _close_upstream_safely(upstream, code=1008)
+                                    await _close_websocket_safely(websocket, 1008)
+                                    return 1008
+                                message_decision = policy.evaluate_upstream(data)
                             _log_upstream_decision(connection_id, message_decision)
                             if message_decision.action is WebSocketMessageAction.DROP:
                                 continue
@@ -2997,19 +3036,24 @@ async def proxy_websocket(
                 """转发上游文本或二进制消息回客户端。"""
                 async for message in upstream:
                     if policy is not None:
-                        original_message = message
-                        original_payload = _parse_websocket_message(original_message)
-                        message, filtered_payload = _filter_user_websocket_downstream_payload(
-                            original_message,
-                            original_payload,
-                            decision.config_name,
-                        )
-                        observation = policy.observe_downstream(
-                            original_message,
-                            message,
-                            original_payload=original_payload,
-                            filtered_payload=filtered_payload,
-                        )
+                        async with authorization_lock:
+                            if not await refresh_authorization():
+                                await _close_upstream_safely(upstream, code=1008)
+                                await _close_websocket_safely(websocket, 1008)
+                                return 1008
+                            original_message = message
+                            original_payload = _parse_websocket_message(original_message)
+                            message, filtered_payload = _filter_user_websocket_downstream_payload(
+                                original_message,
+                                original_payload,
+                                decision.config_name,
+                            )
+                            observation = policy.observe_downstream(
+                                original_message,
+                                message,
+                                original_payload=original_payload,
+                                filtered_payload=filtered_payload,
+                            )
                         downstream_log = log.debug if observation.reason == "forwarded" else log.warning
                         downstream_event = (
                             observation.command

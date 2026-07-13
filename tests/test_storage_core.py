@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -262,6 +263,82 @@ class StorageCoreTests(unittest.TestCase):
 
         storage.delete_user_alas_config("alice")
         self.assertIsNone(storage.get_user_alas_config("alice"))
+
+    def test_user_alas_multi_bindings_keep_independent_permissions_and_default(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
+
+        storage.upsert_user_alas_binding("alice", "AliceMain", True, False)
+        storage.upsert_user_alas_binding("alice", "AliceArchive", False, True)
+        storage.upsert_user_alas_binding("bob", "AliceMain", False, False)
+
+        alice = storage.list_user_alas_bindings("alice")
+        self.assertEqual([item["config_name"] for item in alice], ["AliceMain", "AliceArchive"])
+        self.assertTrue(alice[0]["is_default"])
+        self.assertTrue(alice[0]["can_run"])
+        self.assertFalse(alice[0]["can_edit"])
+        self.assertFalse(alice[1]["can_run"])
+        self.assertTrue(alice[1]["can_edit"])
+        self.assertFalse(storage.get_user_alas_binding("bob", "AliceMain")["can_run"])
+
+        storage.set_default_user_alas_config("alice", "AliceArchive")
+        self.assertEqual(storage.get_user_alas_config("alice")["config_name"], "AliceArchive")
+        storage.delete_user_alas_binding("alice", "AliceArchive")
+        promoted = storage.get_user_alas_config("alice")
+        self.assertEqual(promoted["config_name"], "AliceMain")
+        self.assertTrue(promoted["is_default"])
+
+    def test_user_alas_legacy_table_migrates_once_and_preserves_binding(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("dirty", "DirtyPassword123", "user")
+        with sqlite3.connect(storage.DB_PATH) as conn:
+            conn.execute("DROP TABLE user_alas_configs")
+            conn.execute(
+                """
+                CREATE TABLE user_alas_configs (
+                    username TEXT PRIMARY KEY,
+                    config_name TEXT NOT NULL,
+                    can_run INTEGER NOT NULL DEFAULT 1,
+                    can_edit INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,updated_at) VALUES(?,?,?,?,?)",
+                ("admin", "LegacyMain", 0, 1, 12345),
+            )
+            conn.execute(
+                "INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,updated_at) VALUES(?,?,?,?,?)",
+                ("dirty", "DirtyMain", 2, -3, 23456),
+            )
+
+        storage.init_db()
+        storage.init_db()
+
+        binding = storage.get_user_alas_config("admin")
+        self.assertEqual(binding["config_name"], "LegacyMain")
+        self.assertFalse(binding["can_run"])
+        self.assertTrue(binding["can_edit"])
+        self.assertTrue(binding["is_default"])
+        self.assertEqual(binding["updated_at"], 12345)
+        dirty = storage.get_user_alas_config("dirty")
+        self.assertTrue(dirty["can_run"])
+        self.assertTrue(dirty["can_edit"])
+        self.assertTrue(dirty["is_default"])
+        with sqlite3.connect(storage.DB_PATH) as conn:
+            columns = conn.execute("PRAGMA table_info(user_alas_configs)").fetchall()
+            primary_key = [row[1] for row in sorted((row for row in columns if row[5]), key=lambda row: row[5])]
+            self.assertEqual(primary_key, ["username", "config_name"])
+            self.assertIn("is_default", {row[1] for row in columns})
+            self.assertIsNone(
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='user_alas_configs_new'"
+                ).fetchone()
+            )
 
     def test_password_policy_is_enforced(self):
         storage = load_storage(self.tmp)

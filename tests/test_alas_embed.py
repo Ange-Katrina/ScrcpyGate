@@ -54,6 +54,201 @@ class AlasEmbedUrlTests(unittest.TestCase):
 
         self.assertEqual(result, "wss://alas.test:443/pywebio")
 
+    def test_proxy_websocket_closes_before_forward_when_binding_is_revoked_or_downgraded(self):
+        class ClientWebSocket:
+            query_params = []
+
+            def __init__(self, message):
+                self.accepted = False
+                self.close_codes = []
+                self.message = message
+
+            async def accept(self):
+                self.accepted = True
+
+            async def receive(self):
+                return {"text": self.message}
+
+            async def close(self, code=1000):
+                self.close_codes.append(code)
+
+        class UpstreamWebSocket:
+            def __init__(self):
+                self.sent = []
+                self.close_codes = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                await asyncio.Future()
+
+            async def send(self, message):
+                self.sent.append(message)
+
+            async def close(self, code=1000):
+                self.close_codes.append(code)
+
+        decision = alas_embed.ProxyDecision(
+            allowed=True,
+            config_name="AliceMain",
+            filtered=True,
+            can_run=True,
+            can_edit=True,
+        )
+
+        scenarios = (
+            ("revoked", None, '{"event":"ping"}'),
+            (
+                "run_downgraded",
+                {"config_name": "AliceMain", "can_run": False, "can_edit": True},
+                '{"action":"start","config":"AliceMain"}',
+            ),
+        )
+        for name, current_binding, message in scenarios:
+            with self.subTest(name=name):
+                client = ClientWebSocket(message)
+                upstream = UpstreamWebSocket()
+                with patch.object(alas_embed, "websocket_connect", return_value=upstream):
+                    asyncio.run(
+                        alas_embed.proxy_websocket(
+                            client,
+                            "http://alas.test:22267",
+                            "ws",
+                            decision,
+                            authorization_check=lambda binding=current_binding: binding,
+                        )
+                    )
+
+                self.assertTrue(client.accepted)
+                self.assertEqual(upstream.sent, [])
+                self.assertIn(1008, upstream.close_codes)
+                self.assertIn(1008, client.close_codes)
+
+    def test_proxy_websocket_serializes_bidirectional_authorization_refresh(self):
+        async def exercise(binding_results):
+            first_check_started = asyncio.Event()
+            client_message_delivered = asyncio.Event()
+            release_checks = asyncio.Event()
+            active_checks = 0
+            max_active_checks = 0
+            check_count = 0
+
+            class ClientWebSocket:
+                query_params = []
+
+                def __init__(self):
+                    self.accepted = False
+                    self.close_codes = []
+                    self.sent_text = []
+
+                async def accept(self):
+                    self.accepted = True
+
+                async def receive(self):
+                    await first_check_started.wait()
+                    client_message_delivered.set()
+                    return {"text": '{"action":"start","config":"AliceMain"}'}
+
+                async def send_text(self, message):
+                    self.sent_text.append(message)
+
+                async def send_bytes(self, message):
+                    raise AssertionError(f"unexpected binary downstream message: {message!r}")
+
+                async def close(self, code=1000):
+                    self.close_codes.append(code)
+
+            class UpstreamWebSocket:
+                def __init__(self):
+                    self.sent = []
+                    self.close_codes = []
+                    self.message_count = 0
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    return False
+
+                def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    if self.message_count == 0:
+                        self.message_count += 1
+                        return '{"command":"output","spec":{"content":"ready"}}'
+                    await asyncio.Future()
+
+                async def send(self, message):
+                    self.sent.append(message)
+
+                async def close(self, code=1000):
+                    self.close_codes.append(code)
+
+            async def authorization_check():
+                nonlocal active_checks, max_active_checks, check_count
+                result_index = check_count
+                check_count += 1
+                active_checks += 1
+                max_active_checks = max(max_active_checks, active_checks)
+                if result_index == 0:
+                    first_check_started.set()
+                try:
+                    await release_checks.wait()
+                    return binding_results[result_index]
+                finally:
+                    active_checks -= 1
+
+            client = ClientWebSocket()
+            upstream = UpstreamWebSocket()
+            decision = alas_embed.ProxyDecision(
+                allowed=True,
+                config_name="AliceMain",
+                filtered=True,
+                can_run=True,
+                can_edit=True,
+            )
+            with patch.object(alas_embed, "websocket_connect", return_value=upstream):
+                proxy_task = asyncio.create_task(
+                    alas_embed.proxy_websocket(
+                        client,
+                        "http://alas.test:22267",
+                        "ws",
+                        decision,
+                        authorization_check=authorization_check,
+                    )
+                )
+                await asyncio.wait_for(first_check_started.wait(), timeout=1)
+                await asyncio.wait_for(client_message_delivered.wait(), timeout=1)
+                release_checks.set()
+                await asyncio.wait_for(proxy_task, timeout=1)
+
+            self.assertTrue(client.accepted)
+            self.assertEqual(check_count, 2)
+            self.assertEqual(max_active_checks, 1)
+            self.assertEqual(upstream.sent, [])
+            self.assertIn(1008, upstream.close_codes)
+            self.assertIn(1008, client.close_codes)
+
+        downgraded = {"config_name": "AliceMain", "can_run": False, "can_edit": True}
+        scenarios = {
+            "downgraded": (downgraded, downgraded),
+            "revoked": (
+                {"config_name": "AliceMain", "can_run": True, "can_edit": True},
+                None,
+            ),
+        }
+        for name, binding_results in scenarios.items():
+            with self.subTest(name=name):
+                asyncio.run(exercise(binding_results))
+
     def test_build_upstream_url_preserves_base_path(self):
         result = build_upstream_url(
             "http://alas.test:22267/base/",
@@ -197,6 +392,17 @@ class AlasEmbedTests(unittest.TestCase):
 
         self.assertEqual(
             bound_config_query_items([("config", "挂机-云"), ("x", "1")], decision),
+            [("config", "挂机-云"), ("x", "1")],
+        )
+
+    def test_bound_config_query_items_normalizes_case_insensitive_config_keys(self):
+        decision = alas_embed.ProxyDecision(allowed=True, config_name="挂机-云", filtered=True)
+
+        self.assertEqual(
+            bound_config_query_items(
+                [("Config", "挂机-云"), ("CONFIG_NAME", "挂机-云"), ("x", "1")],
+                decision,
+            ),
             [("config", "挂机-云"), ("x", "1")],
         )
 
@@ -465,6 +671,17 @@ class AlasEmbedPolicyTests(unittest.TestCase):
             {"config": "挂机-云"},
             method="POST",
             body={"config": "其它"},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "config mismatch")
+
+    def test_user_case_insensitive_query_other_config_denied(self):
+        decision = proxy_decision(
+            {"role": "user"},
+            {"config_name": "挂机-云", "can_run": True, "can_edit": True},
+            "api/state",
+            {"Config": ["挂机-云"], "CONFIG_NAME": ["其它"]},
         )
 
         self.assertFalse(decision.allowed)
