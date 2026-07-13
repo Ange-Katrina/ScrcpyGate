@@ -2,6 +2,7 @@
 # -_- coding: utf-8 -_-
 
 import asyncio
+import hashlib
 import io
 import json
 import sys
@@ -107,6 +108,9 @@ class AlasEmbedUrlTests(unittest.TestCase):
 
 
 class AlasEmbedTests(unittest.TestCase):
+    def read_static(self, relative_path):
+        return (ROOT / relative_path).read_text(encoding="utf-8")
+
     def test_embed_shell_html_escapes_inputs_and_links_back(self):
         result = embed_shell_html(
             "ALAS <原页面>",
@@ -119,6 +123,50 @@ class AlasEmbedTests(unittest.TestCase):
         self.assertIn("当前 &lt;仅允许&gt;", result)
         self.assertIn('href="/"', result)
         self.assertNotIn("ALAS <原页面>", result)
+
+    def test_embed_shell_uses_resilient_grid_layout_and_recovery_states(self):
+        result = embed_shell_html("ALAS", "/alas/embed/proxy/", "管理员完整访问")
+        stylesheet = self.read_static("static/css/alas-shell.css")
+        script = self.read_static("static/js/alas-shell.js")
+
+        self.assertIn("grid-template-rows: auto minmax(0, 1fr)", stylesheet)
+        self.assertNotIn("calc(100vh - 45px)", stylesheet)
+        self.assertIn('id="alasFrame"', result)
+        self.assertIn('id="loadStatus"', result)
+        self.assertIn('id="refreshFrame"', result)
+        self.assertIn('id="retryFrame"', result)
+        self.assertIn("ALAS 加载超时", script)
+        self.assertIn("ALAS Runtime 不可达", script)
+        self.assertIn("新窗口打开", result)
+        self.assertIn('rel="noopener noreferrer"', result)
+        self.assertIn('aria-live="polite"', result)
+        self.assertNotIn("<style", result.lower())
+        self.assertNotRegex(result, r"<script(?![^>]+src=)")
+
+    def test_embed_shell_static_assets_are_content_versioned(self):
+        result = embed_shell_html("ALAS", "/alas/embed/proxy/")
+
+        for relative_path in (
+            "static/js/theme-init.js",
+            "static/css/ui-tokens.css",
+            "static/css/alas-shell.css",
+            "static/js/alas-shell.js",
+        ):
+            digest = hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest()[:12]
+            self.assertIn(f'/{relative_path}?v={digest}', result)
+
+    def test_embed_shell_tracks_iframe_load_error_and_timeout(self):
+        script = self.read_static("static/js/alas-shell.js")
+
+        self.assertIn('frame.addEventListener("load", inspectLoadedFrame)', script)
+        self.assertIn('frame.addEventListener("error"', script)
+        self.assertIn("window.setTimeout", script)
+        self.assertIn("if (!doc) return true", script)
+        self.assertIn('"timeout",', script)
+        self.assertIn('"unreachable",', script)
+        self.assertIn('frame.setAttribute("aria-busy", "false")', script)
+        self.assertIn("/unreachable|not configured", script)
+        self.assertNotIn("/ALAS Runtime|unreachable", script)
 
     def test_ip_without_port_uses_default_runtime_port(self):
         self.assertEqual(
@@ -585,6 +633,21 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertNotIn("data-scrcpygate-hidden-sensitive-device", result)
         self.assertNotIn("filterConfigRail", result)
         self.assertNotIn("filterAlasSettings", result)
+
+    def test_filter_user_html_uses_incremental_mutation_cleanup_without_polling(self):
+        result = filter_user_html("<html><body></body></html>", "3256475495")
+
+        self.assertIn("runScrcpyGateFilters(document.body || document.documentElement)", result)
+        self.assertIn("new MutationObserver(function(mutations)", result)
+        self.assertIn("mutation.addedNodes", result)
+        self.assertIn('mutation.type === "characterData"', result)
+        self.assertIn('attributeFilter:["value"]', result)
+        self.assertIn('Object.getOwnPropertyDescriptor(prototype, "value")', result)
+        self.assertIn("descriptor.set.call(this, sanitizeSensitiveValue(value))", result)
+        self.assertIn("installSensitiveValueGuard(window.HTMLInputElement", result)
+        self.assertIn("if (sanitized !== node.nodeValue) node.nodeValue = sanitized", result)
+        self.assertIn("if (sanitized !== field.value) field.value = sanitized", result)
+        self.assertNotIn("setInterval(runScrcpyGateFilters", result)
 
     def test_filter_user_html_proxies_alas_root_static_asset_paths(self):
         result = filter_user_html("<html><body></body></html>", "3256475495")

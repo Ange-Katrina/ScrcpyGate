@@ -469,7 +469,7 @@ async def healthz():
 async def login_page(request: Request):
     if security.get_current_user(request):
         return RedirectResponse("/", status_code=302)
-    return templates.TemplateResponse(request, "login.html", {"error": ""})
+    return templates.TemplateResponse(request, "login.html", {"error": "", "username": ""})
 
 
 @app.post("/login")
@@ -483,7 +483,7 @@ async def login(request: Request):
         response = templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "Too many login attempts. Please try again later."},
+            {"error": "登录尝试次数过多，请稍后再试。", "username": username},
             status_code=429,
         )
         response.headers["Retry-After"] = str(rate["retry_after"])
@@ -494,7 +494,12 @@ async def login(request: Request):
         storage.audit(username or "anonymous", "login_failed", audit_detail(request))
         if rate["limited"]:
             storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
-        return templates.TemplateResponse(request, "login.html", {"error": "Invalid username or password"}, status_code=401)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "用户名或密码错误。", "username": username},
+            status_code=401,
+        )
     security.record_login_success(request, username)
     session = storage.create_session(user["username"])
     storage.audit(user["username"], "login_success", audit_detail(request))

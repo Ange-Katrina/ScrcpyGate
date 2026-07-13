@@ -320,18 +320,69 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111315">
   <title>{safe_title}</title>
-  <style>
-    html, body {{ margin:0; height:100%; background:#0c0f14; color:#f3f6fb; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
-    .bar {{ min-height:44px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 14px; background:#111722; border-bottom:1px solid #394254; }}
-    .bar a {{ color:#86b4ff; text-decoration:none; }}
-    iframe {{ width:100%; height:calc(100vh - 45px); border:0; display:block; background:#202635; }}
-    .msg {{ color:#9aa6ba; font-size:13px; }}
-  </style>
+  <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
+  <link rel="stylesheet" href="/static/css/alas-shell.css?v=8310dfe3dbdc">
+  <script src="/static/js/alas-shell.js?v=3941af81f7e0" defer></script>
 </head>
 <body>
-  <div class="bar"><strong>{safe_title}</strong><span class="msg">{safe_message}</span><a href="/">返回 ScrcpyGate</a></div>
-  <iframe src="{safe_src}" title="{safe_title}"></iframe>
+  <header class="alas-shell-bar">
+    <div class="alas-shell-identity">
+      <span class="alas-shell-brand" aria-hidden="true">SG</span>
+      <div class="alas-shell-title-wrap">
+        <strong class="alas-shell-title">{safe_title}</strong>
+        <span class="alas-shell-message">{safe_message}</span>
+      </div>
+    </div>
+    <div class="alas-shell-toolbar" aria-label="ALAS 页面操作">
+      <span id="loadStatus" class="alas-shell-status" data-state="loading" role="status" aria-live="polite">正在连接</span>
+      <button id="refreshFrame" class="alas-shell-button" type="button">刷新</button>
+      <a class="alas-shell-button" href="{safe_src}" target="_blank" rel="noopener noreferrer">新窗口打开</a>
+      <a class="alas-shell-button" href="/">返回</a>
+    </div>
+  </header>
+  <main class="alas-shell-stage">
+    <iframe
+      id="alasFrame"
+      class="alas-shell-frame"
+      src="{safe_src}"
+      title="{safe_title}"
+      loading="eager"
+      aria-busy="true"
+    ></iframe>
+    <section
+      id="alasState"
+      class="alas-shell-state"
+      data-kind="loading"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div class="alas-shell-state-card">
+        <div class="alas-shell-spinner" aria-hidden="true"></div>
+        <h1 id="stateTitle">正在加载 ALAS</h1>
+        <p id="stateDetail">正在连接 ALAS Runtime，请稍候。</p>
+        <div id="stateActions" class="alas-shell-state-actions" hidden>
+          <button id="retryFrame" class="alas-shell-button primary" type="button">重试</button>
+          <a class="alas-shell-button" href="/">返回 ScrcpyGate</a>
+        </div>
+      </div>
+    </section>
+    <noscript>
+      <section class="alas-shell-state is-visible" role="alert">
+        <div class="alas-shell-state-card">
+          <h1>无法显示加载状态</h1>
+          <p>请启用 JavaScript，或在新窗口中打开 ALAS 页面。</p>
+          <div class="alas-shell-state-actions">
+            <a class="alas-shell-button primary" href="{safe_src}" target="_blank" rel="noopener noreferrer">新窗口打开</a>
+            <a class="alas-shell-button" href="/">返回 ScrcpyGate</a>
+          </div>
+        </div>
+      </section>
+    </noscript>
+  </main>
 </body>
 </html>"""
 
@@ -1118,33 +1169,64 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     if (!rect || rect.width <= 0 || rect.height <= 0) return true;
     return rect.width <= Math.max(280, window.innerWidth * 0.45) && rect.height <= 140;
   }}
-  function maskTextNode(node) {{
-    if (!node || !node.nodeValue) return;
-    if (!adbEndpointPattern.test(node.nodeValue)) {{
+  function sanitizeSensitiveValue(value) {{
+    if (typeof value !== "string") return value;
+    if (!adbEndpointPattern.test(value)) {{
       adbEndpointPattern.lastIndex = 0;
-      return;
+      return value;
     }}
     adbEndpointPattern.lastIndex = 0;
-    node.nodeValue = node.nodeValue.replace(adbEndpointPattern, hiddenEndpointText);
+    var sanitized = value.replace(adbEndpointPattern, hiddenEndpointText);
     adbEndpointPattern.lastIndex = 0;
+    return sanitized;
   }}
-  function maskSensitiveText() {{
+  function maskTextNode(node) {{
+    if (!node || !node.nodeValue) return;
+    var sanitized = sanitizeSensitiveValue(node.nodeValue);
+    if (sanitized !== node.nodeValue) node.nodeValue = sanitized;
+  }}
+  function maskSensitiveField(field) {{
+    if (!field || !("value" in field) || typeof field.value !== "string") return;
+    var sanitized = sanitizeSensitiveValue(field.value);
+    if (sanitized !== field.value) field.value = sanitized;
+  }}
+  function installSensitiveValueGuard(prototype) {{
+    if (!prototype || !Object.getOwnPropertyDescriptor || !Object.defineProperty) return;
+    var descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (!descriptor || !descriptor.get || !descriptor.set || descriptor.set.scrcpyGateGuard) return;
+    var guardedSetter = function(value) {{
+      descriptor.set.call(this, sanitizeSensitiveValue(value));
+    }};
+    guardedSetter.scrcpyGateGuard = true;
+    try {{
+      Object.defineProperty(prototype, "value", {{
+        configurable: descriptor.configurable,
+        enumerable: descriptor.enumerable,
+        get: descriptor.get,
+        set: guardedSetter
+      }});
+    }} catch (err) {{
+      // Input/change listeners and mutation cleanup remain as fallbacks.
+    }}
+  }}
+  function maskSensitiveText(root) {{
+    if (!root) return;
+    if (root.nodeType === 3) {{
+      maskTextNode(root);
+      return;
+    }}
+    if (root.matches && root.matches("input,textarea")) maskSensitiveField(root);
     if (document.createTreeWalker) {{
-      var walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       var textNode = walker.nextNode();
       while (textNode) {{
         maskTextNode(textNode);
         textNode = walker.nextNode();
       }}
     }}
-    var fields = document.querySelectorAll("input,textarea");
-    for (var i = 0; i < fields.length; i += 1) {{
-      var field = fields[i];
-      if ("value" in field && typeof field.value === "string") {{
-        field.value = field.value.replace(adbEndpointPattern, hiddenEndpointText);
-        adbEndpointPattern.lastIndex = 0;
-      }}
-    }}
+    if (!root.querySelectorAll) return;
+    var fields = root.querySelectorAll("input,textarea");
+    for (var i = 0; i < fields.length; i += 1) maskSensitiveField(fields[i]);
   }}
   function blocksSensitiveEvent(event) {{
     var item = closestActionable(elementFromEvent(event));
@@ -1163,14 +1245,38 @@ def inject_bound_config_script(html: str, config_name: str) -> str:
     event.preventDefault();
     event.stopImmediatePropagation();
   }}, true);
-  function runScrcpyGateFilters() {{
-    maskSensitiveText();
+  function runScrcpyGateFilters(root) {{
+    maskSensitiveText(root || document.body || document.documentElement);
   }}
-  runScrcpyGateFilters();
-  window.setInterval(runScrcpyGateFilters, 1000);
+  installSensitiveValueGuard(window.HTMLInputElement && window.HTMLInputElement.prototype);
+  installSensitiveValueGuard(window.HTMLTextAreaElement && window.HTMLTextAreaElement.prototype);
+  runScrcpyGateFilters(document.body || document.documentElement);
   if (window.MutationObserver && document.documentElement) {{
-    new MutationObserver(runScrcpyGateFilters).observe(document.documentElement, {{childList:true, subtree:true, characterData:true}});
+    new MutationObserver(function(mutations) {{
+      for (var i = 0; i < mutations.length; i += 1) {{
+        var mutation = mutations[i];
+        if (mutation.type === "characterData") {{
+          maskTextNode(mutation.target);
+          continue;
+        }}
+        if (mutation.type === "attributes") {{
+          maskSensitiveField(mutation.target);
+          continue;
+        }}
+        for (var j = 0; j < mutation.addedNodes.length; j += 1) {{
+          runScrcpyGateFilters(mutation.addedNodes[j]);
+        }}
+      }}
+    }}).observe(document.documentElement, {{
+      childList:true,
+      subtree:true,
+      characterData:true,
+      attributes:true,
+      attributeFilter:["value"]
+    }});
   }}
+  document.addEventListener("input", function(event) {{ maskSensitiveField(event.target); }}, true);
+  document.addEventListener("change", function(event) {{ maskSensitiveField(event.target); }}, true);
 }})();
 </script>"""
     original = str(html or "")

@@ -68,6 +68,19 @@ class AuthRouteTests(unittest.TestCase):
         rows = self.storage.recent_audit(20)
         self.assertIn("login_rate_limited", [row["action"] for row in rows])
 
+    def test_failed_login_uses_chinese_error_and_preserves_only_username(self):
+        response = self.client.post(
+            "/login",
+            data={"username": "remember-me", "password": "never-render-this-password"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("用户名或密码错误。", response.text)
+        self.assertIn('value="remember-me"', response.text)
+        self.assertNotIn("never-render-this-password", response.text)
+        self.assertIn('id="loginError"', response.text)
+        self.assertIn('role="alert"', response.text)
+
     def test_login_rejects_null_origin_by_default(self):
         response = self.client.post(
             "/login",

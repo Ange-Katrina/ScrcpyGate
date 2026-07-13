@@ -7,6 +7,7 @@
   const busyState = new WeakMap();
   const layerTriggers = new WeakMap();
   const activeLayers = [];
+  const themeControls = [];
   const iconUrl = "/static/icons/lucide.svg?v=fe5209f7a3ec#";
 
   function readTheme() {
@@ -33,6 +34,7 @@
     document.querySelectorAll("[data-ui-theme-select]").forEach((select) => {
       if (select.value !== theme) select.value = theme;
     });
+    themeControls.forEach((control) => control.sync(theme));
   }
 
   function applyTheme(theme, persist) {
@@ -60,6 +62,148 @@
     use.setAttribute("href", iconUrl + name);
     svg.appendChild(use);
     return svg;
+  }
+
+  function closeThemeMenus(restoreFocus, except) {
+    themeControls.forEach((control) => {
+      if (control !== except && control.isOpen()) control.close(restoreFocus);
+    });
+  }
+
+  function enhanceThemeSelect(select, index) {
+    const wrapper = select.closest(".ui-theme-picker");
+    if (!wrapper || select.dataset.uiThemeEnhanced === "true") return null;
+
+    const trigger = document.createElement("button");
+    const triggerLabel = document.createElement("span");
+    const triggerArrow = document.createElement("span");
+    const menu = document.createElement("div");
+    const menuId = `uiThemeMenu-${select.id || index + 1}`;
+
+    select.dataset.uiThemeEnhanced = "true";
+    select.classList.add("ui-theme-native");
+    select.hidden = true;
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
+
+    trigger.type = "button";
+    trigger.className = "ui-theme-trigger";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", menuId);
+    triggerLabel.className = "ui-theme-trigger__label";
+    triggerArrow.className = "ui-theme-trigger__arrow";
+    triggerArrow.setAttribute("aria-hidden", "true");
+    trigger.append(triggerLabel, triggerArrow);
+
+    menu.id = menuId;
+    menu.className = "ui-theme-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "界面主题");
+    menu.hidden = true;
+
+    const items = Array.from(select.options).map((option) => {
+      const item = document.createElement("button");
+      const label = document.createElement("span");
+      item.type = "button";
+      item.className = "ui-theme-option";
+      item.dataset.themeValue = option.value;
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", "false");
+      item.tabIndex = -1;
+      label.textContent = option.textContent;
+      item.append(label, icon("check", "ui-icon ui-theme-option__check"));
+      item.addEventListener("click", () => {
+        applyTheme(option.value, true);
+        control.close(true);
+      });
+      menu.appendChild(item);
+      return item;
+    });
+
+    function selectedIndex() {
+      const selected = Math.max(0, items.findIndex((item) => item.dataset.themeValue === select.value));
+      return Math.min(selected, Math.max(0, items.length - 1));
+    }
+
+    function focusItem(itemIndex) {
+      if (!items.length) return;
+      items[(itemIndex + items.length) % items.length].focus({ preventScroll: true });
+    }
+
+    const control = {
+      sync(theme) {
+        if (select.value !== theme) select.value = theme;
+        const selectedOption = Array.from(select.options).find((option) => option.value === theme) || select.options[0];
+        const label = selectedOption ? selectedOption.textContent : "深色";
+        triggerLabel.textContent = label;
+        trigger.setAttribute("aria-label", `界面主题：${label}`);
+        items.forEach((item) => item.setAttribute("aria-checked", String(item.dataset.themeValue === theme)));
+      },
+      isOpen() {
+        return !menu.hidden;
+      },
+      open(itemIndex) {
+        closeThemeMenus(false, control);
+        menu.hidden = false;
+        wrapper.classList.add("is-open");
+        trigger.setAttribute("aria-expanded", "true");
+        window.requestAnimationFrame(() => focusItem(itemIndex === undefined ? selectedIndex() : itemIndex));
+      },
+      close(restoreFocus) {
+        menu.hidden = true;
+        wrapper.classList.remove("is-open");
+        trigger.setAttribute("aria-expanded", "false");
+        if (restoreFocus) trigger.focus({ preventScroll: true });
+      }
+    };
+
+    trigger.addEventListener("click", () => {
+      if (control.isOpen()) control.close(true);
+      else control.open(selectedIndex());
+    });
+    trigger.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End", "Escape"].includes(event.key)) return;
+      if (event.key === "Escape") {
+        if (!control.isOpen()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        control.close(true);
+        return;
+      }
+      event.preventDefault();
+      if (event.key === "Home" || event.key === "ArrowDown") control.open(0);
+      else control.open(items.length - 1);
+    });
+    menu.addEventListener("keydown", (event) => {
+      const current = items.indexOf(document.activeElement);
+      if (event.key === "Tab") {
+        control.close(false);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        control.close(true);
+        return;
+      }
+      if ((event.key === "Enter" || event.key === " ") && current >= 0) {
+        event.preventDefault();
+        items[current].click();
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "Home") focusItem(0);
+      else if (event.key === "End") focusItem(items.length - 1);
+      else focusItem((current < 0 ? selectedIndex() : current) + (event.key === "ArrowUp" ? -1 : 1));
+    });
+
+    wrapper.append(trigger, menu);
+    select.addEventListener("change", () => applyTheme(select.value, true));
+    themeControls.push(control);
+    control.sync(root.dataset.theme || readTheme());
+    return control;
   }
 
   function setBusy(element, busy, label) {
@@ -257,11 +401,10 @@
     syncThemeControls(root.dataset.theme || readTheme());
     updateThemeColor();
 
-    document.querySelectorAll("[data-ui-theme-select]").forEach((select) => {
-      select.addEventListener("change", () => applyTheme(select.value, true));
-    });
+    document.querySelectorAll("[data-ui-theme-select]").forEach(enhanceThemeSelect);
 
     document.addEventListener("click", (event) => {
+      if (!event.target.closest(".ui-theme-picker")) closeThemeMenus(false);
       const openDrawerButton = event.target.closest("[data-ui-drawer-open]");
       const closeDrawerButton = event.target.closest("[data-ui-drawer-close]");
       const openDialogButton = event.target.closest("[data-ui-dialog-open]");
@@ -273,6 +416,13 @@
     });
 
     document.addEventListener("keydown", (event) => {
+      const openThemeControl = themeControls.find((control) => control.isOpen());
+      if (event.key === "Escape" && openThemeControl) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openThemeControl.close(true);
+        return;
+      }
       if (event.key === "Escape" && topLayer()) {
         event.preventDefault();
         closeTopLayer();

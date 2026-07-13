@@ -7,9 +7,9 @@
   <title>ScrcpyGate 后台</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=84db3b8f15da">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
   <link rel="stylesheet" href="/static/css/admin.css?v=e34985c07f20">
-  <script src="/static/js/ui-core.js?v=523c6db5fdfe" defer></script>
+  <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
 <div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -41,7 +41,7 @@
         <span class="admin-user__avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
         <span><strong>{{ user.username }}</strong><small>管理员</small></span>
       </div>
-      <label class="ui-theme-picker" for="adminTheme">
+      <div class="ui-theme-picker" data-ui-theme-placement="top">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
         <span class="ui-sr-only">界面主题</span>
         <select id="adminTheme" data-ui-theme-select aria-label="界面主题">
@@ -49,7 +49,7 @@
           <option value="light">浅色</option>
           <option value="system">跟随系统</option>
         </select>
-      </label>
+      </div>
       <a class="admin-nav__link" href="/">返回投屏页</a>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

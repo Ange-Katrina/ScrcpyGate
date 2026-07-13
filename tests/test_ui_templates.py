@@ -92,7 +92,10 @@ class UiTemplateContractTests(unittest.TestCase):
 
     def test_template_ids_remain_unique_and_core_bindings_exist(self):
         required = {
-            "login.html": {"username", "password"},
+            "login.html": {
+                "loginTitle", "loginError", "loginForm", "username", "password",
+                "passwordToggle", "loginSubmit", "loginSubmitLabel", "loginSubmitStatus",
+            },
             "index.html": {
                 "sidebar", "roleChip", "adminLink", "toolBtn", "alasBtn", "accountBtn",
                 "sidebarCollapseBtn", "deviceSearch", "deviceFilterAll", "deviceFilterOnline",
@@ -183,8 +186,35 @@ class UiTemplateContractTests(unittest.TestCase):
         for primitive in (".ui-button", ".ui-toast", ".ui-drawer", ".ui-dialog", ".ui-empty", ".ui-skeleton"):
             self.assertIn(primitive, components)
 
+    def test_theme_picker_uses_accessible_self_hosted_popup(self):
+        core = self.read("static/js/ui-core.js")
+        components = self.read("static/css/ui-components.css")
+        for name in ("login.html", "index.html", "admin.html"):
+            with self.subTest(name=name):
+                template = self.read(f"templates/{name}")
+                self.assertIn('class="ui-theme-picker', template)
+                self.assertIn("data-ui-theme-select", template)
+                self.assertNotIn('<label class="ui-theme-picker', template)
+        for token in (
+            'trigger.setAttribute("aria-haspopup", "menu")',
+            'menu.setAttribute("role", "menu")',
+            'item.setAttribute("role", "menuitemradio")',
+            'item.setAttribute("aria-checked", "false")',
+            '"ArrowDown"',
+            '"ArrowUp"',
+            '"Enter"',
+            '"Escape"',
+            "closeThemeMenus(false)",
+            "event.stopPropagation()",
+            "event.stopImmediatePropagation()",
+        ):
+            self.assertIn(token, core)
+        for selector in (".ui-theme-trigger", ".ui-theme-menu", ".ui-theme-option", '.ui-theme-option[aria-checked="true"]', ".compact-theme-picker .ui-theme-trigger"):
+            self.assertIn(selector, components)
+        self.assertIn(".compact-theme-picker { width: 44px; }", components)
+
     def test_scripts_avoid_template_code_and_unsafe_html_sinks(self):
-        for name in ("mirror.js", "admin.js", "ui-core.js", "theme-init.js"):
+        for name in ("mirror.js", "admin.js", "login.js", "ui-core.js", "theme-init.js"):
             with self.subTest(name=name):
                 source = self.read(f"static/js/{name}")
                 self.assertNotIn("{{", source)
@@ -192,6 +222,19 @@ class UiTemplateContractTests(unittest.TestCase):
                 self.assertNotIn(".innerHTML", source)
                 self.assertNotIn("insertAdjacentHTML", source)
                 self.assertNotIn("document.write", source)
+
+    def test_login_page_has_accessible_password_and_submission_states(self):
+        template = self.read("templates/login.html")
+        script = self.read("static/js/login.js")
+        self.assertIn('aria-controls="password"', template)
+        self.assertIn('aria-pressed="false"', template)
+        self.assertIn('role="alert"', template)
+        self.assertIn('aria-live="polite"', template)
+        self.assertIn('value="{{ username', template)
+        self.assertIn('password.type = visible ? "text" : "password"', script)
+        self.assertIn('form.addEventListener("submit"', script)
+        self.assertIn("ScrcpyGateUI.setBusy", script)
+        self.assertIn('addEventListener("pageshow"', script)
 
     def test_lucide_sprite_and_attribution_are_complete(self):
         sprite_path = ROOT / "static/icons/lucide.svg"

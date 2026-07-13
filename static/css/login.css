@@ -9,12 +9,23 @@ body {
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: var(--ui-space-8) var(--ui-space-4);
+  padding: var(--ui-space-6) var(--ui-space-4);
   background: var(--ui-color-canvas);
 }
 
+.login-shell {
+  width: min(408px, 100%);
+  display: grid;
+  gap: var(--ui-space-3);
+}
+
+.login-toolbar {
+  min-height: 36px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .login-panel {
-  width: min(400px, 100%);
   padding: var(--ui-space-6);
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-radius-lg);
@@ -22,16 +33,29 @@ body {
   box-shadow: var(--ui-shadow-raised);
 }
 
-.login-panel h1 {
+.login-heading {
+  margin-bottom: var(--ui-space-5);
+}
+
+.login-kicker {
   margin: 0 0 var(--ui-space-2);
+  color: var(--ui-color-info);
+  font-size: 12px;
+  font-weight: var(--ui-weight-semibold);
+  letter-spacing: 0;
+}
+
+.login-panel h1 {
+  margin: 0;
   color: var(--ui-color-text);
-  font-size: 24px;
+  font-size: 26px;
   font-weight: var(--ui-weight-bold);
+  line-height: 1.2;
   letter-spacing: 0;
 }
 
 .login-intro {
-  margin: 0 0 var(--ui-space-5);
+  margin: var(--ui-space-2) 0 0;
   color: var(--ui-color-text-muted);
   line-height: 1.55;
 }
@@ -45,6 +69,48 @@ body {
   gap: var(--ui-space-2);
 }
 
+.login-form label {
+  font-weight: var(--ui-weight-medium);
+}
+
+.login-password-field {
+  position: relative;
+}
+
+.login-password-field .ui-input {
+  padding-right: 52px;
+}
+
+.login-password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-md);
+  background: transparent;
+  color: var(--ui-color-text-muted);
+  cursor: pointer;
+}
+
+.login-password-toggle:hover {
+  background: var(--ui-color-surface-hover);
+  color: var(--ui-color-text);
+}
+
+.login-password-toggle .password-icon-hide,
+.login-password-toggle[aria-pressed="true"] .password-icon-show {
+  display: none;
+}
+
+.login-password-toggle[aria-pressed="true"] .password-icon-hide {
+  display: block;
+}
+
 .login-submit {
   width: 100%;
   min-height: 44px;
@@ -53,7 +119,7 @@ body {
 
 .login-error {
   margin: 0 0 var(--ui-space-4);
-  padding: 10px var(--ui-space-3);
+  padding: var(--ui-space-3);
   border: 1px solid var(--ui-color-danger);
   border-radius: var(--ui-radius-md);
   background: var(--ui-color-danger-soft);
@@ -63,16 +129,54 @@ body {
 
 @media (max-width: 520px) {
   body {
-    align-items: center;
-    padding: calc(var(--ui-space-8) + env(safe-area-inset-top)) var(--ui-space-4) calc(var(--ui-space-8) + env(safe-area-inset-bottom));
+    padding: calc(var(--ui-space-4) + env(safe-area-inset-top)) max(var(--ui-space-4), env(safe-area-inset-right)) calc(var(--ui-space-4) + env(safe-area-inset-bottom)) max(var(--ui-space-4), env(safe-area-inset-left));
   }
 
   .login-panel {
     padding: var(--ui-space-5);
   }
 
-  .ui-theme-corner {
-    top: max(var(--ui-space-3), env(safe-area-inset-top));
-    right: max(var(--ui-space-3), env(safe-area-inset-right));
+  .login-password-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  .login-password-field .ui-input {
+    min-height: 44px;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  body {
+    place-items: start center;
+    padding-top: max(var(--ui-space-3), env(safe-area-inset-top));
+    padding-bottom: max(var(--ui-space-3), env(safe-area-inset-bottom));
+  }
+
+  .login-shell {
+    gap: var(--ui-space-2);
+  }
+
+  .login-panel {
+    padding: var(--ui-space-4) var(--ui-space-5);
+  }
+
+  .login-heading {
+    margin-bottom: var(--ui-space-3);
+  }
+
+  .login-intro {
+    margin-top: var(--ui-space-1);
+  }
+
+  .login-form {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--ui-space-3);
+  }
+
+  .login-error,
+  .login-submit,
+  #loginSubmitStatus {
+    grid-column: 1 / -1;
   }
 }
