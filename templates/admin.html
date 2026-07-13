@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=e34985c07f20">
+  <link rel="stylesheet" href="/static/css/admin.css?v=529481b27f05">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -160,47 +160,104 @@
       </section>
 
       <section id="alas" class="panel" aria-labelledby="adminTabAlas" tabindex="-1">
-        <div class="panel-heading"><div><p class="eyebrow">Automation</p><h2>ALAS 管理</h2><p>先确认运行状态，再调整连接、绑定与配置。</p></div></div>
-        <section class="workspace-section workspace-section--prominent" aria-labelledby="alasRuntimeTitle">
-          <div class="section-heading"><div><h3 id="alasRuntimeTitle">运行状态</h3><p>管理员操作也必须选择一个已绑定配置。</p></div><button id="reloadAlas" class="btn" type="button">刷新 ALAS</button></div>
-          <div class="form-grid">
-            <div class="col-6"><label for="alasOperateConfig">操作配置</label><select id="alasOperateConfig"></select></div>
-            <div class="col-6 status-field"><span class="field-label">当前状态</span><div id="alasStatus" class="chips" aria-live="polite"></div></div>
-            <div class="col-12 actions"><button id="toggleAlas" class="btn warn" type="button">启动/重启 ALAS</button></div>
+        <div class="panel-heading alas-page-heading">
+          <div><p class="eyebrow">Automation</p><h2>ALAS 管理</h2><p>每个 Runtime 配置独占归属一个用户；用户可以拥有并控制一个或多个配置。</p></div>
+          <div class="alas-heading-actions" aria-label="ALAS 页面操作">
+            <button id="reloadAlas" class="btn" type="button">刷新</button>
+            <a id="alasOpenCurrent" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开完整 ALAS 页面</a>
+            <button id="openAlasConnection" class="btn" type="button">连接设置</button>
           </div>
-          <p class="setting-note">没有绑定配置时不会使用兜底配置。</p>
+        </div>
+
+        <section class="alas-summary" aria-label="ALAS 授权摘要">
+          <div class="alas-summary__item"><span>Runtime</span><strong id="alasRuntimeSummary">加载中</strong><small id="alasRuntimeMeta">正在读取连接状态</small></div>
+          <div class="alas-summary__item"><span>配置总数</span><strong id="alasConfigCount">0</strong><small>Runtime 配置与归属记录</small></div>
+          <div class="alas-summary__item"><span>已分配用户</span><strong id="alasUserCount">0</strong><small>至少拥有一个配置</small></div>
+          <div class="alas-summary__item"><span>已归属配置</span><strong id="alasAssignmentCount">0</strong><small>独占归属到用户的配置</small></div>
         </section>
-        <section class="workspace-section" aria-labelledby="alasConnectionTitle">
-          <div class="section-heading"><div><h3 id="alasConnectionTitle">连接设置</h3><p>连接 Alas-Gyre Overlay Runtime，并安全保存访问凭据。</p></div><a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开完整 ALAS 页面</a></div>
-          <div class="form-grid">
-            <div class="col-6"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267"></div>
-            <div class="col-6"><label for="alasToken">访问 Token</label><input id="alasToken" type="password" autocomplete="new-password"></div>
-            <div class="col-12 actions"><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button></div>
+
+        <section class="alas-scope-guide" aria-labelledby="alasScopeGuideTitle">
+          <div class="alas-scope-guide__heading">
+            <p class="eyebrow">操作范围</p>
+            <h3 id="alasScopeGuideTitle">先分配配置归属，再操作 Runtime 配置</h3>
           </div>
-          <p class="setting-note">Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267。这里不再保存“默认配置”，普通用户实际操作完全以“用户 ALAS 配置绑定”为准，后续可扩展为“用户 + 设备 -&gt; ALAS 配置”。</p>
+          <div class="alas-scope-guide__grid">
+            <article class="alas-scope-card">
+              <span class="alas-scope-card__index" aria-hidden="true">A</span>
+              <div>
+                <span class="alas-scope-card__type">访问范围</span>
+                <h4>用户归属：管理谁拥有</h4>
+                <p>一个用户可以拥有多个配置，但每个配置只能独占归属一个用户，并设置运行、编辑与默认入口权限。</p>
+                <small>调整归属不会复制或修改 Runtime 中的配置内容。</small>
+              </div>
+            </article>
+            <article class="alas-scope-card alas-scope-card--runtime">
+              <span class="alas-scope-card__index" aria-hidden="true">B</span>
+              <div>
+                <span class="alas-scope-card__type">运行范围</span>
+                <h4>配置库：管理运行实例</h4>
+                <p>状态、启停和 JSON 编辑都会发送给 Runtime 中当前选中的同名配置，并显示它的唯一归属用户。</p>
+                <small>未分配配置仍可维护；已有归属时需先解除，才能分配给另一用户。</small>
+              </div>
+            </article>
+          </div>
         </section>
-        <section class="workspace-section" aria-labelledby="alasBindingsTitle">
-          <div class="section-heading"><div><h3 id="alasBindingsTitle">用户 ALAS 配置绑定</h3><p>普通用户前台只会操作自己的绑定配置。</p></div></div>
-          <div class="form-grid">
-            <div class="col-4"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
-            <div class="col-4"><label for="alasBindConfig">绑定配置名</label><input id="alasBindConfig" placeholder="例如 user-001 或 device-a"></div>
-            <div class="col-2"><label for="alasBindRun">运行</label><select id="alasBindRun"><option value="true">允许</option><option value="false">拒绝</option></select></div>
-            <div class="col-2"><label for="alasBindEnabled">绑定</label><select id="alasBindEnabled"><option value="true">启用</option><option value="false">取消</option></select></div>
-            <div class="col-12 actions"><button id="saveAlasBinding" class="btn primary" type="button">保存绑定</button></div>
+
+        <div class="alas-view-tabs" role="tablist" aria-label="ALAS 管理视图">
+          <button id="alasUsersTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="alasUsersView">用户与归属 <small>谁拥有</small></button>
+          <button id="alasConfigsTab" type="button" role="tab" aria-selected="false" aria-controls="alasConfigsView" tabindex="-1">配置库 <small>操作哪项</small></button>
+        </div>
+
+        <section id="alasUsersView" class="alas-view" role="tabpanel" aria-labelledby="alasUsersTab">
+          <p class="alas-view-explainer"><strong>这里管理配置的独占归属与权限。</strong>每个用户可拥有一项或多项配置；已有归属的配置不能直接分配给另一用户。</p>
+          <div class="alas-toolbar">
+            <div class="alas-search-field"><label for="alasUserSearch">搜索用户</label><input id="alasUserSearch" type="search" placeholder="用户名" autocomplete="off"></div>
+            <div><label for="alasUserFilter">分配状态</label><select id="alasUserFilter"><option value="all">全部用户</option><option value="assigned">已分配</option><option value="unassigned">未分配</option></select></div>
+            <button id="openAlasAssignment" class="btn primary" type="button">分配配置</button>
           </div>
-          <p class="setting-note">当前版本按用户绑定 ALAS 配置；后续扩展多设备时可演进为“用户 + 设备 -&gt; ALAS 配置”。前台不会暴露配置列表、配置内容和 Runtime Token。</p>
-          <div class="table-wrap spaced-top-14"><table class="responsive-table" data-table="alas-bindings"><thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">绑定配置</th><th scope="col">运行</th><th scope="col">操作</th></tr></thead><tbody id="alasBindRows"></tbody></table></div>
+          <div class="alas-master-detail">
+            <div class="alas-master-pane" aria-labelledby="alasUserListTitle">
+              <div class="alas-pane-heading"><h3 id="alasUserListTitle">用户</h3><span id="alasUserResultCount" class="chip">0 位</span></div>
+              <div id="alasUserList" class="alas-choice-list" role="listbox" aria-label="选择用户" aria-orientation="vertical"></div>
+            </div>
+            <section class="alas-detail-pane" aria-labelledby="alasSelectedUser">
+              <div class="alas-detail-heading">
+                <div><p class="eyebrow">归属用户</p><h3 id="alasSelectedUser">请选择用户</h3><p id="alasSelectedUserMeta">选择左侧用户后，管理他拥有的配置与操作权限。</p></div>
+                <button id="openAlasAssignmentDetail" class="btn primary" type="button">分配配置</button>
+              </div>
+              <div id="alasBindRows" class="alas-assignment-list" aria-live="polite"></div>
+            </section>
+          </div>
         </section>
-        <section class="workspace-section" aria-labelledby="alasConfigTitle">
-          <div class="section-heading"><div><h3 id="alasConfigTitle">绑定配置工具</h3><p>只维护已经绑定给用户的配置，不使用全局默认配置。</p></div></div>
-          <div class="form-grid">
-            <div class="col-5"><label for="configSource">维护配置</label><select id="configSource"></select></div>
-            <div class="col-5"><label for="configTarget">保存目标</label><input id="configTarget" readonly placeholder="选择维护配置后自动填充"></div>
-            <div class="col-2 form-action"><button id="loadConfig" class="btn" type="button">读取</button></div>
-            <div class="col-12"><label for="configEditor">配置 JSON</label><textarea id="configEditor" spellcheck="false" placeholder="选择已绑定配置后读取 JSON"></textarea></div>
-            <div class="col-12"><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div>
+
+        <section id="alasConfigsView" class="alas-view" role="tabpanel" aria-labelledby="alasConfigsTab" hidden>
+          <p class="alas-view-explainer alas-view-explainer--runtime"><strong>这里操作 Runtime 配置。</strong>选择后读取状态并显示唯一归属用户；未分配配置也可由管理员维护。</p>
+          <div class="alas-toolbar alas-toolbar--configs">
+            <div class="alas-search-field"><label for="alasConfigSearch">搜索配置</label><input id="alasConfigSearch" type="search" placeholder="配置名称" autocomplete="off"></div>
+            <p id="alasCatalogState" class="load-status" role="status" aria-live="polite">打开配置库后显示 Runtime 配置。</p>
           </div>
-          <p class="setting-note">配置名来自上方绑定表；保存时会写回同名配置。</p>
+          <div class="alas-master-detail alas-master-detail--configs">
+            <div class="alas-master-pane" aria-labelledby="alasConfigLibraryTitle">
+              <div class="alas-pane-heading"><h3 id="alasConfigLibraryTitle">Runtime 配置</h3><span id="alasConfigResultCount" class="chip">0 个</span></div>
+              <div id="alasConfigLibrary" class="alas-choice-list" role="listbox" aria-label="选择 ALAS 配置" aria-orientation="vertical"></div>
+            </div>
+            <section class="alas-detail-pane" aria-labelledby="alasCurrentConfigName">
+              <div class="alas-detail-heading">
+                <div><p class="eyebrow">当前操作目标</p><h3 id="alasCurrentConfigName">请选择配置</h3><p id="alasCurrentConfigMeta">从左侧选择要检查、启停或编辑的 Runtime 配置。</p></div>
+                <div id="alasStatus" class="chips" aria-live="polite"></div>
+              </div>
+              <p id="alasImpactNote" class="alas-impact-note">状态、启停和编辑只针对当前配置；归属区会显示唯一归属用户或未分配状态。</p>
+              <div class="alas-config-actions">
+                <button id="toggleAlas" class="btn warn" type="button">启动 ALAS</button>
+                <button id="openConfigEditor" class="btn" type="button">编辑配置 JSON</button>
+              </div>
+              <div class="alas-config-users">
+                <div class="alas-pane-heading"><h4>配置归属</h4><span id="alasCurrentUserCount" class="chip">未分配</span></div>
+                <div id="alasCurrentUsers" class="alas-user-pills" aria-live="polite"></div>
+              </div>
+            </section>
+          </div>
+          <select id="alasOperateConfig" hidden aria-hidden="true" tabindex="-1"></select>
         </section>
         <details class="help-details">
           <summary>ALAS 使用帮助</summary>
@@ -208,9 +265,9 @@
             <ol class="guide-list">
               <li>必须先安装并启动 <strong>Alas-Gyre 的 Overlay Runtime</strong>。只有 Overlay 正常运行后，ScrcpyGate 才能使用 ALAS 的启动、停止、重启功能。</li>
               <li>ScrcpyGate 只是代理控制入口，不会直接运行 ALAS，也不会替代 Overlay。普通用户前台只调用自己绑定配置的启动/停止/重启。</li>
-              <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code> 和访问 <code>Token</code>，然后在“用户 ALAS 配置绑定”中为每个用户绑定自己的配置名。</li>
+              <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code> 和访问 <code>Token</code>，然后在“用户授权”中为每个用户分配一个或多个配置。</li>
               <li>如果状态显示 token 未配置、连接失败或 ALAS control is disabled，先检查 Overlay 是否已启动、URL 是否能从服务器访问、Token 是否一致。</li>
-              <li>用户绑定配置后，只能操作绑定的单个配置；不会在前台暴露全部配置列表、配置内容和 Runtime Token。</li>
+              <li>用户只能看到已授权给自己的配置；配置内容、其他用户关系与 Runtime Token 不会暴露到普通用户前台。</li>
             </ol>
             <div class="guide-links"><a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">ALAS 官方仓库</a><a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">Alas-Gyre Overlay 仓库</a></div>
             <p class="muted">默认 Runtime 地址通常类似 <code>http://127.0.0.1:22267</code>。如果 ScrcpyGate 在 Docker 或另一台服务器上，需填写容器/服务器可访问的 Overlay 地址。</p>
@@ -258,6 +315,44 @@
   <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">取消</button><button id="saveUser" class="btn primary" type="button">保存用户</button></div>
 </aside>
 
+<div id="alasConnectionDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
+<aside id="alasConnectionDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasConnectionDrawerTitle" aria-describedby="alasConnectionDrawerContext" aria-hidden="true" inert>
+  <div class="drawer-heading"><div><p class="eyebrow">Runtime</p><h2 id="alasConnectionDrawerTitle">连接设置</h2><p id="alasConnectionDrawerContext" class="drawer-context">连接 Alas-Gyre Overlay Runtime</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="关闭 ALAS 连接设置"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div class="form-grid drawer-form">
+    <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
+    <div class="col-12"><label for="alasToken">访问 Token</label><input id="alasToken" type="password" placeholder="留空则保留现有 Token" autocomplete="new-password"></div>
+  </div>
+  <p class="muted drawer-note">Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267。Token 只保存在服务端，不会显示给普通用户。</p>
+  <div class="drawer-actions"><button id="cancelAlasConnection" class="btn" type="button">取消</button><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button></div>
+</aside>
+
+<div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
+<aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
+  <div class="drawer-heading"><div><p class="eyebrow">Config Ownership</p><h2 id="alasAssignmentDrawerTitle">分配配置归属</h2><p id="alasAssignmentDrawerContext" class="drawer-context">为用户分配一个 Runtime 配置</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="关闭配置归属"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div class="form-grid drawer-form">
+    <div class="col-12"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
+    <div class="col-12"><label for="alasBindConfig">归属配置</label><input id="alasBindConfig" list="alasConfigSuggestions" placeholder="优先选择未分配配置，或输入准确名称" autocomplete="off"><datalist id="alasConfigSuggestions"></datalist></div>
+    <div class="col-6"><label for="alasBindRun">运行权限</label><select id="alasBindRun"><option value="true">允许启动与停止</option><option value="false">仅查看状态</option></select></div>
+    <div class="col-6"><label for="alasBindEdit">编辑权限</label><select id="alasBindEdit"><option value="false">不允许编辑</option><option value="true">允许编辑配置</option></select></div>
+    <div class="col-12"><label for="alasBindDefault">该用户的默认入口</label><select id="alasBindDefault"><option value="keep">保持当前默认</option><option value="true">设为默认配置</option></select></div>
+    <input id="alasBindEnabled" type="hidden" value="true">
+  </div>
+  <p id="alasAssignmentOwnerHint" class="muted drawer-note alas-owner-note" data-state="idle" role="status">每个配置只能独占归属一个用户；一个用户仍可拥有多个配置。</p>
+  <div class="drawer-actions"><button id="cancelAlasAssignment" class="btn" type="button">取消</button><button id="saveAlasBinding" class="btn primary" type="button">保存归属与权限</button></div>
+</aside>
+
+<div id="alasConfigDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
+<aside id="alasConfigDrawer" class="ui-drawer admin-editor-drawer admin-editor-drawer--wide" role="dialog" aria-modal="true" aria-labelledby="alasConfigDrawerTitle" aria-describedby="alasConfigDrawerContext" aria-hidden="true" inert>
+  <div class="drawer-heading"><div><p class="eyebrow">Runtime Config</p><h2 id="alasConfigDrawerTitle">编辑配置</h2><p id="alasConfigDrawerContext" class="drawer-context">先从配置库选择一个 Runtime 配置</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="关闭配置编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div class="form-grid drawer-form">
+    <div class="col-6"><label for="configSource">读取来源</label><input id="configSource" readonly placeholder="当前配置"></div>
+    <div class="col-6"><label for="configTarget">保存目标</label><input id="configTarget" readonly placeholder="与当前配置相同"></div>
+    <div class="col-12"><label for="configEditor">配置 JSON</label><textarea id="configEditor" spellcheck="false" placeholder="读取后在此编辑 JSON"></textarea></div>
+  </div>
+  <p id="alasConfigDrawerImpact" class="muted drawer-note">保存会直接写回 Runtime 中的当前配置，并影响它的唯一归属用户。</p>
+  <div class="drawer-actions"><button id="cancelAlasConfig" class="btn" type="button">取消</button><button id="loadConfig" class="btn" type="button">重新读取</button><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div>
+</aside>
+
 <dialog id="confirmDialog" class="ui-dialog confirm-dialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
   <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#triangle-alert"></use></svg></div>
   <div><p class="eyebrow">需要确认</p><h2 id="confirmDialogTitle">确认危险操作</h2><p id="confirmDialogMessage">此操作可能无法撤销，请确认后继续。</p></div>
@@ -265,6 +360,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=2085b5520d2d" defer></script>
+<script src="/static/js/admin.js?v=ec644ca5276b" defer></script>
 </body>
 </html>

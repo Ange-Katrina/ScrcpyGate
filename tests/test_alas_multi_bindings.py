@@ -216,6 +216,86 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         remaining = [item for item in deleted.json()["assignments"] if item["username"] == "alice"]
         self.assertEqual([item["config_name"] for item in remaining], ["AliceArchive"])
 
+    def test_admin_rejects_existing_owner_without_transfer_and_allows_reassignment(self):
+        headers = self.login("admin", "admin")
+        self.storage.upsert_user("alice", "AlicePassword123", "user")
+        self.storage.upsert_user("bob", "BobPassword1234", "user")
+        self.bind("alice", "Exclusive", True, False)
+        self.bind("bob", "BobExisting", False, True)
+
+        conflict = self.client.put(
+            "/api/admin/alas/permissions",
+            headers=headers,
+            json={
+                "username": "bob",
+                "config_name": "Exclusive",
+                "enabled": True,
+                "can_run": True,
+                "can_edit": True,
+                "is_default": False,
+            },
+        )
+        legacy_conflict = self.client.put(
+            "/api/admin/alas/permissions",
+            headers=headers,
+            json={
+                "username": "bob",
+                "config_name": "Exclusive",
+                "enabled": True,
+                "can_run": True,
+                "can_edit": True,
+            },
+        )
+
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(legacy_conflict.status_code, 409)
+        self.assertEqual(
+            conflict.json()["detail"],
+            "配置“Exclusive”已归属用户“alice”，请先移除原归属再分配。",
+        )
+        self.assertEqual(self.storage.get_user_alas_binding("alice", "Exclusive")["username"], "alice")
+        self.assertIsNone(self.storage.get_user_alas_binding("bob", "Exclusive"))
+        self.assertEqual(self.storage.get_user_alas_config("bob")["config_name"], "BobExisting")
+
+        deleted = self.client.put(
+            "/api/admin/alas/permissions",
+            headers=headers,
+            json={"username": "alice", "config_name": "Exclusive", "enabled": False, "is_default": False},
+        )
+        reassigned = self.client.put(
+            "/api/admin/alas/permissions",
+            headers=headers,
+            json={
+                "username": "bob",
+                "config_name": "Exclusive",
+                "enabled": True,
+                "can_run": True,
+                "can_edit": False,
+                "is_default": True,
+            },
+        )
+
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(reassigned.status_code, 200)
+        self.assertEqual(self.storage.get_user_alas_binding("bob", "Exclusive")["username"], "bob")
+
+        self.assertEqual(
+            self.client.put(
+                "/api/admin/alas/permissions",
+                headers=headers,
+                json={"username": "alice", "config_name": "Foo", "enabled": True, "is_default": True},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(
+                "/api/admin/alas/permissions",
+                headers=headers,
+                json={"username": "bob", "config_name": "foo", "enabled": True, "is_default": False},
+            ).status_code,
+            200,
+        )
+
     def test_admin_legacy_permission_update_replaces_single_binding(self):
         headers = self.login("admin", "admin")
         self.storage.upsert_user("alice", "AlicePassword123", "user")

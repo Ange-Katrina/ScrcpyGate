@@ -52,6 +52,17 @@ DEFAULT_SETTINGS = {
 COMMON_WEAK_PASSWORDS = {"admin", "admin123", "password", "password123", "123456", "12345678", "qwerty123"}
 
 
+class AlasConfigOwnershipError(ValueError):
+    """Raised when an ALAS config is already assigned to another user."""
+
+    code = "alas_config_already_assigned"
+
+    def __init__(self, config_name: str, owner: str):
+        self.config_name = config_name
+        self.owner = owner
+        super().__init__(f'ALAS config "{config_name}" is already assigned to user "{owner}"')
+
+
 def now_ts() -> int:
     return int(time.time())
 
@@ -255,6 +266,28 @@ def _ensure_user_alas_default(conn: sqlite3.Connection, username: str) -> None:
     )
 
 
+def _deduplicate_alas_config_owners(conn: sqlite3.Connection) -> None:
+    """Keep one deterministic owner for each exact, case-sensitive config name."""
+    conn.execute(
+        """
+        DELETE FROM user_alas_configs
+        WHERE rowid IN (
+            SELECT candidate.rowid
+            FROM user_alas_configs candidate
+            JOIN user_alas_configs preferred
+              ON preferred.config_name = candidate.config_name
+             AND (
+                  preferred.updated_at > candidate.updated_at
+                  OR (
+                      preferred.updated_at = candidate.updated_at
+                      AND preferred.username < candidate.username
+                  )
+             )
+        )
+        """
+    )
+
+
 def _migrate_user_alas_configs(conn: sqlite3.Connection) -> None:
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -279,12 +312,17 @@ def _migrate_user_alas_configs(conn: sqlite3.Connection) -> None:
             )
             conn.execute("DROP TABLE user_alas_configs")
             conn.execute("ALTER TABLE user_alas_configs_new RENAME TO user_alas_configs")
+        _deduplicate_alas_config_owners(conn)
         usernames = conn.execute("SELECT DISTINCT username FROM user_alas_configs ORDER BY username").fetchall()
         for row in usernames:
             _ensure_user_alas_default(conn, row["username"])
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_alas_configs_one_default "
             "ON user_alas_configs(username) WHERE is_default=1"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_alas_configs_config_owner "
+            "ON user_alas_configs(config_name)"
         )
     except Exception:
         conn.rollback()
@@ -627,6 +665,20 @@ def _alas_binding_payload(row) -> dict | None:
     return payload
 
 
+def _alas_config_owner(conn: sqlite3.Connection, config_name: str) -> str | None:
+    row = conn.execute(
+        "SELECT username FROM user_alas_configs WHERE config_name=?",
+        (config_name,),
+    ).fetchone()
+    return row["username"] if row else None
+
+
+def _require_alas_config_available(conn: sqlite3.Connection, username: str, config_name: str) -> None:
+    owner = _alas_config_owner(conn, config_name)
+    if owner is not None and owner != username:
+        raise AlasConfigOwnershipError(config_name, owner)
+
+
 def get_user_alas_binding(username: str, config_name: str) -> dict | None:
     with db_connect() as conn:
         row = conn.execute(
@@ -709,6 +761,7 @@ def upsert_user_alas_binding(
         try:
             if not conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
                 raise ValueError("invalid_username")
+            _require_alas_config_available(conn, username, config_name)
             existing = conn.execute(
                 "SELECT is_default FROM user_alas_configs WHERE username=? AND config_name=?",
                 (username, config_name),
@@ -733,7 +786,10 @@ def upsert_user_alas_binding(
             )
             _ensure_user_alas_default(conn, username)
         except sqlite3.IntegrityError as exc:
+            owner = _alas_config_owner(conn, config_name)
             conn.rollback()
+            if owner is not None and owner != username:
+                raise AlasConfigOwnershipError(config_name, owner) from exc
             raise ValueError("invalid_alas_binding") from exc
         except Exception:
             conn.rollback()
@@ -783,19 +839,33 @@ def delete_user_alas_binding(username: str, config_name: str) -> None:
 def set_user_alas_config(username: str, config_name: str, can_run: bool, can_edit: bool) -> None:
     username = (username or "").strip()
     config_name = (config_name or "").strip()
-    if not username or not get_user(username):
+    if not username:
         raise ValueError("invalid_username")
     if not config_name:
         raise ValueError("invalid_config_name")
     with db_connect() as conn:
-        conn.execute("DELETE FROM user_alas_configs WHERE username=?", (username,))
-        conn.execute(
-            """
-            INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,is_default,updated_at)
-            VALUES(?,?,?,?,1,?)
-            """,
-            (username, config_name, 1 if can_run else 0, 1 if can_edit else 0, now_ts()),
-        )
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+                raise ValueError("invalid_username")
+            _require_alas_config_available(conn, username, config_name)
+            conn.execute("DELETE FROM user_alas_configs WHERE username=?", (username,))
+            conn.execute(
+                """
+                INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,is_default,updated_at)
+                VALUES(?,?,?,?,1,?)
+                """,
+                (username, config_name, 1 if can_run else 0, 1 if can_edit else 0, now_ts()),
+            )
+        except sqlite3.IntegrityError as exc:
+            owner = _alas_config_owner(conn, config_name)
+            conn.rollback()
+            if owner is not None and owner != username:
+                raise AlasConfigOwnershipError(config_name, owner) from exc
+            raise ValueError("invalid_alas_binding") from exc
+        except Exception:
+            conn.rollback()
+            raise
         conn.commit()
 
 

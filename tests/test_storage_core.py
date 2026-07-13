@@ -268,11 +268,9 @@ class StorageCoreTests(unittest.TestCase):
         storage = load_storage(self.tmp)
         storage.init_db()
         storage.upsert_user("alice", "AlicePassword123", "user")
-        storage.upsert_user("bob", "BobPassword1234", "user")
 
         storage.upsert_user_alas_binding("alice", "AliceMain", True, False)
         storage.upsert_user_alas_binding("alice", "AliceArchive", False, True)
-        storage.upsert_user_alas_binding("bob", "AliceMain", False, False)
 
         alice = storage.list_user_alas_bindings("alice")
         self.assertEqual([item["config_name"] for item in alice], ["AliceMain", "AliceArchive"])
@@ -281,7 +279,6 @@ class StorageCoreTests(unittest.TestCase):
         self.assertFalse(alice[0]["can_edit"])
         self.assertFalse(alice[1]["can_run"])
         self.assertTrue(alice[1]["can_edit"])
-        self.assertFalse(storage.get_user_alas_binding("bob", "AliceMain")["can_run"])
 
         storage.set_default_user_alas_config("alice", "AliceArchive")
         self.assertEqual(storage.get_user_alas_config("alice")["config_name"], "AliceArchive")
@@ -289,6 +286,67 @@ class StorageCoreTests(unittest.TestCase):
         promoted = storage.get_user_alas_config("alice")
         self.assertEqual(promoted["config_name"], "AliceMain")
         self.assertTrue(promoted["is_default"])
+
+    def test_alas_config_has_one_owner_and_can_be_reassigned_after_deletion(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
+        storage.upsert_user_alas_binding("alice", "Shared", True, False)
+        storage.upsert_user_alas_binding("bob", "BobExisting", False, True)
+
+        with self.assertRaises(storage.AlasConfigOwnershipError) as conflict:
+            storage.upsert_user_alas_binding("bob", "Shared", False, True)
+        self.assertEqual(conflict.exception.config_name, "Shared")
+        self.assertEqual(conflict.exception.owner, "alice")
+        self.assertIsNone(storage.get_user_alas_binding("bob", "Shared"))
+
+        with self.assertRaises(storage.AlasConfigOwnershipError):
+            storage.set_user_alas_config("bob", "Shared", True, True)
+        self.assertEqual(storage.get_user_alas_config("bob")["config_name"], "BobExisting")
+
+        storage.delete_user_alas_binding("alice", "Shared")
+        storage.upsert_user_alas_binding("bob", "Shared", True, True)
+        self.assertEqual(storage.get_user_alas_binding("bob", "Shared")["username"], "bob")
+
+        storage.upsert_user_alas_binding("alice", "Foo", True, False)
+        storage.upsert_user_alas_binding("bob", "foo", False, True)
+        self.assertEqual(storage.get_user_alas_binding("alice", "Foo")["username"], "alice")
+        self.assertEqual(storage.get_user_alas_binding("bob", "foo")["username"], "bob")
+
+    def test_concurrent_alas_assignment_has_exactly_one_owner(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
+        barrier = threading.Barrier(3)
+        results = {}
+
+        def assign(username):
+            barrier.wait()
+            try:
+                storage.upsert_user_alas_binding(username, "RaceConfig", True, False)
+                results[username] = "assigned"
+            except Exception as exc:  # capture the cross-thread result for assertions
+                results[username] = exc
+
+        threads = [
+            threading.Thread(target=assign, args=("alice",)),
+            threading.Thread(target=assign, args=("bob",)),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+
+        winners = [username for username, result in results.items() if result == "assigned"]
+        conflicts = [result for result in results.values() if isinstance(result, storage.AlasConfigOwnershipError)]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0].owner, winners[0])
+        bindings = [item for item in storage.list_user_alas_bindings() if item["config_name"] == "RaceConfig"]
+        self.assertEqual([item["username"] for item in bindings], winners)
 
     def test_user_alas_legacy_table_migrates_once_and_preserves_binding(self):
         storage = load_storage(self.tmp)
@@ -339,6 +397,41 @@ class StorageCoreTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='user_alas_configs_new'"
                 ).fetchone()
             )
+
+    def test_existing_duplicate_alas_owners_migrate_deterministically_and_repair_defaults(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
+        with sqlite3.connect(storage.DB_PATH) as conn:
+            conn.execute("DROP INDEX ux_user_alas_configs_config_owner")
+            conn.executemany(
+                """
+                INSERT INTO user_alas_configs(username,config_name,can_run,can_edit,is_default,updated_at)
+                VALUES(?,?,?,?,?,?)
+                """,
+                [
+                    ("alice", "SharedLegacy", 1, 0, 1, 100),
+                    ("alice", "AliceOther", 0, 1, 0, 400),
+                    ("alice", "TieConfig", 1, 0, 0, 300),
+                    ("bob", "SharedLegacy", 0, 1, 1, 200),
+                    ("bob", "BobOther", 1, 0, 0, 500),
+                    ("bob", "TieConfig", 0, 1, 0, 300),
+                ],
+            )
+
+        storage.init_db()
+        storage.init_db()
+
+        self.assertIsNone(storage.get_user_alas_binding("alice", "SharedLegacy"))
+        self.assertEqual(storage.get_user_alas_binding("bob", "SharedLegacy")["username"], "bob")
+        self.assertEqual(storage.get_user_alas_binding("alice", "TieConfig")["username"], "alice")
+        self.assertIsNone(storage.get_user_alas_binding("bob", "TieConfig"))
+        self.assertEqual(storage.get_user_alas_config("alice")["config_name"], "AliceOther")
+        self.assertEqual(storage.get_user_alas_config("bob")["config_name"], "SharedLegacy")
+        with sqlite3.connect(storage.DB_PATH) as conn:
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(user_alas_configs)")}
+        self.assertIn("ux_user_alas_configs_config_owner", indexes)
 
     def test_password_policy_is_enforced(self):
         storage = load_storage(self.tmp)

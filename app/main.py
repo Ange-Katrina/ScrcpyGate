@@ -1403,6 +1403,9 @@ async def admin_set_alas_permission(request: Request):
             storage.upsert_user_alas_binding(username, config_name, can_run, can_edit, is_default)
         else:
             storage.set_user_alas_config(username, config_name, can_run, can_edit)
+    except storage.AlasConfigOwnershipError as exc:
+        detail = f"配置“{exc.config_name}”已归属用户“{exc.owner}”，请先移除原归属再分配。"
+        raise HTTPException(status_code=409, detail=detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     storage.audit(admin["username"], "alas_binding_set", f"{username}:{config_name}:{can_run}:{can_edit}:{bool(is_default)}")

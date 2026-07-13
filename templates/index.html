@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=ee5358718d82">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=7a6ae302accc">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=4abd1c7fbd4d"></script>
@@ -208,19 +208,30 @@
 
   <section id="alasTools" class="tools drawer-panel alas-panel" aria-labelledby="alasToolsTitle">
     <h3 id="alasToolsTitle" class="tools-title">ALAS</h3>
+    <div class="alas-config-region">
+      <label id="alasConfigPicker" class="alas-config-picker" for="alasConfigSelect" hidden>
+        <span class="alas-config-label">操作配置</span>
+        <span class="alas-select-wrap">
+          <select id="alasConfigSelect" aria-describedby="alasConfigHint"></select>
+        </span>
+        <span id="alasConfigHint" class="alas-config-hint">这里只显示管理员授权给你的配置</span>
+      </label>
+      <div id="alasConfigState" class="alas-config-state" role="status" aria-live="polite">正在读取可用配置…</div>
+    </div>
     <div id="alasPanelStatus" class="chips" aria-live="polite"></div>
+    <div id="alasRuntimeState" class="alas-runtime-state" role="status" aria-live="polite"></div>
     <div class="actions panel-actions">
       <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
       <button id="alasReload" class="btn" type="button">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#refresh-cw"></use></svg>
         <span>刷新</span>
       </button>
-      <a class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
+      <a id="alasOpenLink" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#external-link"></use></svg>
         <span>打开 ALAS 页面</span>
       </a>
     </div>
-    <p class="quality-note">配置名由后台绑定决定；这里只提供启动、停止和重启，不显示或编辑配置内容。</p>
+    <p class="quality-note">每项配置的权限由管理员单独分配。切换后，运行状态、启停操作和打开页面都只针对当前配置。</p>
   </section>
 
   <section id="accountTools" class="tools drawer-panel" aria-labelledby="accountToolsTitle">
@@ -248,6 +259,6 @@
   </section>
 </aside>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=069c702626a7" defer></script>
+<script src="/static/js/mirror.js?v=2acc7f071ade" defer></script>
 </body>
 </html>

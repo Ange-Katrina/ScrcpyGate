@@ -2,10 +2,12 @@ const bootstrap = JSON.parse(document.getElementById("scrcpygate-bootstrap").tex
 const csrfToken = bootstrap.csrf_token;
 const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
 const SIDEBAR_COLLAPSED_KEY = 'scrcpygate:mirror:sidebar-collapsed';
+const ALAS_CONFIG_KEY_PREFIX = 'scrcpygate:alas:selected-config:';
 const MOBILE_SIDEBAR_QUERY = '(max-width: 960px)';
 const state = {
   user:bootstrap.user || null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
+  alasConfigs:[], alasConfigsLoaded:false, alasConfigsLoading:false, alasConfigsError:'', alasCatalogRevision:0, selectedAlasConfig:'', alasStatusLoading:false, alasStatusError:'', alasSwitching:false, alasStatusRefreshPending:false, alasStatusEpoch:0, alasOperationSeq:0,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
   playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, layoutFrame:null, renderFrame:null,
   idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false,
@@ -17,6 +19,23 @@ const resourceRequests = Object.create(null);
 const actionRequests = new Map();
 const mobileSidebarMedia = window.matchMedia ? window.matchMedia(MOBILE_SIDEBAR_QUERY) : {matches:false};
 const $ = (id) => document.getElementById(id);
+function alasConfigStorageKey(){
+  const username=String((state.user && state.user.username) || '').trim();
+  return username ? `${ALAS_CONFIG_KEY_PREFIX}${encodeURIComponent(username)}` : '';
+}
+function readStoredAlasConfig(){
+  const key=alasConfigStorageKey();
+  if (!key) return '';
+  try { return String(localStorage.getItem(key) || '').trim(); } catch (_) { return ''; }
+}
+function persistAlasConfig(configName){
+  const key=alasConfigStorageKey();
+  if (!key) return;
+  try {
+    if (configName) localStorage.setItem(key, configName);
+    else localStorage.removeItem(key);
+  } catch (_) {}
+}
 function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
 function getDeviceId(device){ return String((device && (device.device_id || device.id)) || '').trim(); }
 function currentDevice(){ return state.devices.find(d => getDeviceId(d) === state.selectedDeviceId) || null; }
@@ -58,8 +77,10 @@ async function runBusyAction(key, element, label, action){
     scheduleRender();
     throw error;
   } finally {
-    if (actionRequests.get(key) === request) actionRequests.delete(key);
+    const completed=actionRequests.get(key) === request;
+    if (completed) actionRequests.delete(key);
     setActionBusy(element, false);
+    if (key === 'alas' && completed) flushPendingAlasStatusRefresh();
     scheduleRender();
   }
 }
@@ -180,7 +201,7 @@ function socketLive(ws){
 const BUILTIN_PROFILE_LABELS = {smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'};
 const ADB_STATE_LABELS = {online:'在线', offline:'离线', unauthorized:'未授权', reconnecting:'重连中', unknown:'未知'};
 const STREAM_HEALTH_LABELS = {healthy:'正常', idle:'空闲', starting:'启动中', config:'等待配置', invalid_h264:'视频异常', adb_failed:'ADB 失败', failed:'失败', stopped:'已停止', unknown:'未知'};
-const ALAS_STATUS_LABELS = {running:'运行中', stopped:'已停止', error:'异常', unknown:'未知'};
+const ALAS_STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', disabled:'服务未启用', disconnected:'未连接', error:'异常', unavailable:'不可达', unbound:'未授权', invalid_config:'配置无效', unknown:'未知'};
 function labelFrom(map, value, fallback){
   const key = String(value || '').trim();
   return map[key] || fallback || key || '未知';
@@ -557,15 +578,100 @@ function render(){
   const roleChip=$('roleChip'); if (roleChip) roleChip.textContent = state.user && state.user.is_admin ? '管理员' : '普通用户';
   const adminLink=$('adminLink'); if (adminLink) adminLink.hidden = !(state.user && state.user.is_admin);
 }
+function currentAlasBinding(){
+  return state.alasConfigs.find(item=>item.config_name === state.selectedAlasConfig) || null;
+}
+function syncAlasConfigSelect(){
+  const select=$('alasConfigSelect');
+  if (!select) return;
+  const revision=String(state.alasCatalogRevision);
+  if (select.dataset.catalogRevision !== revision) {
+    const allowed=new Set(state.alasConfigs.map(item=>item.config_name));
+    const existing=new Map(Array.from(select.options).map(option=>[option.value, option]));
+    existing.forEach((option, value)=>{ if (!allowed.has(value)) option.remove(); });
+    state.alasConfigs.forEach(binding=>{
+      let option=existing.get(binding.config_name);
+      if (!option) {
+        option=document.createElement('option');
+        option.value=binding.config_name;
+      }
+      option.textContent=`${binding.config_name}${binding.is_default ? '（默认）' : ''}`;
+      select.appendChild(option);
+    });
+    select.dataset.catalogRevision=revision;
+  }
+  if (select.value !== state.selectedAlasConfig) select.value=state.selectedAlasConfig;
+  const disabled=actionBusy('alas');
+  if (select.disabled !== disabled) select.disabled=disabled;
+  const busyValue=state.alasStatusLoading ? 'true' : 'false';
+  if (select.getAttribute('aria-busy') !== busyValue) select.setAttribute('aria-busy', busyValue);
+}
+function setAlasPanelMessage(element, message, tone=''){
+  if (!element) return;
+  element.textContent=message;
+  if (tone) element.dataset.tone=tone;
+  else element.removeAttribute('data-tone');
+}
 function renderAlasPanel(){
-  const box=$('alasPanelStatus'); if(!box) return; box.textContent='';
-  const a=state.alas || {};
-  box.appendChild(chip(a.config ? `配置 ${a.config}` : '未绑定', a.config ? 'ok' : 'warn'));
-  box.appendChild(chip(alasStatusLabel(a.status), a.status === 'running' ? 'ok' : a.status === 'error' ? 'warn' : ''));
-  box.appendChild(chip(a.can_run ? '可运行' : '不可运行', a.can_run ? 'ok' : 'warn'));
-  if(a.error) box.appendChild(chip(a.error, 'danger'));
-  $('alasToggleRun').textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';
-  $('alasToggleRun').disabled = !a.can_run || actionBusy('alas');
+  const box=$('alasPanelStatus');
+  if(!box) return;
+  const binding=currentAlasBinding();
+  const a=state.alas && state.alas.config === state.selectedAlasConfig ? state.alas : {};
+  const picker=$('alasConfigPicker');
+  const configState=$('alasConfigState');
+  const runtimeState=$('alasRuntimeState');
+  const configCount=state.alasConfigs.length;
+  const showPicker=state.alasConfigsLoaded && !state.alasConfigsError && configCount > 1;
+  if (picker) picker.hidden=!showPicker;
+  syncAlasConfigSelect();
+  if (configState) {
+    configState.hidden=showPicker;
+    if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(configState, '正在读取可用配置…');
+    else if (state.alasConfigsError) setAlasPanelMessage(configState, '暂时无法读取授权配置', 'danger');
+    else if (!state.alasConfigsLoaded) setAlasPanelMessage(configState, '打开面板后加载你的 ALAS 配置');
+    else if (!configCount) setAlasPanelMessage(configState, '未授权任何 ALAS 配置', 'warn');
+    else setAlasPanelMessage(configState, `当前配置 · ${state.selectedAlasConfig}`, 'ok');
+  }
+
+  box.textContent='';
+  if (binding) {
+    box.appendChild(chip(binding.is_default ? '默认配置' : '已授权'));
+    box.appendChild(chip(binding.can_run ? '可启停' : '仅查看运行状态', binding.can_run ? 'ok' : 'warn'));
+    box.appendChild(chip(binding.can_edit ? '可编辑配置' : '不可编辑配置', binding.can_edit ? 'ok' : ''));
+  }
+  if (a.status) box.appendChild(chip(alasStatusLabel(a.status), a.status === 'running' ? 'ok' : a.status === 'error' ? 'danger' : ''));
+
+  if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(runtimeState, '正在加载配置权限…');
+  else if (state.alasConfigsError) setAlasPanelMessage(runtimeState, `配置列表加载失败：${state.alasConfigsError}`, 'danger');
+  else if (state.alasConfigsLoaded && !configCount) setAlasPanelMessage(runtimeState, '请联系管理员分配一个或多个 ALAS 配置。', 'warn');
+  else if (state.alasStatusRefreshPending) setAlasPanelMessage(runtimeState, `当前操作完成后将刷新 ${state.selectedAlasConfig} 的运行状态…`);
+  else if (state.alasStatusLoading) setAlasPanelMessage(runtimeState, state.alasSwitching ? `正在切换到 ${state.selectedAlasConfig}…` : `正在读取 ${state.selectedAlasConfig} 的运行状态…`);
+  else if (state.alasStatusError) setAlasPanelMessage(runtimeState, `ALAS Runtime 暂时不可达：${state.alasStatusError}`, 'danger');
+  else if (a.error) setAlasPanelMessage(runtimeState, `ALAS Runtime 返回异常：${a.error}`, 'danger');
+  else if (binding && a.status) setAlasPanelMessage(runtimeState, `${state.selectedAlasConfig} 的运行状态已同步`, 'ok');
+  else if (binding) setAlasPanelMessage(runtimeState, '尚未读取运行状态');
+  else setAlasPanelMessage(runtimeState, '');
+
+  const toggle=$('alasToggleRun');
+  if (toggle) {
+    toggle.textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';
+    toggle.disabled = !binding || !binding.can_run || state.alasStatusLoading || actionBusy('alas');
+    toggle.title = binding && !binding.can_run ? '管理员未授予此配置的启停权限' : '';
+  }
+  const reload=$('alasReload');
+  if (reload) reload.disabled=state.alasConfigsLoading || actionBusy('alas');
+  const openLink=$('alasOpenLink');
+  if (openLink) {
+    if (binding) {
+      openLink.href=`/alas/embed/?config=${encodeURIComponent(binding.config_name)}`;
+      openLink.removeAttribute('aria-disabled');
+      openLink.removeAttribute('tabindex');
+    } else {
+      openLink.removeAttribute('href');
+      openLink.setAttribute('aria-disabled','true');
+      openLink.setAttribute('tabindex','-1');
+    }
+  }
 }
 function renderAccountPanel(){
   const box=$('accountInfo'); if(!box) return; box.textContent='';
@@ -707,19 +813,189 @@ function loadVideoPreferences(force=false){
     scheduleRender();
   }, {force});
 }
-function loadAlasStatus(force=false){
-  return requestResource('alas', '/api/alas/status', data=>{
-    state.alas=data;
+function sameAlasCatalog(left, right){
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+  return left.every((item, index)=>{
+    const other=right[index] || {};
+    return item.config_name === other.config_name
+      && !!item.can_run === !!other.can_run
+      && !!item.can_edit === !!other.can_edit
+      && !!item.is_default === !!other.is_default;
+  });
+}
+function selectAuthorizedAlasConfig(configs, current, stored, serverDefault){
+  const allowed=new Set(configs.map(item=>item.config_name));
+  const bindingDefault=(configs.find(item=>item.is_default) || {}).config_name || '';
+  if (allowed.has(current)) return current;
+  if (allowed.has(stored)) return stored;
+  if (allowed.has(serverDefault)) return serverDefault;
+  if (allowed.has(bindingDefault)) return bindingDefault;
+  return (configs[0] || {}).config_name || '';
+}
+function mayStartAlasStatus(actionInFlight, allowDuringAction=false){
+  return !actionInFlight || !!allowDuringAction;
+}
+function isAlasStatusResponseCurrent(requestEpoch, currentEpoch, requestConfig, selectedConfig){
+  return requestEpoch === currentEpoch && requestConfig === selectedConfig;
+}
+function isAlasOperationCurrent(operationSeq, currentSeq, operationConfig, selectedConfig){
+  return operationSeq === currentSeq && operationConfig === selectedConfig;
+}
+function replaceAlasConfigCatalog(configs){
+  if (sameAlasCatalog(state.alasConfigs, configs)) return false;
+  state.alasConfigs=configs;
+  state.alasCatalogRevision+=1;
+  return true;
+}
+function invalidateAlasStatusRequest(){
+  state.alasStatusEpoch+=1;
+  invalidateResource('alasStatus');
+  return state.alasStatusEpoch;
+}
+function invalidateAlasOperation(){
+  state.alasOperationSeq+=1;
+  return state.alasOperationSeq;
+}
+function normalizeAlasConfigBindings(data){
+  const seen=new Set();
+  const configs=[];
+  (Array.isArray(data && data.configs) ? data.configs : []).forEach(item=>{
+    const configName=String((item && item.config_name) || '').trim();
+    if (!configName || seen.has(configName)) return;
+    seen.add(configName);
+    configs.push({
+      config_name:configName,
+      can_run:!!item.can_run,
+      can_edit:!!item.can_edit,
+      is_default:!!item.is_default
+    });
+  });
+  return configs;
+}
+function applyAlasConfigCatalog(data){
+  const configs=normalizeAlasConfigBindings(data);
+  const allowed=new Set(configs.map(item=>item.config_name));
+  const stored=readStoredAlasConfig();
+  const serverDefault=String((data && data.default_config) || '').trim();
+  if (allowed.has(serverDefault)) configs.forEach(item=>{ item.is_default=item.config_name === serverDefault; });
+  const selected=selectAuthorizedAlasConfig(configs, state.selectedAlasConfig, stored, serverDefault);
+  if (selected !== state.selectedAlasConfig) {
+    invalidateAlasStatusRequest();
+    invalidateAlasOperation();
+    state.alas=null;
+    state.alasStatusLoading=false;
+    state.alasStatusError='';
+    state.alasSwitching=false;
+    state.alasStatusRefreshPending=!!selected && actionBusy('alas');
+  }
+  replaceAlasConfigCatalog(configs);
+  state.selectedAlasConfig=selected;
+  state.alasConfigsLoaded=true;
+  state.alasConfigsLoading=false;
+  state.alasConfigsError='';
+  persistAlasConfig(selected);
+  scheduleRender();
+}
+function handleAlasCatalogFailure(error){
+  replaceAlasConfigCatalog([]);
+  state.alasConfigsLoaded=true;
+  state.alasConfigsLoading=false;
+  state.alasConfigsError=(error && error.message) || '无法读取配置权限';
+  state.selectedAlasConfig='';
+  state.alas=null;
+  state.alasStatusLoading=false;
+  state.alasStatusError='';
+  state.alasSwitching=false;
+  state.alasStatusRefreshPending=false;
+  invalidateAlasStatusRequest();
+  invalidateAlasOperation();
+  scheduleRender();
+}
+function flushPendingAlasStatusRefresh(){
+  if (!state.alasStatusRefreshPending || actionBusy('alas')) return null;
+  if (!state.selectedAlasConfig || state.alasConfigsError) {
+    state.alasStatusRefreshPending=false;
+    return null;
+  }
+  state.alasStatusRefreshPending=false;
+  return loadAlasStatus(true).catch(()=>null);
+}
+function loadAlasConfigs(force=false){
+  state.alasConfigsLoading=true;
+  state.alasConfigsError='';
+  scheduleRender();
+  const request=requestResource('alasConfigs', '/api/alas/configs', applyAlasConfigCatalog, {force});
+  return request.catch(error=>{
+    handleAlasCatalogFailure(error);
+    throw error;
+  });
+}
+function loadAlasStatus(force=false, options={}){
+  if (!mayStartAlasStatus(actionBusy('alas'), options.allowDuringAction)) return Promise.resolve(null);
+  const configName=state.selectedAlasConfig;
+  if (!configName) {
+    state.alas=null;
+    state.alasStatusLoading=false;
+    state.alasStatusError='';
+    scheduleRender();
+    return Promise.resolve(null);
+  }
+  state.alasStatusLoading=true;
+  state.alasStatusRefreshPending=false;
+  state.alasStatusError='';
+  scheduleRender();
+  const requestEpoch=state.alasStatusEpoch;
+  const url=`/api/alas/status?config=${encodeURIComponent(configName)}`;
+  const request=requestResource('alasStatus', url, data=>{
+    if (!isAlasStatusResponseCurrent(requestEpoch, state.alasStatusEpoch, configName, state.selectedAlasConfig)) return;
+    state.alas=Object.assign({}, data || {}, {config:(data && data.config) || configName});
+    state.alasStatusLoading=false;
+    state.alasStatusError='';
+    state.alasSwitching=false;
     scheduleRender();
   }, {force});
+  return request.catch(error=>{
+    if (isAlasStatusResponseCurrent(requestEpoch, state.alasStatusEpoch, configName, state.selectedAlasConfig)) {
+      state.alas=null;
+      state.alasStatusLoading=false;
+      state.alasStatusError=(error && error.message) || '无法获取运行状态';
+      state.alasSwitching=false;
+      scheduleRender();
+    }
+    throw error;
+  });
+}
+async function loadAlasPanel(force=false, options={}){
+  await loadAlasConfigs(force);
+  if (state.alasConfigsLoading || state.alasConfigsError || !state.selectedAlasConfig) return null;
+  return loadAlasStatus(force, options);
+}
+async function selectAlasConfig(configName){
+  const selected=String(configName || '').trim();
+  if (!state.alasConfigs.some(item=>item.config_name === selected) || selected === state.selectedAlasConfig) return;
+  invalidateAlasStatusRequest();
+  invalidateAlasOperation();
+  state.selectedAlasConfig=selected;
+  state.alas=null;
+  state.alasStatusError='';
+  state.alasStatusLoading=true;
+  state.alasSwitching=true;
+  persistAlasConfig(selected);
+  scheduleRender();
+  await loadAlasStatus(true);
 }
 async function loadAll(options={}){
   const force=!!options.force;
+  const alasRequests=[];
+  if (state.alasConfigsLoaded && !actionBusy('alas')) {
+    if (options.refreshAlasCatalog) alasRequests.push(loadAlasPanel(force));
+    else if (state.selectedAlasConfig) alasRequests.push(loadAlasStatus(force));
+  }
   const results=await Promise.allSettled([
     loadUser(force),
     loadDevices(force),
     loadVideoPreferences(force),
-    loadAlasStatus(force)
+    ...alasRequests
   ]);
   const failures=results.filter(result=>result.status === 'rejected');
   if (failures.length === results.length) throw failures[0].reason;
@@ -1150,8 +1426,40 @@ function waitForControlResponse(ws, kind){
   });
 }
 function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
-async function reloadAlas(){ await loadAlasStatus(true); }
-async function toggleAlas(){ invalidateResource('alas'); const result = await fetchJson('/api/alas/toggle', {method:'POST'}); if(result.ok === false) return show(result.error || 'ALAS 操作失败'); state.alas = result.alas || result; render(); show(state.alas.status === 'running' ? 'ALAS 已启动' : 'ALAS 状态已更新'); }
+async function reloadAlas(){ await loadAlasPanel(true, {allowDuringAction:true}); }
+async function toggleAlas(){
+  const binding=currentAlasBinding();
+  if (!binding) return;
+  if (!binding.can_run) {
+    state.alasStatusError='管理员未授予此配置的启停权限';
+    scheduleRender();
+    return;
+  }
+  const configName=binding.config_name;
+  const operationSeq=invalidateAlasOperation();
+  invalidateAlasStatusRequest();
+  state.alasStatusLoading=true;
+  state.alasStatusError='';
+  state.alasSwitching=false;
+  scheduleRender();
+  try {
+    const result=await fetchJson('/api/alas/toggle', {method:'POST', body:{config_name:configName}});
+    if(result.ok === false) throw new Error(result.error || 'ALAS 操作失败');
+    if (!isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) return;
+    invalidateAlasStatusRequest();
+    const status=result.alas || result;
+    state.alas=Object.assign({}, status, {config:(status && status.config) || configName});
+    state.alasStatusError='';
+    show(state.alas.status === 'running' ? `${configName} 已启动` : `${configName} 状态已更新`);
+  } catch (error) {
+    if (isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) state.alasStatusError=(error && error.message) || 'ALAS 操作失败';
+    throw error;
+  } finally {
+    if (isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) state.alasStatusLoading=false;
+    flushPendingAlasStatusRefresh();
+    scheduleRender();
+  }
+}
 function applyEventMessage(msg){
   if (msg.sessions) replaceRealtimeSessions(msg.sessions);
   const id=String(msg.device_id || '').trim();
@@ -1169,11 +1477,12 @@ function applyEventMessage(msg){
   scheduleRender();
 }
 function loadDynamicStatus(force=false){
-  return Promise.allSettled([
+  const requests=[
     loadDevices(force),
-    loadVideoPreferences(force),
-    loadAlasStatus(force)
-  ]);
+    loadVideoPreferences(force)
+  ];
+  if (state.alasConfigsLoaded && state.selectedAlasConfig && !actionBusy('alas')) requests.push(loadAlasStatus(force));
+  return Promise.allSettled(requests);
 }
 function clearRefreshTimers(){
   if (state.calibrationTimer) clearTimeout(state.calibrationTimer);
@@ -1373,7 +1682,7 @@ function initializeWorkspaceInteractions(){
   bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, '正在启动投屏', startMirror).catch(e=>show(e.message)));
   bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, '正在停止投屏', stopMirror).catch(e=>show(e.message)));
   bindClick('controlBtn', (_, button)=>runBusyAction('control', button, '正在更新控制权', toggleControl).catch(e=>show(e.message)));
-  bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, '正在刷新', ()=>loadAll({force:true})).catch(e=>show(e.message)));
+  bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, '正在刷新', ()=>loadAll({force:true, refreshAlasCatalog:true})).catch(e=>show(e.message)));
   bindClick('menuBtn', (_, button)=>openSidebar(button));
   bindClick('sidebarCollapseBtn', ()=>{ if (mobileSidebarMedia.matches) closeSidebar(); else setSidebarCollapsed(!state.sidebarCollapsed); });
   bindClick('sidebarBackdrop', ()=>closeSidebar());
@@ -1381,13 +1690,19 @@ function initializeWorkspaceInteractions(){
   bindClick('backBtn', ()=>sendKey(4));
   bindClick('homeBtn', ()=>sendKey(3));
   bindClick('recentBtn', ()=>sendKey(187));
-  bindClick('alasBtn', (_, button)=>toggleToolPanel('alasTools', button));
+  bindClick('alasBtn', (_, button)=>{
+    toggleToolPanel('alasTools', button);
+    const panel=$('alasTools');
+    if (panel && panel.classList.contains('open') && !state.alasConfigsLoaded) loadAlasPanel().catch(()=>{});
+  });
   bindClick('accountBtn', (_, button)=>toggleToolPanel('accountTools', button));
   bindClick('toolDrawerCloseBtn', ()=>closeToolDrawer());
   bindClick('toolDrawerBackdrop', ()=>closeToolDrawer());
   bindClick('changePasswordBtn', (_, button)=>runBusyAction('password', button, '正在修改密码', changePassword).catch(e=>show(e.message)));
-  bindClick('alasToggleRun', (_, button)=>runBusyAction('alas', button, '正在更新 ALAS', toggleAlas).catch(e=>show(e.message)));
-  bindClick('alasReload', (_, button)=>runBusyAction('alas', button, '正在刷新 ALAS', reloadAlas).catch(e=>show(e.message)));
+  bindClick('alasToggleRun', (_, button)=>runBusyAction('alas', button, '正在更新 ALAS', toggleAlas).catch(()=>{}));
+  bindClick('alasReload', (_, button)=>runBusyAction('alas', button, '正在刷新 ALAS', reloadAlas).catch(()=>{}));
+  const alasConfigSelect=$('alasConfigSelect');
+  if (alasConfigSelect) alasConfigSelect.onchange=event=>selectAlasConfig(event.currentTarget.value).catch(()=>{});
   const qualityStreamMode=$('qualityStreamMode');
   if (qualityStreamMode) qualityStreamMode.onchange=()=>runBusyAction('quality', qualityStreamMode, '正在应用画质', saveOrApplyQuality).catch(e=>show(e.message));
   const search=$('deviceSearch');

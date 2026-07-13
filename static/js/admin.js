@@ -7,6 +7,8 @@ const profileHints = {smooth:'\u6700\u4f4e\u4e0a\u884c\u8d1f\u8f7d', balanced:'\
 const customProfiles = {};
 const $ = (id)=>document.getElementById(id);
 const ADMIN_TAB_KEY = 'scrcpygate:admin:tab';
+const ALAS_USER_KEY = 'scrcpygate:admin:alas:user';
+const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
 const resourceRequests = new Map();
 const resourceSequences = new Map();
@@ -20,9 +22,24 @@ const TAB_RESOURCES = {
   logs:['logs','runtimeLogs']
 };
 let activeTab = 'overview';
+let activeAlasView = 'users';
+let selectedAlasUsername = localStorage.getItem(ALAS_USER_KEY) || '';
+let selectedAlasConfigName = localStorage.getItem(ALAS_CONFIG_KEY) || '';
+let editingAlasAssignment = null;
+let alasStatusLoading = false;
+let alasStatusLoadingConfig = '';
+let alasStatusSequence = 0;
+let alasToggleSequence = 0;
+let alasConfigDrawerTarget = '';
+let alasConfigReadSequence = 0;
+let alasConfigReadController = null;
+let alasPermissionsEpoch = 0;
+let alasPermissionsMutations = 0;
+let alasPermissionsNeedsRefresh = false;
 const adminNavMedia = window.matchMedia('(max-width: 920px)');
 let adminNavReturnFocus = null;
 let pendingConfirmation = null;
+const EDITOR_DRAWERS = ['device','user','alasConnection','alasAssignment','alasConfig'];
 
 function managedLayerOpen(){
   return !!document.querySelector('.admin-nav.is-open, .ui-drawer.is-open, dialog[open]');
@@ -126,6 +143,7 @@ function trapAdminNavFocus(event){
 function closeEditorDrawer(name){
   const drawer=$(`${name}Drawer`);
   if(!drawer) return;
+  if(name==='alasConfig') invalidateAlasConfigRead(true);
   if(window.ScrcpyGateUI) window.ScrcpyGateUI.closeDrawer(drawer);
   else {
     drawer.classList.remove('is-open');
@@ -139,7 +157,7 @@ function closeEditorDrawer(name){
 }
 function openEditorDrawer(name, trigger=document.activeElement){
   closeAdminNav(false);
-  ['device','user'].filter(other=>other!==name).forEach(closeEditorDrawer);
+  EDITOR_DRAWERS.filter(other=>other!==name).forEach(closeEditorDrawer);
   const drawer=$(`${name}Drawer`);
   if(!drawer) return;
   drawer.dataset.uiBackdrop=`${name}DrawerBackdrop`;
@@ -506,70 +524,509 @@ function renderPermissions(){
   });
   applyTableLabels(rows);
 }
-function alasBindings(){ return (state.alas && state.alas.bindings) || []; }
-function uniqueAlasConfigs(){ const source=(state.alas && state.alas.bound_configs) || alasBindings().map(b=>b.config_name); const seen=new Set(); const configs=[]; source.forEach(raw=>{ const name=String(raw || '').trim(); const key=name.toLowerCase(); if(name && !seen.has(key)){ seen.add(key); configs.push(name); } }); return configs; }
-function fillConfigSelect(sel, configs, selected){ clear(sel); if(!configs.length){ const o=document.createElement('option'); o.value=''; o.textContent='暂无绑定配置'; sel.appendChild(o); sel.disabled=true; return ''; } sel.disabled=false; configs.forEach(name=>{ const o=document.createElement('option'); o.value=name; o.textContent=name; sel.appendChild(o); }); const value=configs.includes(selected) ? selected : configs[0]; sel.value=value; return value; }
-function selectedAlasConfig(){ return (($('alasOperateConfig') && $('alasOperateConfig').value) || ($('configSource') && $('configSource').value) || uniqueAlasConfigs()[0] || '').trim(); }
-function syncAlasConfigSelectors(configName){ const config=(configName || selectedAlasConfig()).trim(); if($('alasOperateConfig') && config) $('alasOperateConfig').value=config; if($('configSource') && config) $('configSource').value=config; if($('configTarget')) $('configTarget').value=config; return config; }
-function currentAlasBinding(username){ return alasBindings().find(b=>b.username===username) || null; }
-function fillAlasBindingForm(binding){ const b=binding || currentAlasBinding($('alasBindUser').value) || {}; $('alasBindUser').value=b.username || $('alasBindUser').value || ''; $('alasBindConfig').value=b.config_name || ''; $('alasBindRun').value=b.can_run ? 'true' : 'false'; $('alasBindEnabled').value=b.config_name ? 'true' : 'false'; }
+function alasBindings(){ return (state.alas && Array.isArray(state.alas.bindings) && state.alas.bindings) || []; }
+function alasAssignments(){
+  const hasDetailedAssignments=!!(state.alas && Array.isArray(state.alas.assignments));
+  const source=hasDetailedAssignments ? state.alas.assignments : alasBindings();
+  return source.filter(item=>String(item && item.config_name || '').trim()).map(item=>({
+    ...item,
+    username:String(item.username || '').trim(),
+    config_name:String(item.config_name || '').trim(),
+    can_run:!!item.can_run,
+    can_edit:!!item.can_edit,
+    is_default:item.is_default === undefined ? !hasDetailedAssignments : !!item.is_default,
+    updated_at:Number(item.updated_at || 0)
+  }));
+}
+function alasCatalog(){ return (state.alas && state.alas.catalog) || {}; }
+function configKey(value){
+  const name=String(value || '').trim();
+  return name.endsWith('.json') ? name.slice(0,-5) : name;
+}
+function uniqueNames(values){
+  const seen=new Set();
+  const result=[];
+  values.forEach(raw=>{
+    const name=String(raw || '').trim();
+    const key=configKey(name);
+    if(name && !seen.has(key)){ seen.add(key); result.push(name); }
+  });
+  return result;
+}
+function uniqueAlasConfigs(){
+  const catalog=alasCatalog();
+  return uniqueNames([...(catalog.configs || []), ...(catalog.runtime_configs || []), ...((state.alas && state.alas.bound_configs) || []), ...alasAssignments().map(item=>item.config_name)]);
+}
+function runtimeAlasConfigs(){ return new Set((alasCatalog().runtime_configs || []).map(configKey)); }
+function alasUsers(){
+  const users=new Map();
+  [...state.users, ...alasBindings(), ...alasAssignments()].forEach(item=>{
+    const username=String(item && item.username || '').trim();
+    if(!username) return;
+    const previous=users.get(username) || {};
+    users.set(username, {username, role:item.role || previous.role || 'user'});
+  });
+  return [...users.values()].sort((a,b)=>a.username.localeCompare(b.username, 'zh-CN'));
+}
+function assignmentsForUser(username){ return alasAssignments().filter(item=>item.username===username); }
+function assignmentsForConfig(configName){ const key=configKey(configName); return alasAssignments().filter(item=>configKey(item.config_name)===key); }
+function configOwnership(configName){
+  const bindings=assignmentsForConfig(configName);
+  const owners=uniqueNames(bindings.map(item=>item.username));
+  return {bindings, owners, owner:owners.length===1?owners[0]:'', conflict:owners.length>1};
+}
+function selectedAlasConfig(){ return String(selectedAlasConfigName || uniqueAlasConfigs()[0] || '').trim(); }
+function syncAlasConfigSelectors(configName){
+  const config=String(configName || '').trim();
+  selectedAlasConfigName=config;
+  if(config) localStorage.setItem(ALAS_CONFIG_KEY, config);
+  else localStorage.removeItem(ALAS_CONFIG_KEY);
+  if($('alasOperateConfig')) $('alasOperateConfig').value=config;
+  if($('configSource')) $('configSource').value=config;
+  if($('configTarget')) $('configTarget').value=config;
+  return config;
+}
+function formatAlasUpdated(value){
+  const stamp=Number(value || 0);
+  return stamp ? new Date(stamp * 1000).toLocaleString([], {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '暂无记录';
+}
+function alasRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
+function emptyMessage(text){ const p=document.createElement('p'); p.className='alas-empty'; p.textContent=text; return p; }
+function emptyListboxOption(text){
+  const option=document.createElement('div');
+  option.className='alas-empty';
+  option.setAttribute('role','option');
+  option.setAttribute('aria-disabled','true');
+  option.setAttribute('aria-selected','false');
+  option.tabIndex=-1;
+  option.textContent=text;
+  return option;
+}
+function focusedAlasChoiceKey(list){
+  const active=document.activeElement;
+  return active && list && list.contains(active) && active.classList.contains('alas-choice') ? String(active.dataset.choiceKey || '') : '';
+}
+function restoreAlasChoiceFocus(list, key){
+  if(!list || !key) return;
+  requestAnimationFrame(()=>{
+    const choices=[...list.querySelectorAll('.alas-choice')];
+    const target=choices.find(choice=>choice.dataset.choiceKey===key) || choices.find(choice=>choice.classList.contains('is-selected')) || choices[0];
+    if(target) target.focus({preventScroll:true});
+  });
+}
+function focusAlasUserChoice(username){
+  const list=$('alasUserList');
+  if(!list || !username) return;
+  requestAnimationFrame(()=>{
+    const target=[...list.querySelectorAll('.alas-choice')].find(choice=>choice.dataset.choiceKey===username);
+    if(target) target.focus({preventScroll:true});
+    else if($('openAlasAssignmentDetail') && !$('openAlasAssignmentDetail').disabled) $('openAlasAssignmentDetail').focus({preventScroll:true});
+  });
+}
+function createAlasChoice({title, meta, badges, selected, tabStop=selected, onSelect}){
+  const button=document.createElement('button');
+  button.type='button';
+  button.className='alas-choice';
+  button.setAttribute('role','option');
+  button.setAttribute('aria-selected',String(selected));
+  button.tabIndex=tabStop?0:-1;
+  if(selected) button.classList.add('is-selected');
+  const main=document.createElement('span');
+  main.className='alas-choice__main';
+  const strong=document.createElement('strong');
+  strong.textContent=title;
+  const small=document.createElement('small');
+  small.textContent=meta;
+  main.append(strong,small);
+  const side=document.createElement('span');
+  side.className='alas-choice__badges';
+  (badges || []).forEach(label=>side.appendChild(chip(label)));
+  button.append(main,side);
+  button.dataset.choiceKey=title;
+  button.onclick=()=>onSelect(button);
+  button.onkeydown=event=>{
+    if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key)) return;
+    const list=button.parentElement;
+    const choices=list ? [...list.querySelectorAll('.alas-choice')] : [];
+    const index=choices.indexOf(button);
+    if(index<0 || !choices.length) return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?choices.length-1:event.key==='ArrowDown'?(index+1)%choices.length:(index-1+choices.length)%choices.length;
+    choices[next].focus({preventScroll:true});
+    choices[next].click();
+  };
+  return button;
+}
+function renderAlasSummary(){
+  const settings=(state.alas && state.alas.settings) || {};
+  const catalog=alasCatalog();
+  const configs=uniqueAlasConfigs();
+  const assignments=alasAssignments();
+  const authorizedUsers=new Set(assignments.map(item=>item.username));
+  const assignedConfigs=new Set(assignments.map(item=>configKey(item.config_name)));
+  const catalogError=String(catalog.error || (state.alas && state.alas.catalog_error) || '');
+  const detailsError=String(state.alas && state.alas.details_error || '');
+  let runtimeLabel='未配置';
+  let runtimeMeta='请打开连接设置配置 Runtime';
+  if(detailsError){
+    runtimeLabel='数据异常';
+    runtimeMeta=detailsError;
+  } else if(settings.enabled && settings.token_set){
+    runtimeLabel=catalogError?'连接异常':'已连接';
+    runtimeMeta=catalogError || `${(catalog.runtime_configs || []).length} 个 Runtime 配置`;
+  } else if(settings.enabled){
+    runtimeLabel='缺少 Token';
+    runtimeMeta='Runtime 已启用，访问 Token 未配置';
+  }
+  $('alasRuntimeSummary').textContent=runtimeLabel;
+  $('alasRuntimeSummary').className=catalogError || !settings.enabled || !settings.token_set ? 'is-warning' : 'is-ok';
+  $('alasRuntimeMeta').textContent=runtimeMeta;
+  $('alasConfigCount').textContent=String(configs.length);
+  $('alasUserCount').textContent=String(authorizedUsers.size);
+  $('alasAssignmentCount').textContent=String(assignedConfigs.size);
+}
+function renderAlasUserList(){
+  const list=$('alasUserList');
+  const focusedKey=focusedAlasChoiceKey(list);
+  const allUsers=alasUsers();
+  const query=String($('alasUserSearch').value || '').trim().toLocaleLowerCase();
+  const filter=$('alasUserFilter').value || 'all';
+  const visible=allUsers.filter(user=>{
+    const count=assignmentsForUser(user.username).length;
+    return (!query || user.username.toLocaleLowerCase().includes(query)) && (filter==='all' || (filter==='assigned' ? count>0 : count===0));
+  });
+  if(!allUsers.some(user=>user.username===selectedAlasUsername)) selectedAlasUsername=(allUsers[0] && allUsers[0].username) || '';
+  if(visible.length && !visible.some(user=>user.username===selectedAlasUsername)) selectedAlasUsername=visible[0].username;
+  if(selectedAlasUsername) localStorage.setItem(ALAS_USER_KEY, selectedAlasUsername);
+  clear(list);
+  visible.forEach(user=>{
+    const count=assignmentsForUser(user.username).length;
+    list.appendChild(createAlasChoice({
+      title:user.username,
+      meta:alasRoleLabel(user.role),
+      badges:[`${count} 个配置`],
+      selected:user.username===selectedAlasUsername,
+      onSelect:()=>{ selectedAlasUsername=user.username; localStorage.setItem(ALAS_USER_KEY,user.username); renderAlasUserList(); renderAlasUserDetail(); }
+    }));
+  });
+  if(!visible.length) list.appendChild(emptyListboxOption(query || filter!=='all' ? '没有符合筛选条件的用户。' : '暂无可分配用户。'));
+  $('alasUserResultCount').textContent=`${visible.length} 位`;
+  restoreAlasChoiceFocus(list,focusedKey);
+}
+function renderAlasUserDetail(){
+  const user=alasUsers().find(item=>item.username===selectedAlasUsername);
+  const rows=$('alasBindRows');
+  clear(rows);
+  $('openAlasAssignmentDetail').disabled=!user;
+  $('openAlasAssignment').disabled=!user;
+  if(!user){
+    $('alasSelectedUser').textContent='请选择用户';
+    $('alasSelectedUserMeta').textContent='选择左侧用户后管理其配置权限。';
+    rows.appendChild(emptyMessage('没有可显示的用户。'));
+    return;
+  }
+  const assignments=assignmentsForUser(user.username);
+  $('alasSelectedUser').textContent=user.username;
+  $('alasSelectedUserMeta').textContent=`${alasRoleLabel(user.role)} · 拥有 ${assignments.length} 个配置`;
+  assignments.forEach(binding=>{
+    const ownership=configOwnership(binding.config_name);
+    const otherOwners=ownership.owners.filter(owner=>owner!==binding.username);
+    const row=document.createElement('article');
+    row.className='alas-assignment-row';
+    const main=document.createElement('div');
+    main.className='alas-assignment-row__main';
+    const title=document.createElement('h4');
+    title.textContent=binding.config_name;
+    const badges=document.createElement('div');
+    badges.className='chips';
+    if(binding.is_default) badges.appendChild(chip('默认','ok'));
+    badges.appendChild(chip(binding.can_run?'可运行':'仅查看',binding.can_run?'ok':''));
+    badges.appendChild(chip(binding.can_edit?'可编辑':'不可编辑',binding.can_edit?'ok':''));
+    main.append(title,badges);
+    const meta=document.createElement('div');
+    meta.className='alas-assignment-row__meta';
+    const ownerText=document.createElement('span');
+    ownerText.textContent=otherOwners.length ? `归属冲突：还关联 ${otherOwners.join('、')}` : `独占归属：${binding.username}`;
+    const updated=document.createElement('span');
+    updated.textContent=`更新于 ${formatAlasUpdated(binding.updated_at)}`;
+    meta.append(ownerText,updated);
+    const actions=document.createElement('div');
+    actions.className='actions alas-assignment-row__actions';
+    actions.append(btn('编辑','',()=>openAlasAssignmentDrawer(binding,document.activeElement)), btn('移除','danger',()=>removeAlasBinding(binding)));
+    row.append(main,meta,actions);
+    rows.appendChild(row);
+  });
+  if(!assignments.length) rows.appendChild(emptyMessage('此用户尚未分配 ALAS 配置。点击“分配配置”开始。'));
+}
+function renderAlasConfigList(){
+  const list=$('alasConfigLibrary');
+  const focusedKey=focusedAlasChoiceKey(list);
+  const configs=uniqueAlasConfigs();
+  const runtime=runtimeAlasConfigs();
+  const query=String($('alasConfigSearch').value || '').trim().toLocaleLowerCase();
+  const visible=configs.filter(name=>!query || name.toLocaleLowerCase().includes(query));
+  const statusConfig=String(state.alas && state.alas.status && state.alas.status.config || '').trim();
+  if(!configs.some(name=>configKey(name)===configKey(selectedAlasConfigName))){
+    selectedAlasConfigName=configs.find(name=>configKey(name)===configKey(statusConfig)) || configs[0] || '';
+  }
+  syncAlasConfigSelectors(selectedAlasConfigName);
+  clear(list);
+  const selectedVisible=visible.some(name=>configKey(name)===configKey(selectedAlasConfigName));
+  visible.forEach((name,index)=>{
+    const ownership=configOwnership(name);
+    list.appendChild(createAlasChoice({
+      title:name,
+      meta:runtime.has(configKey(name))?'Runtime 中存在':'仅存在归属记录',
+      badges:[ownership.conflict?'归属冲突':ownership.owner?`归属 ${ownership.owner}`:'未分配'],
+      selected:configKey(name)===configKey(selectedAlasConfigName),
+      tabStop:configKey(name)===configKey(selectedAlasConfigName) || (!selectedVisible && index===0),
+      onSelect:()=>selectAlasConfig(name)
+    }));
+  });
+  if(!visible.length) list.appendChild(emptyListboxOption(query ? '没有匹配的配置。' : 'Runtime 与归属记录中都没有配置。'));
+  $('alasConfigResultCount').textContent=`${visible.length} 个`;
+  const catalog=alasCatalog();
+  const error=String(catalog.error || (state.alas && state.alas.catalog_error) || '');
+  $('alasCatalogState').textContent=error ? `Runtime 配置读取失败：${error}` : `Runtime ${(catalog.runtime_configs || []).length} 个 · 已归属 ${((state.alas && state.alas.bound_configs) || []).length} 个`;
+  $('alasCatalogState').dataset.state=error?'error':'ready';
+  restoreAlasChoiceFocus(list,focusedKey);
+}
+function renderAlasConfigDetail(){
+  const config=selectedAlasConfig();
+  const settings=(state.alas && state.alas.settings) || {};
+  const status=(state.alas && state.alas.status) || {};
+  const statusMatches=config && configKey(status.config)===configKey(config);
+  const ownership=config?configOwnership(config):{bindings:[],owners:[],owner:'',conflict:false};
+  const runtime=runtimeAlasConfigs();
+  const loadingCurrent=alasStatusLoading && configKey(alasStatusLoadingConfig)===configKey(config);
+  $('alasCurrentConfigName').textContent=config || '请选择配置';
+  $('alasCurrentConfigMeta').textContent=config ? `${runtime.has(configKey(config))?'Runtime 中存在':'仅存在归属记录'} · ${ownership.conflict?'归属冲突':ownership.owner?`归属 ${ownership.owner}`:'未分配'}` : '选择左侧配置后才会读取运行状态。';
+  const statusBox=$('alasStatus');
+  clear(statusBox);
+  if(!config) statusBox.appendChild(chip('无配置','warn'));
+  else if(loadingCurrent) statusBox.appendChild(chip('正在读取','warn'));
+  else if(!statusMatches) statusBox.appendChild(chip('状态未读取'));
+  else {
+    statusBox.appendChild(chip(statusLabel(status.status),status.status==='running'?'ok':status.status==='error'?'danger':''));
+    if(status.task) statusBox.appendChild(chip(String(status.task)));
+    if(status.error) statusBox.appendChild(chip(String(status.error),'danger'));
+  }
+  if(config && ownership.conflict) $('alasImpactNote').textContent=`检测到历史归属冲突：${config} 同时关联 ${ownership.owners.join('、')}。请先在“用户与归属”中移除多余关系。`;
+  else if(config && ownership.owner) $('alasImpactNote').textContent=`启停或编辑 ${config} 只影响归属用户 ${ownership.owner} 使用的此配置。`;
+  else if(config) $('alasImpactNote').textContent=`${config} 当前未分配给用户；管理员仍可检查或维护它。`;
+  else $('alasImpactNote').textContent='启停操作只会发送给当前配置。';
+  $('toggleAlas').disabled=!config || !settings.enabled || !settings.token_set || loadingCurrent;
+  $('toggleAlas').textContent=statusMatches && status.status==='running'?'停止 ALAS':statusMatches && status.status==='error'?'重启 ALAS':'启动 ALAS';
+  $('openConfigEditor').disabled=!config;
+  $('alasOpenCurrent').href=config?`/alas/embed/?config=${encodeURIComponent(config)}`:'/alas/embed/';
+  $('alasOpenCurrent').setAttribute('aria-disabled',String(!config));
+  $('alasOpenCurrent').tabIndex=config?0:-1;
+  const currentUsers=$('alasCurrentUsers');
+  clear(currentUsers);
+  if(ownership.owner){
+    const binding=ownership.bindings.find(item=>item.username===ownership.owner) || {};
+    const pill=document.createElement('span');
+    pill.className='alas-user-pill';
+    const label=document.createElement('strong');
+    label.textContent=binding.username;
+    const permissions=document.createElement('small');
+    permissions.textContent=[binding.is_default?'默认':null,binding.can_run?'可运行':'仅查看',binding.can_edit?'可编辑':null].filter(Boolean).join(' · ');
+    pill.append(label,permissions);
+    currentUsers.appendChild(pill);
+  } else if(ownership.conflict) currentUsers.appendChild(emptyMessage(`历史归属冲突：${ownership.owners.join('、')}。请先移除多余授权。`));
+  else currentUsers.appendChild(emptyMessage('此配置尚未分配给用户。'));
+  $('alasCurrentUserCount').textContent=ownership.conflict?'需处理':ownership.owner?'已分配':'未分配';
+}
+function renderAlasCompatibilityFields(){
+  const configs=uniqueAlasConfigs();
+  const select=$('alasOperateConfig');
+  clear(select);
+  configs.forEach(name=>{ const option=document.createElement('option'); option.value=name; option.textContent=name; select.appendChild(option); });
+  select.value=selectedAlasConfig();
+  const suggestions=$('alasConfigSuggestions');
+  clear(suggestions);
+  const suggestionConfigs=configs.filter(name=>{
+    const ownership=configOwnership(name);
+    return !ownership.owners.length || !!(editingAlasAssignment && configKey(editingAlasAssignment.config_name)===configKey(name));
+  });
+  suggestionConfigs.forEach(name=>{ const option=document.createElement('option'); option.value=name; suggestions.appendChild(option); });
+  const userSelect=$('alasBindUser');
+  const previous=userSelect.value || selectedAlasUsername;
+  fillSelect(userSelect,alasUsers().map(user=>({value:user.username,text:`${user.username} · ${alasRoleLabel(user.role)}`})),item=>item.text);
+  if([...userSelect.options].some(option=>option.value===previous)) userSelect.value=previous;
+  updateAlasAssignmentOwnerHint();
+}
 async function removeAlasBinding(binding){
   const confirmed=await confirmDanger({
-    title:'取消 ALAS 配置绑定',
-    message:`将取消用户 ${binding.username} 与配置 ${binding.config_name} 的绑定，用户将无法继续操作该配置。`,
-    confirmText:'取消绑定'
+    title:'移除配置归属',
+    message:`只解除 ${binding.config_name} 与用户 ${binding.username} 的归属关系；Runtime 中的配置内容不会被删除。`,
+    confirmText:'移除归属'
   });
   if(!confirmed) return;
-  await api('/api/admin/alas/permissions',{method:'PUT', body:{username:binding.username, enabled:false}});
-  show('ALAS 绑定已取消');
-  await refreshDomains('overview','alas');
+  await mutateAlasPermissions({username:binding.username, config_name:binding.config_name, enabled:false, is_default:false});
+  focusAlasUserChoice(binding.username);
+  show('配置归属已移除');
+  await refreshDomains('overview');
 }
 function renderAlas(){
   const alas=state.alas || {};
   const settings=alas.settings || {};
-  const status=alas.status || {};
-  const configs=uniqueAlasConfigs();
-  const selected=fillConfigSelect($('alasOperateConfig'), configs, status.config || selectedAlasConfig());
-  fillConfigSelect($('configSource'), configs, selected);
-  syncAlasConfigSelectors(selected);
+  if(!$('alasConnectionDrawer').classList.contains('is-open')){
+    $('alasBaseUrl').value=settings.base_url || '';
+    $('alasToken').value='';
+  }
+  renderAlasCompatibilityFields();
+  renderAlasSummary();
+  renderAlasUserList();
+  renderAlasUserDetail();
+  renderAlasConfigList();
+  renderAlasConfigDetail();
+}
+function activateAlasView(view, focus=false){
+  const next=view==='configs'?'configs':'users';
+  activeAlasView=next;
+  const usersSelected=next==='users';
+  $('alasUsersTab').classList.toggle('active',usersSelected);
+  $('alasUsersTab').setAttribute('aria-selected',String(usersSelected));
+  $('alasUsersTab').tabIndex=usersSelected?0:-1;
+  $('alasConfigsTab').classList.toggle('active',!usersSelected);
+  $('alasConfigsTab').setAttribute('aria-selected',String(!usersSelected));
+  $('alasConfigsTab').tabIndex=usersSelected?-1:0;
+  $('alasUsersView').hidden=!usersSelected;
+  $('alasConfigsView').hidden=usersSelected;
+  if(focus) (usersSelected?$('alasUsersTab'):$('alasConfigsTab')).focus({preventScroll:true});
+  if(!usersSelected){
+    renderAlasConfigList();
+    renderAlasConfigDetail();
+    loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置库加载失败')).finally(()=>{
+      const statusConfig=String(state.alas && state.alas.status && state.alas.status.config || '');
+      if(selectedAlasConfig() && configKey(statusConfig)!==configKey(selectedAlasConfig())) loadAlasStatusForConfig(selectedAlasConfig());
+    });
+  }
+}
+function selectAlasConfig(configName){
+  const config=String(configName || '').trim();
+  if(!config) return;
+  const changed=configKey(config)!==configKey(selectedAlasConfigName);
+  syncAlasConfigSelectors(config);
+  renderAlasConfigList();
+  renderAlasConfigDetail();
+  const statusConfig=String(state.alas && state.alas.status && state.alas.status.config || '');
+  if(changed || configKey(statusConfig)!==configKey(config)) loadAlasStatusForConfig(config);
+}
+async function loadAlasStatusForConfig(configName){
+  const config=String(configName || '').trim();
+  if(!config) return;
+  const sequence=++alasStatusSequence;
+  alasStatusLoading=true;
+  alasStatusLoadingConfig=config;
+  renderAlasConfigDetail();
+  try{
+    await requestResource('alasStatus',signal=>api(`/api/admin/alas?config=${encodeURIComponent(config)}`,{signal}),data=>{
+      const catalog=alasCatalog();
+      state.alas={...(state.alas || {}),...data,catalog};
+      renderAlasSummary();
+    },{force:true});
+  } catch(error){
+    if(!isAbortError(error)) show(`配置状态读取失败：${error.message}`);
+  } finally {
+    if(sequence===alasStatusSequence && configKey(config)===configKey(selectedAlasConfig()) && configKey(alasStatusLoadingConfig)===configKey(config)){
+      alasStatusLoading=false;
+      alasStatusLoadingConfig='';
+      renderAlasConfigDetail();
+    }
+  }
+}
+function openAlasConnectionDrawer(trigger=document.activeElement){
+  const settings=(state.alas && state.alas.settings) || {};
   $('alasBaseUrl').value=settings.base_url || '';
   $('alasToken').value='';
-
-  const statusBox=$('alasStatus');
-  clear(statusBox);
-  statusBox.appendChild(chip(settings.enabled?'启用':'未启用', settings.enabled?'ok':'warn'));
-  statusBox.appendChild(chip(settings.token_set?'Token 已配置':'Token 未配置', settings.token_set?'ok':'warn'));
-  if(!configs.length){
-    statusBox.appendChild(chip('未绑定配置','warn'));
+  $('alasConnectionDrawerContext').textContent=settings.enabled ? `当前 Runtime：${settings.base_url || '未填写地址'}` : '连接 Alas-Gyre Overlay Runtime';
+  openEditorDrawer('alasConnection',trigger);
+}
+function openAlasAssignmentDrawer(binding=null,trigger=document.activeElement){
+  const users=alasUsers();
+  if(!users.length) return show('请先创建用户');
+  editingAlasAssignment=binding ? {username:binding.username,config_name:binding.config_name} : null;
+  renderAlasCompatibilityFields();
+  const username=binding && binding.username || selectedAlasUsername || users[0].username;
+  $('alasBindUser').value=username;
+  $('alasBindUser').disabled=!!binding;
+  $('alasBindConfig').value=binding && binding.config_name || '';
+  $('alasBindConfig').readOnly=!!binding;
+  $('alasBindRun').value=binding && binding.can_run ? 'true' : 'false';
+  $('alasBindEdit').value=binding && binding.can_edit ? 'true' : 'false';
+  $('alasBindDefault').value='keep';
+  $('alasBindEnabled').value='true';
+  $('alasAssignmentDrawerTitle').textContent=binding?'编辑配置归属与权限':'分配配置归属';
+  $('alasAssignmentDrawerContext').textContent=binding ? `正在编辑 ${binding.username} → ${binding.config_name}` : `为 ${username} 分配一个独占配置`;
+  updateAlasAssignmentOwnerHint();
+  openEditorDrawer('alasAssignment',trigger);
+  loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置建议加载失败'));
+}
+function updateAlasAssignmentOwnerHint(){
+  const hint=$('alasAssignmentOwnerHint');
+  if(!hint) return;
+  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
+  const configName=editingAlasAssignment ? editingAlasAssignment.config_name : String($('alasBindConfig').value || '').trim();
+  let blocked=false;
+  let stateName='ready';
+  if(!configName){
+    hint.textContent='每个配置只能独占归属一个用户；一个用户仍可拥有多个配置。';
+    stateName='idle';
   } else {
-    statusBox.appendChild(chip(`配置 ${selected}`));
-    statusBox.appendChild(chip(statusLabel(status.status), status.status==='running'?'ok':status.status==='error'?'warn':''));
+    const ownership=configOwnership(configName);
+    const otherOwners=ownership.owners.filter(owner=>owner!==username);
+    blocked=otherOwners.length>0;
+    if(blocked){
+      hint.textContent=`${configName} 已归属 ${otherOwners.join('、')}，不能直接分配给 ${username || '当前用户'}。请先移除原归属。`;
+      stateName='error';
+    } else if(ownership.owner===username){
+      hint.textContent=`${configName} 已归属当前用户；保存将更新这条授权的权限。`;
+    } else {
+      hint.textContent=`${configName} 当前未分配，可以独占分配给 ${username || '所选用户'}。`;
+    }
   }
-  if(status.error) statusBox.appendChild(chip(status.error, 'danger'));
-  $('toggleAlas').textContent=status.status==='error'?'重启 ALAS':status.status==='running'?'停止 ALAS':'启动 ALAS';
-  $('toggleAlas').disabled=!configs.length;
-  $('loadConfig').disabled=!configs.length;
-  $('saveConfig').disabled=!configs.length;
-
-  fillSelect($('alasBindUser'), state.users.map(user=>({value:user.username, text:user.username})), value=>value.text);
-  if(!$('alasBindUser').value && state.users[0]) $('alasBindUser').value=state.users[0].username;
-  fillAlasBindingForm(currentAlasBinding($('alasBindUser').value));
-  const rows=$('alasBindRows');
-  clear(rows);
-  alasBindings().forEach(binding=>{
-    const tr=document.createElement('tr');
-    tr.append(td(binding.username), td(binding.role==='admin'?'管理员':'普通用户'), td(binding.config_name || '未绑定'), td(binding.can_run?'允许':'拒绝'));
-    const actions=document.createElement('td');
-    actions.className='actions';
-    actions.append(btn('编辑','',()=>{
-      fillAlasBindingForm(binding);
-      if(binding.config_name) syncAlasConfigSelectors(binding.config_name);
-    }));
-    if(binding.config_name) actions.append(btn('取消绑定','danger',()=>removeAlasBinding(binding)));
-    tr.appendChild(actions);
-    rows.appendChild(tr);
-  });
-  applyTableLabels(rows);
+  hint.dataset.state=stateName;
+  const saveButton=$('saveAlasBinding');
+  if(saveButton && !saveButton.classList.contains('busy')) saveButton.disabled=blocked;
+}
+function requireAlasSuccess(result, fallback='ALAS 操作失败'){
+  if(result && result.ok===false) throw new Error(result.error || result.detail || fallback);
+  return result || {};
+}
+function invalidateAlasConfigRead(clearTarget=false){
+  alasConfigReadSequence+=1;
+  if(alasConfigReadController) alasConfigReadController.abort();
+  alasConfigReadController=null;
+  if(clearTarget) alasConfigDrawerTarget='';
+}
+function beginAlasConfigRead(target){
+  invalidateAlasConfigRead(false);
+  const controller=new AbortController();
+  alasConfigReadController=controller;
+  return {target, sequence:alasConfigReadSequence, controller};
+}
+function alasConfigReadIsCurrent(request){
+  return !!request
+    && !request.controller.signal.aborted
+    && request.sequence===alasConfigReadSequence
+    && configKey(request.target)===configKey(alasConfigDrawerTarget)
+    && $('alasConfigDrawer').classList.contains('is-open');
+}
+function openAlasConfigDrawer(trigger=document.activeElement){
+  const config=selectedAlasConfig();
+  if(!config) return show('请先从配置库选择配置');
+  const ownership=configOwnership(config);
+  invalidateAlasConfigRead(false);
+  alasConfigDrawerTarget=config;
+  $('configSource').value=config;
+  $('configTarget').value=config;
+  $('alasConfigDrawerContext').textContent=`正在编辑 ${config}`;
+  $('alasConfigDrawerImpact').textContent=ownership.conflict ? `保存会直接写回 ${config}；当前存在历史归属冲突，请随后清理 ${ownership.owners.join('、')} 的多余关系。` : ownership.owner ? `保存会直接写回 ${config}，并影响归属用户 ${ownership.owner}。` : `保存会直接写回 ${config}。该配置当前未分配给用户。`;
+  $('configEditor').value='';
+  openEditorDrawer('alasConfig',trigger);
+  withBusy($('loadConfig'),loadConfig,'读取中').catch(error=>{ if(!isAbortError(error)) show(error.message); });
 }
 function renderRuntimeLogs(){
   $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n');
@@ -609,7 +1066,44 @@ function applyPermissions(data){
   renderOverview();
 }
 function applyVideo(data){ state.video=data; renderVideo(); }
-function applyAlas(data){ state.alas=data; renderAlas(); renderOverview(); }
+function applyAlas(data){
+  const previous=state.alas || {};
+  const catalog=previous.catalog;
+  state.alas={...previous,...(data || {})};
+  if(catalog && !state.alas.catalog) state.alas.catalog=catalog;
+  if(!resourceRequests.has('alasStatus')){
+    alasStatusLoading=false;
+    alasStatusLoadingConfig='';
+  }
+  renderAlas();
+  renderOverview();
+}
+function applyAlasDetails(data, statusSequence){
+  const payload={...(data || {})};
+  if(statusSequence!==alasStatusSequence){
+    if(state.alas && Object.prototype.hasOwnProperty.call(state.alas,'status')) payload.status=state.alas.status;
+    else delete payload.status;
+  }
+  applyAlas(payload);
+}
+function applyAlasPermissions(data, epoch=alasPermissionsEpoch){
+  if(epoch!==alasPermissionsEpoch) return false;
+  const previous=state.alas || {};
+  state.alas={
+    ...previous,
+    bindings:Array.isArray(data && data.bindings) ? data.bindings : (previous.bindings || []),
+    assignments:Array.isArray(data && data.assignments) ? data.assignments : (previous.assignments || [])
+  };
+  if(data && Array.isArray(data.users)) state.users=data.users;
+  loadedResources.add('alas');
+  renderAlas();
+  renderOverview();
+  return true;
+}
+function applyAlasCatalog(data){
+  state.alas={...(state.alas || {}),catalog:{...(data || {}),loaded:true},catalog_error:''};
+  renderAlas();
+}
 function applyLogs(data){
   state.logs=data.logs || [];
   renderAuditLogs();
@@ -625,10 +1119,75 @@ function loadDevices(options={}){ return requestResource('devices', signal=>api(
 function loadUsers(options={}){ return requestResource('users', signal=>api('/api/admin/users',{signal}), applyUsers, options); }
 function loadPermissions(options={}){ return requestResource('permissions', signal=>api('/api/admin/permissions',{signal}), applyPermissions, options); }
 function loadVideo(options={}){ return requestResource('video', signal=>api('/api/admin/video',{signal}), applyVideo, options); }
-function loadAlas(options={}){
+function loadAlasPermissions(options={}){
+  const epoch=alasPermissionsEpoch;
+  return requestResource('alasPermissions',signal=>api('/api/admin/alas/permissions',{signal}),data=>{
+    if(alasPermissionsMutations || epoch!==alasPermissionsEpoch) return;
+    applyAlasPermissions(data,epoch);
+  },options);
+}
+
+function beginAlasPermissionsMutation(){
+  alasPermissionsMutations+=1;
+  alasPermissionsEpoch+=1;
+  markResourceStale('alasPermissions');
+  return alasPermissionsEpoch;
+}
+
+async function finishAlasPermissionsMutation(epoch, result, succeeded){
+  alasPermissionsMutations=Math.max(0,alasPermissionsMutations-1);
+  if(succeeded && epoch===alasPermissionsEpoch){
+    markResourceStale('alasPermissions');
+    applyAlasPermissions(result,epoch);
+  } else if(epoch!==alasPermissionsEpoch){
+    alasPermissionsNeedsRefresh=true;
+  }
+  if(!alasPermissionsMutations && alasPermissionsNeedsRefresh){
+    alasPermissionsNeedsRefresh=false;
+    try{ await loadAlasPermissions({force:true}); }
+    catch(error){ reportRequestError(error,'ALAS 归属刷新失败'); }
+  }
+}
+
+async function mutateAlasPermissions(body){
+  const epoch=beginAlasPermissionsMutation();
+  try{
+    const result=await api('/api/admin/alas/permissions',{method:'PUT',body});
+    await finishAlasPermissionsMutation(epoch,result,true);
+    return result;
+  } catch(error){
+    await finishAlasPermissionsMutation(epoch,null,false);
+    throw error;
+  }
+}
+function loadAlasDetails(options={}){
+  markResourceStale('alasStatus');
+  alasStatusLoading=false;
+  alasStatusLoadingConfig='';
+  const statusSequence=alasStatusSequence;
   const config=String(options.config === undefined ? selectedAlasConfig() : options.config || '').trim();
   const url='/api/admin/alas' + (config ? `?config=${encodeURIComponent(config)}` : '');
-  return requestResource('alas', signal=>api(url,{signal}), applyAlas, options);
+  return requestResource('alasDetails',signal=>api(url,{signal}),data=>applyAlasDetails(data,statusSequence),options);
+}
+async function loadAlas(options={}){
+  const results=await Promise.allSettled([loadAlasPermissions(options),loadAlasDetails(options)]);
+  if(results.every(result=>result.status==='rejected')) throw results[0].reason;
+  state.alas={
+    ...(state.alas || {}),
+    details_error:results[1].status==='rejected' ? String(results[1].reason && results[1].reason.message || 'ALAS 数据读取失败') : ''
+  };
+  loadedResources.add('alas');
+  renderAlas();
+  return state.alas;
+}
+function loadAlasCatalog(options={}){
+  return requestResource('alasCatalog',signal=>api('/api/admin/alas/configs',{signal}),applyAlasCatalog,options).catch(error=>{
+    if(!isAbortError(error)){
+      state.alas={...(state.alas || {}),catalog_error:String(error && error.message || '配置库读取失败')};
+      renderAlas();
+    }
+    throw error;
+  });
 }
 function loadLogs(options={}){
   setLogLoadState('logs','loading','正在加载审计日志…');
@@ -714,12 +1273,83 @@ async function savePermission(){ await api('/api/admin/permissions',{method:'PUT
 function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=Number(input.value); }); return presets; }
 function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:Number($('customProfileBitrate').value || 900000), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
 async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
-async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); show('ALAS 设置已保存'); await refreshDomains('overview','alas'); }
-async function reloadAlas(){ await loadAlas({force:true}); }
-async function toggleAlas(){ const config=selectedAlasConfig(); if(!config) return show('请先为用户绑定 ALAS 配置'); await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}); show('ALAS 状态已更新'); await refreshDomains('overview','alas'); }
-async function loadConfig(){ const config=selectedAlasConfig(); if(!config) return show('请先选择绑定配置'); const data=await api(`/api/admin/alas/config?config=${encodeURIComponent(config)}`); syncAlasConfigSelectors(data.config || config); $('configEditor').value=JSON.stringify(data.data || {}, null, 2); show('绑定配置已读取'); }
-async function saveConfig(){ const config=selectedAlasConfig(); if(!config) return show('请先选择绑定配置'); let data; try{ data=JSON.parse($('configEditor').value); }catch(e){ show('JSON 格式错误'); return; } await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}}); show('配置已保存'); await refreshDomains('alas'); }
-async function saveAlasBinding(){ await api('/api/admin/alas/permissions',{method:'PUT', body:{username:$('alasBindUser').value, config_name:$('alasBindConfig').value, enabled:$('alasBindEnabled').value==='true', can_run:$('alasBindRun').value==='true', can_edit:false}}); show('ALAS 绑定已保存'); await refreshDomains('overview','alas'); }
+async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','alas'); }
+async function reloadAlas(){
+  const requests=[loadAlas({force:true})];
+  if(activeAlasView==='configs') requests.push(loadAlasCatalog({force:true}));
+  const results=await Promise.allSettled(requests);
+  if(results.every(result=>result.status==='rejected')) throw results[0].reason;
+  return results;
+}
+async function toggleAlas(){
+  const config=selectedAlasConfig();
+  if(!config) return show('请先从配置库选择配置');
+  const sequence=++alasToggleSequence;
+  const result=requireAlasSuccess(await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}),'ALAS 启停失败');
+  if(sequence!==alasToggleSequence) return;
+  const current=selectedAlasConfig();
+  show(configKey(current)===configKey(config) ? `${config} 状态已更新` : `${config} 操作已完成；当前查看 ${current || '其他配置'}`);
+  const statusRefresh=configKey(current)===configKey(config) ? loadAlasStatusForConfig(config) : Promise.resolve();
+  await Promise.allSettled([statusRefresh,refreshDomains('overview')]);
+  return result;
+}
+async function loadConfig(){
+  const config=alasConfigDrawerTarget;
+  if(!config) throw new Error('配置编辑器没有固定目标，请重新打开');
+  const request=beginAlasConfigRead(config);
+  try{
+    const data=requireAlasSuccess(await api(`/api/admin/alas/config?config=${encodeURIComponent(config)}`,{signal:request.controller.signal}),'配置读取失败');
+    if(!alasConfigReadIsCurrent(request)) return;
+    $('configEditor').value=JSON.stringify(data.data || {}, null, 2);
+    show(`${config} 配置已读取`);
+    return data;
+  } finally {
+    if(alasConfigReadController===request.controller) alasConfigReadController=null;
+  }
+}
+async function saveConfig(){
+  const config=alasConfigDrawerTarget;
+  if(!config) return show('配置编辑器没有固定目标，请重新打开');
+  let data;
+  try{ data=JSON.parse($('configEditor').value); }
+  catch(e){ show('JSON 格式错误，请检查后再保存'); return; }
+  const request=beginAlasConfigRead(config);
+  try{
+    const result=requireAlasSuccess(await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}, signal:request.controller.signal}),'配置保存失败');
+    if(!alasConfigReadIsCurrent(request)) return;
+    closeEditorDrawer('alasConfig');
+    show(`${config} 配置已保存`);
+    await refreshDomains('alas');
+    return result;
+  } finally {
+    if(alasConfigReadController===request.controller) alasConfigReadController=null;
+  }
+}
+async function saveAlasBinding(){
+  const wasEditing=!!editingAlasAssignment;
+  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
+  const configName=configKey(editingAlasAssignment ? editingAlasAssignment.config_name : $('alasBindConfig').value);
+  if(!username) return show('请选择用户');
+  if(!configName) return show('请输入或选择配置名称');
+  const otherOwners=configOwnership(configName).owners.filter(owner=>owner!==username);
+  if(otherOwners.length) return show(`${configName} 已归属 ${otherOwners.join('、')}；请先移除原归属后再分配`);
+  const payload={
+    username,
+    config_name:configName,
+    enabled:true,
+    can_run:$('alasBindRun').value==='true',
+    can_edit:$('alasBindEdit').value==='true',
+    is_default:$('alasBindDefault').value==='true' ? true : null
+  };
+  await mutateAlasPermissions(payload);
+  selectedAlasUsername=username;
+  localStorage.setItem(ALAS_USER_KEY,username);
+  editingAlasAssignment=null;
+  closeEditorDrawer('alasAssignment');
+  if(wasEditing) focusAlasUserChoice(username);
+  show(`已保存 ${username} → ${configName} 的归属与权限`);
+  await refreshDomains('overview');
+}
 function activateTab(tabId, save=true, focusPanel=false){
   const target=$(tabId) ? tabId : 'overview';
   activeTab=target;
@@ -792,7 +1422,7 @@ function initializeAdminNavigation(){
   syncAdminNavMode();
 }
 function initializeEditorDrawers(){
-  ['device','user'].forEach(name=>{
+  EDITOR_DRAWERS.forEach(name=>{
     const drawer=$(`${name}Drawer`);
     const backdrop=$(`${name}DrawerBackdrop`);
     drawer.dataset.uiBackdrop=`${name}DrawerBackdrop`;
@@ -806,6 +1436,38 @@ function initializeEditorDrawers(){
   $('cancelDeviceForm').onclick=()=>closeEditorDrawer('device');
   $('userDrawerClose').onclick=()=>closeEditorDrawer('user');
   $('cancelUserForm').onclick=()=>closeEditorDrawer('user');
+  $('alasConnectionDrawerClose').onclick=()=>closeEditorDrawer('alasConnection');
+  $('cancelAlasConnection').onclick=()=>closeEditorDrawer('alasConnection');
+  $('alasAssignmentDrawerClose').onclick=()=>closeEditorDrawer('alasAssignment');
+  $('cancelAlasAssignment').onclick=()=>closeEditorDrawer('alasAssignment');
+  $('alasConfigDrawerClose').onclick=()=>closeEditorDrawer('alasConfig');
+  $('cancelAlasConfig').onclick=()=>closeEditorDrawer('alasConfig');
+}
+function initializeAlasWorkspace(){
+  $('alasUsersTab').onclick=()=>activateAlasView('users');
+  $('alasConfigsTab').onclick=()=>activateAlasView('configs');
+  [$('alasUsersTab'),$('alasConfigsTab')].forEach((tab,index,tabs)=>{
+    tab.onkeydown=event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+      event.preventDefault();
+      const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:event.key==='ArrowRight'?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;
+      activateAlasView(next?'configs':'users',true);
+    };
+  });
+  $('alasUserSearch').oninput=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
+  $('alasUserFilter').onchange=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
+  $('alasConfigSearch').oninput=()=>renderAlasConfigList();
+  $('alasBindUser').onchange=updateAlasAssignmentOwnerHint;
+  $('alasBindConfig').oninput=updateAlasAssignmentOwnerHint;
+  $('openAlasAssignment').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
+  $('openAlasAssignmentDetail').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
+  $('openAlasConnection').onclick=event=>openAlasConnectionDrawer(event.currentTarget);
+  $('openConfigEditor').onclick=event=>openAlasConfigDrawer(event.currentTarget);
+  $('alasOpenCurrent').onclick=event=>{
+    if(selectedAlasConfig()) return;
+    event.preventDefault();
+    show('请先从配置库选择配置');
+  };
 }
 function initializeConfirmDialog(){
   const dialog=$('confirmDialog');
@@ -827,6 +1489,7 @@ initializeAdminNavigation();
 initializeEditorDrawers();
 initializeConfirmDialog();
 initializeTabs();
+initializeAlasWorkspace();
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
 activateTab('overview', false);
 bindAction('reloadAll', loadAll, '刷新中');
@@ -844,9 +1507,6 @@ bindAction('toggleAlas', toggleAlas, '执行中');
 bindAction('loadConfig', loadConfig, '读取中');
 bindAction('saveConfig', saveConfig, '保存中');
 bindAction('saveAlasBinding', saveAlasBinding, '保存中');
-$('alasBindUser').onchange=()=>fillAlasBindingForm();
-$('alasOperateConfig').onchange=()=>{ syncAlasConfigSelectors($('alasOperateConfig').value); reloadAlas().catch(e=>show(e.message)); };
-$('configSource').onchange=()=>syncAlasConfigSelectors($('configSource').value);
 loadOverview()
   .then(()=>{ if(savedInitialTab !== 'overview') activateTab(savedInitialTab, false); })
   .catch(error=>reportRequestError(error));

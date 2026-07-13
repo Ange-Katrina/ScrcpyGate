@@ -234,10 +234,10 @@ The admin ALAS page needs:
 
 - Runtime URL, for example `http://127.0.0.1:22267`
 - API Token
-- Current config name
-- User-to-config bindings
+- The Runtime config catalog
+- One-to-many user-to-config ownership, with run, edit, and per-user default permissions
 
-Normal users can only start, stop, or restart their bound ALAS config. The frontend does not expose all configs, config content, or the Runtime Token.
+Each normal user can own one or more configs and switch only within that set. A config can belong to exactly one user and must never be assigned to multiple users at the same time. The admin “User authorization” view manages ownership; the owner can inspect status and may run, edit, or use the config by default according to that assignment's permissions. The “Config library” operates the actual Runtime instance and does not create per-user copies. To transfer a config, remove it from the current owner before assigning the same config name to another user. The frontend does not expose other users' ownership records, configs owned by another user, config content, or the Runtime Token.
 
 Related projects:
 
