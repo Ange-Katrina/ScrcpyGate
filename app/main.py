@@ -411,10 +411,9 @@ def bound_alas_config_names(bindings: list[dict] | None = None) -> list[str]:
             name = alas.sanitize_config_name(raw)
         except ValueError:
             continue
-        key = name.casefold()
-        if key in seen:
+        if name in seen:
             continue
-        seen.add(key)
+        seen.add(name)
         names.append(name)
     return names
 

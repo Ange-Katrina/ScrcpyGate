@@ -257,6 +257,40 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["runtime_configs"], ["BoundConfig", "UnassignedConfig"])
         self.assertEqual(response.json()["configs"], ["BoundConfig", "UnassignedConfig"])
 
+    def test_case_distinct_configs_survive_admin_catalog_and_authorization(self):
+        self.login("alice")
+        self.bind("alice", "Foo", True, False, True)
+        self.bind("alice", "foo", False, True, False)
+        calls = []
+
+        def status_for_config(config_name, include_configs=False):
+            calls.append((config_name, include_configs))
+            return {"ok": True, "configured": True, "status": "idle", "config": config_name}
+
+        self.main.alas.status_for_config = status_for_config
+
+        upper = self.client.get("/api/alas/status?config=Foo")
+        lower = self.client.get("/api/alas/status?config=foo")
+        wrong_case = self.client.get("/api/alas/status?config=FOO")
+
+        self.assertEqual(upper.status_code, 200)
+        self.assertEqual(upper.json()["config"], "Foo")
+        self.assertTrue(upper.json()["can_run"])
+        self.assertFalse(upper.json()["can_edit"])
+        self.assertEqual(lower.status_code, 200)
+        self.assertEqual(lower.json()["config"], "foo")
+        self.assertFalse(lower.json()["can_run"])
+        self.assertTrue(lower.json()["can_edit"])
+        self.assertEqual(wrong_case.status_code, 403)
+        self.assertEqual(calls, [("Foo", False), ("foo", False)])
+
+        self.login("admin", "admin")
+        catalog = self.client.get("/api/admin/alas/configs")
+
+        self.assertEqual(catalog.status_code, 200)
+        self.assertEqual(catalog.json()["bound_configs"], ["Foo", "foo"])
+        self.assertEqual(catalog.json()["configs"], ["Foo", "foo"])
+
 
 if __name__ == "__main__":
     unittest.main()
