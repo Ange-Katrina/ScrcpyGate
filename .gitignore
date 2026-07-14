@@ -31,18 +31,6 @@ dist/
 *.tmp
 *.temp
 
-*.zip
-*.exe
-*.log
-*.txt
-!/requirements.txt
-!/requirements-dev.txt
-!/adb/linux/NOTICE.txt
-/*.yaml
-/*.yml
-!/docker-compose.v2.yml
-gpt*.md
-ds*.md
 logs/
 log/
 /.trae/
