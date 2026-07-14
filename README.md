@@ -456,6 +456,8 @@ docker compose -f docker-compose.v2.yml build
   Dockerfile              Docker 镜像构建文件
   docker-compose.v2.yml   Docker Compose 配置
   deploy-v2.sh            部署辅助脚本
+  requirements.txt        生产运行时 Python 依赖
+  requirements-dev.txt    开发、测试与审计依赖
   README.md               中文说明
   README.en.md            English documentation
 ```
@@ -516,6 +518,12 @@ docker logs --tail=120 web-scrcpy-v2
 
 ## 开发检查
 
+安装开发与测试依赖：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
 编译检查：
 
 ```bash
@@ -526,6 +534,12 @@ python -m compileall -q app tests
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
+```
+
+运行时依赖漏洞审计：
+
+```bash
+pip-audit -r requirements.txt --progress-spinner off
 ```
 
 项目维护的前端 JavaScript 语法检查：

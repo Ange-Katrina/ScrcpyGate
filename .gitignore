@@ -36,6 +36,7 @@ dist/
 *.log
 *.txt
 !/requirements.txt
+!/requirements-dev.txt
 !/adb/linux/NOTICE.txt
 /*.yaml
 /*.yml

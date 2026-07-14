@@ -341,6 +341,8 @@ See [.env.example](.env.example) for more options.
   Dockerfile              Docker image build file
   docker-compose.v2.yml   Docker Compose file
   deploy-v2.sh            Deployment helper
+  requirements.txt        Production Python dependencies
+  requirements-dev.txt    Development, test, and audit dependencies
   README.md               Chinese documentation
   README.en.md            English documentation
 ```
@@ -401,6 +403,12 @@ Check:
 
 ## Development Checks
 
+Install development and test dependencies:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
 Compile check:
 
 ```bash
@@ -411,6 +419,12 @@ Unit tests:
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
+```
+
+Audit runtime dependencies:
+
+```bash
+pip-audit -r requirements.txt --progress-spinner off
 ```
 
 Project-maintained frontend JavaScript syntax checks:
