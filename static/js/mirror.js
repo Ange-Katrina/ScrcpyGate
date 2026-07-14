@@ -608,9 +608,31 @@ function syncAlasConfigSelect(){
 }
 function setAlasPanelMessage(element, message, tone=''){
   if (!element) return;
+  element.classList.remove('is-config-summary');
+  element.classList.add('is-message');
   element.textContent=message;
   if (tone) element.dataset.tone=tone;
   else element.removeAttribute('data-tone');
+}
+function renderAlasConfigSummary(element, configName){
+  if(!element) return;
+  element.textContent='';
+  element.classList.remove('is-message');
+  element.classList.add('is-config-summary');
+  element.dataset.tone='ok';
+  const dot=document.createElement('span');
+  dot.className='alas-config-state__dot';
+  dot.setAttribute('aria-hidden','true');
+  const copy=document.createElement('span');
+  copy.className='alas-config-state__copy';
+  const label=document.createElement('span');
+  label.className='alas-config-state__label';
+  label.textContent='当前配置';
+  const name=document.createElement('strong');
+  name.className='alas-config-state__name';
+  name.textContent=configName;
+  copy.append(label,name);
+  element.append(dot,copy);
 }
 function renderAlasPanel(){
   const box=$('alasPanelStatus');
@@ -630,7 +652,7 @@ function renderAlasPanel(){
     else if (state.alasConfigsError) setAlasPanelMessage(configState, '暂时无法读取授权配置', 'danger');
     else if (!state.alasConfigsLoaded) setAlasPanelMessage(configState, '打开面板后加载你的 ALAS 配置');
     else if (!configCount) setAlasPanelMessage(configState, '未授权任何 ALAS 配置', 'warn');
-    else setAlasPanelMessage(configState, `当前配置 · ${state.selectedAlasConfig}`, 'ok');
+    else renderAlasConfigSummary(configState,state.selectedAlasConfig);
   }
 
   box.textContent='';

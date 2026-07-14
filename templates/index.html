@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=7a6ae302accc">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=d4c9bb613f4b">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=dad3e85fe2fa"></script>
@@ -216,7 +216,7 @@
         </span>
         <span id="alasConfigHint" class="alas-config-hint">这里只显示管理员授权给你的配置</span>
       </label>
-      <div id="alasConfigState" class="alas-config-state" role="status" aria-live="polite">正在读取可用配置…</div>
+      <div id="alasConfigState" class="alas-config-state is-message" role="status" aria-live="polite">正在读取可用配置…</div>
     </div>
     <div id="alasPanelStatus" class="chips" aria-live="polite"></div>
     <div id="alasRuntimeState" class="alas-runtime-state" role="status" aria-live="polite"></div>
@@ -259,6 +259,6 @@
   </section>
 </aside>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=6036a8a6125a" defer></script>
+<script src="/static/js/mirror.js?v=5a512d0f77a8" defer></script>
 </body>
 </html>

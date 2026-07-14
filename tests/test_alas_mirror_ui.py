@@ -139,8 +139,12 @@ class AlasMirrorUiContractTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertIn(message, self.template + self.script)
         self.assertIn(".alas-config-region", self.styles)
-        self.assertIn("min-height: 96px", self.styles)
+        self.assertIn("min-height: 52px", self.styles)
         self.assertIn("overflow-wrap: anywhere", self.styles)
+        self.assertIn("function renderAlasConfigSummary", self.script)
+        self.assertIn(".alas-config-state.is-config-summary", self.styles)
+        self.assertIn("width: fit-content", self.styles)
+        self.assertIn("alas-config-state__name", self.script + self.styles)
 
     def test_pure_catalog_selection_and_request_guards_execute(self):
         result = self.run_node(

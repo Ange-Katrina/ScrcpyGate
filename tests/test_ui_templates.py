@@ -128,6 +128,8 @@ class UiTemplateContractTests(unittest.TestCase):
                 "alasBaseUrl", "alasToken", "saveAlas", "alasOperateConfig", "alasStatus",
                 "toggleAlas", "reloadAlas", "alasBindUser", "alasBindConfig", "alasBindRun",
                 "alasBindEnabled", "saveAlasBinding", "alasBindRows", "configSource", "configTarget",
+                "alasAssignmentSummary", "alasAssignmentUserName", "alasAssignmentUserMeta",
+                "alasAssignmentConfigSummary", "alasAssignmentConfigName", "alasAssignmentConfigMeta",
                 "loadConfig", "configEditor", "saveConfig", "logs", "runtimeLogs", "logRows",
                 "scrcpygate-bootstrap",
             },

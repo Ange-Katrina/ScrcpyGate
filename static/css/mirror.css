@@ -1160,7 +1160,7 @@ video {
 }
 
 .alas-config-region {
-  min-height: 96px;
+  min-height: 52px;
   margin-bottom: var(--ui-space-3);
 }
 
@@ -1240,10 +1240,10 @@ video {
 }
 
 .alas-config-state {
-  min-height: 96px;
+  min-height: 52px;
   display: flex;
   align-items: center;
-  padding: var(--ui-space-3);
+  padding: 10px 12px;
   overflow-wrap: anywhere;
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-radius-md);
@@ -1253,10 +1253,47 @@ video {
   line-height: 1.45;
 }
 
+.alas-config-state.is-config-summary {
+  width: fit-content;
+  max-width: 100%;
+  gap: 10px;
+  padding-right: 16px;
+}
+
+.alas-config-state__dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ui-color-success);
+  box-shadow: 0 0 0 4px var(--ui-color-success-soft);
+}
+
+.alas-config-state__copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.alas-config-state__label {
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-medium);
+  line-height: 1.2;
+}
+
+.alas-config-state__name {
+  overflow-wrap: anywhere;
+  color: var(--ui-color-text);
+  font-size: 15px;
+  font-weight: var(--ui-weight-semibold);
+  line-height: 1.3;
+}
+
 .alas-config-state[data-tone="ok"] {
-  border-color: color-mix(in srgb, var(--ui-color-success) 42%, var(--ui-color-border));
-  background: var(--ui-color-success-soft);
-  color: var(--ui-color-success);
+  border-color: var(--ui-color-border-strong);
+  background: var(--ui-color-surface-raised);
+  color: var(--ui-color-text);
 }
 
 .alas-config-state[data-tone="warn"] {

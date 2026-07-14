@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=97c32c59ed7e">
+  <link rel="stylesheet" href="/static/css/admin.css?v=d3e89634d06c">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -368,6 +368,19 @@
 <div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
   <div class="drawer-heading"><div><p class="eyebrow">Config Ownership</p><h2 id="alasAssignmentDrawerTitle">分配配置归属</h2><p id="alasAssignmentDrawerContext" class="drawer-context">为用户分配一个 Runtime 配置</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="关闭配置归属"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
+  <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="配置归属摘要">
+    <div class="alas-assignment-summary__item">
+      <span>归属用户</span>
+      <strong id="alasAssignmentUserName">待选择用户</strong>
+      <small id="alasAssignmentUserMeta">选择接收配置的用户</small>
+    </div>
+    <span class="alas-assignment-summary__arrow" aria-hidden="true">→</span>
+    <div id="alasAssignmentConfigSummary" class="alas-assignment-summary__item alas-assignment-summary__item--config" data-state="idle">
+      <span>Runtime 配置</span>
+      <strong id="alasAssignmentConfigName">待选择配置</strong>
+      <small id="alasAssignmentConfigMeta">输入或选择一个配置名称</small>
+    </div>
+  </div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
     <div class="col-12"><label for="alasBindConfig">归属配置</label><input id="alasBindConfig" list="alasConfigSuggestions" placeholder="优先选择未分配配置，或输入准确名称" autocomplete="off"><datalist id="alasConfigSuggestions"></datalist></div>
@@ -399,6 +412,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=6039c6673a84" defer></script>
+<script src="/static/js/admin.js?v=d3a9aa80e1a2" defer></script>
 </body>
 </html>

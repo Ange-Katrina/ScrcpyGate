@@ -969,7 +969,7 @@ function focusAlasUserChoice(username){
     else if($('openAlasAssignmentDetail') && !$('openAlasAssignmentDetail').disabled) $('openAlasAssignmentDetail').focus({preventScroll:true});
   });
 }
-function createAlasChoice({title, meta, badges, selected, tabStop=selected, onSelect}){
+function createAlasChoice({title, meta, kind, badges, selected, tabStop=selected, onSelect}){
   const button=document.createElement('button');
   button.type='button';
   button.className='alas-choice';
@@ -979,11 +979,14 @@ function createAlasChoice({title, meta, badges, selected, tabStop=selected, onSe
   if(selected) button.classList.add('is-selected');
   const main=document.createElement('span');
   main.className='alas-choice__main';
+  const type=document.createElement('span');
+  type.className='alas-choice__kind';
+  type.textContent=kind;
   const strong=document.createElement('strong');
   strong.textContent=title;
   const small=document.createElement('small');
   small.textContent=meta;
-  main.append(strong,small);
+  main.append(type,strong,small);
   const side=document.createElement('span');
   side.className='alas-choice__badges';
   (badges || []).forEach(label=>side.appendChild(chip(label)));
@@ -1050,6 +1053,7 @@ function renderAlasUserList(){
     list.appendChild(createAlasChoice({
       title:user.username,
       meta:alasRoleLabel(user.role),
+      kind:'用户账号',
       badges:[`${count} 个配置`],
       selected:user.username===selectedAlasUsername,
       onSelect:()=>{ selectedAlasUsername=user.username; localStorage.setItem(ALAS_USER_KEY,user.username); renderAlasUserList(); renderAlasUserDetail(); }
@@ -1081,6 +1085,9 @@ function renderAlasUserDetail(){
     row.className='alas-assignment-row';
     const main=document.createElement('div');
     main.className='alas-assignment-row__main';
+    const kind=document.createElement('span');
+    kind.className='alas-assignment-row__kind';
+    kind.textContent='Runtime 配置';
     const title=document.createElement('h4');
     title.textContent=binding.config_name;
     const badges=document.createElement('div');
@@ -1088,7 +1095,7 @@ function renderAlasUserDetail(){
     if(binding.is_default) badges.appendChild(chip('默认','ok'));
     badges.appendChild(chip(binding.can_run?'可运行':'仅查看',binding.can_run?'ok':''));
     badges.appendChild(chip(binding.can_edit?'可编辑':'不可编辑',binding.can_edit?'ok':''));
-    main.append(title,badges);
+    main.append(kind,title,badges);
     const meta=document.createElement('div');
     meta.className='alas-assignment-row__meta';
     const ownerText=document.createElement('span');
@@ -1123,6 +1130,7 @@ function renderAlasConfigList(){
     list.appendChild(createAlasChoice({
       title:name,
       meta:runtime.has(configKey(name))?'Runtime 中存在':'仅存在归属记录',
+      kind:'Runtime 配置',
       badges:[ownership.conflict?'归属冲突':ownership.owner?`归属 ${ownership.owner}`:'未分配'],
       selected:configKey(name)===configKey(selectedAlasConfigName),
       tabStop:configKey(name)===configKey(selectedAlasConfigName) || (!selectedVisible && index===0),
@@ -1201,6 +1209,7 @@ function renderAlasCompatibilityFields(){
   fillSelect(userSelect,alasUsers().map(user=>({value:user.username,text:`${user.username} · ${alasRoleLabel(user.role)}`})),item=>item.text);
   if([...userSelect.options].some(option=>option.value===previous)) userSelect.value=previous;
   updateAlasAssignmentOwnerHint();
+  syncAlasAssignmentSummary();
 }
 async function removeAlasBinding(binding){
   const confirmed=await confirmDanger({
@@ -1307,8 +1316,36 @@ function openAlasAssignmentDrawer(binding=null,trigger=document.activeElement){
   $('alasAssignmentDrawerTitle').textContent=binding?'编辑配置归属与权限':'分配配置归属';
   $('alasAssignmentDrawerContext').textContent=binding ? `正在编辑 ${binding.username} → ${binding.config_name}` : `为 ${username} 分配一个独占配置`;
   updateAlasAssignmentOwnerHint();
+  syncAlasAssignmentSummary();
   openEditorDrawer('alasAssignment',trigger);
   loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置建议加载失败'));
+}
+function syncAlasAssignmentSummary(){
+  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
+  const configName=editingAlasAssignment ? editingAlasAssignment.config_name : String($('alasBindConfig').value || '').trim();
+  const user=alasUsers().find(item=>item.username===username);
+  $('alasAssignmentUserName').textContent=username || '待选择用户';
+  $('alasAssignmentUserMeta').textContent=user ? `${alasRoleLabel(user.role)} · 已拥有 ${assignmentsForUser(username).length} 个配置` : '选择接收配置的用户';
+  $('alasAssignmentConfigName').textContent=configName || '待选择配置';
+  const summary=$('alasAssignmentConfigSummary');
+  let stateName='idle';
+  let meta='输入或选择一个配置名称';
+  if(configName){
+    const ownership=configOwnership(configName);
+    const otherOwners=ownership.owners.filter(owner=>owner!==username);
+    if(otherOwners.length){
+      stateName='error';
+      meta=`已归属 ${otherOwners.join('、')}`;
+    } else if(ownership.owner===username){
+      stateName='ready';
+      meta='已归属当前用户，将更新权限';
+    } else {
+      stateName='available';
+      meta='当前未分配，可以建立归属';
+    }
+  }
+  summary.dataset.state=stateName;
+  $('alasAssignmentConfigMeta').textContent=meta;
 }
 function updateAlasAssignmentOwnerHint(){
   const hint=$('alasAssignmentOwnerHint');
@@ -1956,8 +1993,8 @@ function initializeAlasWorkspace(){
   $('alasUserSearch').oninput=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
   $('alasUserFilter').onchange=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
   $('alasConfigSearch').oninput=()=>renderAlasConfigList();
-  $('alasBindUser').onchange=updateAlasAssignmentOwnerHint;
-  $('alasBindConfig').oninput=updateAlasAssignmentOwnerHint;
+  $('alasBindUser').onchange=()=>{ updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
+  $('alasBindConfig').oninput=()=>{ updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
   $('openAlasAssignment').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
   $('openAlasAssignmentDetail').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
   $('openAlasConnection').onclick=event=>openAlasConnectionDrawer(event.currentTarget);

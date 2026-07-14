@@ -141,6 +141,28 @@ class AlasAdminUiContractTests(unittest.TestCase):
         self.assertIn("overflow-wrap: anywhere", strong_rule)
         self.assertIn("white-space: normal", strong_rule)
 
+    def test_assignment_identity_has_clear_visual_hierarchy(self):
+        for token in (
+            'id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="配置归属摘要"',
+            'id="alasAssignmentUserName"',
+            'id="alasAssignmentUserMeta"',
+            'id="alasAssignmentConfigName"',
+            'id="alasAssignmentConfigMeta"',
+            "function syncAlasAssignmentSummary()",
+            "kind:'用户账号'",
+            "kind:'Runtime 配置'",
+            "syncAlasAssignmentSummary();",
+        ):
+            self.assertIn(token, self.template + self.script)
+        for token in (
+            ".alas-assignment-summary",
+            ".alas-choice__kind",
+            "font-size: 15px",
+            "font-size: 16px",
+            "box-shadow: inset 3px 0 0 var(--ui-color-primary)",
+        ):
+            self.assertIn(token, self.styles)
+
     def test_promise_driven_config_and_toggle_guards(self):
         harness = textwrap.dedent(
             r"""

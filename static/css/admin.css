@@ -1494,7 +1494,7 @@ td.actions {
 
 .alas-choice {
   width: 100%;
-  min-height: 60px;
+  min-height: 68px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1515,6 +1515,7 @@ td.actions {
 .alas-choice.is-selected {
   border-color: color-mix(in srgb, var(--ui-color-primary) 54%, var(--ui-color-border));
   background: var(--ui-color-primary-soft);
+  box-shadow: inset 3px 0 0 var(--ui-color-primary);
 }
 
 .alas-choice:focus-visible {
@@ -1522,10 +1523,22 @@ td.actions {
   box-shadow: var(--ui-focus-ring);
 }
 
+.alas-choice.is-selected:focus-visible {
+  box-shadow: inset 3px 0 0 var(--ui-color-primary), var(--ui-focus-ring);
+}
+
 .alas-choice__main {
   min-width: 0;
   display: grid;
   gap: 3px;
+}
+
+.alas-choice__kind,
+.alas-assignment-row__kind {
+  color: var(--ui-color-info);
+  font-size: 11px;
+  font-weight: var(--ui-weight-semibold);
+  line-height: 1.2;
 }
 
 .alas-choice__main small {
@@ -1537,13 +1550,13 @@ td.actions {
 .alas-choice__main strong {
   overflow-wrap: anywhere;
   white-space: normal;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: var(--ui-weight-semibold);
 }
 
 .alas-choice__main small {
   color: var(--ui-color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .alas-choice__badges {
@@ -1553,7 +1566,7 @@ td.actions {
 .alas-choice__badges .chip {
   min-height: 24px;
   padding: 3px 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .alas-detail-pane {
@@ -1571,6 +1584,8 @@ td.actions {
 
 .alas-detail-heading h3 {
   overflow-wrap: anywhere;
+  font-size: 18px;
+  font-weight: var(--ui-weight-semibold);
 }
 
 .alas-detail-heading p:not(.eyebrow) {
@@ -1607,7 +1622,7 @@ td.actions {
 .alas-assignment-row__main h4 {
   overflow-wrap: anywhere;
   font-family: var(--ui-font-mono);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: var(--ui-weight-semibold);
 }
 
@@ -1697,6 +1712,64 @@ td.actions {
   border-left-color: var(--ui-color-danger);
   background: var(--ui-color-danger-soft);
   color: var(--ui-color-danger);
+}
+
+.alas-assignment-summary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-canvas);
+}
+
+.alas-assignment-summary__item {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 12px;
+}
+
+.alas-assignment-summary__item > span {
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-semibold);
+}
+
+.alas-assignment-summary__item strong {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: var(--ui-weight-semibold);
+  line-height: 1.25;
+}
+
+.alas-assignment-summary__item--config strong {
+  font-family: var(--ui-font-mono);
+}
+
+.alas-assignment-summary__item small {
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.alas-assignment-summary__item--config[data-state="available"] {
+  background: var(--ui-color-success-soft);
+}
+
+.alas-assignment-summary__item--config[data-state="error"] {
+  background: var(--ui-color-danger-soft);
+}
+
+.alas-assignment-summary__arrow {
+  display: grid;
+  place-items: center;
+  padding-inline: 4px;
+  color: var(--ui-color-text-muted);
+  font-size: 20px;
 }
 
 .admin-editor-drawer--wide {
@@ -2126,6 +2199,16 @@ td.actions {
   .alas-detail-heading > .btn {
     width: 100%;
     align-self: stretch;
+  }
+
+  .alas-assignment-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .alas-assignment-summary__arrow {
+    min-height: 24px;
+    padding: 0;
+    transform: rotate(90deg);
   }
 
   .alas-config-actions {
