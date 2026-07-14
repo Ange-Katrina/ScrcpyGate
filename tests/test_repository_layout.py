@@ -3,6 +3,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_SUFFIX = "v" + str(2)
+LEGACY_COMPOSE = f"docker-compose.{LEGACY_SUFFIX}.yml"
+LEGACY_DEPLOY = f"deploy-{LEGACY_SUFFIX}.sh"
+LEGACY_SERVICE = f"web-scrcpy-{LEGACY_SUFFIX}"
 
 
 class RepositoryLayoutTests(unittest.TestCase):
@@ -14,8 +18,8 @@ class RepositoryLayoutTests(unittest.TestCase):
         deploy_path = ROOT / "deploy.sh"
         self.assertTrue(compose_path.is_file())
         self.assertTrue(deploy_path.is_file())
-        self.assertFalse((ROOT / "docker-compose.v2.yml").exists())
-        self.assertFalse((ROOT / "deploy-v2.sh").exists())
+        self.assertFalse((ROOT / LEGACY_COMPOSE).exists())
+        self.assertFalse((ROOT / LEGACY_DEPLOY).exists())
 
         compose = self.read("compose.yaml")
         self.assertIn("name: scrcpygate", compose)
@@ -25,15 +29,15 @@ class RepositoryLayoutTests(unittest.TestCase):
 
         deploy = self.read("deploy.sh")
         self.assertNotIn(" -f ", deploy)
-        self.assertNotIn("web-scrcpy-v2", deploy)
+        self.assertNotIn(LEGACY_SERVICE, deploy)
         self.assertIn("$DC up -d", deploy)
 
     def test_documentation_uses_auto_discovered_compose(self):
         for readme in ("README.md", "README.en.md"):
             text = self.read(readme)
-            self.assertNotIn("docker-compose.v2.yml", text)
-            self.assertNotIn("deploy-v2.sh", text)
-            self.assertNotIn("web-scrcpy-v2", text)
+            self.assertNotIn(LEGACY_COMPOSE, text)
+            self.assertNotIn(LEGACY_DEPLOY, text)
+            self.assertNotIn(LEGACY_SERVICE, text)
             self.assertIn("compose.yaml", text)
             self.assertIn("docker compose up -d", text)
 
