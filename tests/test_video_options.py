@@ -7,7 +7,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.video_options import (
+    ALAS_PROFILE_MAX_SIZE,
+    ALAS_PROFILE_NAMES,
     BANDWIDTH_RECOMMENDATIONS,
+    NORMAL_PROFILE_NAMES,
     VideoOptionError,
     enabled_stream_modes_value,
     normalize_custom_profile_payloads,
@@ -36,10 +39,10 @@ class VideoOptionsTests(unittest.TestCase):
         self.assertEqual(request["scrcpy_stream_mode"], "protocol")
 
     def test_admin_settings_are_valid_defaults(self):
-        options = settings_to_video_options({"video_profile": "balanced", "video_bit_rate": "900000", "max_size": "540", "max_fps": "24"})
+        options = settings_to_video_options({"video_profile": "balanced", "video_bit_rate": "2400000", "max_size": "1280", "max_fps": "24"})
 
-        self.assertEqual(options["video_bit_rate"], 900000)
-        self.assertEqual(options["max_size"], 540)
+        self.assertEqual(options["video_bit_rate"], 2400000)
+        self.assertEqual(options["max_size"], 1280)
         self.assertEqual(options["max_fps"], 24)
         self.assertEqual(options["profile"], "balanced")
         self.assertEqual(options["scrcpy_stream_mode"], "raw")
@@ -91,6 +94,8 @@ class VideoOptionsTests(unittest.TestCase):
             normalize_custom_profile_payloads({"smooth": {"max_size": 480}})
         with self.assertRaises(VideoOptionError):
             normalize_custom_profile_payloads({"office": {"max_size": 360}})
+        with self.assertRaises(VideoOptionError):
+            normalize_custom_profile_payloads({"alas_smooth": {"max_size": 960}})
 
         custom = normalize_custom_profile_payloads({
             "office": {"video_bit_rate": 900000, "max_size": 480, "max_fps": 24}
@@ -100,11 +105,35 @@ class VideoOptionsTests(unittest.TestCase):
     def test_bandwidth_recommendations_include_expected_levels(self):
         self.assertEqual(set(BANDWIDTH_RECOMMENDATIONS), {"2mbps", "5mbps", "10mbps", "20mbps"})
         for level, profiles in BANDWIDTH_RECOMMENDATIONS.items():
-            for profile, values in profiles.items():
-                with self.subTest(level=level, profile=profile):
-                    self.assertGreaterEqual(values["max_size"], 720)
-        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["10mbps"]["sharp"]["max_size"], 960)
-        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["20mbps"]["sharp"]["max_size"], 1280)
+            normal_sizes = [profiles[name]["max_size"] for name in NORMAL_PROFILE_NAMES]
+            alas_sizes = [profiles[name]["max_size"] for name in ALAS_PROFILE_NAMES]
+            with self.subTest(level=level):
+                self.assertEqual(set(profiles), set(NORMAL_PROFILE_NAMES + ALAS_PROFILE_NAMES))
+                self.assertTrue(any(size >= 1280 for size in normal_sizes), "each normal tier needs a real 720p option")
+                self.assertNotEqual(set(normal_sizes), {1280}, "normal profiles must not all collapse to 720p")
+                self.assertTrue(any(size >= 1280 for size in alas_sizes), "each ALAS tier needs a real 720p option")
+                self.assertTrue(all(size <= 1280 for size in alas_sizes), "ALAS profiles must stay at or below 720p")
+                self.assertNotEqual(set(alas_sizes), {1280}, "ALAS profiles must preserve lower-bandwidth choices")
+                bandwidth = int(level.removesuffix("mbps")) * 1000000
+                self.assertLessEqual(max(values["video_bit_rate"] for values in profiles.values()), bandwidth / 1.5)
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["2mbps"]["sharp"], {"video_bit_rate": 1300000, "max_size": 1280, "max_fps": 24})
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["10mbps"]["sharp"]["max_size"], 1920)
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["20mbps"]["balanced"]["max_size"], 1600)
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["20mbps"]["sharp"]["video_bit_rate"], 8500000)
+
+    def test_alas_default_profiles_are_four_distinct_720p_capped_choices(self):
+        profiles = profile_payloads()
+        self.assertEqual(len(ALAS_PROFILE_NAMES), 4)
+        self.assertTrue(all(profiles[name]["max_size"] <= ALAS_PROFILE_MAX_SIZE for name in ALAS_PROFILE_NAMES))
+        self.assertEqual(profiles["alas_sharp"]["max_size"], ALAS_PROFILE_MAX_SIZE)
+
+        stored = profile_payloads({"video_preset_alas_sharp_max_size": "1920"})
+        self.assertEqual(stored["alas_sharp"]["max_size"], ALAS_PROFILE_MAX_SIZE)
+
+        with self.assertRaisesRegex(VideoOptionError, "alas_sharp max_size must be between 480 and 1280"):
+            normalize_profile_payloads({"alas_sharp": {"max_size": 1920}})
+        with self.assertRaisesRegex(VideoOptionError, "alas_sharp max_size must be between 480 and 1280"):
+            normalize_profile_payloads({"alas_sharp": {"max_size": 0}})
 
     def test_invalid_ranges_are_rejected(self):
         with self.assertRaises(VideoOptionError):

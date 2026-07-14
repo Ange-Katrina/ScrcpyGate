@@ -16,7 +16,7 @@ class ScrcpyRuntimeTests(unittest.TestCase):
     def make_scrcpy(mode="raw"):
         runtime = object.__new__(Scrcpy)
         runtime.video_bit_rate = 2_000_000
-        runtime.max_size = 720
+        runtime.max_size = 1280
         runtime.max_fps = 30
         runtime.stream_mode = mode
         return runtime
@@ -42,7 +42,7 @@ class ScrcpyRuntimeTests(unittest.TestCase):
         self.assertNotIn("send_device_meta=false", command)
         self.assertNotIn("send_frame_meta=false", command)
         self.assertNotIn("send_codec_meta=false", command)
-        self.assertIn("max_size=720", command)
+        self.assertIn("max_size=1280", command)
         self.assertIn("max_fps=30", command)
 
     def test_forward_handshake_consumes_dummy_only_when_requested(self):

@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=d4c9bb613f4b">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=856f9498ea13">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=dad3e85fe2fa"></script>
@@ -188,11 +188,8 @@
         <span>投屏画质</span>
         <span class="setting-group-help">应用后会重启投屏流</span>
       </div>
-      <div class="quality-grid" id="qualityProfiles">
-        <button class="btn" data-profile="smooth" type="button">流畅</button>
-        <button class="btn" data-profile="balanced" type="button">稳定</button>
-        <button class="btn" data-profile="sharp" type="button">高清</button>
-        <button class="btn" data-profile="low_latency" type="button">低延迟</button>
+      <div id="qualityModeNotice" class="quality-mode-notice" role="status" hidden></div>
+      <div class="quality-grid" id="qualityProfiles" aria-busy="true">
         <label class="wide" for="qualityStreamMode">scrcpy 流模式
           <select id="qualityStreamMode">
             <option value="raw">raw</option>
@@ -203,7 +200,7 @@
       </div>
       <div id="qualityStatus" class="quality-status" role="status" aria-live="polite"></div>
     </div>
-    <p class="quality-note">投屏中点击预设会自动重启投屏流；只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+    <p class="quality-note">投屏中点击预设会自动重启投屏流；清晰度显示为 16:9 等效值（长边 1280≈720p），只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
   </section>
 
   <section id="alasTools" class="tools drawer-panel alas-panel" aria-labelledby="alasToolsTitle">
@@ -258,7 +255,7 @@
     <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
   </section>
 </aside>
-<script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=5a512d0f77a8" defer></script>
+<script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin", "video_mode": user.video_mode | default("normal", true)}} | tojson }}</script>
+<script src="/static/js/mirror.js?v=22d3087dd960" defer></script>
 </body>
 </html>

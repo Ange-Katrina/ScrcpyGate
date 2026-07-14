@@ -41,6 +41,7 @@ class AdminVideoUiContractTests(unittest.TestCase):
             (
                 "bitrateBpsToMbps",
                 "bitrateMbpsToBps",
+                "maxSizeQualityLabel",
                 "presetFieldDisplayValue",
                 "presetInput",
                 "collectVideoPresets",
@@ -60,6 +61,22 @@ class AdminVideoUiContractTests(unittest.TestCase):
         self.assertEqual(result["presets"]["smooth"]["video_bit_rate"], 5500000)
         self.assertEqual(result["presets"]["smooth"]["max_size"], 720)
 
+    def test_max_size_is_labeled_as_scrcpy_long_edge_and_equivalent_quality(self):
+        result = self.run_node(
+            ("maxSizeQualityLabel",),
+            "[854,960,1280,1600,1920].map(maxSizeQualityLabel)",
+        )
+        self.assertEqual(result, [
+            "480p · 长边 854px",
+            "540p · 长边 960px",
+            "720p · 长边 1280px",
+            "900p · 长边 1600px",
+            "1080p · 长边 1920px",
+        ])
+        self.assertIn("最长边 px", self.template)
+        self.assertIn("1280≈720p", self.template)
+        self.assertNotIn("推荐输出尺寸最低 720", self.template)
+
     def test_bitrate_conversion_round_trips_recommendation_values(self):
         result = self.run_node(
             ("bitrateBpsToMbps", "bitrateMbpsToBps"),
@@ -74,9 +91,19 @@ class AdminVideoUiContractTests(unittest.TestCase):
         self.assertIn('value="0.9"', self.template)
         self.assertIn('content: "码率 Mbps"', self.styles)
         self.assertNotIn('content: "码率 bps"', self.styles)
+        self.assertIn('content: "最长边 px"', self.styles)
         self.assertIn("td(bitrateBpsToMbps(profile.video_bit_rate))", self.script)
         self.assertIn("video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9)", self.script)
         self.assertIn("input.value=presetFieldDisplayValue(field, value)", self.script)
+
+    def test_admin_exposes_four_normal_and_four_alas_presets(self):
+        self.assertIn("const ALL_PROFILE_NAMES = NORMAL_PROFILE_NAMES.concat(ALAS_PROFILE_NAMES)", self.script)
+        self.assertIn("ALL_PROFILE_NAMES.forEach(name=>", self.script)
+        self.assertIn("const group=profileGroup==='alas' ? 'ALAS · ' : '普通 · '", self.script)
+        self.assertIn('tr.dataset.profileGroup=profileGroup', self.script)
+        self.assertIn('tr[data-profile-group="normal"] + tr[data-profile-group="alas"]', self.styles)
+        self.assertIn('tr[data-profile-group="normal"] + tr[data-profile-group="alas"] td {\n    border-top: 0;', self.styles)
+        self.assertIn("普通与 ALAS 两组画质，每组都有流畅、稳定、高清、低延迟四档", self.template)
 
 
 if __name__ == "__main__":

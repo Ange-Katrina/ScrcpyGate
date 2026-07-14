@@ -10,26 +10,33 @@ VIDEO_LIMITS = {
 }
 
 STREAM_MODES = ("raw", "protocol", "legacy")
-PROFILE_NAMES = ("smooth", "balanced", "sharp", "low_latency")
+NORMAL_PROFILE_NAMES = ("smooth", "balanced", "sharp", "low_latency")
+ALAS_PROFILE_NAMES = ("alas_smooth", "alas_balanced", "alas_sharp", "alas_low_latency")
+PROFILE_NAMES = NORMAL_PROFILE_NAMES + ALAS_PROFILE_NAMES
 PROFILE_FIELDS = ("video_bit_rate", "max_size", "max_fps")
 MIN_PRESET_MAX_SIZE = 480
+ALAS_PROFILE_MAX_SIZE = 1280
 MAX_CUSTOM_PROFILES = 12
 CUSTOM_PROFILE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{1,31}$")
 
 DEFAULT_VIDEO_OPTIONS = {
     "profile": "balanced",
     "adaptive": False,
-    "video_bit_rate": 900000,
-    "max_size": 540,
+    "video_bit_rate": 2400000,
+    "max_size": 1280,
     "max_fps": 24,
     "scrcpy_stream_mode": "raw",
 }
 
 VIDEO_PROFILES = {
-    "smooth": {"video_bit_rate": 700000, "max_size": 480, "max_fps": 24},
-    "balanced": {"video_bit_rate": 900000, "max_size": 540, "max_fps": 24},
-    "sharp": {"video_bit_rate": 1600000, "max_size": 720, "max_fps": 30},
-    "low_latency": {"video_bit_rate": 900000, "max_size": 480, "max_fps": 30},
+    "smooth": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
+    "balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
+    "sharp": {"video_bit_rate": 6000000, "max_size": 1920, "max_fps": 30},
+    "low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
+    "alas_smooth": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
+    "alas_balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
+    "alas_sharp": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
+    "alas_low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
 }
 
 PROFILE_LABELS = {
@@ -37,32 +44,52 @@ PROFILE_LABELS = {
     "balanced": "稳定",
     "sharp": "高清",
     "low_latency": "低延迟",
+    "alas_smooth": "流畅",
+    "alas_balanced": "稳定",
+    "alas_sharp": "高清",
+    "alas_low_latency": "低延迟",
 }
 
 BANDWIDTH_RECOMMENDATIONS = {
     "2mbps": {
-        "smooth": {"video_bit_rate": 450000, "max_size": 720, "max_fps": 20},
-        "balanced": {"video_bit_rate": 650000, "max_size": 720, "max_fps": 24},
-        "sharp": {"video_bit_rate": 1100000, "max_size": 720, "max_fps": 24},
-        "low_latency": {"video_bit_rate": 750000, "max_size": 720, "max_fps": 30},
+        "smooth": {"video_bit_rate": 800000, "max_size": 854, "max_fps": 20},
+        "balanced": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
+        "sharp": {"video_bit_rate": 1300000, "max_size": 1280, "max_fps": 24},
+        "low_latency": {"video_bit_rate": 1000000, "max_size": 854, "max_fps": 30},
+        "alas_smooth": {"video_bit_rate": 800000, "max_size": 854, "max_fps": 20},
+        "alas_balanced": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
+        "alas_sharp": {"video_bit_rate": 1300000, "max_size": 1280, "max_fps": 20},
+        "alas_low_latency": {"video_bit_rate": 1000000, "max_size": 854, "max_fps": 30},
     },
     "5mbps": {
-        "smooth": {"video_bit_rate": 700000, "max_size": 720, "max_fps": 24},
-        "balanced": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 24},
-        "sharp": {"video_bit_rate": 2200000, "max_size": 720, "max_fps": 30},
-        "low_latency": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 30},
+        "smooth": {"video_bit_rate": 1200000, "max_size": 960, "max_fps": 24},
+        "balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
+        "sharp": {"video_bit_rate": 3200000, "max_size": 1280, "max_fps": 30},
+        "low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
+        "alas_smooth": {"video_bit_rate": 1200000, "max_size": 960, "max_fps": 24},
+        "alas_balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
+        "alas_sharp": {"video_bit_rate": 3200000, "max_size": 1280, "max_fps": 30},
+        "alas_low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
     },
     "10mbps": {
-        "smooth": {"video_bit_rate": 900000, "max_size": 720, "max_fps": 24},
-        "balanced": {"video_bit_rate": 1800000, "max_size": 720, "max_fps": 24},
-        "sharp": {"video_bit_rate": 3500000, "max_size": 960, "max_fps": 30},
-        "low_latency": {"video_bit_rate": 1800000, "max_size": 720, "max_fps": 30},
+        "smooth": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
+        "balanced": {"video_bit_rate": 3500000, "max_size": 1280, "max_fps": 30},
+        "sharp": {"video_bit_rate": 6500000, "max_size": 1920, "max_fps": 30},
+        "low_latency": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 30},
+        "alas_smooth": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 24},
+        "alas_balanced": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 24},
+        "alas_sharp": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
+        "alas_low_latency": {"video_bit_rate": 2800000, "max_size": 1280, "max_fps": 30},
     },
     "20mbps": {
-        "smooth": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 24},
-        "balanced": {"video_bit_rate": 2800000, "max_size": 720, "max_fps": 30},
-        "sharp": {"video_bit_rate": 5500000, "max_size": 1280, "max_fps": 30},
-        "low_latency": {"video_bit_rate": 2800000, "max_size": 720, "max_fps": 30},
+        "smooth": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 24},
+        "balanced": {"video_bit_rate": 5000000, "max_size": 1600, "max_fps": 30},
+        "sharp": {"video_bit_rate": 8500000, "max_size": 1920, "max_fps": 30},
+        "low_latency": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
+        "alas_smooth": {"video_bit_rate": 2000000, "max_size": 960, "max_fps": 24},
+        "alas_balanced": {"video_bit_rate": 3500000, "max_size": 1280, "max_fps": 30},
+        "alas_sharp": {"video_bit_rate": 4500000, "max_size": 1280, "max_fps": 30},
+        "alas_low_latency": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 30},
     },
 }
 
@@ -193,6 +220,8 @@ def profile_payloads(settings: dict[str, Any] | None = None) -> dict[str, dict[s
                 continue
             if field == "max_size" and value and value < MIN_PRESET_MAX_SIZE:
                 continue
+            if profile in ALAS_PROFILE_NAMES and field == "max_size":
+                value = min(value or ALAS_PROFILE_MAX_SIZE, ALAS_PROFILE_MAX_SIZE)
             profiles[profile][field] = value
     for profile, values in custom_profile_payloads(settings).items():
         profiles[profile] = {field: int(values[field]) for field in PROFILE_FIELDS}
@@ -211,6 +240,8 @@ def normalize_profile_payloads(payload: dict[str, Any] | None, fallback: dict[st
             value = int_value(values.get(field), field, int(result[profile][field]))
             if field == "max_size" and value and value < MIN_PRESET_MAX_SIZE:
                 raise VideoOptionError(f"{profile} max_size must be at least {MIN_PRESET_MAX_SIZE}")
+            if profile in ALAS_PROFILE_NAMES and field == "max_size" and not 0 < value <= ALAS_PROFILE_MAX_SIZE:
+                raise VideoOptionError(f"{profile} max_size must be between {MIN_PRESET_MAX_SIZE} and {ALAS_PROFILE_MAX_SIZE}")
             result[profile][field] = value
     return result
 

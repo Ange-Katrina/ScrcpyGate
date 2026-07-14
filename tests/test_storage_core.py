@@ -87,6 +87,118 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(storage.get_initial_admin_password_for_display(admin_created), "StrongInitialPwd123")
         self.assertIsNotNone(storage.authenticate("admin", "StrongInitialPwd123"))
 
+    def test_known_bad_quality_presets_are_upgraded_without_touching_manual_custom_values(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("manual", "ManualQualityPassword123", "user")
+
+        legacy_2mbps = {
+            "smooth": (450000, 720, 20),
+            "balanced": (650000, 720, 24),
+            "sharp": (1100000, 720, 24),
+            "low_latency": (750000, 720, 30),
+        }
+        for profile, (bit_rate, max_size, max_fps) in legacy_2mbps.items():
+            storage.set_setting(f"video_preset_{profile}_video_bit_rate", str(bit_rate))
+            storage.set_setting(f"video_preset_{profile}_max_size", str(max_size))
+            storage.set_setting(f"video_preset_{profile}_max_fps", str(max_fps))
+        storage.set_setting("video_profile", "sharp")
+        storage.set_setting("video_bit_rate", "1100000")
+        storage.set_setting("max_size", "720")
+        storage.set_setting("max_fps", "24")
+        storage.set_user_video_preference(
+            "admin",
+            {"profile": "sharp", "adaptive": False, "video_bit_rate": 1100000, "max_size": 720, "max_fps": 24, "scrcpy_stream_mode": "raw"},
+        )
+        storage.set_user_video_preference(
+            "manual",
+            {"profile": "custom", "adaptive": False, "video_bit_rate": 1100000, "max_size": 720, "max_fps": 24, "scrcpy_stream_mode": "raw"},
+        )
+        with storage.db_connect() as conn:
+            conn.execute("DELETE FROM settings WHERE key='video_quality_migration_version'")
+
+        storage.init_db()
+
+        settings = storage.get_settings()
+        expected = {
+            "smooth": (800000, 854, 20),
+            "balanced": (1000000, 960, 24),
+            "sharp": (1300000, 1280, 24),
+            "low_latency": (1000000, 854, 30),
+        }
+        for profile, values in expected.items():
+            actual = tuple(int(settings[f"video_preset_{profile}_{field}"]) for field in ("video_bit_rate", "max_size", "max_fps"))
+            self.assertEqual(actual, values)
+        self.assertEqual((int(settings["video_bit_rate"]), int(settings["max_size"]), int(settings["max_fps"])), expected["sharp"])
+        self.assertEqual(storage.get_user_video_preference("admin")["max_size"], 1280)
+        manual = storage.get_user_video_preference("manual")
+        self.assertEqual((manual["profile"], manual["video_bit_rate"], manual["max_size"]), ("custom", 1100000, 720))
+        self.assertEqual(settings["video_quality_migration_version"], storage.VIDEO_QUALITY_MIGRATION_VERSION)
+
+    def test_quality_migration_requires_a_complete_known_matrix_and_never_downgrades_marker(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        custom_json = '{"manual":{"label":"Manual","video_bit_rate":1234567,"max_size":777,"max_fps":23}}'
+        storage.set_setting("video_preset_smooth_video_bit_rate", "450000")
+        storage.set_setting("video_preset_smooth_max_size", "720")
+        storage.set_setting("video_preset_smooth_max_fps", "20")
+        storage.set_setting("video_custom_profiles", custom_json)
+        with storage.db_connect() as conn:
+            conn.execute("DELETE FROM settings WHERE key='video_quality_migration_version'")
+
+        storage.init_db()
+
+        settings = storage.get_settings()
+        self.assertEqual(
+            tuple(int(settings[f"video_preset_smooth_{field}"]) for field in ("video_bit_rate", "max_size", "max_fps")),
+            (450000, 720, 20),
+        )
+        self.assertEqual(settings["video_custom_profiles"], custom_json)
+
+        legacy = {
+            "smooth": (450000, 720, 20),
+            "balanced": (650000, 720, 24),
+            "sharp": (1100000, 720, 24),
+            "low_latency": (750000, 720, 30),
+        }
+        for profile, values in legacy.items():
+            for field, value in zip(("video_bit_rate", "max_size", "max_fps"), values):
+                storage.set_setting(f"video_preset_{profile}_{field}", str(value))
+        storage.set_setting("video_quality_migration_version", "3")
+
+        storage.init_db()
+
+        settings = storage.get_settings()
+        self.assertEqual(settings["video_quality_migration_version"], "3")
+        self.assertEqual(int(settings["video_preset_sharp_video_bit_rate"]), 1100000)
+
+    def test_legacy_env_video_values_are_imported_before_quality_marker(self):
+        (self.tmp / ".env").write_text(
+            "VIDEO_BIT_RATE=650000\nMAX_SIZE=720\nMAX_FPS=24\n",
+            encoding="utf-8",
+        )
+        storage = load_storage(self.tmp)
+
+        storage.init_db()
+
+        settings = storage.get_settings()
+        self.assertEqual((settings["video_bit_rate"], settings["max_size"], settings["max_fps"]), ("650000", "720", "24"))
+        self.assertEqual(settings["video_quality_migration_version"], storage.VIDEO_QUALITY_MIGRATION_VERSION)
+
+    def test_user_video_mode_is_validated_and_preserved_when_omitted(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AliceVideoMode123", "user", "alas")
+
+        self.assertEqual(storage.get_user("alice")["video_mode"], "alas")
+        self.assertEqual(next(user for user in storage.list_users() if user["username"] == "alice")["video_mode"], "alas")
+        storage.upsert_user("alice", None, "user")
+        self.assertEqual(storage.get_user("alice")["video_mode"], "alas")
+        storage.upsert_user("alice", None, "user", "normal")
+        self.assertEqual(storage.get_user("alice")["video_mode"], "normal")
+        with self.assertRaisesRegex(ValueError, "invalid_video_mode"):
+            storage.upsert_user("alice", None, "user", "invalid")
+
     def test_legacy_plaintext_password_is_hashed_before_migration(self):
         (self.tmp / "users.json").write_text(json.dumps({
             "alice": {"password": "AlicePassword123", "role": "user", "created_at": "2026-07-05 00:00:00"}

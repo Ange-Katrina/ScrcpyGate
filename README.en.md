@@ -103,7 +103,7 @@ Do not add runtime paths for:
 - changing `Physical size`
 - changing `Override size`
 
-This is especially important for ALAS setups, where automation often depends on a fixed real emulator resolution such as `1280x720`. The web UI output size maps only to scrcpy `max_size`; it does not change the real device resolution.
+This is especially important for ALAS setups, where automation often depends on a fixed real emulator resolution such as `1280x720`. The web UI longest-edge limit maps only to scrcpy `max_size`; it does not change the real device resolution. For 16:9 landscape content, `max_size=720` is about `720x405`; `max_size=1280` is the value that corresponds to 720p.
 
 Also note:
 
@@ -261,10 +261,12 @@ Keep `raw` as the default mode unless you have tested another mode in your envir
 Admins can tune each preset:
 
 - bitrate
-- output size
+- scrcpy longest-edge limit
 - frame rate
 
-Bandwidth recommendation buttons keep every recommended output size at 720 or higher while preserving the 960 and 1280 values in higher-bandwidth tiers. Existing manual and custom profiles may still use smaller output sizes. The admin UI displays bitrate in Mbps, while the API and database continue to use integer bps values.
+Admins can assign each user either the four normal profiles or four ALAS-specific profiles. The mirror page always shows only the selected group: Smooth, Balanced, Sharp, and Low latency. Normal Sharp may reach 1080p, while every ALAS profile is enforced within a `480–1280` longest-edge range and therefore remains capped at about 720p.
+
+The 2/5/10/20 Mbps recommendation buttons update both four-profile groups. Each group contains at least one true 720p option (`max_size=1280`) without forcing all four profiles to 720p. The 2 Mbps tier ranges from 480p to a low-bitrate 720p option; higher normal tiers progressively add 900p and 1080p, while ALAS remains capped at 720p. The values are calibrated against the official scrcpy default, Amazon IVS low-latency recommendations, Zoom bandwidth requirements, and YouTube Live H.264 guidance. The admin UI displays bitrate in Mbps, while the API and database continue to use integer bps values.
 
 These values only affect the scrcpy output stream. Some changes may require restarting the mirror session to fully take effect.
 

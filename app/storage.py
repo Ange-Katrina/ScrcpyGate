@@ -23,23 +23,35 @@ PASSWORD_PBKDF2_ITERATIONS = int(os.environ.get("PASSWORD_PBKDF2_ITERATIONS", "3
 DEFAULT_SETTINGS = {
     "video_profile": "balanced",
     "video_adaptive": "false",
-    "video_bit_rate": "900000",
-    "max_size": "540",
+    "video_bit_rate": "2400000",
+    "max_size": "1280",
     "max_fps": "24",
     "scrcpy_stream_mode": "raw",
     "scrcpy_enabled_stream_modes": "raw",
-    "video_preset_smooth_video_bit_rate": "700000",
-    "video_preset_smooth_max_size": "480",
+    "video_preset_smooth_video_bit_rate": "1000000",
+    "video_preset_smooth_max_size": "960",
     "video_preset_smooth_max_fps": "24",
-    "video_preset_balanced_video_bit_rate": "900000",
-    "video_preset_balanced_max_size": "540",
+    "video_preset_balanced_video_bit_rate": "2400000",
+    "video_preset_balanced_max_size": "1280",
     "video_preset_balanced_max_fps": "24",
-    "video_preset_sharp_video_bit_rate": "1600000",
-    "video_preset_sharp_max_size": "720",
+    "video_preset_sharp_video_bit_rate": "6000000",
+    "video_preset_sharp_max_size": "1920",
     "video_preset_sharp_max_fps": "30",
-    "video_preset_low_latency_video_bit_rate": "900000",
-    "video_preset_low_latency_max_size": "480",
+    "video_preset_low_latency_video_bit_rate": "1800000",
+    "video_preset_low_latency_max_size": "960",
     "video_preset_low_latency_max_fps": "30",
+    "video_preset_alas_smooth_video_bit_rate": "1000000",
+    "video_preset_alas_smooth_max_size": "960",
+    "video_preset_alas_smooth_max_fps": "24",
+    "video_preset_alas_balanced_video_bit_rate": "2400000",
+    "video_preset_alas_balanced_max_size": "1280",
+    "video_preset_alas_balanced_max_fps": "24",
+    "video_preset_alas_sharp_video_bit_rate": "4000000",
+    "video_preset_alas_sharp_max_size": "1280",
+    "video_preset_alas_sharp_max_fps": "30",
+    "video_preset_alas_low_latency_video_bit_rate": "1800000",
+    "video_preset_alas_low_latency_max_size": "960",
+    "video_preset_alas_low_latency_max_fps": "30",
     "video_custom_profiles": "{}",
     "auto_stop_time": "15",
     "auto_stop_minutes": "15",
@@ -48,6 +60,31 @@ DEFAULT_SETTINGS = {
     "alas_current_config": "alas",
     "alas_token": "",
 }
+
+VIDEO_QUALITY_MIGRATION_VERSION = "2"
+NORMAL_VIDEO_PROFILES = ("smooth", "balanced", "sharp", "low_latency")
+LEGACY_VIDEO_PROFILE_MATRICES = (
+    (
+        {"smooth": (700000, 480, 24), "balanced": (900000, 540, 24), "sharp": (1600000, 720, 30), "low_latency": (900000, 480, 30)},
+        {"smooth": (1000000, 960, 24), "balanced": (2400000, 1280, 24), "sharp": (6000000, 1920, 30), "low_latency": (1800000, 960, 30)},
+    ),
+    (
+        {"smooth": (450000, 720, 20), "balanced": (650000, 720, 24), "sharp": (1100000, 720, 24), "low_latency": (750000, 720, 30)},
+        {"smooth": (800000, 854, 20), "balanced": (1000000, 960, 24), "sharp": (1300000, 1280, 24), "low_latency": (1000000, 854, 30)},
+    ),
+    (
+        {"smooth": (700000, 720, 24), "balanced": (1200000, 720, 24), "sharp": (2200000, 720, 30), "low_latency": (1200000, 720, 30)},
+        {"smooth": (1200000, 960, 24), "balanced": (2400000, 1280, 24), "sharp": (3200000, 1280, 30), "low_latency": (1800000, 960, 30)},
+    ),
+    (
+        {"smooth": (900000, 720, 24), "balanced": (1800000, 720, 24), "sharp": (3500000, 960, 30), "low_latency": (1800000, 720, 30)},
+        {"smooth": (2400000, 1280, 24), "balanced": (3500000, 1280, 30), "sharp": (6500000, 1920, 30), "low_latency": (3000000, 1280, 30)},
+    ),
+    (
+        {"smooth": (1200000, 720, 24), "balanced": (2800000, 720, 30), "sharp": (5500000, 1280, 30), "low_latency": (2800000, 720, 30)},
+        {"smooth": (3000000, 1280, 24), "balanced": (5000000, 1600, 30), "sharp": (8500000, 1920, 30), "low_latency": (4000000, 1280, 30)},
+    ),
+)
 
 COMMON_WEAK_PASSWORDS = {"admin", "admin123", "password", "password123", "123456", "12345678", "qwerty123"}
 
@@ -157,7 +194,8 @@ def init_db() -> bool:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('admin','user')),
                 created_at TEXT NOT NULL,
-                must_change_password INTEGER NOT NULL DEFAULT 0
+                must_change_password INTEGER NOT NULL DEFAULT 0,
+                video_mode TEXT NOT NULL DEFAULT 'normal' CHECK(video_mode IN ('normal','alas'))
             );
             CREATE TABLE IF NOT EXISTS devices (
                 id TEXT PRIMARY KEY,
@@ -221,6 +259,9 @@ def init_db() -> bool:
             """
         )
         _migrate_user_alas_configs(conn)
+        user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "video_mode" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN video_mode TEXT NOT NULL DEFAULT 'normal'")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(user_video_preferences)").fetchall()}
         if "scrcpy_stream_mode" not in columns:
             conn.execute("ALTER TABLE user_video_preferences ADD COLUMN scrcpy_stream_mode TEXT NOT NULL DEFAULT 'raw'")
@@ -228,7 +269,11 @@ def init_db() -> bool:
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value))
         _migrate_video_defaults(conn)
         conn.commit()
-    return migrate_legacy_data()
+    admin_created = migrate_legacy_data()
+    with db_connect() as conn:
+        _migrate_video_quality_presets(conn)
+        conn.commit()
+    return admin_created
 
 
 def _create_user_alas_configs_table(conn: sqlite3.Connection, name: str = "user_alas_configs") -> None:
@@ -345,6 +390,68 @@ def _migrate_video_defaults(conn: sqlite3.Connection) -> None:
     if all(_setting_value(conn, key) == value for key, value in old_defaults.items()):
         for key in ("video_bit_rate", "max_size", "max_fps"):
             conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, DEFAULT_SETTINGS[key]))
+
+
+def _stored_profile_matrix(conn: sqlite3.Connection) -> dict[str, tuple[int, int, int]] | None:
+    result = {}
+    for profile in NORMAL_VIDEO_PROFILES:
+        try:
+            result[profile] = tuple(
+                int(_setting_value(conn, f"video_preset_{profile}_{field}"))
+                for field in ("video_bit_rate", "max_size", "max_fps")
+            )
+        except (TypeError, ValueError):
+            return None
+    return result
+
+
+def _migrate_video_quality_presets(conn: sqlite3.Connection) -> None:
+    try:
+        current_version = int(_setting_value(conn, "video_quality_migration_version", "0") or "0")
+        target_version = int(VIDEO_QUALITY_MIGRATION_VERSION)
+    except ValueError:
+        current_version = 0
+        target_version = int(VIDEO_QUALITY_MIGRATION_VERSION)
+    if current_version >= target_version:
+        return
+
+    current_matrix = _stored_profile_matrix(conn)
+    for legacy_matrix, upgraded_matrix in LEGACY_VIDEO_PROFILE_MATRICES:
+        if current_matrix != legacy_matrix:
+            continue
+        for profile, upgraded in upgraded_matrix.items():
+            for field, value in zip(("video_bit_rate", "max_size", "max_fps"), upgraded):
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+                    (f"video_preset_{profile}_{field}", str(value)),
+                )
+
+        default_profile = _setting_value(conn, "video_profile", "balanced")
+        if default_profile in legacy_matrix:
+            current_default = tuple(
+                int(_setting_value(conn, field)) for field in ("video_bit_rate", "max_size", "max_fps")
+            )
+            if current_default == legacy_matrix[default_profile]:
+                for field, value in zip(("video_bit_rate", "max_size", "max_fps"), upgraded_matrix[default_profile]):
+                    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (field, str(value)))
+
+        rows = conn.execute(
+            "SELECT username,profile,video_bit_rate,max_size,max_fps FROM user_video_preferences"
+        ).fetchall()
+        for row in rows:
+            profile = str(row["profile"] or "")
+            current = (int(row["video_bit_rate"]), int(row["max_size"]), int(row["max_fps"]))
+            if profile in legacy_matrix and current == legacy_matrix[profile]:
+                conn.execute(
+                    "UPDATE user_video_preferences SET video_bit_rate=?,max_size=?,max_fps=? WHERE username=?",
+                    (*upgraded_matrix[profile], row["username"]),
+                )
+        break
+
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES('video_quality_migration_version',?)",
+        (VIDEO_QUALITY_MIGRATION_VERSION,),
+    )
 
 
 def _remove_initial_password_file() -> None:
@@ -538,7 +645,7 @@ def get_user(username: str):
 
 def list_users() -> list[dict]:
     with db_connect() as conn:
-        return [dict(row) for row in conn.execute("SELECT username,role,created_at,must_change_password FROM users ORDER BY username")]
+        return [dict(row) for row in conn.execute("SELECT username,role,created_at,must_change_password,video_mode FROM users ORDER BY username")]
 
 
 def admin_count(conn: sqlite3.Connection | None = None) -> int:
@@ -548,12 +655,14 @@ def admin_count(conn: sqlite3.Connection | None = None) -> int:
         return admin_count(local_conn)
 
 
-def upsert_user(username: str, password: str | None, role: str) -> None:
+def upsert_user(username: str, password: str | None, role: str, video_mode: str | None = None) -> None:
     username = (username or "").strip()
     if not username or len(username) > 64 or any(ch.isspace() for ch in username):
         raise ValueError("invalid_username")
     if role not in ("admin", "user"):
         raise ValueError("invalid_role")
+    if video_mode is not None and video_mode not in ("normal", "alas"):
+        raise ValueError("invalid_video_mode")
     if password:
         error = validate_password(password, username)
         if error:
@@ -565,14 +674,20 @@ def upsert_user(username: str, password: str | None, role: str) -> None:
             if current and current["role"] == "admin" and role != "admin" and admin_count(conn) <= 1:
                 raise ValueError("last_admin_required")
             if password:
-                conn.execute("UPDATE users SET password_hash=?, role=? WHERE username=?", (hash_password(password), role, username))
+                if video_mode is None:
+                    conn.execute("UPDATE users SET password_hash=?, role=? WHERE username=?", (hash_password(password), role, username))
+                else:
+                    conn.execute("UPDATE users SET password_hash=?, role=?, video_mode=? WHERE username=?", (hash_password(password), role, video_mode, username))
                 conn.execute("DELETE FROM sessions WHERE username=?", (username,))
             else:
-                conn.execute("UPDATE users SET role=? WHERE username=?", (role, username))
+                if video_mode is None:
+                    conn.execute("UPDATE users SET role=? WHERE username=?", (role, username))
+                else:
+                    conn.execute("UPDATE users SET role=?, video_mode=? WHERE username=?", (role, video_mode, username))
         else:
             if not password:
                 raise ValueError("password_required")
-            conn.execute("INSERT INTO users(username,password_hash,role,created_at,must_change_password) VALUES(?,?,?,?,0)", (username, hash_password(password), role, time.strftime("%Y-%m-%d %H:%M:%S")))
+            conn.execute("INSERT INTO users(username,password_hash,role,created_at,must_change_password,video_mode) VALUES(?,?,?,?,0,?)", (username, hash_password(password), role, time.strftime("%Y-%m-%d %H:%M:%S"), video_mode or "normal"))
         conn.commit()
 
 

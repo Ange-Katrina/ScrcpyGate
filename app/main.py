@@ -21,8 +21,10 @@ from .devices import devices_payload, sessions_payload
 from .logging_config import setup_logging, tail_log
 from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
+    ALAS_PROFILE_NAMES,
     BANDWIDTH_RECOMMENDATIONS,
     MIN_PRESET_MAX_SIZE,
+    NORMAL_PROFILE_NAMES,
     PROFILE_FIELDS,
     PROFILE_NAMES,
     VIDEO_LIMITS,
@@ -164,7 +166,12 @@ async def parse_body(request: Request) -> dict:
 
 
 def user_payload(user: dict) -> dict:
-    return {"username": user["username"], "role": user["role"], "is_admin": user["role"] == "admin"}
+    return {
+        "username": user["username"],
+        "role": user["role"],
+        "is_admin": user["role"] == "admin",
+        "video_mode": user["video_mode"] if "video_mode" in user.keys() else "normal",
+    }
 
 
 def parse_bool(value, default: bool = False) -> bool:
@@ -304,11 +311,54 @@ def default_video_options() -> dict:
     return settings_to_video_options(storage.get_settings())
 
 
+def user_video_mode(username: str) -> str:
+    user = storage.get_user(username)
+    mode = str(user["video_mode"] if user and "video_mode" in user.keys() else "normal")
+    return mode if mode in ("normal", "alas") else "normal"
+
+
+def video_profiles_for_user(username: str, settings: dict | None = None) -> dict:
+    settings = settings or storage.get_settings()
+    profiles = profile_payloads(settings)
+    if user_video_mode(username) == "alas":
+        return {name: profiles[name] for name in ALAS_PROFILE_NAMES}
+    alas_names = set(ALAS_PROFILE_NAMES)
+    return {name: values for name, values in profiles.items() if name not in alas_names}
+
+
 def user_video_options(username: str, payload: dict | None = None) -> dict:
     settings = storage.get_settings()
-    fallback = storage.get_user_video_preference(username) or default_video_options()
     enabled_modes = enabled_stream_modes_value(settings.get("scrcpy_enabled_stream_modes", "raw"))
-    return normalize_video_options(payload or {}, fallback, profiles=profile_payloads(settings), enabled_stream_modes=enabled_modes)
+    profiles = video_profiles_for_user(username, settings)
+    stored = storage.get_user_video_preference(username)
+    fallback = stored or default_video_options()
+    if user_video_mode(username) == "alas":
+        requested = payload or {}
+        fallback_profile = str(fallback.get("profile") or "")
+        profile = str(requested.get("profile") or fallback_profile)
+        if profile not in profiles:
+            profile = "alas_balanced"
+        preset = profiles[profile]
+        forced = {
+            "profile": profile,
+            "adaptive": False,
+            "video_bit_rate": preset["video_bit_rate"],
+            "max_size": preset["max_size"],
+            "max_fps": preset["max_fps"],
+            "scrcpy_stream_mode": requested.get(
+                "scrcpy_stream_mode",
+                requested.get("stream_mode", fallback.get("scrcpy_stream_mode", "raw")),
+            ),
+        }
+        return normalize_video_options(forced, forced, profiles=profiles, enabled_stream_modes=enabled_modes)
+    if str(fallback.get("profile") or "") not in profiles:
+        fallback = normalize_video_options(
+            {"profile": "balanced"},
+            default_video_options(),
+            profiles=profiles,
+            enabled_stream_modes=enabled_modes,
+        )
+    return normalize_video_options(payload or {}, fallback, profiles=profiles, enabled_stream_modes=enabled_modes)
 
 
 def alas_binding_for_user(
@@ -635,13 +685,21 @@ async def api_video_preferences(request: Request):
     defaults = default_video_options()
     stored = storage.get_user_video_preference(user["username"])
     effective = user_video_options(user["username"])
+    mode = user_video_mode(user["username"])
+    profiles = video_profiles_for_user(user["username"], settings)
+    labels = profile_label_payloads(settings)
+    labels = {name: labels[name] for name in profiles if name in labels}
+    if mode == "alas":
+        defaults = effective
+        stored = effective
     return {
         "defaults": public_video_options(defaults),
         "preferences": public_video_options(stored or defaults),
         "has_user_preference": stored is not None,
         "effective": public_video_options(effective),
-        "profiles": profile_payloads(settings),
-        "profile_labels": profile_label_payloads(settings),
+        "profiles": profiles,
+        "profile_labels": labels,
+        "video_mode": mode,
         "limits": VIDEO_LIMITS,
         "stream_modes": ["raw", "protocol", "legacy"],
         "enabled_stream_modes": list(enabled_stream_modes_value(settings.get("scrcpy_enabled_stream_modes", "raw"))),
@@ -660,7 +718,7 @@ async def api_save_video_preferences(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     storage.set_user_video_preference(user["username"], options)
     storage.audit(user["username"], "video_preference_save", json.dumps(public_video_options(options), ensure_ascii=False))
-    return {"ok": True, "preferences": public_video_options(options), "effective": public_video_options(options)}
+    return {"ok": True, "preferences": public_video_options(options), "effective": public_video_options(options), "video_mode": user_video_mode(user["username"])}
 
 
 @app.put("/api/account/password")
@@ -1060,8 +1118,10 @@ async def admin_upsert_user(request: Request):
     password = payload.get("password")
     password = str(password) if password else None
     role = str(payload.get("role", "user"))
+    raw_video_mode = payload.get("video_mode")
+    video_mode = str(raw_video_mode) if raw_video_mode is not None else None
     try:
-        storage.upsert_user(username, password, role)
+        storage.upsert_user(username, password, role, video_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     storage.audit(admin["username"], "user_upsert", username)
