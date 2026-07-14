@@ -51,6 +51,11 @@ jobs:
       - name: Compile Python files
         run: python -m compileall -q app tests
 
+      - name: Validate deployment files
+        run: |
+          sh -n deploy.sh
+          docker compose config --quiet
+
       - name: Run unit tests
         env:
           SESSION_COOKIE_SECURE: "false"

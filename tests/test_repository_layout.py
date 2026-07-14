@@ -28,9 +28,10 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertIn("container_name: scrcpygate", compose)
 
         deploy = self.read("deploy.sh")
-        self.assertNotIn(" -f ", deploy)
+        self.assertNotIn("docker compose -f", deploy)
+        self.assertNotIn("docker-compose -f", deploy)
         self.assertNotIn(LEGACY_SERVICE, deploy)
-        self.assertIn("$DC up -d", deploy)
+        self.assertIn("compose up -d", deploy)
 
     def test_documentation_uses_auto_discovered_compose(self):
         for readme in ("README.md", "README.en.md"):
