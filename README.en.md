@@ -128,7 +128,9 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-On its first run, the installer creates a permission-restricted `.env` from `.env.example`. It then checks Docker, validates the Compose configuration, builds the image, initializes the database, starts the service, and waits for a health check. Repeated runs never overwrite an existing `.env`, database, user, or password.
+Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The guided flow asks for the deployment mode, port, data directory, public URL, and proxy settings, then shows a summary before saving anything.
+
+On its first run, the installer creates a permission-restricted `.env` from `.env.example`. Repeated runs never overwrite an existing database, user, or password, and configuration changes require confirmation. In a non-interactive environment, running the script performs an unattended install with the current configuration; use `./deploy.sh --install` to request that behavior explicitly.
 
 To customize the port, LAN address, or reverse-proxy settings, prepare the configuration first:
 
@@ -142,6 +144,8 @@ Common installer options:
 ```bash
 ./deploy.sh --pull        # Refresh base images and rebuild
 ./deploy.sh --skip-build  # Reuse the existing scrcpygate:local image
+./deploy.sh --configure   # Run only the configuration wizard
+./deploy.sh --status      # Show container status
 ./deploy.sh --help
 ```
 

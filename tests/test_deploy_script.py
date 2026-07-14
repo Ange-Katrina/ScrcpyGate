@@ -74,13 +74,33 @@ class DeployScriptTests(unittest.TestCase):
             command.chmod(0o755)
         return target
 
-    def run_installer(self, target: Path, arguments: str = "", **environment: str):
+    def run_installer(
+        self,
+        target: Path,
+        arguments: str = "",
+        input_text: str | None = None,
+        **environment: str,
+    ):
         command = (
             'export PATH="$PWD/fake-bin:$PATH"; '
             'export FAKE_DOCKER_LOG="$PWD/docker.log"; '
             f"sh ./deploy.sh {arguments}"
         )
         env = os.environ.copy()
+        for key in (
+            "WEB_SCRCPY_BIND",
+            "WEB_SCRCPY_PORT",
+            "WEB_SCRCPY_DATA_HOST",
+            "PUBLIC_BASE_URL",
+            "ALLOWED_HOSTS",
+            "ALLOWED_ORIGINS",
+            "TRUST_PROXY",
+            "TRUSTED_PROXY_IPS",
+            "SESSION_COOKIE_SECURE",
+            "SCRCPYGATE_HEALTH_TIMEOUT",
+            "INITIAL_ADMIN_PASSWORD",
+        ):
+            env.pop(key, None)
         env.update(environment)
         return subprocess.run(
             [self.shell(), "-c", command],
@@ -88,6 +108,9 @@ class DeployScriptTests(unittest.TestCase):
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            input=input_text,
             timeout=30,
             check=False,
         )
@@ -98,23 +121,60 @@ class DeployScriptTests(unittest.TestCase):
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("ScrcpyGate installer", result.stdout)
+        self.assertIn("ScrcpyGate", result.stdout)
+        self.assertIn("--menu", result.stdout)
         self.assertIn("--skip-build", result.stdout)
         self.assertIn("--pull", result.stdout)
+
+    def test_menu_opens_in_forced_interactive_mode(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--menu",
+            input_text="0\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ScrcpyGate 安装与管理面板", result.stdout)
+        self.assertIn("引导配置并安装", result.stdout)
+        self.assertIn("重置管理员密码", result.stdout)
+
+    def test_configuration_wizard_writes_lan_settings(self):
+        target = self.prepare_installer()
+        answers = "2\n5053\n./wizard-data\n192.0.2.50\n\n\n"
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text=answers,
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("部署配置向导", result.stdout)
+        self.assertIn("配置已保存", result.stdout)
+        config = (target / ".env").read_text(encoding="utf-8")
+        self.assertIn("WEB_SCRCPY_BIND=0.0.0.0", config)
+        self.assertIn("WEB_SCRCPY_PORT=5053", config)
+        self.assertIn("WEB_SCRCPY_DATA_HOST=./wizard-data", config)
+        self.assertIn("PUBLIC_BASE_URL=http://192.0.2.50:5053", config)
+        self.assertIn("ALLOWED_HOSTS=127.0.0.1,localhost,192.0.2.50", config)
 
     def test_fresh_install_runs_the_complete_compose_flow(self):
         target = self.prepare_installer()
         result = self.run_installer(target)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((target / ".env").is_file())
-        self.assertIn("Created .env from .env.example", result.stdout)
-        self.assertIn("Public URL:     http://127.0.0.1:5000", result.stdout)
+        self.assertIn(".env.example", result.stdout)
+        self.assertIn("http://127.0.0.1:5000", result.stdout)
         self.assertIn("TestInitialPassword-123456", result.stdout)
-        self.assertIn("ScrcpyGate installation completed", result.stdout)
+        self.assertIn("docker compose ps", result.stdout)
 
         calls = (target / "docker.log").read_text(encoding="utf-8")
         for expected in (
@@ -144,8 +204,8 @@ class DeployScriptTests(unittest.TestCase):
         result = self.run_installer(target, "--skip-build")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((target / ".env").read_text(encoding="utf-8"), config)
-        self.assertIn("Public URL:     http://127.0.0.1:5052", result.stdout)
-        self.assertIn("Reusing image scrcpygate:local", result.stdout)
+        self.assertIn("http://127.0.0.1:5052", result.stdout)
+        self.assertIn("scrcpygate:local", result.stdout)
 
         calls = (target / "docker.log").read_text(encoding="utf-8")
         self.assertIn("image inspect scrcpygate:local", calls)

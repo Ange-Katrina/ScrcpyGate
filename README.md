@@ -127,7 +127,9 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-首次运行会自动从 `.env.example` 创建权限受限的 `.env`，然后检查 Docker、校验 Compose 配置、构建镜像、初始化数据库、启动服务并等待健康检查。重复运行不会覆盖现有 `.env`、数据库、用户或密码。
+在交互式终端直接运行会打开彩色管理面板，可选择“引导配置并安装”、安装更新、启停/重启、状态、日志、修改配置和重置管理员密码。选择“引导配置并安装”后，向导会依次询问部署模式、端口、数据目录、访问地址和代理设置，显示摘要并确认后才写入配置。
+
+首次打开会自动从 `.env.example` 创建权限受限的 `.env`。重复运行不会覆盖现有数据库、用户或密码；修改 `.env` 前会明确显示并确认。非交互环境直接运行时会使用当前配置自动安装，也可以显式执行 `./deploy.sh --install`。
 
 需要修改端口、局域网地址或反向代理参数时，先执行：
 
@@ -141,6 +143,8 @@ cp .env.example .env
 ```bash
 ./deploy.sh --pull        # 更新基础镜像并重新构建
 ./deploy.sh --skip-build  # 复用已有 scrcpygate:local 镜像
+./deploy.sh --configure   # 只运行配置向导
+./deploy.sh --status      # 查看容器状态
 ./deploy.sh --help
 ```
 
