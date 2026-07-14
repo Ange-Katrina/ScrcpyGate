@@ -12,26 +12,34 @@ ScrcpyGate is a FastAPI/WebSocket refactor and productized gateway built with it
 ## scrcpy-server
 
 - File: `scrcpy-server`
-- Upstream: https://github.com/Genymobile/scrcpy
+- Version: `v3.1`
+- Upstream: https://github.com/Genymobile/scrcpy/releases/tag/v3.1
 - Purpose: Android-side scrcpy server used for screen capture and control.
+- License: Apache License 2.0; the upstream copyright notice is retained in `LICENSE`.
+- SHA-256: `958f0944a62f23b1f33a16e9eb14844c1a04b882ca175a738c16d23cb22b86c0`
 
-Verify the bundled version before publishing a release and keep its license obligations with the release artifacts.
+The protocol version in `scrcpy.py` must match this bundled server version.
 
 ## Android platform-tools
 
 - Directory: `adb/linux/`
+- Version: Android SDK Platform-Tools `36.0.0` (see `adb/linux/source.properties`).
 - Purpose: Linux ADB binaries and support files used inside the Docker image.
 - Notices: `adb/linux/NOTICE.txt`
+- Bundled `adb` SHA-256: `372d800c04c3272729afade8a85d95a70fb1c7e74062d9ab17a92eb7b618096c`
 
 The Docker image also installs Alpine's `android-tools`; the bundled files remain for compatibility with existing code paths.
 
 ## jMuxer
 
 - File: `static/js/jmuxer.min.js`
-- Upstream: https://github.com/webstream-labs/jmuxer
+- Version: `v2.0.7`
+- Upstream: https://github.com/webstream-labs/jmuxer/tree/v2.0.7
 - Purpose: H264 remuxing and MSE playback in the browser.
+- License: MIT (`static/js/JMUXER_LICENSE`)
+- SHA-256: `70381d825b1a2462885fb797bb952692e20993bc76d8f5cf5e13d7d4b0a2d6ae`
 
-Keep upstream license notices when replacing this file.
+Update the version, hash, and bundled license when replacing this file.
 
 ## Lucide Icons
 

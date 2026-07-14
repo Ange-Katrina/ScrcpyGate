@@ -464,6 +464,6 @@ Thanks also to these open-source projects:
 
 ## License
 
-ScrcpyGate is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+Except for separately identified third-party components, ScrcpyGate source code is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 Third-party components and provenance notes are listed in [THIRD_PARTY.md](THIRD_PARTY.md).

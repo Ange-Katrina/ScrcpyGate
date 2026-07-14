@@ -585,6 +585,6 @@ ScrcpyGate 的早期方向和部分实现参考自原始项目 [baixin1228/web-s
 
 ## 许可证
 
-ScrcpyGate 使用 Apache License 2.0。详见 [LICENSE](LICENSE)。
+除单独列明的第三方组件外，ScrcpyGate 源码使用 Apache License 2.0。详见 [LICENSE](LICENSE)。
 
 第三方组件和来源说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。

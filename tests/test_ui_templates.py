@@ -259,6 +259,26 @@ class UiTemplateContractTests(unittest.TestCase):
         self.assertTrue((ROOT / "static/icons/LUCIDE_LICENSE").is_file())
         self.assertFalse((ROOT / "static/css/local-ui.css").exists())
 
+    def test_bundled_video_assets_have_versioned_provenance(self):
+        third_party = self.read("THIRD_PARTY.md")
+        assets = {
+            "scrcpy-server": "v3.1",
+            "static/js/jmuxer.min.js": "v2.0.7",
+            "adb/linux/adb": "36.0.0",
+        }
+        for relative_path, version in assets.items():
+            asset_path = ROOT / relative_path
+            self.assertTrue(asset_path.is_file())
+            digest = hashlib.sha256(asset_path.read_bytes()).hexdigest()
+            self.assertIn(digest, third_party)
+            self.assertIn(version, third_party)
+
+        jmuxer_license = ROOT / "static/js/JMUXER_LICENSE"
+        self.assertTrue(jmuxer_license.is_file())
+        license_text = jmuxer_license.read_text(encoding="utf-8")
+        self.assertIn("The MIT License", license_text)
+        self.assertIn("Copyright (c) 2018 Samir Das", license_text)
+
 
 if __name__ == "__main__":
     unittest.main()
