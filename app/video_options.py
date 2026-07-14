@@ -41,25 +41,25 @@ PROFILE_LABELS = {
 
 BANDWIDTH_RECOMMENDATIONS = {
     "2mbps": {
-        "smooth": {"video_bit_rate": 450000, "max_size": 480, "max_fps": 20},
-        "balanced": {"video_bit_rate": 650000, "max_size": 480, "max_fps": 24},
-        "sharp": {"video_bit_rate": 1100000, "max_size": 540, "max_fps": 24},
-        "low_latency": {"video_bit_rate": 750000, "max_size": 480, "max_fps": 30},
+        "smooth": {"video_bit_rate": 450000, "max_size": 720, "max_fps": 20},
+        "balanced": {"video_bit_rate": 650000, "max_size": 720, "max_fps": 24},
+        "sharp": {"video_bit_rate": 1100000, "max_size": 720, "max_fps": 24},
+        "low_latency": {"video_bit_rate": 750000, "max_size": 720, "max_fps": 30},
     },
     "5mbps": {
-        "smooth": {"video_bit_rate": 700000, "max_size": 480, "max_fps": 24},
-        "balanced": {"video_bit_rate": 1200000, "max_size": 540, "max_fps": 24},
+        "smooth": {"video_bit_rate": 700000, "max_size": 720, "max_fps": 24},
+        "balanced": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 24},
         "sharp": {"video_bit_rate": 2200000, "max_size": 720, "max_fps": 30},
-        "low_latency": {"video_bit_rate": 1200000, "max_size": 480, "max_fps": 30},
+        "low_latency": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 30},
     },
     "10mbps": {
-        "smooth": {"video_bit_rate": 900000, "max_size": 480, "max_fps": 24},
+        "smooth": {"video_bit_rate": 900000, "max_size": 720, "max_fps": 24},
         "balanced": {"video_bit_rate": 1800000, "max_size": 720, "max_fps": 24},
         "sharp": {"video_bit_rate": 3500000, "max_size": 960, "max_fps": 30},
-        "low_latency": {"video_bit_rate": 1800000, "max_size": 540, "max_fps": 30},
+        "low_latency": {"video_bit_rate": 1800000, "max_size": 720, "max_fps": 30},
     },
     "20mbps": {
-        "smooth": {"video_bit_rate": 1200000, "max_size": 540, "max_fps": 24},
+        "smooth": {"video_bit_rate": 1200000, "max_size": 720, "max_fps": 24},
         "balanced": {"video_bit_rate": 2800000, "max_size": 720, "max_fps": 30},
         "sharp": {"video_bit_rate": 5500000, "max_size": 1280, "max_fps": 30},
         "low_latency": {"video_bit_rate": 2800000, "max_size": 720, "max_fps": 30},

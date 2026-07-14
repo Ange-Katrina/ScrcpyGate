@@ -224,6 +224,8 @@ Admins can tune each preset:
 - output size
 - frame rate
 
+Bandwidth recommendation buttons keep every recommended output size at 720 or higher while preserving the 960 and 1280 values in higher-bandwidth tiers. Existing manual and custom profiles may still use smaller output sizes. The admin UI displays bitrate in Mbps, while the API and database continue to use integer bps values.
+
 These values only affect the scrcpy output stream. Some changes may require restarting the mirror session to fully take effect.
 
 ## ALAS / Alas-Gyre Overlay

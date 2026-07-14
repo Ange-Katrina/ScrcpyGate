@@ -382,8 +382,11 @@ function renderDevices(){
     box.appendChild(card);
   });
 }
-function presetInput(profile, field, value){ const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : value; input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='100000'; input.step='100000'; } else if(field==='max_size'){ input.min='480'; input.step='1'; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
-function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(input) input.value=value; }
+function bitrateBpsToMbps(value){ const bps=Number(value); return Number.isFinite(bps) ? bps / 1000000 : ''; }
+function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFinite(mbps) ? Math.round(mbps * 1000000) : 0; }
+function presetFieldDisplayValue(field, value){ return field==='video_bit_rate' ? bitrateBpsToMbps(value) : value; }
+function presetInput(profile, field, value){ const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : presetFieldDisplayValue(field, value); input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='0.1'; input.max='100'; input.step='0.05'; input.inputMode='decimal'; } else if(field==='max_size'){ input.min='480'; input.step='1'; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
+function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(input) input.value=presetFieldDisplayValue(field, value); }
 function renderBandwidthActions(recommendations){ const box=$('bandwidthPresetActions'); if(!box) return; clear(box); Object.keys(recommendations).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(name=>box.appendChild(btn(name.toUpperCase(), 'warn', ()=>applyBandwidthRecommendation(name)))); }
 function applyBandwidthRecommendation(name){ const rec=((state.video || {}).bandwidth_recommendations || {})[name]; if(!rec) return; Object.entries(rec).forEach(([profile, values])=>['video_bit_rate','max_size','max_fps'].forEach(field=>setPresetValue(profile, field, values[field]))); show(`${name.toUpperCase()} \u63a8\u8350\u503c\u5df2\u586b\u5165\uff0c\u786e\u8ba4\u540e\u70b9\u4fdd\u5b58`); }
 async function removeCustomProfile(id){
@@ -404,14 +407,14 @@ function renderCustomProfiles(){
   Object.keys(customProfiles).sort().forEach(id=>{
     const profile=customProfiles[id] || {};
     const tr=document.createElement('tr');
-    tr.append(td(id), td(profile.label || id), td(profile.video_bit_rate), td(profile.max_size), td(profile.max_fps));
+    tr.append(td(id), td(profile.label || id), td(bitrateBpsToMbps(profile.video_bit_rate)), td(profile.max_size), td(profile.max_fps));
     const actions=document.createElement('td');
     actions.className='actions';
     actions.append(
       btn('编辑','',()=>{
         $('customProfileId').value=id;
         $('customProfileLabel').value=profile.label || id;
-        $('customProfileBitrate').value=profile.video_bit_rate || 900000;
+        $('customProfileBitrate').value=bitrateBpsToMbps(profile.video_bit_rate || 900000);
         $('customProfileSize').value=profile.max_size || 480;
         $('customProfileFps').value=profile.max_fps || 24;
       }),
@@ -1651,8 +1654,8 @@ async function savePermission(){
   if(failed.length) throw new Error(`${failed.length} 台设备权限保存失败，已重新读取服务器状态`);
   show(`已保存 ${changes.length} 台设备的权限`);
 }
-function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=Number(input.value); }); return presets; }
-function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:Number($('customProfileBitrate').value || 900000), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
+function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=field==='video_bit_rate' ? bitrateMbpsToBps(input.value) : Number(input.value); }); return presets; }
+function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(['smooth','balanced','sharp','low_latency','custom','auto'].includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:Number($('customProfileSize').value || 480), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
 async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
 async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','alas'); }
 async function reloadAlas(){

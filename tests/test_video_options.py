@@ -92,9 +92,19 @@ class VideoOptionsTests(unittest.TestCase):
         with self.assertRaises(VideoOptionError):
             normalize_custom_profile_payloads({"office": {"max_size": 360}})
 
+        custom = normalize_custom_profile_payloads({
+            "office": {"video_bit_rate": 900000, "max_size": 480, "max_fps": 24}
+        })
+        self.assertEqual(custom["office"]["max_size"], 480)
+
     def test_bandwidth_recommendations_include_expected_levels(self):
         self.assertEqual(set(BANDWIDTH_RECOMMENDATIONS), {"2mbps", "5mbps", "10mbps", "20mbps"})
-        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["2mbps"]["smooth"]["max_size"], 480)
+        for level, profiles in BANDWIDTH_RECOMMENDATIONS.items():
+            for profile, values in profiles.items():
+                with self.subTest(level=level, profile=profile):
+                    self.assertGreaterEqual(values["max_size"], 720)
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["10mbps"]["sharp"]["max_size"], 960)
+        self.assertEqual(BANDWIDTH_RECOMMENDATIONS["20mbps"]["sharp"]["max_size"], 1280)
 
     def test_invalid_ranges_are_rejected(self):
         with self.assertRaises(VideoOptionError):

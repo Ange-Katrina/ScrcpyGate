@@ -2243,13 +2243,13 @@ td.actions {
   [data-table="permissions"] td:nth-child(3):not([data-label])::before { content: "查看"; }
   [data-table="permissions"] td:nth-child(4):not([data-label])::before { content: "控制"; }
   [data-table="video-presets"] td:nth-child(1):not([data-label])::before { content: "预设"; }
-  [data-table="video-presets"] td:nth-child(2):not([data-label])::before { content: "码率 bps"; }
+  [data-table="video-presets"] td:nth-child(2):not([data-label])::before { content: "码率 Mbps"; }
   [data-table="video-presets"] td:nth-child(3):not([data-label])::before { content: "输出尺寸"; }
   [data-table="video-presets"] td:nth-child(4):not([data-label])::before { content: "帧率"; }
   [data-table="video-presets"] td:nth-child(5):not([data-label])::before { content: "建议"; }
   [data-table="custom-profiles"] td:nth-child(1):not([data-label])::before { content: "ID"; }
   [data-table="custom-profiles"] td:nth-child(2):not([data-label])::before { content: "名称"; }
-  [data-table="custom-profiles"] td:nth-child(3):not([data-label])::before { content: "码率"; }
+  [data-table="custom-profiles"] td:nth-child(3):not([data-label])::before { content: "码率 Mbps"; }
   [data-table="custom-profiles"] td:nth-child(4):not([data-label])::before { content: "输出尺寸"; }
   [data-table="custom-profiles"] td:nth-child(5):not([data-label])::before { content: "帧率"; }
   [data-table="alas-bindings"] td:nth-child(1):not([data-label])::before { content: "用户"; }

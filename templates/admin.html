@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=3cc0b693d0b0">
+  <link rel="stylesheet" href="/static/css/admin.css?v=97c32c59ed7e">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -120,20 +120,20 @@
         <section class="workspace-section" aria-labelledby="presetParamsTitle">
           <div class="section-heading"><div><h3 id="presetParamsTitle">预设参数</h3><p>上行有限时优先调低码率，其次调整输出尺寸。</p></div></div>
           <div class="actions spaced-bottom-12" id="bandwidthPresetActions"></div>
-          <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">预设</th><th scope="col">码率 bps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
-          <p class="muted">点击 2/5/10/20Mbps 会自动填入推荐值；帧率建议保持 20-30，输出尺寸最低 480。</p>
+          <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">预设</th><th scope="col">码率 Mbps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
+          <p class="muted">点击 2/5/10/20 Mbps 会自动填入推荐值；推荐输出尺寸最低 720，高带宽档位仍保留 960/1280。</p>
         </section>
         <section class="workspace-section" aria-labelledby="customProfilesTitle">
           <div class="section-heading"><div><h3 id="customProfilesTitle">专属画质设定</h3><p>添加适合特定网络或设备的画质档位。</p></div></div>
           <div class="form-grid">
             <div class="col-3"><label for="customProfileId">档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
             <div class="col-3"><label for="customProfileLabel">显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
-            <div class="col-2"><label for="customProfileBitrate">码率 bps</label><input id="customProfileBitrate" type="number" min="100000" step="100000" value="900000"></div>
+            <div class="col-2"><label for="customProfileBitrate">码率 Mbps</label><input id="customProfileBitrate" type="number" min="0.1" max="100" step="0.05" inputmode="decimal" value="0.9"></div>
             <div class="col-2"><label for="customProfileSize">输出尺寸</label><input id="customProfileSize" type="number" min="480" step="1" value="480"></div>
             <div class="col-2"><label for="customProfileFps">帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
             <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加专属设定</button></div>
           </div>
-          <div class="table-wrap spaced-top-12"><table class="responsive-table" data-table="custom-profiles"><thead><tr><th scope="col">ID</th><th scope="col">名称</th><th scope="col">码率</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
+          <div class="table-wrap spaced-top-12"><table class="responsive-table" data-table="custom-profiles"><thead><tr><th scope="col">ID</th><th scope="col">名称</th><th scope="col">码率 Mbps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
         </section>
       </section>
 
@@ -399,6 +399,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=3a57d478469a" defer></script>
+<script src="/static/js/admin.js?v=6039c6673a84" defer></script>
 </body>
 </html>
