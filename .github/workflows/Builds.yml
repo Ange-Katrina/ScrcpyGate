@@ -57,17 +57,26 @@ jobs:
       - name: Scan for forbidden resolution commands
         run: python -m unittest tests.test_resolution_safety
 
-      - name: Scan for deployment secrets
+      - name: Scan for credential-shaped values
         run: |
-          if grep -RInE "private-network-marker|personal-domain-marker|2_nLOv|ALAS_TOKEN=.+|SESSION_SECRET=.+|INITIAL_ADMIN_PASSWORD=.+" \
+          pattern='-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+'
+          set +e
+          matches="$(grep -RIlE \
             --exclude-dir=.git \
-            --exclude-dir=.github \
             --exclude-dir=__pycache__ \
             --exclude-dir=.pytest_cache \
             --exclude-dir=.mypy_cache \
             --exclude-dir=.ruff_cache \
-            .; then
-            echo "Forbidden deployment-specific value found."
+            -- "$pattern" .)"
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then
+            echo "Credential scan failed to execute."
+            exit "$status"
+          fi
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches"
+            echo "Credential-shaped value found; matched contents are intentionally hidden."
             exit 1
           fi
 

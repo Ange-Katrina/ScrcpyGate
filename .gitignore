@@ -6,6 +6,9 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+/.agents/
+/.uv-cache/
+/.uv-python/
 
 .env
 .env.*
@@ -32,8 +35,11 @@ dist/
 *.exe
 *.log
 *.txt
+!/requirements.txt
+!/adb/linux/NOTICE.txt
 /*.yaml
 /*.yml
+!/docker-compose.v2.yml
 gpt*.md
 ds*.md
 logs/
@@ -41,3 +47,4 @@ log/
 /.trae/
 docs/superpowers/
 __tmp_alas_home.html
+/ALAS_EMBED_STATUS.md

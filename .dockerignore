@@ -1,6 +1,9 @@
 .git/
 .gitignore
 .github/
+.agents/
+.uv-cache/
+.uv-python/
 
 __pycache__/
 *.py[cod]
@@ -31,3 +34,7 @@ dist/
 .idea/
 *.tmp
 *.temp
+
+ALAS_EMBED_STATUS.md
+__tmp_alas_home.html
+tests/

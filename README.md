@@ -55,7 +55,7 @@ ScrcpyGate 适合这些使用方式：
 | 画质 | 流畅、稳定、高清、低延迟预设，后台可调默认值 |
 | 安全 | Host / Origin / CSRF / Trusted Proxy 检查，安全响应头 |
 | 隐私 | 普通用户 API 和界面隐藏真实 ADB IP:端口 |
-| ALAS | 代理 Alas-Gyre Overlay 的启动、停止、重启能力 |
+| ALAS | 代理 Alas-Gyre Overlay，支持多配置单一归属、分项权限和嵌入访问 |
 | 运维 | Docker Compose、健康检查、审计日志、运行日志 |
 
 ## 架构概览
@@ -437,7 +437,7 @@ docker compose -f docker-compose.v2.yml build
 | 设备 | 设备 ID、名称、ADB 地址、启用状态 | 管理可投屏设备；普通用户只看到名称和在线状态 |
 | 权限 | 用户、设备、查看、控制 | 控制谁能看、谁能操作某台设备 |
 | 画质 | 默认预设、各预设码率/尺寸/帧率、自定义预设、允许的流模式 | 管理员按网络环境设置默认值，用户可选择预设 |
-| ALAS | Runtime URL、Token、配置目录、单用户唯一归属、默认入口、运行与编辑权限 | 只代理当前用户所拥有且已选中配置的状态、启停、编辑和嵌入访问 |
+| ALAS | Runtime URL、Token、配置目录、每项配置唯一用户归属（用户可拥有多项）、默认入口、运行与编辑权限 | 只代理当前用户所拥有且已选中配置的状态、启停、编辑和嵌入访问 |
 | 安全日志 | 登录、登出、权限、ALAS、投屏操作记录 | 方便追踪异常登录和越权访问 |
 
 ## 项目结构
@@ -515,19 +515,25 @@ docker logs --tail=120 web-scrcpy-v2
 编译检查：
 
 ```bash
-python -m compileall -q .
+python -m compileall -q app tests
 ```
 
 单元测试：
 
 ```bash
-python -m unittest discover -s tests
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-模板内联 JS 语法检查：
+项目维护的前端 JavaScript 语法检查：
 
 ```bash
-node -e "const fs=require('fs'); for (const f of ['templates/index.html','templates/admin.html','templates/login.html']) { const html=fs.readFileSync(f,'utf8'); const scripts=[...html.matchAll(/<script(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)<\\/script>/gi)].map(m=>m[1]); scripts.forEach((s,i)=>new Function(s)); console.log(f+' ok'); }"
+node --check static/js/theme-init.js
+node --check static/js/ui-core.js
+node --check static/js/input.js
+node --check static/js/admin.js
+node --check static/js/mirror.js
+node --check static/js/login.js
+node --check static/js/alas-shell.js
 ```
 
 分辨率安全扫描：
@@ -539,8 +545,10 @@ rg -n "wm size|wm density|modifydev|Physical size|Override size" .
 敏感信息扫描示例：
 
 ```bash
-rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
+rg -l --hidden --glob '!.git/**' -- '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .
 ```
+
+无输出表示未发现这些高置信凭据形态；扫描只打印文件名，不输出命中内容。
 
 ## 致谢
 

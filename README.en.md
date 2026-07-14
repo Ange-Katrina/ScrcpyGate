@@ -56,7 +56,7 @@ It is not focused on:
 | Quality | Smooth, stable, sharp, and low-latency presets with admin tuning |
 | Security | Host, Origin, CSRF, trusted-proxy checks, security response headers |
 | Privacy | Real ADB IP and port hidden from normal user APIs and UI |
-| ALAS | Proxy for Alas-Gyre Overlay start, stop, and restart |
+| ALAS | Alas-Gyre Overlay proxy with multi-config single-owner assignment, per-config permissions, and embedded access |
 | Operations | Docker Compose, health check, audit log, runtime log |
 
 ## Architecture
@@ -398,19 +398,25 @@ Check:
 Compile check:
 
 ```bash
-python -m compileall -q .
+python -m compileall -q app tests
 ```
 
 Unit tests:
 
 ```bash
-python -m unittest discover -s tests
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Inline template JavaScript syntax check:
+Project-maintained frontend JavaScript syntax checks:
 
 ```bash
-node -e "const fs=require('fs'); for (const f of ['templates/index.html','templates/admin.html','templates/login.html']) { const html=fs.readFileSync(f,'utf8'); const scripts=[...html.matchAll(/<script(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)<\\/script>/gi)].map(m=>m[1]); scripts.forEach((s,i)=>new Function(s)); console.log(f+' ok'); }"
+node --check static/js/theme-init.js
+node --check static/js/ui-core.js
+node --check static/js/input.js
+node --check static/js/admin.js
+node --check static/js/mirror.js
+node --check static/js/login.js
+node --check static/js/alas-shell.js
 ```
 
 Resolution safety scan:
@@ -422,8 +428,10 @@ rg -n "wm size|wm density|modifydev|Physical size|Override size" .
 Sensitive data scan example:
 
 ```bash
-rg -n "BEGIN PRIVATE|BEGIN OPENSSH|ALAS_GYRE_API_TOKEN=|sk-[A-Za-z0-9]" .
+rg -l --hidden --glob '!.git/**' -- '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .
 ```
+
+No output means no high-confidence credential shape was found. The scan prints file names only, never matched contents.
 
 ## Acknowledgements
 
