@@ -46,7 +46,8 @@ class AdminUiPerformanceContractTests(unittest.TestCase):
     def test_full_refresh_is_parallel_and_mutations_are_domain_scoped(self):
         self.assertIn("loadedResources.has(name) || visible.has(name)", self.source)
         self.assertIn("Promise.allSettled(names.map(name=>RESOURCE_LOADERS[name]({force:true})))", self.source)
-        self.assertIn("refreshDomains('overview','devices','permissions')", self.source)
+        self.assertIn("applyDevices(result)", self.source)
+        self.assertIn("refreshDomains('permissions')", self.source)
         self.assertIn("refreshDomains('overview','users','permissions','alas')", self.source)
         self.assertIn("refreshDomains('alas')", self.source)
         self.assertIn("await loadPermissions({force:true})", self.source)

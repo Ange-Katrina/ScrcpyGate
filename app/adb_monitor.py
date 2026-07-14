@@ -55,7 +55,7 @@ class AdbDeviceMonitor:
         self.connect_timeout = max(2, _env_int("ADB_CONNECT_TIMEOUT", 8))
         self.reconnect_backoff = max(1, _env_int("ADB_RECONNECT_BACKOFF", 5))
         self._task: asyncio.Task | None = None
-        self._lock = asyncio.Lock()
+        self._device_locks: dict[str, asyncio.Lock] = {}
         self._statuses: dict[str, dict[str, Any]] = {}
 
     async def start(self) -> None:
@@ -91,28 +91,41 @@ class AdbDeviceMonitor:
         address = str(device.get("address") or device_id).strip()
         if not device_id:
             return {"ok": False, "state": "unknown", "detail": "device id is empty"}
-        if not _bool_value(device.get("enabled"), True):
-            return self._set_status(device_id, "disabled", ok=False, detail="device disabled")
+        lock = self._device_locks.setdefault(device_id, asyncio.Lock())
+        async with lock:
+            persisted = storage.get_device(device_id)
+            if persisted:
+                device = dict(persisted)
+                address = str(device.get("address") or device_id).strip()
+            if not _bool_value(device.get("enabled"), True):
+                return self._set_status(device_id, "disabled", ok=False, detail="device disabled")
 
-        current = self._statuses.get(device_id) or {}
-        if (
-            not force
-            and current.get("state") == "online"
-            and _now() - int(current.get("last_checked_at") or 0) < self.reconnect_backoff
-        ):
-            return dict(current)
+            current = self._statuses.get(device_id) or {}
+            if (
+                not force
+                and current.get("state") == "online"
+                and _now() - int(current.get("last_checked_at") or 0) < self.reconnect_backoff
+            ):
+                return dict(current)
 
-        if force or current.get("state") != "online":
-            self._set_status(device_id, "reconnecting", ok=False, detail="checking adb state")
-        result = await asyncio.to_thread(self._probe, device_id, address)
-        return self._set_status(device_id, result["state"], ok=result["ok"], detail=result["detail"], address=address)
+            if force or current.get("state") != "online":
+                self._set_status(device_id, "reconnecting", ok=False, detail="checking adb state")
+            try:
+                result = await asyncio.to_thread(self._probe, device_id, address)
+            except Exception as exc:
+                log.exception("ADB_PROBE_ERROR device=%s", device_id)
+                result = {"ok": False, "state": "unknown", "detail": str(exc)}
+            return self._set_status(
+                device_id,
+                result["state"],
+                ok=result["ok"],
+                detail=result["detail"],
+                address=address,
+            )
 
     async def check_all(self) -> None:
         for device in storage.list_all_devices():
-            if _bool_value(device.get("enabled"), True):
-                await self.ensure_connected(dict(device))
-            else:
-                self._set_status(str(device.get("id") or ""), "disabled", ok=False, detail="device disabled")
+            await self.ensure_connected(dict(device))
 
     async def _run(self) -> None:
         while True:
@@ -127,18 +140,18 @@ class AdbDeviceMonitor:
         adb = ADBManager()
         detail: list[str] = []
         target = address or device_id
-        state = adb.get_device_state(target)
+        state = adb.get_device_state(target, timeout=self.connect_timeout)
         if state != "device" and target and ":" in target:
             ok, output = adb._run_adb_command(["connect", target], timeout=self.connect_timeout)
             if output:
                 detail.append(output.strip())
-            state = adb.get_device_state(target)
+            state = adb.get_device_state(target, timeout=self.connect_timeout)
             if not ok and not state:
                 return {"ok": False, "state": "unknown", "detail": "\n".join(detail)}
 
         label = adb_state_label(state)
         if label == "unknown":
-            for item in adb.get_devices():
+            for item in adb.get_devices(timeout=self.connect_timeout):
                 if item.get("id") in {device_id, address}:
                     label = adb_state_label(item.get("state"))
                     detail.append(f"{item.get('id')} {item.get('state')}")

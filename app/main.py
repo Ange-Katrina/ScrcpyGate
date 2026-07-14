@@ -1105,8 +1105,7 @@ async def admin_upsert_device(request: Request):
         storage.set_permission(admin["username"], device_id, True, True)
     storage.audit(admin["username"], "device_upsert", device_id)
     sessions = await manager.snapshot()
-    if enabled:
-        await adb_monitor.reconnect_device(device_id)
+    await adb_monitor.reconnect_device(device_id)
     return {"ok": True, "devices": devices_payload(storage.list_all_devices(), sessions, adb_monitor.snapshot())}
 
 

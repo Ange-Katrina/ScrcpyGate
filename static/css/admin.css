@@ -680,18 +680,31 @@ textarea {
   transition: border-color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
+.device-card__heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
 .device-card:hover {
   border-color: var(--ui-color-border-strong);
 }
 
 .device-card h3 {
+  min-width: 0;
   overflow: hidden;
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: var(--ui-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .device-address {
+  padding: 7px 9px;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-canvas);
   color: var(--ui-color-text-muted);
   font-family: var(--ui-font-mono);
   font-size: 12px;
@@ -701,6 +714,12 @@ textarea {
 
 .device-card .actions {
   align-self: end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.device-card .actions .btn {
+  width: 100%;
 }
 
 .table-wrap {

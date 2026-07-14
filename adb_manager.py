@@ -71,14 +71,14 @@ class ADBManager:
                 )
         return devices
 
-    def get_devices(self) -> list[dict]:
-        success, output = self._run_adb_command(["devices"])
+    def get_devices(self, timeout: int | None = None) -> list[dict]:
+        success, output = self._run_adb_command(["devices"], timeout=timeout)
         if not success:
             return []
         return self.parse_devices_output(output)
 
-    def get_device_state(self, device_id: str | None = None) -> Optional[str]:
-        success, output = self._run_adb_command(["get-state"], device_id)
+    def get_device_state(self, device_id: str | None = None, timeout: int | None = None) -> Optional[str]:
+        success, output = self._run_adb_command(["get-state"], device_id, timeout=timeout)
         if not success:
             return None
         return (output or "").strip()

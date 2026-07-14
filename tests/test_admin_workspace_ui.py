@@ -70,6 +70,23 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertNotIn("letter-spacing: -", self.styles)
         self.assertNotIn("font-size: clamp(", self.styles)
 
+    def test_device_cards_show_authoritative_adb_state(self):
+        for token in (
+            "const ADB_STATUS_META",
+            "function deviceAdbMeta(device)",
+            "function applyDeviceAdbResult(id,result={})",
+            "deviceProbeRequests.has(id)",
+            "applyDevices(result)",
+            "loadedResources.add('devices')",
+            "正在检测 ADB",
+            "ADB 在线",
+            "ADB 离线",
+            "ADB 等待授权",
+        ):
+            self.assertIn(token, self.script)
+        self.assertIn(".device-card__heading", self.styles)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", self.styles)
+
 
 if __name__ == "__main__":
     unittest.main()

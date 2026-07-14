@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -187,6 +188,40 @@ class AuthRouteTests(unittest.TestCase):
             json={"username": "bob", "password": "BobPassword123", "role": "user"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_device_save_returns_fresh_adb_status(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        async def record_online(device_id):
+            return self.main.adb_monitor._set_status(
+                device_id,
+                "online",
+                ok=True,
+                detail="device",
+                address="192.0.2.10:30100",
+            )
+
+        try:
+            with patch.object(self.main.adb_monitor, "reconnect_device", side_effect=record_online) as reconnect:
+                response = self.client.put(
+                    "/api/admin/devices",
+                    headers={"x-csrf-token": session["csrf_token"]},
+                    json={
+                        "device_id": "new-device",
+                        "name": "New device",
+                        "address": "192.0.2.10:30100",
+                        "enabled": True,
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            reconnect.assert_awaited_once_with("new-device")
+            saved = next(item for item in response.json()["devices"] if item["id"] == "new-device")
+            self.assertEqual(saved["adb_state"], "online")
+            self.assertTrue(saved["adb_ok"])
+        finally:
+            self.main.adb_monitor._statuses.pop("new-device", None)
 
     def test_normal_user_cannot_open_unassigned_device_websockets(self):
         self.storage.upsert_user("alice", "AlicePassword123", "user")

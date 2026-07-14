@@ -13,9 +13,18 @@ const ALAS_USER_KEY = 'scrcpygate:admin:alas:user';
 const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
 const USER_PAGE_SIZE = 20;
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
+const ADB_STATUS_META = Object.freeze({
+  online:{label:'ADB 在线',tone:'ok'},
+  offline:{label:'ADB 离线',tone:'danger'},
+  unauthorized:{label:'ADB 等待授权',tone:'warn'},
+  reconnecting:{label:'正在检测 ADB',tone:'warn'},
+  disabled:{label:'ADB 未启用',tone:''},
+  unknown:{label:'ADB 未检测',tone:'warn'}
+});
 const resourceRequests = new Map();
 const resourceSequences = new Map();
 const loadedResources = new Set();
+const deviceProbeRequests = new Set();
 const TAB_RESOURCES = {
   overview:['overview'],
   devices:['devices'],
@@ -360,11 +369,15 @@ function renderDevices(){
     const id=getDeviceId(device);
     const card=document.createElement('div');
     card.className='device-card';
+    const heading=document.createElement('div');
+    heading.className='device-card__heading';
     const title=document.createElement('h3');
     title.textContent=device.name || id;
+    const adbMeta=deviceAdbMeta(device);
+    heading.append(title,chip(adbMeta.label,adbMeta.tone));
     const address=document.createElement('div');
     address.className='device-address';
-    address.textContent=device.address || id;
+    address.textContent=`ADB · ${device.address || id}`;
     const statuses=document.createElement('div');
     statuses.className='chips';
     statuses.appendChild(chip(device.enabled?'启用':'禁用', device.enabled?'ok':'warn'));
@@ -372,15 +385,38 @@ function renderDevices(){
     if(device.session&&device.session.control_lock) statuses.appendChild(chip(`控制: ${device.session.control_lock.username || '已占用'}`, 'warn'));
     const actions=document.createElement('div');
     actions.className='actions';
+    const probeButton=btn(deviceProbeRequests.has(id)?'检测中':'测试 ADB','',()=>testDevice(id));
+    probeButton.disabled=deviceProbeRequests.has(id);
     actions.append(
       btn('编辑','',()=>editDevice(device)),
-      btn('测试 ADB','',()=>testDevice(id)),
+      probeButton,
       btn(device.session&&device.session.running?'停止投屏':'开始投屏', device.session&&device.session.running?'warn':'primary', ()=>device.session&&device.session.running?stopDevice(id):startDevice(id)),
       btn('删除','danger',()=>deleteDevice(id))
     );
-    card.append(title,address,statuses,actions);
+    card.append(heading,address,statuses,actions);
     box.appendChild(card);
   });
+}
+function deviceAdbMeta(device){
+  const raw=device && device.enabled===false ? 'disabled' : String(device && (device.adb_state || device.status_label) || 'unknown').toLowerCase();
+  return Object.assign({state:raw}, ADB_STATUS_META[raw] || ADB_STATUS_META.unknown);
+}
+function applyDeviceAdbResult(id,result={}){
+  const device=state.devices.find(item=>getDeviceId(item)===id);
+  if(!device) return null;
+  const nextState=String(result.adb_state || result.state || 'unknown').toLowerCase();
+  Object.assign(device,{
+    adb_state:nextState,
+    adb_ok:Boolean(result.adb_ok ?? result.ok),
+    status_label:result.status_label || nextState,
+    adb_detail:result.detail || '',
+    last_error:result.last_error || (result.ok ? '' : result.detail || ''),
+    last_checked_at:result.last_checked_at || device.last_checked_at || null,
+    last_seen_at:result.last_seen_at || device.last_seen_at || null
+  });
+  renderDevices();
+  renderOverview();
+  return device;
 }
 function bitrateBpsToMbps(value){ const bps=Number(value); return Number.isFinite(bps) ? bps / 1000000 : ''; }
 function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFinite(mbps) ? Math.round(mbps * 1000000) : 0; }
@@ -1610,11 +1646,16 @@ async function deleteUser(username){
 }
 async function saveDevice(){
   const id=$('deviceId').value.trim();
-  await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}});
-  show('设备已保存');
+  const result=await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}});
+  markResourceStale('devices');
+  applyDevices(result);
+  loadedResources.add('devices');
+  markResourceStale('overview');
+  const saved=state.devices.find(device=>getDeviceId(device)===id);
+  show(`设备已保存 · ${deviceAdbMeta(saved).label}`);
   closeEditorDrawer('device');
   clearDeviceForm();
-  await refreshDomains('overview','devices','permissions');
+  await refreshDomains('permissions');
 }
 async function deleteDevice(id){
   const confirmed=await confirmDanger({
@@ -1627,7 +1668,22 @@ async function deleteDevice(id){
   show('设备已删除');
   await refreshDomains('overview','devices','permissions');
 }
-async function testDevice(id){ const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'}); show(`ADB ${id}: ${result.state}${result.detail ? ' - ' + result.detail : ''}`, 5200); }
+async function testDevice(id){
+  if(deviceProbeRequests.has(id)) return;
+  deviceProbeRequests.add(id);
+  applyDeviceAdbResult(id,{state:'reconnecting',ok:false});
+  try{
+    const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'});
+    applyDeviceAdbResult(id,result);
+    show(`${deviceAdbMeta(result).label}${result.detail ? ` · ${result.detail}` : ''}`,5200);
+  } catch(error){
+    applyDeviceAdbResult(id,{state:'unknown',ok:false,detail:error.message || '检测失败'});
+    throw error;
+  } finally {
+    deviceProbeRequests.delete(id);
+    renderDevices();
+  }
+}
 async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await refreshDomains('overview','devices','permissions'); }
 async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await refreshDomains('overview','devices','permissions'); }
 async function savePermission(){
