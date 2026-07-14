@@ -36,7 +36,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
     """验证 ALAS 嵌入 HTTP 路由。"""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-alas-embed-routes-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-alas-embed-routes-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver,alas.test:22267"
         os.environ["SESSION_COOKIE_SECURE"] = "false"

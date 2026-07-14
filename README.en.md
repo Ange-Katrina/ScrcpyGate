@@ -125,8 +125,8 @@ Also note:
 
 ```bash
 cp .env.example .env
-chmod +x deploy-v2.sh
-./deploy-v2.sh
+chmod +x deploy.sh
+./deploy.sh
 ```
 
 The helper builds the image, initializes the database, starts the service, and prints the admin account when it creates a new database:
@@ -142,9 +142,9 @@ The initial password is shown once and is not stored in plaintext under `data/`.
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.v2.yml build
-docker compose -f docker-compose.v2.yml run --rm --no-deps web-scrcpy-v2 python -m app.cli bootstrap-admin
-docker compose -f docker-compose.v2.yml up -d
+docker compose build
+docker compose run --rm --no-deps scrcpygate python -m app.cli bootstrap-admin
+docker compose up -d
 ```
 
 Save the initial password printed by `bootstrap-admin` before starting the service. Do not run `docker compose up` before the first bootstrap, because an automatically generated password would not be displayed. Use `reset-admin` below for an existing database.
@@ -185,7 +185,7 @@ SESSION_COOKIE_SECURE=true \
 TRUST_PROXY=true \
 TRUSTED_PROXY_IPS=127.0.0.1 \
 SCRCPY_STREAM_MODE=raw \
-./deploy-v2.sh
+./deploy.sh
 ```
 
 If the reverse proxy runs on another machine, set `TRUSTED_PROXY_IPS` to the source IP used by that proxy when it connects to ScrcpyGate.
@@ -199,7 +199,7 @@ ALLOWED_HOSTS=192.168.1.10,127.0.0.1,localhost \
 ALLOWED_ORIGINS=http://192.168.1.10:5000 \
 SESSION_COOKIE_SECURE=false \
 TRUST_PROXY=false \
-./deploy-v2.sh
+./deploy.sh
 ```
 
 Replace `192.168.1.10` with your server LAN IP.
@@ -256,31 +256,31 @@ Related projects:
 Show containers:
 
 ```bash
-docker compose -f docker-compose.v2.yml ps
+docker compose ps
 ```
 
 Show logs:
 
 ```bash
-docker logs --tail=120 web-scrcpy-v2
+docker logs --tail=120 scrcpygate
 ```
 
 Stop the service:
 
 ```bash
-docker compose -f docker-compose.v2.yml down
+docker compose down
 ```
 
 Rebuild:
 
 ```bash
-docker compose -f docker-compose.v2.yml up -d --build
+docker compose up -d --build
 ```
 
 Reset admin:
 
 ```bash
-docker compose -f docker-compose.v2.yml exec -T web-scrcpy-v2 python -m app.cli reset-admin
+docker compose exec -T scrcpygate python -m app.cli reset-admin
 ```
 
 Health check:
@@ -338,8 +338,8 @@ See [.env.example](.env.example) for more options.
   tests/                  Unit tests
   adb/                    Android platform-tools compatibility files
   Dockerfile              Docker image build file
-  docker-compose.v2.yml   Docker Compose file
-  deploy-v2.sh            Deployment helper
+  compose.yaml            Auto-discovered Docker Compose file
+  deploy.sh               Deployment helper
   requirements.txt        Production Python dependencies
   requirements-dev.txt    Development, test, and audit dependencies
   README.md               Chinese documentation
@@ -360,7 +360,7 @@ Common causes:
 Check logs:
 
 ```bash
-docker logs --tail=120 web-scrcpy-v2
+docker logs --tail=120 scrcpygate
 ```
 
 Look for `HOST_REJECT`, `ORIGIN_REJECT`, or `PROXY_HEADER_REJECT`.

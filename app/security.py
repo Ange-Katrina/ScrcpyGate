@@ -64,7 +64,7 @@ def normalize_origin(value: str | None) -> str:
 
 
 def allowed_hosts() -> set[str]:
-    hosts = {"localhost", "127.0.0.1", "::1", "web-scrcpy", "web-scrcpy-v2"}
+    hosts = {"localhost", "127.0.0.1", "::1", "web-scrcpy", "scrcpygate"}
     for item in env_list("ALLOWED_HOSTS"):
         if item != "*":
             host = host_from_header(item)

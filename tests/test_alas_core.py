@@ -24,7 +24,7 @@ def load_modules(data_dir: Path):
 
 class AlasCoreTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-alas-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-alas-"))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

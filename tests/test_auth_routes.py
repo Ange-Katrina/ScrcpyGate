@@ -26,7 +26,7 @@ def reset_app_modules(names):
 
 class AuthRouteTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-auth-routes-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-auth-routes-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver"
         os.environ["SESSION_COOKIE_SECURE"] = "false"

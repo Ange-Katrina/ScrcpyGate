@@ -1,6 +1,6 @@
 const bootstrap = JSON.parse(document.getElementById("scrcpygate-bootstrap").textContent);
 const csrfToken = bootstrap.csrf_token;
-const SELECTED_KEY = 'webscrcpy:v2:selectedDeviceId';
+const SELECTED_KEY = 'scrcpygate:selectedDeviceId';
 const SIDEBAR_COLLAPSED_KEY = 'scrcpygate:mirror:sidebar-collapsed';
 const ALAS_CONFIG_KEY_PREFIX = 'scrcpygate:alas:selected-config:';
 const MOBILE_SIDEBAR_QUERY = '(max-width: 960px)';

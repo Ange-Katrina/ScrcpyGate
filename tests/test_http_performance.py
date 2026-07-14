@@ -30,7 +30,7 @@ def reset_app_modules(names):
 
 class HttpPerformanceTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-http-performance-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-http-performance-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver"
         os.environ["SESSION_COOKIE_SECURE"] = "false"

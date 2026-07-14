@@ -29,7 +29,7 @@ def reset_app_modules(names):
 
 class AlasMultiBindingRouteTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-alas-multi-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-alas-multi-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["SESSION_COOKIE_SECURE"] = "false"
         reset_app_modules(["app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"])

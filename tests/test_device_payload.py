@@ -54,7 +54,7 @@ class DevicePayloadTests(unittest.TestCase):
         self.assertNotIn("address", payload)
 
     def test_public_payload_hides_adb_address(self):
-        tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-device-payload-"))
+        tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-device-payload-"))
         try:
             os.environ["WEB_SCRCPY_DATA_DIR"] = str(tmp)
             for name in ["app.devices", "app.storage"]:

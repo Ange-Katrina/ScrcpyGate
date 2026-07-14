@@ -24,7 +24,7 @@ def load_storage(data_dir: Path):
 
 class StorageCoreTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="webscrcpy-v2-test-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-test-"))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -54,7 +54,7 @@ class StorageCoreTests(unittest.TestCase):
     def test_legacy_users_are_migrated_without_password_override(self):
         (self.tmp / "initial_admin_password.txt").write_text("stale-password\n", encoding="utf-8")
         (self.tmp / "users.json").write_text(json.dumps({
-            "admin": {"password_hash": "not-a-v2-generated-hash", "is_admin": True, "created_at": "2026-07-05 00:00:00"}
+            "admin": {"password_hash": "not-a-current-generated-hash", "is_admin": True, "created_at": "2026-07-05 00:00:00"}
         }), encoding="utf-8")
         storage = load_storage(self.tmp)
         storage.init_db()

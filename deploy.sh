@@ -62,24 +62,24 @@ case "$WEB_SCRCPY_BIND" in
 esac
 echo "SafeLine upstream can use: http://${health_host}:${WEB_SCRCPY_PORT}"
 
-$DC -f docker-compose.v2.yml build
+$DC build
 
 if command -v docker >/dev/null 2>&1; then
-  app_uid="$(docker run --rm --entrypoint id web-scrcpy-v2:local -u 2>/dev/null || true)"
-  app_gid="$(docker run --rm --entrypoint id web-scrcpy-v2:local -g 2>/dev/null || true)"
+  app_uid="$(docker run --rm --entrypoint id scrcpygate:local -u 2>/dev/null || true)"
+  app_gid="$(docker run --rm --entrypoint id scrcpygate:local -g 2>/dev/null || true)"
   if [ -n "$app_uid" ] && [ -n "$app_gid" ]; then
     chown -R "$app_uid:$app_gid" "$WEB_SCRCPY_DATA_HOST" 2>/dev/null || true
     chmod 700 "$WEB_SCRCPY_DATA_HOST" 2>/dev/null || true
   fi
 fi
 
-password="$($DC -f docker-compose.v2.yml run --rm --no-deps -e INITIAL_ADMIN_PASSWORD web-scrcpy-v2 python -m app.cli bootstrap-admin 2>/dev/null)" || {
+password="$($DC run --rm --no-deps -e INITIAL_ADMIN_PASSWORD scrcpygate python -m app.cli bootstrap-admin 2>/dev/null)" || {
   echo "ERROR: failed to initialize admin account." >&2
   exit 1
 }
 password="$(printf '%s' "$password" | tr -d '\r' | tail -n 1)"
 
-$DC -f docker-compose.v2.yml up -d
+$DC up -d
 
 printf 'Waiting for healthz'
 i=0
@@ -91,9 +91,9 @@ while [ "$i" -lt 40 ]; do
   if [ "$i" -eq 39 ]; then
     echo " timeout"
     echo "Container status:"
-    $DC -f docker-compose.v2.yml ps || true
+    $DC ps || true
     echo "Recent container logs:"
-    docker logs --tail=120 web-scrcpy-v2 2>/dev/null || true
+    docker logs --tail=120 scrcpygate 2>/dev/null || true
   else
     printf '.'
     sleep 1
@@ -112,5 +112,5 @@ else
   echo ""
   echo "No new initial password was generated. Existing users were detected or the old users.json was migrated."
   echo "If you need a reset, run inside this directory:"
-  echo "  $DC -f docker-compose.v2.yml exec -T web-scrcpy-v2 python -m app.cli reset-admin"
+  echo "  $DC exec -T scrcpygate python -m app.cli reset-admin"
 fi
