@@ -128,9 +128,11 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The wizard detects the server's default-route IPv4 address. Leaving the service port empty selects an unused listening port in `20000–59999`, and the final value is shown in the confirmation summary.
+Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The wizard detects the server's default-route IPv4 address. Leaving the service port empty uses the fixed default port `5000`; enter another port explicitly when needed.
 
-LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode asks separately for the internal bind IP, public domain, HTTP/HTTPS, external port, trusted proxy IP/CIDR, and optional extra origins. It then generates `PUBLIC_BASE_URL`, `ALLOWED_HOSTS`, `ALLOWED_ORIGINS`, and the secure-cookie setting. An empty external port means HTTPS `443` or HTTP `80`; it is not randomized because it must match the WAF or reverse-proxy configuration.
+LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode shows an example so the domain field contains only a hostname such as `waf.example.com`, never `http://`, `https://`, a path, or a port. Protocol and external port have separate prompts. The wizard also asks for trusted proxy IPs/CIDRs, optional extra origins, and whether the WAF requires `Origin: null` compatibility. An empty external port means HTTPS `443` or HTTP `80`.
+
+When changing configuration or using guided configuration and installation, the script performs a soft check for an existing container named `scrcpygate`. If it is running, the script shows its state and asks—with No as the safe default—whether to recreate and restart it. Declining preserves the saved configuration, but the running container keeps its old settings. The Restart menu action recreates the container through Compose so changed port mappings and environment variables take effect.
 
 On its first run, the installer creates a permission-restricted `.env` from `.env.example`. Repeated runs never overwrite an existing database, user, or password, and configuration changes require confirmation. If Docker or Compose is missing, interactive mode shows the detected OS, package manager, and planned command before asking for confirmation. Packages come from the distribution repository; the installer never runs `curl | sh`.
 
@@ -325,7 +327,7 @@ Common environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `WEB_SCRCPY_BIND` | `127.0.0.1` | Host bind address |
-| `WEB_SCRCPY_PORT` | `5000` | Host port; leaving the wizard prompt empty selects an unused port in `20000–59999` |
+| `WEB_SCRCPY_PORT` | `5000` | Host port; leaving the wizard prompt empty uses `5000` |
 | `WEB_SCRCPY_DATA_HOST` | `./data` | Host data directory |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | Public base URL |
 | `SCRCPYGATE_HEALTH_TIMEOUT` | `90` | Installer health-check timeout in seconds (`10–600`) |
@@ -394,6 +396,10 @@ docker logs --tail=120 scrcpygate
 ```
 
 Look for `HOST_REJECT`, `ORIGIN_REJECT`, or `PROXY_HEADER_REJECT`.
+
+- `PROXY_HEADER_REJECT remote=...`: add the actual logged `remote` IP (or the smallest necessary CIDR) to `TRUSTED_PROXY_IPS`; do not trust the whole LAN without a reason.
+- `ORIGIN_REJECT origin=null`: only after confirming the WAF or embed flow causes it, set `ALLOW_NULL_ORIGIN=true` and recreate the container.
+- `HOST_REJECT`: verify that the WAF preserves the external Host and that it is present in `ALLOWED_HOSTS`.
 
 ### Login returns to the login page
 

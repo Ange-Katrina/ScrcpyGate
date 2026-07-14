@@ -226,6 +226,7 @@ load_settings() {
   PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-$(dotenv_value PUBLIC_BASE_URL)}
   ALLOWED_HOSTS=${ALLOWED_HOSTS:-$(dotenv_value ALLOWED_HOSTS)}
   ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-$(dotenv_value ALLOWED_ORIGINS)}
+  ALLOW_NULL_ORIGIN=${ALLOW_NULL_ORIGIN:-$(dotenv_value ALLOW_NULL_ORIGIN)}
   TRUST_PROXY=${TRUST_PROXY:-$(dotenv_value TRUST_PROXY)}
   TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-$(dotenv_value TRUSTED_PROXY_IPS)}
   SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-$(dotenv_value SESSION_COOKIE_SECURE)}
@@ -238,6 +239,7 @@ load_settings() {
   PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://127.0.0.1:${WEB_SCRCPY_PORT}}
   ALLOWED_HOSTS=${ALLOWED_HOSTS:-127.0.0.1,localhost}
   ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-$PUBLIC_BASE_URL}
+  ALLOW_NULL_ORIGIN=${ALLOW_NULL_ORIGIN:-false}
   TRUST_PROXY=${TRUST_PROXY:-false}
   TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-127.0.0.1,::1}
   SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
@@ -272,7 +274,7 @@ validate_settings() {
   esac
 
   export WEB_SCRCPY_BIND WEB_SCRCPY_PORT WEB_SCRCPY_DATA_HOST
-  export PUBLIC_BASE_URL ALLOWED_HOSTS ALLOWED_ORIGINS
+  export PUBLIC_BASE_URL ALLOWED_HOSTS ALLOWED_ORIGINS ALLOW_NULL_ORIGIN
   export TRUST_PROXY TRUSTED_PROXY_IPS SESSION_COOKIE_SECURE
 }
 
@@ -294,6 +296,14 @@ prompt_confirm() {
     ''|y|Y|yes|YES|是) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+prompt_confirm_no() {
+  label=$1
+  printf '\n%s>%s %s [y/N]: ' "$C_YELLOW" "$C_RESET" "$label"
+  IFS= read -r answer || return 1
+  answer=$(printf '%s' "$answer" | tr -d '\r')
+  case "$answer" in y|Y|yes|YES|是) return 0 ;; *) return 1 ;; esac
 }
 
 prompt_optional() {
@@ -322,59 +332,6 @@ detect_primary_ip() {
     ''|0.0.0.0|127.*|169.254.*) return 1 ;;
   esac
   printf '%s\n' "$detected"
-}
-
-port_is_free() {
-  port=$1
-  if command -v ss >/dev/null 2>&1; then
-    if listeners=$(ss -ltn 2>/dev/null); then
-      if printf '%s\n' "$listeners" | awk -v suffix=":$port" 'NR > 1 && $4 ~ suffix "$" { found=1 } END { exit found ? 0 : 1 }'; then
-        return 1
-      fi
-      return 0
-    fi
-  fi
-  if command -v netstat >/dev/null 2>&1; then
-    if listeners=$(netstat -ltn 2>/dev/null); then
-      if printf '%s\n' "$listeners" | awk -v suffix=":$port" 'NR > 2 && $4 ~ suffix "$" { found=1 } END { exit found ? 0 : 1 }'; then
-        return 1
-      fi
-      return 0
-    fi
-  fi
-  port_hex=$(printf '%04X' "$port")
-  for table in /proc/net/tcp /proc/net/tcp6; do
-    [ -r "$table" ] || continue
-    if awk -v wanted="$port_hex" 'NR > 1 { split($2, address, ":"); if (toupper(address[2]) == wanted && $4 == "0A") found=1 } END { exit found ? 0 : 1 }' "$table"; then
-      return 1
-    fi
-  done
-  [ -r /proc/net/tcp ] && return 0
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 1
-    return 0
-  fi
-  return 2
-}
-
-random_free_port() {
-  attempt=0
-  seed=$(date +%s)
-  while [ "$attempt" -lt 80 ]; do
-    if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
-      random_value=$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -d ' ')
-    else
-      random_value=$((seed + $$ * 977 + attempt * 7919))
-    fi
-    case "$random_value" in ''|*[!0-9]*) random_value=$((seed + attempt * 7919)) ;; esac
-    candidate=$((20000 + random_value % 40000))
-    if port_is_free "$candidate"; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    attempt=$((attempt + 1))
-  done
-  return 1
 }
 
 valid_host_input() {
@@ -514,11 +471,11 @@ configure_wizard() {
   mode=$PROMPT_RESULT
   case "$mode" in 1|2|3|4) ;; *) error_msg "无效部署模式"; return 1 ;; esac
 
-  prompt_optional "服务端口（当前 ${WEB_SCRCPY_PORT}；留空自动选择 20000-59999）" || return 1
+  prompt_optional "服务端口（当前 ${WEB_SCRCPY_PORT}；留空使用默认端口 5000）" || return 1
   new_port=$PROMPT_RESULT
   if [ -z "$new_port" ]; then
-    new_port=$(random_free_port) || { error_msg "没有找到可用的随机端口"; return 1; }
-    success_msg "已自动选择空闲端口 ${new_port}"
+    new_port=5000
+    success_msg "已使用默认服务端口 5000"
   fi
   case "$new_port" in ''|*[!0-9]*) error_msg "端口必须是整数"; return 1 ;; esac
   if [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
@@ -531,12 +488,14 @@ configure_wizard() {
 
   new_timeout=$SCRCPYGATE_HEALTH_TIMEOUT
   new_trusted=$TRUSTED_PROXY_IPS
+  new_allow_null=$ALLOW_NULL_ORIGIN
   case "$mode" in
     1)
       new_bind=127.0.0.1
       new_public="http://127.0.0.1:${new_port}"
       new_hosts="127.0.0.1,localhost"
       new_origins=$new_public
+      new_allow_null=false
       new_trust=false
       new_secure=false
       ;;
@@ -550,6 +509,7 @@ configure_wizard() {
       new_public=$(build_public_url http "$lan_host" "$new_port")
       new_hosts="127.0.0.1,localhost,${lan_host}"
       new_origins=$new_public
+      new_allow_null=false
       new_trust=false
       new_secure=false
       ;;
@@ -562,7 +522,7 @@ configure_wizard() {
 
       proxy_host=$(public_host_from_url "$PUBLIC_BASE_URL")
       case "$proxy_host" in ''|127.0.0.1|localhost) proxy_host=$system_ip ;; esac
-      prompt_value "外部域名或 IP（不含协议、路径和端口）" "$proxy_host" || return 1
+      prompt_value "外部域名或 IP（示例：waf.example.com；不要输入 http://、https://、路径或端口）" "$proxy_host" || return 1
       proxy_host=$PROMPT_RESULT
       valid_host_input "$proxy_host" || { error_msg "请输入纯域名或 IP，不要包含协议、路径或端口"; return 1; }
 
@@ -585,12 +545,15 @@ configure_wizard() {
       fi
       new_public=$(build_public_url "$proxy_scheme" "$proxy_host" "$proxy_port")
 
-      prompt_value "可信代理 IP/CIDR，逗号分隔" "$TRUSTED_PROXY_IPS" || return 1
+      prompt_value "可信代理 IP/CIDR（填写日志 remote= 的地址；例如 192.0.2.20）" "$TRUSTED_PROXY_IPS" || return 1
       new_trusted=$PROMPT_RESULT
       valid_proxy_list "$new_trusted" || { error_msg "可信代理不能为空，且每项必须是 IP 或 CIDR"; return 1; }
       prompt_optional "额外允许的 Origin（可选，多个用逗号分隔）" || return 1
       extra_origins=$PROMPT_RESULT
       valid_origin_list "$extra_origins" || { error_msg "Origin 必须是完整的 http(s)://主机[:端口]，不能包含路径"; return 1; }
+      prompt_value "是否兼容 WAF 的 Origin: null（true/false，通常保持 false）" "$ALLOW_NULL_ORIGIN" || return 1
+      new_allow_null=$PROMPT_RESULT
+      case "$new_allow_null" in true|false) ;; *) error_msg "ALLOW_NULL_ORIGIN 只能是 true 或 false"; return 1 ;; esac
       new_hosts="127.0.0.1,localhost,${proxy_host}"
       [ "$new_bind" = 127.0.0.1 ] || new_hosts="${new_hosts},${new_bind}"
       new_origins=$(merge_csv_unique "$new_public" "$extra_origins")
@@ -606,6 +569,9 @@ configure_wizard() {
       new_hosts=$PROMPT_RESULT
       prompt_value "允许的 Origin" "$ALLOWED_ORIGINS" || return 1
       new_origins=$PROMPT_RESULT
+      prompt_value "是否允许 Origin: null（true/false）" "$ALLOW_NULL_ORIGIN" || return 1
+      new_allow_null=$PROMPT_RESULT
+      case "$new_allow_null" in true|false) ;; *) error_msg "ALLOW_NULL_ORIGIN 只能是 true 或 false"; return 1 ;; esac
       prompt_value "是否信任代理头（true/false）" "$TRUST_PROXY" || return 1
       new_trust=$PROMPT_RESULT
       prompt_value "可信代理 IP/CIDR" "$TRUSTED_PROXY_IPS" || return 1
@@ -622,6 +588,7 @@ configure_wizard() {
   panel_line "访问地址" "$new_public"
   panel_line "数据目录" "$new_data"
   panel_line "信任代理" "$new_trust"
+  panel_line "允许 Null Origin" "$new_allow_null"
   panel_line "安全 Cookie" "$new_secure"
   print_rule
   prompt_confirm "保存以上配置？" || { warn_msg "已取消"; return 1; }
@@ -632,6 +599,7 @@ configure_wizard() {
   set_env_value PUBLIC_BASE_URL "$new_public"
   set_env_value ALLOWED_HOSTS "$new_hosts"
   set_env_value ALLOWED_ORIGINS "$new_origins"
+  set_env_value ALLOW_NULL_ORIGIN "$new_allow_null"
   set_env_value TRUST_PROXY "$new_trust"
   set_env_value TRUSTED_PROXY_IPS "$new_trusted"
   set_env_value SESSION_COOKIE_SECURE "$new_secure"
@@ -643,6 +611,7 @@ configure_wizard() {
   PUBLIC_BASE_URL=$new_public
   ALLOWED_HOSTS=$new_hosts
   ALLOWED_ORIGINS=$new_origins
+  ALLOW_NULL_ORIGIN=$new_allow_null
   TRUST_PROXY=$new_trust
   TRUSTED_PROXY_IPS=$new_trusted
   SESSION_COOKIE_SECURE=$new_secure
@@ -876,6 +845,32 @@ check_system_dependencies() {
   success_msg "Docker 与 Docker Compose 均可用"
 }
 
+detect_scrcpygate_instance() {
+  EXISTING_SCRCPYGATE_STATE=""
+  EXISTING_SCRCPYGATE_PROJECT=""
+  command -v docker >/dev/null 2>&1 || return 0
+  docker info >/dev/null 2>&1 || return 0
+  EXISTING_SCRCPYGATE_STATE=$(docker inspect --format '{{.State.Status}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  [ -n "$EXISTING_SCRCPYGATE_STATE" ] || return 0
+  EXISTING_SCRCPYGATE_PROJECT=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+}
+
+show_existing_scrcpygate() {
+  panel_top "检测到现有 ScrcpyGate 实例"
+  panel_line "容器" "scrcpygate"
+  panel_line "状态" "$EXISTING_SCRCPYGATE_STATE"
+  panel_line "Compose 项目" "${EXISTING_SCRCPYGATE_PROJECT:-未知/手工创建}"
+  print_rule
+}
+
+existing_instance_can_be_managed() {
+  case "$EXISTING_SCRCPYGATE_PROJECT" in scrcpygate) return 0 ;;
+  esac
+  show_existing_scrcpygate
+  warn_msg "同名容器属于其他 Compose 项目，脚本不会自动接管；请先人工确认并迁移该容器"
+  return 1
+}
+
 service_status_line() {
   if ! command -v docker >/dev/null 2>&1; then
     printf '%s[Docker 未安装]%s' "$C_RED" "$C_RESET"
@@ -1029,6 +1024,45 @@ show_install_summary() {
   print_rule
 }
 
+apply_configuration_to_running_instance() {
+  prepare_deployment
+  log "正在应用新配置并重启 ScrcpyGate..."
+  compose up -d --force-recreate scrcpygate
+  wait_for_health
+  success_msg "ScrcpyGate 已重建并应用新配置"
+}
+
+configure_only_flow() {
+  detect_scrcpygate_instance
+  configure_wizard || return 1
+  case "$EXISTING_SCRCPYGATE_STATE" in running|restarting|paused) ;; *) return 0 ;; esac
+  existing_instance_can_be_managed || return 0
+  show_existing_scrcpygate
+  if ! prompt_confirm_no "是否立即重建并重启以应用新配置？"; then
+    warn_msg "配置已保存，当前运行实例仍使用旧配置；可稍后选择“重启服务”应用"
+    return 0
+  fi
+  apply_configuration_to_running_instance
+}
+
+configure_and_install_flow() {
+  detect_scrcpygate_instance
+  configure_wizard || return 1
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
+    existing_instance_can_be_managed || return 0
+    show_existing_scrcpygate
+    case "$EXISTING_SCRCPYGATE_STATE" in
+      running|restarting|paused) deploy_question="是否重新构建并部署，重启现有 ScrcpyGate？" ;;
+      *) deploy_question="是否重新构建并部署现有 ScrcpyGate 容器？" ;;
+    esac
+    if ! prompt_confirm_no "$deploy_question"; then
+      warn_msg "配置已保存，已取消重新部署；现有实例尚未应用新配置"
+      return 0
+    fi
+  fi
+  install_service
+}
+
 install_service() {
   prepare_deployment
   prepare_data_directory
@@ -1059,9 +1093,9 @@ stop_service() {
 
 restart_service() {
   prepare_deployment
-  compose restart
+  compose up -d --force-recreate scrcpygate
   wait_for_health
-  success_msg "ScrcpyGate 已重启"
+  success_msg "ScrcpyGate 已重建并应用当前配置"
 }
 
 show_status() {
@@ -1121,7 +1155,7 @@ show_menu() {
     choice=$(printf '%s' "$choice" | tr -d '\r')
     case "$choice" in
       1)
-        if configure_wizard; then (skip_build=false; pull_images=false; install_service) || true; fi
+        (skip_build=false; pull_images=false; configure_and_install_flow) || true
         pause_menu
         ;;
       2) (skip_build=false; pull_images=false; install_service) || true; pause_menu ;;
@@ -1131,7 +1165,7 @@ show_menu() {
       6) (restart_service) || true; pause_menu ;;
       7) (show_status) || true; pause_menu ;;
       8) (show_logs) || true; pause_menu ;;
-      9) configure_wizard || true; pause_menu ;;
+      9) configure_only_flow || true; pause_menu ;;
       10)
         if prompt_confirm "确认重置 admin 密码？"; then (reset_admin) || true; fi
         pause_menu
@@ -1150,7 +1184,7 @@ fi
 
 case "$ACTION" in
   menu) show_menu ;;
-  configure) configure_wizard ;;
+  configure) configure_only_flow ;;
   install) install_service ;;
   start) start_service ;;
   stop) stop_service ;;

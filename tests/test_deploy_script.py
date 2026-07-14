@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -23,7 +22,8 @@ case "$1" in
         fi
         printf '%s\n' 'Docker Compose version fake'
         ;;
-      config|build|up|ps) exit 0 ;;
+      config|build|ps) exit 0 ;;
+      up) : > "$PWD/container-running" ;;
       run) printf '%s\n' 'TestInitialPassword-123456' ;;
       *) exit 2 ;;
     esac
@@ -39,9 +39,13 @@ case "$1" in
     ;;
   image) exit 0 ;;
   inspect)
+    state=${FAKE_SCRCPYGATE_STATE:-}
+    [ -n "$state" ] || { [ ! -f "$PWD/container-running" ] || state=running; }
+    [ -n "$state" ] || exit 1
     case "$*" in
+      *com.docker.compose.project*) printf '%s\n' "${FAKE_SCRCPYGATE_PROJECT:-scrcpygate}" ;;
       *Health*) printf '%s\n' 'healthy' ;;
-      *) printf '%s\n' 'running' ;;
+      *) printf '%s\n' "$state" ;;
     esac
     ;;
   logs) exit 0 ;;
@@ -106,30 +110,6 @@ class DeployScriptTests(unittest.TestCase):
             newline="\n",
         )
         fake_service.chmod(0o755)
-        fake_ss = fake_bin / "ss"
-        fake_ss.write_text(
-            "#!/bin/sh\n"
-            "printf '%s\\n' 'State Recv-Q Send-Q Local Address:Port Peer Address:Port'\n"
-            "if [ -n \"${FAKE_SS_OCCUPIED_PORT:-}\" ]; then\n"
-            "  printf '%s\\n' \"LISTEN 0 128 0.0.0.0:$FAKE_SS_OCCUPIED_PORT 0.0.0.0:*\"\n"
-            "fi\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        fake_ss.chmod(0o755)
-        fake_od = fake_bin / "od"
-        fake_od.write_text(
-            "#!/bin/sh\n"
-            "counter_file=\"$PWD/random-counter\"\n"
-            "counter=0\n"
-            "[ ! -f \"$counter_file\" ] || counter=$(sed -n '1p' \"$counter_file\")\n"
-            "printf '%s\\n' \"$counter\"\n"
-            "next=$((counter + 1))\n"
-            "printf '%s\\n' \"$next\" > \"$counter_file\"\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        fake_od.chmod(0o755)
         return target
 
     def run_installer(
@@ -152,6 +132,7 @@ class DeployScriptTests(unittest.TestCase):
             "PUBLIC_BASE_URL",
             "ALLOWED_HOSTS",
             "ALLOWED_ORIGINS",
+            "ALLOW_NULL_ORIGIN",
             "TRUST_PROXY",
             "TRUSTED_PROXY_IPS",
             "SESSION_COOKIE_SECURE",
@@ -161,7 +142,8 @@ class DeployScriptTests(unittest.TestCase):
             "SCRCPYGATE_DETECTED_IP",
             "SCRCPYGATE_PACKAGE_MANAGER",
             "FAKE_DOCKER_COMPOSE_MISSING",
-            "FAKE_SS_OCCUPIED_PORT",
+            "FAKE_SCRCPYGATE_STATE",
+            "FAKE_SCRCPYGATE_PROJECT",
         ):
             env.pop(key, None)
         env.update(environment)
@@ -231,7 +213,7 @@ class DeployScriptTests(unittest.TestCase):
         self.assertIn("PUBLIC_BASE_URL=http://192.0.2.50:5053", config)
         self.assertIn("ALLOWED_HOSTS=127.0.0.1,localhost,192.0.2.50", config)
 
-    def test_configuration_wizard_uses_detected_ip_and_random_port(self):
+    def test_configuration_wizard_uses_detected_ip_and_default_port(self):
         target = self.prepare_installer()
         result = self.run_installer(
             target,
@@ -243,37 +225,109 @@ class DeployScriptTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("检测到系统 IPv4", result.stdout)
-        self.assertIn("已自动选择空闲端口", result.stdout)
+        self.assertIn("已使用默认服务端口 5000", result.stdout)
         config = (target / ".env").read_text(encoding="utf-8")
-        port_match = re.search(r"^WEB_SCRCPY_PORT=(\d+)$", config, re.MULTILINE)
-        self.assertIsNotNone(port_match)
-        port = int(port_match.group(1))
-        self.assertGreaterEqual(port, 20000)
-        self.assertLessEqual(port, 59999)
-        self.assertIn(f"PUBLIC_BASE_URL=http://192.0.2.77:{port}", config)
+        self.assertIn("WEB_SCRCPY_PORT=5000", config)
+        self.assertIn("PUBLIC_BASE_URL=http://192.0.2.77:5000", config)
         self.assertIn("ALLOWED_HOSTS=127.0.0.1,localhost,192.0.2.77", config)
 
-    def test_random_port_skips_a_listening_candidate(self):
+    def test_running_instance_can_be_recreated_after_configuration(self):
         target = self.prepare_installer()
         result = self.run_installer(
             target,
             "--configure",
-            input_text="1\n\n\n\n",
+            input_text="1\n\n\n\ny\n",
             SCRCPYGATE_FORCE_INTERACTIVE="1",
             SCRCPYGATE_DETECTED_IP="192.0.2.77",
-            FAKE_SS_OCCUPIED_PORT="20000",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="scrcpygate",
             TERM="dumb",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("检测到现有 ScrcpyGate 实例", result.stdout)
+        self.assertIn("[y/N]", result.stdout)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertIn("compose up -d --force-recreate scrcpygate", calls)
+
+    def test_running_instance_is_not_recreated_on_default_no(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text="1\n\n\n\n\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="192.0.2.77",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="scrcpygate",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("当前运行实例仍使用旧配置", result.stderr)
         config = (target / ".env").read_text(encoding="utf-8")
-        self.assertIn("WEB_SCRCPY_PORT=20001", config)
-        self.assertIn("PUBLIC_BASE_URL=http://127.0.0.1:20001", config)
+        self.assertIn("WEB_SCRCPY_PORT=5000", config)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertNotIn("compose up", calls)
+
+    def test_guided_install_requires_confirmation_for_any_existing_container(self):
+        for state in ("running", "exited"):
+            with self.subTest(state=state):
+                target = self.prepare_installer()
+                result = self.run_installer(
+                    target,
+                    "--menu",
+                    input_text="1\n1\n\n\n\n\n\n0\n",
+                    SCRCPYGATE_FORCE_INTERACTIVE="1",
+                    SCRCPYGATE_DETECTED_IP="192.0.2.77",
+                    FAKE_SCRCPYGATE_STATE=state,
+                    FAKE_SCRCPYGATE_PROJECT="scrcpygate",
+                    TERM="dumb",
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("[y/N]", result.stdout)
+                calls = (target / "docker.log").read_text(encoding="utf-8")
+                self.assertNotIn("compose build", calls)
+                self.assertNotIn("compose up", calls)
+
+    def test_guided_install_redeploys_existing_container_once_when_confirmed(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--menu",
+            input_text="1\n1\n\n\n\ny\n\n0\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="192.0.2.77",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="scrcpygate",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (target / "docker.log").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(calls.count("compose build"), 1)
+        self.assertEqual(calls.count("compose up -d"), 1)
+
+    def test_guided_install_does_not_take_over_another_compose_project(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--menu",
+            input_text="1\n1\n\n\n\n\n0\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="192.0.2.77",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="legacy-project",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("不会自动接管", result.stderr)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertNotIn("compose build", calls)
+        self.assertNotIn("compose up", calls)
 
     def test_configuration_wizard_builds_reverse_proxy_settings(self):
         target = self.prepare_installer()
         answers = (
             "3\n51234\n./proxy-data\n192.0.2.10\nexample.com\nhttps\n"
-            "22263\n192.0.2.20\nhttp://192.0.2.10:51234\n\n"
+            "22263\n192.0.2.20\nhttp://192.0.2.10:51234\ntrue\n\n"
         )
         result = self.run_installer(
             target,
@@ -291,6 +345,7 @@ class DeployScriptTests(unittest.TestCase):
             "PUBLIC_BASE_URL=https://example.com:22263",
             "ALLOWED_HOSTS=127.0.0.1,localhost,example.com,192.0.2.10",
             "ALLOWED_ORIGINS=https://example.com:22263,http://192.0.2.10:51234",
+            "ALLOW_NULL_ORIGIN=true",
             "TRUST_PROXY=true",
             "TRUSTED_PROXY_IPS=192.0.2.20",
             "SESSION_COOKIE_SECURE=true",
@@ -298,9 +353,26 @@ class DeployScriptTests(unittest.TestCase):
         for item in expected:
             self.assertIn(item, config)
 
+    def test_reverse_proxy_domain_prompt_rejects_a_url(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text="3\n\n\n\nhttps://example.com\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="192.0.2.10",
+            TERM="dumb",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("示例：waf.example.com", result.stdout)
+        self.assertIn("不要输入 http://", result.stdout)
+        self.assertIn("请输入纯域名或 IP", result.stderr)
+        config = (target / ".env").read_text(encoding="utf-8")
+        self.assertIn("PUBLIC_BASE_URL=http://127.0.0.1:5000", config)
+
     def test_reverse_proxy_default_https_port_is_not_rendered(self):
         target = self.prepare_installer()
-        answers = "3\n51235\n\n\nexample.com\n\n\n192.0.2.20\n\n\n"
+        answers = "3\n51235\n\n\nexample.com\n\n\n192.0.2.20\n\n\n\n"
         result = self.run_installer(
             target,
             "--configure",
@@ -359,6 +431,20 @@ class DeployScriptTests(unittest.TestCase):
         calls = (target / "docker.log").read_text(encoding="utf-8")
         self.assertIn("image inspect scrcpygate:local", calls)
         self.assertNotIn("compose build", calls)
+
+    def test_noninteractive_install_does_not_prompt_for_running_instance(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--skip-build",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="scrcpygate",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("[y/N]", result.stdout)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertIn("compose up -d", calls)
 
     def test_invalid_port_stops_before_calling_docker(self):
         target = self.prepare_installer()
