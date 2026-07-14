@@ -1,3 +1,5 @@
+import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -60,6 +62,82 @@ class MirrorUiPerformanceContractTests(unittest.TestCase):
         self.assertIn("state.jmuxer.feed({video:completeAnnexBChunk(buf)});", self.script)
         self.assertNotIn("duration:frameDurationMs()", self.script)
         self.assertNotIn("last_keyframe_payload", self.script)
+
+    def test_player_rebuilds_when_h264_sps_changes_after_rotation(self):
+        start = self.script.index("function annexBNalUnit")
+        end = self.script.index("function completeAnnexBChunk", start)
+        helpers = self.script[start:end]
+        program = f"""
+const state={{videoSpsSignature:''}};
+{helpers}
+const spsA=new Uint8Array([0,0,0,1,0x67,0x64,0x00,0x1f,0xaa,0,0,1,0x68,0xee]);
+const nonSps=new Uint8Array([0,0,0,1,0x65,0x88]);
+const spsB=new Uint8Array([0,0,1,0x67,0x64,0x00,0x1f,0xbb]);
+const audThenSps=new Uint8Array([0,0,1,0x09,0xf0,0,0,1,0x67,0x42,0x00,0x1e]);
+const result=[
+  videoConfigurationChanged(spsA),
+  videoConfigurationChanged(spsA),
+  videoConfigurationChanged(nonSps),
+  videoConfigurationChanged(spsB),
+  videoConfigurationChanged(spsB),
+];
+console.log(JSON.stringify({{result,sps:Array.from(annexBNalUnit(spsA,7)),spsAfterAud:Array.from(annexBNalUnit(audThenSps,7)),signature:state.videoSpsSignature}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["result"], [False, False, False, True, False])
+        self.assertEqual(result["sps"], [0x67, 0x64, 0x00, 0x1F, 0xAA])
+        self.assertEqual(result["spsAfterAud"], [0x67, 0x42, 0x00, 0x1E])
+        self.assertTrue(result["signature"])
+        self.assertIn("function recreateVideoPlayer(video)", self.script)
+        self.assertIn("const configurationChanged=videoConfigurationChanged(buf);", self.script)
+        self.assertIn("if(configurationChanged){ state.videoReconfiguring=true; recreateVideoPlayer(video); }", self.script)
+        rebuild = self.script.index("if(configurationChanged){ state.videoReconfiguring=true; recreateVideoPlayer(video); }")
+        feed = self.script.index("state.jmuxer.feed({video:completeAnnexBChunk(buf)});")
+        reset = self.script.index("if(configurationChanged) sendPlayerReset();")
+        self.assertLess(
+            rebuild,
+            feed,
+        )
+        self.assertLess(feed, reset)
+        self.assertIn("video.onresize = () => updateInputSize();", self.script)
+        self.assertIn("if(metadataW>0 && metadataH>0) state.videoReconfiguring=false;", self.script)
+        self.assertIn("if (state.videoReconfiguring && isTouch) return;", self.script)
+        self.assertEqual(self.script.count("if(configurationChanged) sendPlayerReset();"), 1)
+
+        update_start = self.script.index("function updateInputSize()")
+        update_end = self.script.index("function layoutVideo()", update_start)
+        update_source = self.script[update_start:update_end]
+        layout_program = f"""
+const video={{videoWidth:1280,videoHeight:720}};
+const resizeCalls=[];
+const state={{screen:{{w:720,h:1280}},videoReconfiguring:true,input:{{resizeScreen:(w,h)=>resizeCalls.push([w,h])}}}};
+const $=()=>video;
+function scheduleLayout(){{ resizeCalls.push('layout'); }}
+{update_source}
+updateInputSize();
+console.log(JSON.stringify({{screen:state.screen,reconfiguring:state.videoReconfiguring,resizeCalls}}));
+"""
+        layout_completed = subprocess.run(
+            ["node", "-e", layout_program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        layout_result = json.loads(layout_completed.stdout)
+        self.assertEqual(layout_result["screen"], {"w": 1280, "h": 720})
+        self.assertFalse(layout_result["reconfiguring"])
+        self.assertEqual(layout_result["resizeCalls"], [[1280, 720], "layout"])
 
     def test_video_and_control_reconnects_are_bounded(self):
         self.assertIn("const RECONNECT_DELAYS=[500, 1000, 2000, 4000, 8000]", self.script)
