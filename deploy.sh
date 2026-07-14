@@ -313,6 +313,16 @@ prompt_optional() {
   PROMPT_RESULT=$(printf '%s' "$answer" | tr -d '\r')
 }
 
+parse_single_output_line() {
+  printf '%s\n' "$1" | tr -d '\r' | awk '
+    NF { count++; value=$0 }
+    END {
+      if (count > 1) exit 1
+      if (count == 1) print value
+    }
+  '
+}
+
 detect_primary_ip() {
   if [ -n "${SCRCPYGATE_DETECTED_IP:-}" ]; then
     printf '%s\n' "$SCRCPYGATE_DETECTED_IP"
@@ -945,14 +955,38 @@ initialize_admin() {
       || die "管理员初始化失败"
   fi
   unset INITIAL_ADMIN_PASSWORD
-  password=$(printf '%s\n' "$bootstrap_output" | tr -d '\r' | awk 'NF { line=$0 } END { print line }')
+  if ! password=$(parse_single_output_line "$bootstrap_output"); then
+    die "管理员初始化返回了无法识别的多行输出"
+  fi
+  bootstrap_output=""
   if [ -n "$password" ]; then
     panel_top "初始管理员账号（请立即保存）"
     panel_line "用户名" "admin"
     panel_line "密码" "$password"
     print_rule
+    password=""
   else
-    success_msg "保留现有管理员账号"
+    panel_top "检测到现有管理员账号"
+    panel_line "用户名" "admin"
+    panel_line "密码" "保持原密码（安全原因不会重复显示）"
+    panel_line "后续重置" "管理菜单 10，或 ./deploy.sh --reset-admin"
+    print_rule
+    if is_interactive && prompt_confirm_no "是否立即生成并显示新的 admin 密码？"; then
+      reset_output=$(compose run --rm --no-deps scrcpygate python -m app.cli reset-admin) \
+        || die "管理员密码重置失败"
+      if ! password=$(parse_single_output_line "$reset_output"); then
+        die "管理员密码重置返回了无法识别的多行输出"
+      fi
+      reset_output=""
+      [ -n "$password" ] || die "管理员密码已重置，但未能读取新密码"
+      panel_top "管理员密码已重置（请立即保存）"
+      panel_line "用户名" "admin"
+      panel_line "新密码" "$password"
+      print_rule
+      password=""
+    else
+      success_msg "已保留现有管理员密码"
+    fi
   fi
 }
 
@@ -1110,12 +1144,17 @@ show_logs() {
 
 reset_admin() {
   prepare_deployment
-  password=$(compose exec -T scrcpygate python -m app.cli reset-admin) || die "管理员密码重置失败"
-  password=$(printf '%s\n' "$password" | tr -d '\r' | awk 'NF { line=$0 } END { print line }')
+  reset_output=$(compose exec -T scrcpygate python -m app.cli reset-admin) || die "管理员密码重置失败"
+  if ! password=$(parse_single_output_line "$reset_output"); then
+    die "管理员密码重置返回了无法识别的多行输出"
+  fi
+  reset_output=""
+  [ -n "$password" ] || die "管理员密码已重置，但未能读取新密码"
   panel_top "管理员密码已重置"
   panel_line "用户名" "admin"
   panel_line "新密码" "$password"
   print_rule
+  password=""
 }
 
 show_menu() {

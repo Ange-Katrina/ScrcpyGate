@@ -11,6 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FAKE_DOCKER = r'''#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+emit_reset_password() {
+  if [ "${FAKE_RESET_FAIL:-0}" = 1 ]; then
+    return 3
+  elif [ "${FAKE_RESET_EMPTY:-0}" = 1 ]; then
+    return 0
+  elif [ "${FAKE_RESET_MULTILINE:-0}" = 1 ]; then
+    printf '%s\n' 'unexpected diagnostic' 'TestResetPassword-654321'
+  else
+    printf '%s\n' 'TestResetPassword-654321'
+  fi
+}
 case "$1" in
   info) exit 0 ;;
   compose)
@@ -24,7 +35,25 @@ case "$1" in
         ;;
       config|build|ps) exit 0 ;;
       up) : > "$PWD/container-running" ;;
-      run) printf '%s\n' 'TestInitialPassword-123456' ;;
+      run)
+        case "$*" in
+          *reset-admin*)
+            emit_reset_password
+            ;;
+          *bootstrap-admin*)
+            if [ "${FAKE_EXISTING_ADMIN:-0}" != 1 ]; then
+              printf '%s\n' 'TestInitialPassword-123456'
+            fi
+            ;;
+          *) exit 2 ;;
+        esac
+        ;;
+      exec)
+        case "$*" in
+          *reset-admin*) emit_reset_password ;;
+          *) exit 2 ;;
+        esac
+        ;;
       *) exit 2 ;;
     esac
     ;;
@@ -142,6 +171,10 @@ class DeployScriptTests(unittest.TestCase):
             "SCRCPYGATE_DETECTED_IP",
             "SCRCPYGATE_PACKAGE_MANAGER",
             "FAKE_DOCKER_COMPOSE_MISSING",
+            "FAKE_EXISTING_ADMIN",
+            "FAKE_RESET_EMPTY",
+            "FAKE_RESET_FAIL",
+            "FAKE_RESET_MULTILINE",
             "FAKE_SCRCPYGATE_STATE",
             "FAKE_SCRCPYGATE_PROJECT",
         ):
@@ -407,6 +440,73 @@ class DeployScriptTests(unittest.TestCase):
             "compose up -d",
         ):
             self.assertIn(expected, calls)
+
+    def test_existing_admin_can_be_reset_during_interactive_install(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--install",
+            input_text="y\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            FAKE_EXISTING_ADMIN="1",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("检测到现有管理员账号", result.stdout)
+        self.assertIn("保持原密码", result.stdout)
+        self.assertIn("管理员密码已重置", result.stdout)
+        self.assertIn("TestResetPassword-654321", result.stdout)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertIn("python -m app.cli reset-admin", calls)
+
+    def test_noninteractive_install_never_resets_existing_admin(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--install",
+            FAKE_EXISTING_ADMIN="1",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("已保留现有管理员密码", result.stdout)
+        self.assertNotIn("[y/N]", result.stdout)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertNotIn("python -m app.cli reset-admin", calls)
+
+    def test_existing_admin_reset_fails_closed_on_invalid_output(self):
+        for flag in ("FAKE_RESET_FAIL", "FAKE_RESET_EMPTY", "FAKE_RESET_MULTILINE"):
+            with self.subTest(flag=flag):
+                target = self.prepare_installer()
+                result = self.run_installer(
+                    target,
+                    "--install",
+                    input_text="y\n",
+                    SCRCPYGATE_FORCE_INTERACTIVE="1",
+                    FAKE_EXISTING_ADMIN="1",
+                    TERM="dumb",
+                    **{flag: "1"},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("管理员密码已重置（请立即保存）", result.stdout)
+                calls = (target / "docker.log").read_text(encoding="utf-8")
+                self.assertNotIn("compose up", calls)
+
+    def test_standalone_reset_admin_displays_one_new_password(self):
+        target = self.prepare_installer()
+        result = self.run_installer(target, "--reset-admin", TERM="dumb")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("管理员密码已重置", result.stdout)
+        self.assertIn("TestResetPassword-654321", result.stdout)
+
+    def test_standalone_reset_admin_fails_closed_on_invalid_output(self):
+        for flag in ("FAKE_RESET_FAIL", "FAKE_RESET_EMPTY", "FAKE_RESET_MULTILINE"):
+            with self.subTest(flag=flag):
+                target = self.prepare_installer()
+                result = self.run_installer(target, "--reset-admin", TERM="dumb", **{flag: "1"})
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("新密码", result.stdout)
 
     def test_existing_configuration_is_preserved_when_reusing_image(self):
         target = self.prepare_installer()

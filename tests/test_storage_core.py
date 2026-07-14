@@ -45,11 +45,22 @@ class StorageCoreTests(unittest.TestCase):
     def test_initial_admin_password_env_is_used_and_displayed(self):
         os.environ["INITIAL_ADMIN_PASSWORD"] = "StrongInitialPwd123"
         storage = load_storage(self.tmp)
-        storage.init_db()
+        admin_created = storage.init_db()
 
-        self.assertEqual(storage.get_initial_admin_password_for_display(), "StrongInitialPwd123")
+        self.assertTrue(admin_created)
+        self.assertEqual(storage.get_initial_admin_password_for_display(admin_created), "StrongInitialPwd123")
         self.assertFalse((self.tmp / "initial_admin_password.txt").exists())
         self.assertIsNotNone(storage.authenticate("admin", "StrongInitialPwd123"))
+
+    def test_existing_admin_password_is_never_displayed_again(self):
+        os.environ["INITIAL_ADMIN_PASSWORD"] = "StrongInitialPwd123"
+        storage = load_storage(self.tmp)
+        first_created = storage.init_db()
+        second_created = storage.init_db()
+
+        self.assertTrue(first_created)
+        self.assertFalse(second_created)
+        self.assertEqual(storage.get_initial_admin_password_for_display(second_created), "")
 
     def test_legacy_users_are_migrated_without_password_override(self):
         (self.tmp / "initial_admin_password.txt").write_text("stale-password\n", encoding="utf-8")
@@ -64,6 +75,17 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(users[0]["username"], "admin")
         self.assertEqual(storage.get_initial_admin_password_for_display(), "")
         self.assertFalse((self.tmp / "initial_admin_password.txt").exists())
+
+    def test_empty_legacy_users_file_still_creates_an_admin(self):
+        os.environ["INITIAL_ADMIN_PASSWORD"] = "StrongInitialPwd123"
+        (self.tmp / "users.json").write_text("{}", encoding="utf-8")
+        storage = load_storage(self.tmp)
+
+        admin_created = storage.init_db()
+
+        self.assertTrue(admin_created)
+        self.assertEqual(storage.get_initial_admin_password_for_display(admin_created), "StrongInitialPwd123")
+        self.assertIsNotNone(storage.authenticate("admin", "StrongInitialPwd123"))
 
     def test_legacy_plaintext_password_is_hashed_before_migration(self):
         (self.tmp / "users.json").write_text(json.dumps({
@@ -491,6 +513,16 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertIsNotNone(storage.get_session(current["sid"]))
         self.assertIsNone(storage.get_session(other["sid"]))
+
+    def test_upsert_password_revokes_existing_sessions(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        session = storage.create_session("admin")
+
+        storage.upsert_user("admin", "ReplacementAdminPwd123", "admin")
+
+        self.assertIsNone(storage.get_session(session["sid"]))
+        self.assertIsNotNone(storage.authenticate("admin", "ReplacementAdminPwd123"))
 
     def test_recent_audit_returns_recent_rows_oldest_to_newest(self):
         storage = load_storage(self.tmp)

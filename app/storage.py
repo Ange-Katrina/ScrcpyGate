@@ -146,7 +146,7 @@ def validate_password(password: str, username: str = "") -> str | None:
     return None
 
 
-def init_db() -> None:
+def init_db() -> bool:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     _remove_initial_password_file()
     with db_connect() as conn:
@@ -228,7 +228,7 @@ def init_db() -> None:
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value))
         _migrate_video_defaults(conn)
         conn.commit()
-    migrate_legacy_data()
+    return migrate_legacy_data()
 
 
 def _create_user_alas_configs_table(conn: sqlite3.Connection, name: str = "user_alas_configs") -> None:
@@ -369,7 +369,9 @@ def _generate_initial_password() -> str:
     return generate_random_password()
 
 
-def get_initial_admin_password_for_display() -> str:
+def get_initial_admin_password_for_display(admin_created: bool = False) -> str:
+    if not admin_created:
+        return ""
     password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
     if not password:
         return ""
@@ -380,7 +382,8 @@ def get_initial_admin_password_for_display() -> str:
     return password
 
 
-def migrate_legacy_data() -> None:
+def migrate_legacy_data() -> bool:
+    admin_created = False
     with db_connect() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if user_count == 0:
@@ -407,12 +410,20 @@ def migrate_legacy_data() -> None:
                             1 if info.get("must_change_password") else 0,
                         ),
                     )
+        if conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] == 0:
+            password = _generate_initial_password()
+            existing_admin = conn.execute("SELECT username FROM users WHERE username='admin'").fetchone()
+            if existing_admin:
+                conn.execute(
+                    "UPDATE users SET password_hash=?, role='admin', must_change_password=0 WHERE username='admin'",
+                    (hash_password(password),),
+                )
             else:
-                password = _generate_initial_password()
                 conn.execute(
                     "INSERT INTO users(username,password_hash,role,created_at,must_change_password) VALUES(?,?,?,?,?)",
                     ("admin", hash_password(password), "admin", time.strftime("%Y-%m-%d %H:%M:%S"), 0),
                 )
+            admin_created = True
         env = parse_env_file(LEGACY_ENV_FILE)
         for key in ("video_bit_rate", "max_size", "max_fps", "auto_stop_time", "auto_stop_minutes"):
             raw = env.get(key.upper()) or env.get(key)
@@ -458,6 +469,7 @@ def migrate_legacy_data() -> None:
             for device_id, _, _ in devices[:1]:
                 conn.execute("INSERT OR IGNORE INTO user_devices(username,device_id,can_view,can_control) VALUES(?,?,1,1)", (username, device_id))
         conn.commit()
+    return admin_created
 
 
 def audit(username: str, action: str, detail: str = "") -> None:
@@ -554,6 +566,7 @@ def upsert_user(username: str, password: str | None, role: str) -> None:
                 raise ValueError("last_admin_required")
             if password:
                 conn.execute("UPDATE users SET password_hash=?, role=? WHERE username=?", (hash_password(password), role, username))
+                conn.execute("DELETE FROM sessions WHERE username=?", (username,))
             else:
                 conn.execute("UPDATE users SET role=? WHERE username=?", (role, username))
         else:

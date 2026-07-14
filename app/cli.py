@@ -11,13 +11,13 @@ def main() -> int:
         if not password:
             password = storage.generate_random_password()
         os.environ["INITIAL_ADMIN_PASSWORD"] = password
-        storage.init_db()
-        print(storage.get_initial_admin_password_for_display())
+        admin_created = storage.init_db()
+        print(storage.get_initial_admin_password_for_display(admin_created))
         return 0
 
-    storage.init_db()
+    admin_created = storage.init_db()
     if command == "initial-password":
-        password = storage.get_initial_admin_password_for_display()
+        password = storage.get_initial_admin_password_for_display(admin_created)
         if password:
             print(password)
             return 0
