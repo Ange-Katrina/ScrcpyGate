@@ -170,6 +170,7 @@ class DeployScriptTests(unittest.TestCase):
             "SCRCPYGATE_AUTO_INSTALL_DEPS",
             "SCRCPYGATE_DETECTED_IP",
             "SCRCPYGATE_PACKAGE_MANAGER",
+            "SCRCPYGATE_SHOW_PRIVATE_IPS",
             "FAKE_DOCKER_COMPOSE_MISSING",
             "FAKE_EXISTING_ADMIN",
             "FAKE_RESET_EMPTY",
@@ -263,6 +264,38 @@ class DeployScriptTests(unittest.TestCase):
         self.assertIn("WEB_SCRCPY_PORT=5000", config)
         self.assertIn("PUBLIC_BASE_URL=http://192.0.2.77:5000", config)
         self.assertIn("ALLOWED_HOSTS=127.0.0.1,localhost,192.0.2.77", config)
+
+    def test_configuration_wizard_redacts_private_ip_but_saves_real_value(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text="2\n\n\n\n\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="10.23.45.67",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("10.23.45.67", result.stdout)
+        self.assertIn("<private-ip>", result.stdout)
+        config = (target / ".env").read_text(encoding="utf-8")
+        self.assertIn("PUBLIC_BASE_URL=http://10.23.45.67:5000", config)
+        self.assertIn("ALLOWED_HOSTS=127.0.0.1,localhost,10.23.45.67", config)
+
+    def test_configuration_wizard_can_explicitly_show_private_ip(self):
+        target = self.prepare_installer()
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text="2\n\n\n\n\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            SCRCPYGATE_DETECTED_IP="10.23.45.67",
+            SCRCPYGATE_SHOW_PRIVATE_IPS="true",
+            TERM="dumb",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("10.23.45.67", result.stdout)
+        self.assertNotIn("<private-ip>", result.stdout)
 
     def test_running_instance_can_be_recreated_after_configuration(self):
         target = self.prepare_installer()
@@ -359,28 +392,28 @@ class DeployScriptTests(unittest.TestCase):
     def test_configuration_wizard_builds_reverse_proxy_settings(self):
         target = self.prepare_installer()
         answers = (
-            "3\n51234\n./proxy-data\n192.0.2.10\nexample.com\nhttps\n"
-            "22263\n192.0.2.20\nhttp://192.0.2.10:51234\ntrue\n\n"
+            "3\n51234\n./proxy-data\n192.0.2.16\nexample.com\nhttps\n"
+            "22263\n192.0.2.15\nhttp://192.0.2.16:51234\ntrue\n\n"
         )
         result = self.run_installer(
             target,
             "--configure",
             input_text=answers,
             SCRCPYGATE_FORCE_INTERACTIVE="1",
-            SCRCPYGATE_DETECTED_IP="192.0.2.10",
+            SCRCPYGATE_DETECTED_IP="192.0.2.16",
             TERM="dumb",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         config = (target / ".env").read_text(encoding="utf-8")
         expected = (
-            "WEB_SCRCPY_BIND=192.0.2.10",
+            "WEB_SCRCPY_BIND=192.0.2.16",
             "WEB_SCRCPY_PORT=51234",
             "PUBLIC_BASE_URL=https://example.com:22263",
-            "ALLOWED_HOSTS=127.0.0.1,localhost,example.com,192.0.2.10",
-            "ALLOWED_ORIGINS=https://example.com:22263,http://192.0.2.10:51234",
+            "ALLOWED_HOSTS=127.0.0.1,localhost,example.com,192.0.2.16",
+            "ALLOWED_ORIGINS=https://example.com:22263,http://192.0.2.16:51234",
             "ALLOW_NULL_ORIGIN=true",
             "TRUST_PROXY=true",
-            "TRUSTED_PROXY_IPS=192.0.2.20",
+            "TRUSTED_PROXY_IPS=192.0.2.15",
             "SESSION_COOKIE_SECURE=true",
         )
         for item in expected:
@@ -393,11 +426,11 @@ class DeployScriptTests(unittest.TestCase):
             "--configure",
             input_text="3\n\n\n\nhttps://example.com\n",
             SCRCPYGATE_FORCE_INTERACTIVE="1",
-            SCRCPYGATE_DETECTED_IP="192.0.2.10",
+            SCRCPYGATE_DETECTED_IP="192.0.2.16",
             TERM="dumb",
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("示例：waf.example.com", result.stdout)
+        self.assertIn("示例：example.com", result.stdout)
         self.assertIn("不要输入 http://", result.stdout)
         self.assertIn("请输入纯域名或 IP", result.stderr)
         config = (target / ".env").read_text(encoding="utf-8")
@@ -405,13 +438,13 @@ class DeployScriptTests(unittest.TestCase):
 
     def test_reverse_proxy_default_https_port_is_not_rendered(self):
         target = self.prepare_installer()
-        answers = "3\n51235\n\n\nexample.com\n\n\n192.0.2.20\n\n\n\n"
+        answers = "3\n51235\n\n\nexample.com\n\n\n192.0.2.15\n\n\n\n"
         result = self.run_installer(
             target,
             "--configure",
             input_text=answers,
             SCRCPYGATE_FORCE_INTERACTIVE="1",
-            SCRCPYGATE_DETECTED_IP="192.0.2.10",
+            SCRCPYGATE_DETECTED_IP="192.0.2.16",
             TERM="dumb",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

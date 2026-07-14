@@ -130,7 +130,9 @@ chmod +x deploy.sh
 
 Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The wizard detects the server's default-route IPv4 address. Leaving the service port empty uses the fixed default port `5000`; enter another port explicitly when needed.
 
-LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode shows an example so the domain field contains only a hostname such as `waf.example.com`, never `http://`, `https://`, a path, or a port. Protocol and external port have separate prompts. The wizard also asks for trusted proxy IPs/CIDRs, optional extra origins, and whether the WAF requires `Origin: null` compatibility. An empty external port means HTTPS `443` or HTTP `80`.
+LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode shows an example so the domain field contains only a hostname such as `example.com`, never `http://`, `https://`, a path, or a port. Protocol and external port have separate prompts. The wizard also asks for trusted proxy IPs/CIDRs, optional extra origins, and whether the WAF requires `Origin: null` compatibility. An empty external port means HTTPS `443` or HTTP `80`.
+
+To keep terminal screenshots and installer logs from exposing internal topology, RFC 1918 private addresses are displayed as `<private-ip>` by default while their real detected values are still written to the configuration. Set `SCRCPYGATE_SHOW_PRIVATE_IPS=true` only when local debugging requires the values to be shown.
 
 When changing configuration or using guided configuration and installation, the script performs a soft check for an existing container named `scrcpygate`. If it is running, the script shows its state and asks—with No as the safe default—whether to recreate and restart it. Declining preserves the saved configuration, but the running container keeps its old settings. The Restart menu action recreates the container through Compose so changed port mappings and environment variables take effect.
 
@@ -227,15 +229,15 @@ For direct LAN access:
 
 ```bash
 WEB_SCRCPY_BIND=0.0.0.0 \
-PUBLIC_BASE_URL=http://192.168.1.10:5000 \
-ALLOWED_HOSTS=192.168.1.10,127.0.0.1,localhost \
-ALLOWED_ORIGINS=http://192.168.1.10:5000 \
+PUBLIC_BASE_URL=http://192.0.2.10:5000 \
+ALLOWED_HOSTS=192.0.2.10,127.0.0.1,localhost \
+ALLOWED_ORIGINS=http://192.0.2.10:5000 \
 SESSION_COOKIE_SECURE=false \
 TRUST_PROXY=false \
 ./deploy.sh
 ```
 
-Replace `192.168.1.10` with your server LAN IP.
+Replace the documentation address `192.0.2.10` with your server LAN IP.
 
 ## Video Quality and Stream Modes
 

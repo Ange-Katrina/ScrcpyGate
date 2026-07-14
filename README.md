@@ -129,7 +129,9 @@ chmod +x deploy.sh
 
 在交互式终端直接运行会打开彩色管理面板，可选择“引导配置并安装”、安装更新、启停/重启、状态、日志、修改配置和重置管理员密码。向导会自动探测服务器默认路由的 IPv4 地址；服务端口留空时固定使用默认端口 `5000`，也可以明确输入其他端口。
 
-局域网模式可直接采用探测到的 IP，也可手动覆盖。反向代理模式会用示例提醒域名栏只填写 `waf.example.com` 这类主机名，不要填写 `http://`、`https://`、路径或端口；协议和外部端口由后续问题单独填写。向导还会询问信任代理 IP/CIDR、额外 Origin，以及是否兼容 WAF 的 `Origin: null`，再自动生成对应安全配置。外部端口留空时使用 HTTPS `443` 或 HTTP `80`。
+局域网模式可直接采用探测到的 IP，也可手动覆盖。反向代理模式会用示例提醒域名栏只填写 `example.com` 这类主机名，不要填写 `http://`、`https://`、路径或端口；协议和外部端口由后续问题单独填写。向导还会询问信任代理 IP/CIDR、额外 Origin，以及是否兼容 WAF 的 `Origin: null`，再自动生成对应安全配置。外部端口留空时使用 HTTPS `443` 或 HTTP `80`。
+
+为避免终端截图或安装日志泄露内网拓扑，向导默认把 RFC 1918 私网地址显示为 `<private-ip>`，但仍会使用真实检测值写入配置。仅在本机调试确实需要回显时，可临时设置 `SCRCPYGATE_SHOW_PRIVATE_IPS=true`。
 
 修改配置或选择“引导配置并安装”时，脚本会软检测名为 `scrcpygate` 的现有容器。若实例正在运行，会显示状态并以默认 No 询问是否重建/重启；拒绝不会丢失刚保存的配置，但运行实例仍使用旧配置。菜单中的“重启服务”会通过 Compose 重建容器，以应用新的端口映射和环境变量。
 
@@ -224,15 +226,15 @@ SCRCPY_STREAM_MODE=raw \
 
 ```bash
 WEB_SCRCPY_BIND=0.0.0.0 \
-PUBLIC_BASE_URL=http://192.168.1.10:5000 \
-ALLOWED_HOSTS=192.168.1.10,127.0.0.1,localhost \
-ALLOWED_ORIGINS=http://192.168.1.10:5000 \
+PUBLIC_BASE_URL=http://192.0.2.10:5000 \
+ALLOWED_HOSTS=192.0.2.10,127.0.0.1,localhost \
+ALLOWED_ORIGINS=http://192.0.2.10:5000 \
 SESSION_COOKIE_SECURE=false \
 TRUST_PROXY=false \
 ./deploy.sh
 ```
 
-把 `192.168.1.10` 替换为你的服务器局域网 IP。
+把文档示例地址 `192.0.2.10` 替换为你的服务器局域网 IP。
 
 ## 画质与流模式
 
@@ -396,7 +398,7 @@ curl -fsS http://127.0.0.1:5000/healthz
 | 变量 | 默认值 | 作用 | 说明 |
 | --- | --- | --- | --- |
 | `ALLOWED_HOSTS` | `127.0.0.1,localhost` | 允许访问的 Host 名称 | 必须包含浏览器地址栏里的域名或 IP，不含协议和端口 |
-| `ALLOWED_ORIGINS` | 空 | 允许的浏览器 Origin | 推荐填写完整源，例如 `https://example.com:443` 或 `http://192.168.1.10:5000` |
+| `ALLOWED_ORIGINS` | 空 | 允许的浏览器 Origin | 推荐填写完整源，例如 `https://example.com:443` 或 `http://192.0.2.10:5000` |
 | `ALLOW_NULL_ORIGIN` | `false` | 是否允许 `Origin: null` | 只建议在本地 file/iframe/WAF 特殊场景临时开启；公网默认不要开启 |
 | `TRUST_PROXY` | `false` | 是否信任 `X-Forwarded-*` 代理头 | 只有请求确实来自可信反代时才开启 |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理来源 IP 或 CIDR | 填写反向代理访问 ScrcpyGate 时的真实来源 IP |

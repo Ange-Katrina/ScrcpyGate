@@ -62,13 +62,36 @@ print_rule() {
   printf '%s--------------------------------------------------%s\n' "$C_GRAY" "$C_RESET"
 }
 
+safe_display() {
+  value=${1:-}
+  case "${SCRCPYGATE_SHOW_PRIVATE_IPS:-false}" in 1|true|TRUE|yes|YES|on|ON) printf '%s\n' "$value"; return 0 ;; esac
+  printf '%s\n' "$value" | awk '
+    {
+      remaining=$0
+      gsub(/[fF][cCdD][0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f:]+/, "<private-ipv6>", remaining)
+      gsub(/[fF][eE][89aAbB][0-9A-Fa-f]:[0-9A-Fa-f:]+/, "<private-ipv6>", remaining)
+      output=""
+      while (match(remaining, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+        prefix=substr(remaining, 1, RSTART-1)
+        ip=substr(remaining, RSTART, RLENGTH)
+        split(ip, octet, ".")
+        private=(octet[1] == 10 || (octet[1] == 172 && octet[2] >= 16 && octet[2] <= 31) || (octet[1] == 192 && octet[2] == 168) || (octet[1] == 169 && octet[2] == 254))
+        output=output prefix (private ? "<private-ip>" : ip)
+        remaining=substr(remaining, RSTART+RLENGTH)
+      }
+      print output remaining
+    }
+  '
+}
+
 panel_top() {
   printf '\n%s%s%s\n' "${C_BOLD}${C_CYAN}" "$1" "$C_RESET"
   print_rule
 }
 
 panel_line() {
-  printf '  %s%s%s : %s\n' "$C_DIM" "$1" "$C_RESET" "$2"
+  displayed_value=$(safe_display "$2")
+  printf '  %s%s%s : %s\n' "$C_DIM" "$1" "$C_RESET" "$displayed_value"
 }
 
 menu_group() {
@@ -281,7 +304,8 @@ validate_settings() {
 prompt_value() {
   label=$1
   default_value=$2
-  printf '\n%s>%s %s [%s]: ' "$C_YELLOW" "$C_RESET" "$label" "$default_value"
+  displayed_default=$(safe_display "$default_value")
+  printf '\n%s>%s %s [%s]: ' "$C_YELLOW" "$C_RESET" "$label" "$displayed_default"
   IFS= read -r answer || return 1
   answer=$(printf '%s' "$answer" | tr -d '\r')
   PROMPT_RESULT=${answer:-$default_value}
@@ -531,8 +555,12 @@ configure_wizard() {
       valid_ipv4 "$new_bind" || { error_msg "内部绑定地址必须是有效 IPv4"; return 1; }
 
       proxy_host=$(public_host_from_url "$PUBLIC_BASE_URL")
-      case "$proxy_host" in ''|127.0.0.1|localhost) proxy_host=$system_ip ;; esac
-      prompt_value "外部域名或 IP（示例：waf.example.com；不要输入 http://、https://、路径或端口）" "$proxy_host" || return 1
+      case "$proxy_host" in ''|127.0.0.1|localhost|"$system_ip") proxy_host="" ;; esac
+      if [ -n "$proxy_host" ]; then
+        prompt_value "外部域名或 IP（示例：example.com；不要输入 http://、https://、路径或端口）" "$proxy_host" || return 1
+      else
+        prompt_optional "外部域名或 IP（必填；示例：example.com；不要输入 http://、https://、路径或端口）" || return 1
+      fi
       proxy_host=$PROMPT_RESULT
       valid_host_input "$proxy_host" || { error_msg "请输入纯域名或 IP，不要包含协议、路径或端口"; return 1; }
 
@@ -555,7 +583,7 @@ configure_wizard() {
       fi
       new_public=$(build_public_url "$proxy_scheme" "$proxy_host" "$proxy_port")
 
-      prompt_value "可信代理 IP/CIDR（填写日志 remote= 的地址；例如 192.0.2.20）" "$TRUSTED_PROXY_IPS" || return 1
+      prompt_value "可信代理 IP/CIDR（填写日志 remote= 的地址；例如 192.0.2.15）" "$TRUSTED_PROXY_IPS" || return 1
       new_trusted=$PROMPT_RESULT
       valid_proxy_list "$new_trusted" || { error_msg "可信代理不能为空，且每项必须是 IP 或 CIDR"; return 1; }
       prompt_optional "额外允许的 Origin（可选，多个用逗号分隔）" || return 1
@@ -1107,7 +1135,7 @@ install_service() {
   log "正在启动 ScrcpyGate..."
   compose up -d
   wait_for_health
-  success_msg "安装/更新完成：$PUBLIC_BASE_URL"
+  success_msg "安装/更新完成：$(safe_display "$PUBLIC_BASE_URL")"
   log "  状态: docker compose ps"
   log "  日志: docker logs --tail=120 scrcpygate"
 }
