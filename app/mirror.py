@@ -23,17 +23,24 @@ from .h264 import (
     H264_NAL_SPS,
     annexb_nal_types,
     is_annexb,
+    is_first_vcl_nal,
     nal_type,
     normalize_h264_payload,
 )
 from .scrcpy_demuxer import ScrcpyProtocolDemuxer, ScrcpyPacket
 from .video_options import enabled_stream_modes_value, public_video_options, settings_to_video_options, signature, stream_mode_or_default
 
-VIDEO_QUEUE_MAXSIZE = max(8, int(os.environ.get("VIDEO_QUEUE_MAXSIZE", "60") or "60"))
-VIDEO_QUEUE_SOFT_LIMIT = int(os.environ.get("VIDEO_QUEUE_SOFT_LIMIT", str(max(8, int(VIDEO_QUEUE_MAXSIZE * 0.75)))) or "0")
+VIDEO_QUEUE_MAXSIZE = max(8, int(os.environ.get("VIDEO_QUEUE_MAXSIZE", "24") or "24"))
+VIDEO_QUEUE_SOFT_LIMIT = int(os.environ.get("VIDEO_QUEUE_SOFT_LIMIT", "8") or "0")
+VIDEO_RESET_COOLDOWN = max(0.1, float(os.environ.get("VIDEO_RESET_COOLDOWN", "0.75") or "0.75"))
+CONTROL_LEASE_VERIFY_INTERVAL = max(0.1, float(os.environ.get("CONTROL_LEASE_VERIFY_INTERVAL", "0.5") or "0.5"))
+SCRCPY_RESET_VIDEO_MESSAGE = b"\x11"
 SCRCPY_STREAM_MODE = os.environ.get("SCRCPY_STREAM_MODE", "raw").strip().lower() or "raw"
 STREAM_HEALTH_TIMEOUT = float(os.environ.get("SCRCPY_STREAM_HEALTH_TIMEOUT", "5") or "5")
 _start_lock = threading.Lock()
+_control_epoch_lock = threading.RLock()
+_control_device_locks: dict[str, threading.Lock] = {}
+_control_lock_epochs: dict[str, int] = {}
 log = logging.getLogger("webscrcpy.mirror")
 
 
@@ -47,6 +54,52 @@ def _stream_mode() -> str:
     configured = str(configured or "raw").strip().lower()
     configured = configured if configured in ("raw", "protocol", "legacy") else "raw"
     return stream_mode_or_default(configured, enabled)
+
+
+def control_lock_epoch(device_id: str) -> int:
+    with _control_epoch_lock:
+        return _control_lock_epochs.get(device_id, 0)
+
+
+def _bump_control_lock_epoch(device_id: str) -> int:
+    epoch = _control_lock_epochs.get(device_id, 0) + 1
+    _control_lock_epochs[device_id] = epoch
+    return epoch
+
+
+def _control_device_lock(device_id: str) -> threading.Lock:
+    with _control_epoch_lock:
+        return _control_device_locks.setdefault(device_id, threading.Lock())
+
+
+def acquire_control_lock(device_id: str, username: str, client_id: str, *, force: bool = False) -> tuple[dict[str, Any], int]:
+    with _control_device_lock(device_id):
+        result = storage.acquire_lock(device_id, username, client_id, force=force)
+        with _control_epoch_lock:
+            epoch = _bump_control_lock_epoch(device_id) if result.get("ok") else _control_lock_epochs.get(device_id, 0)
+        return result, epoch
+
+
+def renew_control_lock(device_id: str, username: str, client_id: str, *, ttl_seconds: int = 90) -> tuple[bool, int]:
+    with _control_device_lock(device_id):
+        ok = storage.renew_lock(device_id, username, client_id, ttl_seconds=ttl_seconds)
+        with _control_epoch_lock:
+            return ok, _control_lock_epochs.get(device_id, 0)
+
+
+def release_control_lock(
+    device_id: str,
+    username: str,
+    *,
+    force: bool = False,
+    client_id: str | None = None,
+) -> bool:
+    with _control_device_lock(device_id):
+        ok = storage.release_lock(device_id, username, force=force, client_id=client_id)
+        if ok:
+            with _control_epoch_lock:
+                _bump_control_lock_epoch(device_id)
+        return ok
 
 
 @dataclass
@@ -73,15 +126,15 @@ class ClientSession:
             return max(1, int(maxsize * 0.75))
         return max(1, VIDEO_QUEUE_SOFT_LIMIT)
 
-    def push_frame(self, frame: bytes, keyframe: bool = False, config: bytes = b"") -> None:
+    def push_frame(self, frame: bytes, keyframe: bool = False, config: bytes = b"") -> bool:
         if self.needs_keyframe and not keyframe:
-            return
+            return False
         if self.queue.qsize() >= self.soft_limit():
             self.clear_queue()
             self.drops += 1
             self.needs_keyframe = True
             if not keyframe:
-                return
+                return True
         payload = config + frame if keyframe and config else frame
         try:
             self.queue.put_nowait(payload)
@@ -91,6 +144,8 @@ class ClientSession:
             self.clear_queue()
             self.drops += 1
             self.needs_keyframe = True
+            return True
+        return False
 
 
 @dataclass
@@ -100,6 +155,23 @@ class EventClient:
     ready: bool = False
     pending: list[str] = field(default_factory=list)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+@dataclass
+class ControlLeaseState:
+    verified_until: float = 0.0
+    epoch: int = -1
+
+    def mark_verified(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.verified_until = time.monotonic() + CONTROL_LEASE_VERIFY_INTERVAL
+
+    def clear(self) -> None:
+        self.epoch = -1
+        self.verified_until = 0.0
+
+    def is_verified(self, epoch: int) -> bool:
+        return self.epoch == epoch and time.monotonic() < self.verified_until
 
 
 class MirrorSession:
@@ -116,7 +188,6 @@ class MirrorSession:
         self.sps = b""
         self.pps = b""
         self.config_packet = b""
-        self.last_keyframe_payload = b""
         self.video_options = settings_to_video_options(storage.get_settings())
         self.stream_mode = _stream_mode()
         self.effective_stream_mode = "none"
@@ -126,6 +197,11 @@ class MirrorSession:
         self.last_adb_status: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
         self._control_send_lock = threading.Lock()
+        self._video_reset_lock = asyncio.Lock()
+        self._video_reset_task: asyncio.Task | None = None
+        self._transport_cleanup_task: asyncio.Task | None = None
+        self._last_video_reset_at = 0.0
+        self._video_generation = 0
         self._protocol_invalid_logged = False
         self._protocol_payload_logged = False
 
@@ -157,6 +233,8 @@ class MirrorSession:
         async with self._lock:
             if self.running:
                 return True
+            if self._transport_cleanup_task and not self._transport_cleanup_task.done():
+                await self._transport_cleanup_task
             self.last_client_left_at = None
             adb_status = await adb_monitor.ensure_connected({"id": self.device_id, "address": self.address, "enabled": True})
             self.last_adb_status = adb_status
@@ -187,7 +265,10 @@ class MirrorSession:
                     max_fps,
                 )
                 self._reset_video_state(mode)
+                generation = self._video_generation
                 ok = await asyncio.to_thread(self._start_scrcpy, bit_rate, max_size, max_fps, mode)
+                if generation != self._video_generation:
+                    ok = False
                 self.running = ok
                 if ok:
                     healthy = await self._wait_for_stream_health(mode)
@@ -212,12 +293,67 @@ class MirrorSession:
             scpy = Scrcpy()
             scpy.device_id = self.device_id
             scpy.device_address = self.address
-            ok = scpy.scrcpy_start(self.publish_video, bit_rate, max_size, max_fps, stream_mode=mode)
+            generation = self._video_generation
+            ok = scpy.scrcpy_start(
+                lambda data: self.publish_video(data, generation),
+                bit_rate,
+                max_size,
+                max_fps,
+                stream_mode=mode,
+                stream_exit_callback=lambda reason: self._on_stream_transport_closed(generation, scpy, reason),
+            )
+            if ok and scpy.unexpected_exit_reason:
+                self.last_error = scpy.unexpected_exit_reason
+                scpy.scrcpy_stop()
+                return False
             if ok:
                 self.scrcpy = scpy
             else:
                 self.last_error = scpy.last_error or f"failed to start scrcpy in {mode} mode"
             return ok
+
+    def _on_stream_transport_closed(self, generation: int, scrcpy: Scrcpy, reason: str) -> None:
+        self.loop.call_soon_threadsafe(self._handle_stream_transport_closed, generation, scrcpy, reason)
+
+    def _handle_stream_transport_closed(self, generation: int, scrcpy: Scrcpy, reason: str) -> None:
+        if generation != self._video_generation or self.scrcpy is not scrcpy:
+            return
+        self.running = False
+        self.scrcpy = None
+        self.stream_health = "failed"
+        self.last_error = reason or "video stream ended"
+        self._video_generation += 1
+        failed_generation = self._video_generation
+        if self._video_reset_task and not self._video_reset_task.done():
+            self._video_reset_task.cancel()
+        self._video_reset_task = None
+        for client in self.clients.values():
+            client.clear_queue()
+            client.needs_keyframe = True
+            client.queue.put_nowait(None)
+        log.warning("MIRROR_TRANSPORT_CLOSED device=%s error=%s", self.device_id, self.last_error)
+        task = self.loop.create_task(self._finalize_stream_transport_failure(scrcpy, failed_generation))
+        self._transport_cleanup_task = task
+
+        def clear_cleanup(completed: asyncio.Task) -> None:
+            if self._transport_cleanup_task is completed:
+                self._transport_cleanup_task = None
+
+        task.add_done_callback(clear_cleanup)
+
+    async def _finalize_stream_transport_failure(self, scrcpy: Scrcpy, failed_generation: int) -> None:
+        await asyncio.to_thread(scrcpy.scrcpy_stop)
+        if failed_generation != self._video_generation or self.running:
+            return
+        await manager.broadcast(
+            {
+                "type": "mirror_status",
+                "device_id": self.device_id,
+                "running": False,
+                "session": self.snapshot(),
+                "reason": "transport_closed",
+            }
+        )
 
     def _reset_video_state(self, mode: str) -> None:
         self.video_parser = H264AnnexBParser()
@@ -225,7 +361,11 @@ class MirrorSession:
         self.sps = b""
         self.pps = b""
         self.config_packet = b""
-        self.last_keyframe_payload = b""
+        self._video_generation += 1
+        self._last_video_reset_at = 0.0
+        if self._video_reset_task and not self._video_reset_task.done():
+            self._video_reset_task.cancel()
+        self._video_reset_task = None
         self.stream_health = "starting"
         self.effective_stream_mode = mode
         self.last_keyframe_at = None
@@ -238,8 +378,10 @@ class MirrorSession:
     async def _wait_for_stream_health(self, mode: str) -> bool:
         deadline = time.monotonic() + STREAM_HEALTH_TIMEOUT
         while time.monotonic() < deadline:
-            if self.stream_health == "healthy" and self.last_keyframe_payload:
+            if self.stream_health == "healthy" and self.last_keyframe_at and self.codec_config():
                 return True
+            if not self.running:
+                return False
             await asyncio.sleep(0.1)
         return False
 
@@ -252,17 +394,19 @@ class MirrorSession:
 
     async def stop(self) -> bool:
         async with self._lock:
-            if not self.scrcpy:
-                self.running = False
-                return True
             log.info("MIRROR_STOP device=%s mode=%s", self.device_id, self.effective_stream_mode)
             scpy = self.scrcpy
             self.scrcpy = None
             self.running = False
-            await asyncio.to_thread(scpy.scrcpy_stop)
+            self._video_generation += 1
+            if self._video_reset_task and not self._video_reset_task.done():
+                self._video_reset_task.cancel()
+            self._video_reset_task = None
+            if scpy:
+                await asyncio.to_thread(scpy.scrcpy_stop)
             self.stream_health = "stopped"
             self.last_client_left_at = None
-            storage.release_lock(self.device_id, "", force=True)
+            release_control_lock(self.device_id, "", force=True)
             for client in self.clients.values():
                 client.clear_queue()
                 client.needs_keyframe = True
@@ -273,21 +417,32 @@ class MirrorSession:
         return await self.start(self.video_options, force_restart=True)
 
     def codec_config(self) -> bytes:
-        return self.config_packet or (self.sps + self.pps)
+        if self.config_packet:
+            return self.config_packet
+        return self.sps + self.pps if self.sps and self.pps else b""
 
-    def publish_video(self, data: bytes) -> None:
+    def publish_video(self, data: bytes, generation: int | None = None) -> None:
+        if generation is not None and generation != self._video_generation:
+            return
         if self.protocol_demuxer is not None:
             for packet in self.protocol_demuxer.feed(data):
-                self._process_packet(packet)
+                self._process_packet(packet, generation)
             return
         for nal in self.video_parser.feed(data):
-            self._process_nal(nal)
+            self._process_nal(nal, generation)
 
-    def _process_packet(self, packet: ScrcpyPacket) -> None:
+    def _process_packet(self, packet: ScrcpyPacket, generation: int | None = None) -> None:
         payload = normalize_h264_payload(packet.payload)
         if packet.config:
             if not is_annexb(payload):
                 self._log_invalid_protocol_payload("config", payload)
+                return
+            nal_types = annexb_nal_types(payload)
+            if H264_NAL_SPS not in nal_types or H264_NAL_PPS not in nal_types:
+                self.config_packet = b""
+                self.stream_health = "config"
+                self.last_error = "protocol codec config is missing SPS or PPS"
+                log.warning("VIDEO_CONFIG_INCOMPLETE device=%s types=%s bytes=%s", self.device_id, nal_types, len(payload))
                 return
             self.config_packet = payload
             self.stream_health = "config"
@@ -306,7 +461,8 @@ class MirrorSession:
             return
         nal_types = annexb_nal_types(payload)
         has_idr = H264_NAL_IDR in nal_types
-        keyframe = has_idr or (packet.keyframe and not nal_types)
+        config = self.codec_config() if has_idr else b""
+        keyframe = has_idr and bool(config)
         if not self._protocol_payload_logged:
             self._protocol_payload_logged = True
             log.info(
@@ -326,11 +482,10 @@ class MirrorSession:
                 nal_types,
                 len(payload),
             )
-        if has_idr:
+        if keyframe:
             self.last_keyframe_at = int(time.time())
             self.stream_health = "healthy"
-        config = self.codec_config() if keyframe else b""
-        self.loop.call_soon_threadsafe(self.publish_nal, payload, keyframe, config)
+        self.loop.call_soon_threadsafe(self.publish_nal, payload, keyframe, config, generation)
 
     def _log_invalid_protocol_payload(self, kind: str, payload: bytes) -> None:
         self.stream_health = "invalid_h264"
@@ -346,7 +501,7 @@ class MirrorSession:
             payload[:16].hex(),
         )
 
-    def _process_nal(self, nal: bytes) -> None:
+    def _process_nal(self, nal: bytes, generation: int | None = None) -> None:
         ntype = nal_type(nal)
         if ntype == H264_NAL_SPS:
             self.sps = nal
@@ -356,52 +511,79 @@ class MirrorSession:
             self.pps = nal
             self.stream_health = "config"
             log.info("VIDEO_PPS device=%s mode=%s bytes=%s", self.device_id, self.effective_stream_mode, len(nal))
-        keyframe = ntype == H264_NAL_IDR
+        first_idr = ntype == H264_NAL_IDR and is_first_vcl_nal(nal)
+        config = self.codec_config() if first_idr else b""
+        keyframe = first_idr and bool(config)
         if keyframe:
             self.last_keyframe_at = int(time.time())
             self.stream_health = "healthy"
-        config = self.codec_config() if keyframe else b""
-        if keyframe:
+        if first_idr:
             log.info("VIDEO_IDR device=%s mode=%s bytes=%s config_bytes=%s", self.device_id, self.effective_stream_mode, len(nal), len(config))
-        self.loop.call_soon_threadsafe(self.publish_nal, nal, keyframe, config)
+        self.loop.call_soon_threadsafe(self.publish_nal, nal, keyframe, config, generation)
 
-    def publish_nal(self, nal: bytes, keyframe: bool, config: bytes) -> None:
-        if keyframe:
-            self.last_keyframe_payload = config + nal if config else nal
-            log.info("VIDEO_KEYFRAME_CACHED device=%s bytes=%s clients=%s", self.device_id, len(self.last_keyframe_payload), len(self.clients))
+    def publish_nal(self, nal: bytes, keyframe: bool, config: bytes, generation: int | None = None) -> None:
+        if generation is not None and generation != self._video_generation:
+            return
+        reset_needed = False
         for client in list(self.clients.values()):
             before = client.drops
-            client.push_frame(nal, keyframe=keyframe, config=config)
+            dropped = client.push_frame(nal, keyframe=keyframe, config=config)
             if client.drops != before:
                 log.warning("VIDEO_CLIENT_DROP device=%s client=%s user=%s drops=%s", self.device_id, client.id, client.username, client.drops)
+            reset_needed = reset_needed or dropped
+        if reset_needed:
+            self.schedule_video_reset("queue_overflow")
 
     def add_client(self, client: ClientSession) -> None:
         self.clients[client.id] = client
         self.last_client_left_at = None
         log.info("VIDEO_CLIENT_ADD device=%s client=%s user=%s clients=%s", self.device_id, client.id, client.username, len(self.clients))
-        self.prime_client(client)
+        self.prime_client(client, reason="client_join")
 
-    def prime_client(self, client: ClientSession) -> None:
-        if not self.last_keyframe_payload:
-            client.clear_queue()
-            client.needs_keyframe = True
-            log.info("VIDEO_CLIENT_WAIT_KEYFRAME device=%s client=%s user=%s", self.device_id, client.id, client.username)
-            return
+    def prime_client(self, client: ClientSession, reason: str = "player_reset") -> None:
         client.clear_queue()
-        client.needs_keyframe = False
-        try:
-            client.queue.put_nowait(self.last_keyframe_payload)
-            log.info(
-                "VIDEO_CLIENT_PRIMED device=%s client=%s user=%s bytes=%s",
-                self.device_id,
-                client.id,
-                client.username,
-                len(self.last_keyframe_payload),
-            )
-        except asyncio.QueueFull:
-            client.clear_queue()
-            client.drops += 1
-            client.needs_keyframe = True
+        client.needs_keyframe = True
+        log.info("VIDEO_CLIENT_WAIT_FRESH_KEYFRAME device=%s client=%s user=%s reason=%s", self.device_id, client.id, client.username, reason)
+        self.schedule_video_reset(reason)
+
+    def schedule_video_reset(self, reason: str) -> None:
+        if not self.running or not self.scrcpy:
+            return
+        if self._video_reset_task and not self._video_reset_task.done():
+            return
+        generation = self._video_generation
+        task = self.loop.create_task(self.request_video_reset(reason, generation))
+        self._video_reset_task = task
+
+        def clear_task(completed: asyncio.Task) -> None:
+            if self._video_reset_task is completed:
+                self._video_reset_task = None
+
+        task.add_done_callback(clear_task)
+
+    async def request_video_reset(self, reason: str, generation: int | None = None) -> bool:
+        expected_generation = self._video_generation if generation is None else generation
+        async with self._video_reset_lock:
+            if expected_generation != self._video_generation or not self.running or not self.scrcpy:
+                return False
+            wait_seconds = VIDEO_RESET_COOLDOWN - (time.monotonic() - self._last_video_reset_at)
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            if expected_generation != self._video_generation or not self.running or not self.scrcpy:
+                return False
+            self._last_video_reset_at = time.monotonic()
+            scrcpy = self.scrcpy
+            try:
+                ok = await asyncio.to_thread(self._send_control_to, scrcpy, SCRCPY_RESET_VIDEO_MESSAGE)
+            except Exception as exc:
+                self.last_error = str(exc)
+                log.warning("VIDEO_RESET_FAILED device=%s reason=%s generation=%s error=%s", self.device_id, reason, expected_generation, exc)
+                return False
+            if ok:
+                log.info("VIDEO_RESET_REQUESTED device=%s reason=%s generation=%s", self.device_id, reason, expected_generation)
+            else:
+                log.warning("VIDEO_RESET_FAILED device=%s reason=%s generation=%s error=%s", self.device_id, reason, expected_generation, self.last_error)
+            return ok
 
     def remove_client(self, client_id: str) -> None:
         self.clients.pop(client_id, None)
@@ -410,11 +592,22 @@ class MirrorSession:
         log.info("VIDEO_CLIENT_REMOVE device=%s client=%s clients=%s", self.device_id, client_id, len(self.clients))
 
     def send_control(self, payload: bytes) -> bool:
+        return self._send_control_to(self.scrcpy, payload)
+
+    def _send_control_to(self, scrcpy: Scrcpy | None, payload: bytes) -> bool:
         with self._control_send_lock:
-            if not self.running or not self.scrcpy:
+            if not self.running or not scrcpy or self.scrcpy is not scrcpy:
                 self.last_error = "mirror is not running"
                 return False
-            return bool(self.scrcpy.scrcpy_send_control(payload))
+            return bool(scrcpy.scrcpy_send_control(payload))
+
+    def send_control_for_epoch(self, payload: bytes, expected_epoch: int) -> bool:
+        with _control_device_lock(self.device_id):
+            with _control_epoch_lock:
+                if _control_lock_epochs.get(self.device_id, 0) != expected_epoch:
+                    self.last_error = "control lock changed"
+                    return False
+            return self.send_control(payload)
 
 
 class MirrorManager:
@@ -492,6 +685,15 @@ class MirrorManager:
 
     async def snapshot(self) -> dict[str, Any]:
         return {device_id: session.snapshot() for device_id, session in self.sessions.items()}
+
+    async def stop_all(self) -> None:
+        sessions = list(self.sessions.items())
+        if not sessions:
+            return
+        results = await asyncio.gather(*(session.stop() for _, session in sessions), return_exceptions=True)
+        for (device_id, _), result in zip(sessions, results):
+            if isinstance(result, Exception):
+                log.warning("MIRROR_SHUTDOWN_STOP_FAILED device=%s error=%s", device_id, result)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         clients = list(self.events.items())
@@ -616,12 +818,14 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
     session.add_client(client)
     public_id = exposed_device_id or device_id
     await websocket.send_json({"type": "hello", "client_id": client.id, "device_id": public_id, "session": exposed_snapshot(session, public_id)})
-    session.prime_client(client)
 
     async def sender() -> None:
         try:
             while True:
                 frame = await client.queue.get()
+                if frame is None:
+                    await websocket.close(code=1011, reason="video stream ended")
+                    return
                 await websocket.send_bytes(frame)
         except (WebSocketDisconnect, asyncio.CancelledError):
             raise
@@ -637,7 +841,7 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
                 except json.JSONDecodeError:
                     continue
                 if msg.get("type") == "player_reset":
-                    session.prime_client(client)
+                    session.prime_client(client, reason="player_reset")
         except (WebSocketDisconnect, asyncio.CancelledError):
             raise
         except Exception as exc:
@@ -656,6 +860,8 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
                 log.warning("VIDEO_CLIENT_TASK_ERROR device=%s client=%s user=%s error=%s", device_id, client.id, user["username"], exc)
         for task in pending:
             task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -670,22 +876,30 @@ async def control_socket(websocket: WebSocket, user: dict, device_id: str, expos
         return
     await websocket.accept()
     client_id = str(uuid.uuid4())
+    lease = ControlLeaseState()
     await websocket.send_json({"type": "hello", "client_id": client_id, "device_id": exposed_device_id or device_id, "lock": storage.get_lock(device_id)})
     try:
         while True:
             message = await websocket.receive()
             if message.get("text") is not None:
-                await handle_control_text(websocket, user, device_id, client_id, message["text"])
+                await handle_control_text(websocket, user, device_id, client_id, message["text"], lease)
             elif message.get("bytes") is not None:
-                await handle_control_bytes(websocket, user, device_id, client_id, message["bytes"])
+                await handle_control_bytes(websocket, user, device_id, client_id, message["bytes"], lease)
     except WebSocketDisconnect:
         pass
     finally:
-        storage.release_lock(device_id, user["username"], force=False, client_id=client_id)
+        release_control_lock(device_id, user["username"], force=False, client_id=client_id)
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
 
 
-async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, client_id: str, text: str):
+async def handle_control_text(
+    websocket: WebSocket,
+    user: dict,
+    device_id: str,
+    client_id: str,
+    text: str,
+    lease: ControlLeaseState | None = None,
+):
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -694,12 +908,22 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
     msg_type = data.get("type")
     if msg_type == "acquire_control":
         force = bool(data.get("force") and user.get("role") == "admin")
-        result = storage.acquire_lock(device_id, user["username"], client_id, force=force)
+        result, epoch = acquire_control_lock(device_id, user["username"], client_id, force=force)
+        if lease:
+            if result.get("ok"):
+                lease.mark_verified(epoch)
+            else:
+                lease.clear()
         await websocket.send_json({"type": "control_lock", **result, "lock": storage.get_lock(device_id)})
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
         return
     if msg_type == "control_keepalive":
-        ok = storage.renew_lock(device_id, user["username"], client_id, ttl_seconds=90)
+        ok, epoch = renew_control_lock(device_id, user["username"], client_id, ttl_seconds=90)
+        if lease:
+            if ok:
+                lease.mark_verified(epoch)
+            else:
+                lease.clear()
         lock = storage.get_lock(device_id)
         await websocket.send_json(
             {
@@ -712,7 +936,9 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
         )
         return
     if msg_type == "release_control":
-        ok = storage.release_lock(device_id, user["username"], force=user.get("role") == "admin", client_id=client_id)
+        ok = release_control_lock(device_id, user["username"], force=user.get("role") == "admin", client_id=client_id)
+        if lease:
+            lease.clear()
         await websocket.send_json({"type": "control_released", "ok": ok})
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
         return
@@ -729,25 +955,46 @@ async def handle_control_text(websocket: WebSocket, user: dict, device_id: str, 
         if not payload:
             await websocket.send_json({"type": "error", "error": "invalid control payload"})
             return
-        await handle_control_bytes(websocket, user, device_id, client_id, payload)
+        await handle_control_bytes(websocket, user, device_id, client_id, payload, lease)
         return
     if msg_type == "player_reset":
         session = await manager.get_or_create(device_id)
         for client in session.clients.values():
             if client.username == user["username"]:
-                session.prime_client(client)
+                session.prime_client(client, reason="control_player_reset")
         return
     await websocket.send_json({"type": "error", "error": "unknown control message"})
 
 
-async def handle_control_bytes(websocket: WebSocket, user: dict, device_id: str, client_id: str, payload: bytes):
+async def handle_control_bytes(
+    websocket: WebSocket,
+    user: dict,
+    device_id: str,
+    client_id: str,
+    payload: bytes,
+    lease: ControlLeaseState | None = None,
+):
     if not payload:
         await websocket.send_json({"type": "error", "error": "invalid control payload"})
         return
-    if not storage.renew_lock(device_id, user["username"], client_id, ttl_seconds=90):
-        await websocket.send_json({"type": "control_lock", "ok": False, "lock": storage.get_lock(device_id)})
+    epoch = control_lock_epoch(device_id)
+    verified = bool(lease and lease.is_verified(epoch))
+    if not verified:
+        verified, epoch = await asyncio.to_thread(renew_control_lock, device_id, user["username"], client_id, ttl_seconds=90)
+        if lease:
+            if verified:
+                lease.mark_verified(epoch)
+            else:
+                lease.clear()
+    if not verified:
+        lock = await asyncio.to_thread(storage.get_lock, device_id)
+        await websocket.send_json({"type": "control_lock", "ok": False, "lock": lock})
         return
     session = await manager.get_or_create(device_id)
-    ok = await asyncio.to_thread(session.send_control, payload)
+    ok = await asyncio.to_thread(session.send_control_for_epoch, payload, epoch)
     if not ok:
+        if control_lock_epoch(device_id) != epoch:
+            lock = await asyncio.to_thread(storage.get_lock, device_id)
+            await websocket.send_json({"type": "control_lock", "ok": False, "lock": lock})
+            return
         await websocket.send_json({"type": "control_error", "error": session.last_error or "control failed"})

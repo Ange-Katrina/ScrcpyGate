@@ -12,6 +12,8 @@ from app.h264 import (
     H264_NAL_PPS,
     H264_NAL_SPS,
     annexb_nal_types,
+    first_mb_in_slice,
+    is_first_vcl_nal,
     normalize_h264_payload,
     nal_type,
 )
@@ -61,6 +63,16 @@ class H264ParserTests(unittest.TestCase):
 
         self.assertEqual(normalized, b"\x00\x00\x00\x01" + sps + b"\x00\x00\x00\x01" + pps)
         self.assertEqual(annexb_nal_types(normalized), [H264_NAL_SPS, H264_NAL_PPS])
+
+    def test_first_mb_in_slice_distinguishes_multi_slice_frames(self):
+        first_slice = b"\x00\x00\x00\x01\x65\x80"
+        later_slice = b"\x00\x00\x00\x01\x65\x40"
+
+        self.assertEqual(first_mb_in_slice(first_slice), 0)
+        self.assertEqual(first_mb_in_slice(later_slice), 1)
+        self.assertTrue(is_first_vcl_nal(first_slice))
+        self.assertFalse(is_first_vcl_nal(later_slice))
+        self.assertIsNone(first_mb_in_slice(b"\x00\x00\x00\x01\x67\x80"))
 
 
 if __name__ == "__main__":

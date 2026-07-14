@@ -137,6 +137,48 @@ def nal_type(nal: bytes | bytearray) -> int:
     return nal[prefix_len] & 0x1F
 
 
+def first_mb_in_slice(nal: bytes | bytearray) -> int | None:
+    """Return H.264 first_mb_in_slice for VCL NAL units."""
+    prefix_len = start_code_length(nal, 0)
+    if prefix_len <= 0 or prefix_len + 1 >= len(nal):
+        return None
+    if nal[prefix_len] & 0x1F not in (H264_NAL_NON_IDR, H264_NAL_IDR):
+        return None
+
+    escaped = bytes(nal[prefix_len + 1:])
+    rbsp = bytearray()
+    zero_count = 0
+    for value in escaped:
+        if zero_count >= 2 and value == 3:
+            continue
+        rbsp.append(value)
+        zero_count = zero_count + 1 if value == 0 else 0
+
+    bit_count = len(rbsp) * 8
+    bit_index = 0
+    leading_zero_bits = 0
+    while bit_index < bit_count:
+        value = (rbsp[bit_index // 8] >> (7 - bit_index % 8)) & 1
+        bit_index += 1
+        if value:
+            break
+        leading_zero_bits += 1
+    else:
+        return None
+
+    if bit_index + leading_zero_bits > bit_count:
+        return None
+    suffix = 0
+    for _ in range(leading_zero_bits):
+        suffix = (suffix << 1) | ((rbsp[bit_index // 8] >> (7 - bit_index % 8)) & 1)
+        bit_index += 1
+    return (1 << leading_zero_bits) - 1 + suffix
+
+
+def is_first_vcl_nal(nal: bytes | bytearray) -> bool:
+    return first_mb_in_slice(nal) == 0
+
+
 def is_keyframe(nal: bytes | bytearray) -> bool:
     return nal_type(nal) == H264_NAL_IDR
 

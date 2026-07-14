@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import sys
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app import mirror
-from app.mirror import ClientSession, EventClient, MirrorManager
+from app.mirror import ClientSession, ControlLeaseState, EventClient, MirrorManager, MirrorSession
 
 
 class FakeControlWebSocket:
@@ -296,6 +297,135 @@ class MirrorManagerTests(unittest.TestCase):
         self.assertFalse(client.needs_keyframe)
         self.assertEqual(client.queue.get_nowait(), b"cfgidr")
 
+    def test_stop_all_stops_every_session_without_short_circuiting(self):
+        async def run():
+            manager = MirrorManager()
+            first = FakeMirrorSession()
+            second = FakeMirrorSession()
+            manager.sessions = {"first": first, "second": second}
+
+            await manager.stop_all()
+
+            self.assertTrue(first.stopped)
+            self.assertTrue(second.stopped)
+
+        asyncio.run(run())
+
+
+class MirrorRawRecoveryTests(unittest.TestCase):
+    @staticmethod
+    def make_session(loop):
+        with (
+            patch.object(mirror.storage, "get_settings", return_value={}),
+            patch.object(mirror, "_stream_mode", return_value="raw"),
+        ):
+            return MirrorSession("dev1", "127.0.0.1:5555", loop)
+
+    def test_new_client_waits_for_fresh_keyframe_and_requests_reset_once(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            send_control = Mock(return_value=True)
+            session.running = True
+            session.scrcpy = SimpleNamespace(scrcpy_send_control=send_control)
+            client = ClientSession("client", "alice", None)
+            client.needs_keyframe = False
+            client.queue.put_nowait(b"stale-idr")
+
+            session.add_client(client)
+            first_task = session._video_reset_task
+            session.prime_client(client, reason="duplicate_request")
+
+            self.assertIs(session._video_reset_task, first_task)
+            await first_task
+            self.assertTrue(client.needs_keyframe)
+            self.assertTrue(client.queue.empty())
+            send_control.assert_called_once_with(b"\x11")
+
+        asyncio.run(run())
+
+    def test_queue_overflow_requests_fresh_keyframe(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            send_control = Mock(return_value=True)
+            session.running = True
+            session.scrcpy = SimpleNamespace(scrcpy_send_control=send_control)
+            client = ClientSession("client", "alice", None)
+            client.queue = asyncio.Queue(maxsize=4)
+            client.needs_keyframe = False
+            session.clients[client.id] = client
+            for payload in (b"p1", b"p2", b"p3"):
+                client.queue.put_nowait(payload)
+
+            session.publish_nal(b"p4", keyframe=False, config=b"")
+            await session._video_reset_task
+
+            self.assertEqual(client.drops, 1)
+            self.assertTrue(client.needs_keyframe)
+            self.assertTrue(client.queue.empty())
+            send_control.assert_called_once_with(mirror.SCRCPY_RESET_VIDEO_MESSAGE)
+
+        asyncio.run(run())
+
+    def test_multi_slice_idr_prepends_config_only_to_first_slice(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            client = ClientSession("client", "alice", None)
+            session.clients[client.id] = client
+            sps = b"\x00\x00\x00\x01\x67\x42"
+            pps = b"\x00\x00\x00\x01\x68\xce"
+            first_slice = b"\x00\x00\x00\x01\x65\x80"
+            later_slice = b"\x00\x00\x00\x01\x65\x40"
+
+            for nal in (sps, pps, first_slice, later_slice):
+                session._process_nal(nal)
+            await asyncio.sleep(0)
+
+            self.assertFalse(client.needs_keyframe)
+            self.assertEqual(client.queue.get_nowait(), sps + pps + first_slice)
+            self.assertEqual(client.queue.get_nowait(), later_slice)
+            self.assertEqual(session.stream_health, "healthy")
+
+        asyncio.run(run())
+
+    def test_idr_waits_until_both_sps_and_pps_are_available(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            client = ClientSession("client", "alice", None)
+            session.clients[client.id] = client
+            session._process_nal(b"\x00\x00\x00\x01\x67\x42")
+            session._process_nal(b"\x00\x00\x00\x01\x65\x80")
+            await asyncio.sleep(0)
+
+            self.assertTrue(client.needs_keyframe)
+            self.assertTrue(client.queue.empty())
+            self.assertEqual(session.stream_health, "config")
+            self.assertEqual(session.codec_config(), b"")
+
+        asyncio.run(run())
+
+    def test_video_transport_exit_marks_failed_and_closes_client_queue(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            scrcpy = SimpleNamespace(scrcpy_stop=Mock())
+            client = ClientSession("client", "alice", None)
+            client.needs_keyframe = False
+            session.clients[client.id] = client
+            session.running = True
+            session.scrcpy = scrcpy
+
+            with patch.object(mirror.manager, "broadcast", new=AsyncMock()) as broadcast:
+                session._handle_stream_transport_closed(session._video_generation, scrcpy, "video socket closed")
+                await session._transport_cleanup_task
+
+            self.assertFalse(session.running)
+            self.assertIsNone(session.scrcpy)
+            self.assertEqual(session.stream_health, "failed")
+            self.assertEqual(client.queue.get_nowait(), None)
+            scrcpy.scrcpy_stop.assert_called_once_with()
+            broadcast.assert_awaited_once()
+
+        asyncio.run(run())
+
 
 class MirrorControlTests(unittest.TestCase):
     def test_control_socket_passes_client_id_for_binary_messages(self):
@@ -315,7 +445,10 @@ class MirrorControlTests(unittest.TestCase):
                 await mirror.control_socket(websocket, user, "dev1")
 
             self.assertTrue(websocket.accepted)
-            handle_bytes.assert_awaited_once_with(websocket, user, "dev1", "client-raw", b"payload")
+            handle_bytes.assert_awaited_once()
+            args = handle_bytes.await_args.args
+            self.assertEqual(args[:5], (websocket, user, "dev1", "client-raw", b"payload"))
+            self.assertIsInstance(args[5], ControlLeaseState)
             release_lock.assert_called_once_with("dev1", "alice", force=False, client_id="client-raw")
 
         asyncio.run(run())
@@ -335,7 +468,7 @@ class MirrorControlTests(unittest.TestCase):
                     json.dumps({"type": "control_base64", "data": encoded}),
                 )
 
-            handle_bytes.assert_awaited_once_with(websocket, user, "dev1", "client-base64", b"payload")
+            handle_bytes.assert_awaited_once_with(websocket, user, "dev1", "client-base64", b"payload", None)
 
         asyncio.run(run())
 
@@ -445,7 +578,11 @@ class MirrorControlTests(unittest.TestCase):
                 events.append(("send", payload))
                 return True
 
-            session = SimpleNamespace(send_control=Mock(side_effect=send_control), last_error="")
+            session = SimpleNamespace(
+                send_control=Mock(side_effect=send_control),
+                send_control_for_epoch=Mock(side_effect=lambda payload, _epoch: send_control(payload)),
+                last_error="",
+            )
             with (
                 patch.object(mirror.storage, "renew_lock", side_effect=renew_lock) as renew,
                 patch.object(mirror.manager, "get_or_create", new=AsyncMock(return_value=session)),
@@ -457,6 +594,68 @@ class MirrorControlTests(unittest.TestCase):
             self.assertEqual(websocket.sent, [])
 
         asyncio.run(run())
+
+    def test_cached_control_lease_skips_database_write_for_touch_burst(self):
+        async def run():
+            websocket = FakeControlWebSocket()
+            user = {"username": "alice", "role": "user"}
+            session = SimpleNamespace(send_control=Mock(return_value=True), last_error="")
+            lease = ControlLeaseState()
+            lease.mark_verified(mirror.control_lock_epoch("dev1"))
+            session.send_control_for_epoch = Mock(return_value=True)
+            with (
+                patch.object(mirror.storage, "renew_lock") as renew_lock,
+                patch.object(mirror.manager, "get_or_create", new=AsyncMock(return_value=session)),
+            ):
+                await mirror.handle_control_bytes(websocket, user, "dev1", "client-a", b"payload", lease)
+
+            renew_lock.assert_not_called()
+            session.send_control_for_epoch.assert_called_once_with(b"payload", mirror.control_lock_epoch("dev1"))
+            self.assertEqual(websocket.sent, [])
+
+        asyncio.run(run())
+
+    def test_force_takeover_epoch_invalidates_cached_control_lease(self):
+        lease = ControlLeaseState()
+        initial_epoch = mirror.control_lock_epoch("dev-epoch")
+        lease.mark_verified(initial_epoch)
+
+        with patch.object(mirror.storage, "acquire_lock", return_value={"ok": True}):
+            _result, takeover_epoch = mirror.acquire_control_lock("dev-epoch", "admin", "admin-client", force=True)
+
+        self.assertGreater(takeover_epoch, initial_epoch)
+        self.assertFalse(lease.is_verified(takeover_epoch))
+
+    def test_blocked_control_send_does_not_hold_other_device_epoch_lock(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        class BlockingScrcpy:
+            def scrcpy_send_control(self, _payload):
+                started.set()
+                release.wait(timeout=2)
+                return True
+
+        session = SimpleNamespace(
+            device_id="dev-blocked",
+            running=True,
+            scrcpy=BlockingScrcpy(),
+            _control_send_lock=threading.Lock(),
+            last_error="",
+        )
+        session._send_control_to = lambda _scrcpy, _payload: (started.set(), release.wait(timeout=2), True)[-1]
+        session.send_control = MirrorSession.send_control.__get__(session, MirrorSession)
+        session.send_control_for_epoch = MirrorSession.send_control_for_epoch.__get__(session, MirrorSession)
+
+        with patch.object(mirror, "control_lock_epoch", return_value=0):
+            worker = threading.Thread(target=session.send_control_for_epoch, args=(b"payload", 0))
+            worker.start()
+            self.assertTrue(started.wait(timeout=1))
+            self.assertEqual(mirror.control_lock_epoch("dev-other"), 0)
+            release.set()
+            worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
 
 
 class MirrorControlTemplateTests(unittest.TestCase):

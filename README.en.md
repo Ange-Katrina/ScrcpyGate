@@ -319,8 +319,12 @@ Common environment variables:
 | `ADB_RECONNECT_BACKOFF` | `5` | ADB reconnect backoff in seconds |
 | `SCRCPY_STREAM_MODE` | `raw` | Default scrcpy stream mode |
 | `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | Video stream health timeout |
-| `VIDEO_QUEUE_MAXSIZE` | `60` | Per-client video queue hard limit |
-| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | Per-client video queue soft limit; waits for a keyframe after dropping stale frames |
+| `SCRCPY_I_FRAME_INTERVAL` | `1` | Natural Android encoder keyframe interval in seconds |
+| `SCRCPY_SOCKET_READY_TIMEOUT` | `8` | Timeout for the Android-side scrcpy connection handshake |
+| `VIDEO_RESET_COOLDOWN` | `0.75` | Minimum interval between fresh configuration/keyframe requests |
+| `CONTROL_LEASE_VERIFY_INTERVAL` | `0.5` | Control-lock verification interval during high-frequency touch input |
+| `VIDEO_QUEUE_MAXSIZE` | `24` | Per-client video queue hard limit |
+| `VIDEO_QUEUE_SOFT_LIMIT` | `8` | Per-client soft limit; drops stale frames and requests a fresh keyframe |
 | `LOG_LEVEL` | `INFO` | Log level |
 
 See [.env.example](.env.example) for more options.

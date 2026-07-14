@@ -409,10 +409,14 @@ docker compose -f docker-compose.v2.yml exec -T web-scrcpy-v2 python -m app.cli 
 | --- | --- | --- | --- |
 | `SCRCPY_STREAM_MODE` | `raw` | 默认 scrcpy 流模式 | 生产建议 `raw`；`protocol`、`legacy` 等稳定后再在后台开启 |
 | `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | 启动后等待关键视频数据的秒数 | 设备启动慢时可调大；太大则失败反馈变慢 |
-| `VIDEO_QUEUE_MAXSIZE` | `60` | 每个浏览器视频队列硬上限 | 越大越抗抖动，但延迟和内存占用增加 |
-| `VIDEO_QUEUE_SOFT_LIMIT` | `45` | 队列软上限 | 慢客户端超过软上限后会丢自己的帧并等待关键帧，不拖垮其他观看端 |
+| `SCRCPY_I_FRAME_INTERVAL` | `1` | Android 编码器自然关键帧间隔，单位秒 | 增大可降低关键帧开销，但丢帧后的自然恢复会变慢 |
+| `SCRCPY_SOCKET_READY_TIMEOUT` | `8` | 等待 Android 端 scrcpy 首连接确认的秒数 | 慢设备可适当调大；握手会在服务就绪后立即结束，不固定等待 |
+| `VIDEO_RESET_COOLDOWN` | `0.75` | 主动请求新配置和关键帧的最短间隔，单位秒 | 多观看端同时进入时避免反复重置编码器 |
+| `CONTROL_LEASE_VERIFY_INTERVAL` | `0.5` | 高频触摸期间重新核验控制锁的间隔，单位秒 | 减少每个 MOVE 都写 SQLite；调小会更快发现控制权变更但增加 I/O |
+| `VIDEO_QUEUE_MAXSIZE` | `24` | 每个浏览器视频队列硬上限 | 越大越抗抖动，但延迟和内存占用增加 |
+| `VIDEO_QUEUE_SOFT_LIMIT` | `8` | 队列软上限 | 慢客户端超过软上限后丢弃陈旧帧并主动请求新关键帧，不拖垮其他观看端 |
 
-队列是按浏览器客户端隔离的。一个慢客户端卡顿时，只会丢它自己的帧，不会拖慢同设备的其他观看者。
+队列是按浏览器客户端隔离的。一个慢客户端卡顿时，只会丢它自己的帧，不会拖慢同设备的其他观看者。新观看端和丢帧后的客户端不会复用旧 IDR，而是通过 scrcpy 控制通道请求新的 SPS/PPS 与关键帧，避免旧参考链导致绿屏或花屏。
 
 ### Docker 构建参数
 

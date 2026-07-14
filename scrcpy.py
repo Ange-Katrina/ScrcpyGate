@@ -1,5 +1,6 @@
-﻿from threading import Thread
+﻿from threading import Lock, Thread
 import logging
+import os
 import subprocess
 import socket
 import time
@@ -10,6 +11,8 @@ log = logging.getLogger("webscrcpy.scrcpy")
 SCRCPY_SERVER_PATH = "scrcpy-server"
 DEVICE_SERVER_PATH = "/data/local/tmp/scrcpy-server.jar"
 BASE_PORT = 6666  # Base local forward port; avoid conflict with 5555.
+SCRCPY_I_FRAME_INTERVAL = max(1, int(os.environ.get("SCRCPY_I_FRAME_INTERVAL", "1") or "1"))
+SOCKET_READY_TIMEOUT = max(1.0, float(os.environ.get("SCRCPY_SOCKET_READY_TIMEOUT", "8") or "8"))
 
 class Scrcpy:
     def __init__(self):
@@ -30,6 +33,10 @@ class Scrcpy:
         self.stream_mode = "raw"
         self.last_error = ""
         self.local_port = None  # Dynamically allocated local port.
+        self.stream_exit_callback = None
+        self.unexpected_exit_reason = ""
+        self._exit_notify_lock = Lock()
+        self._exit_notified = False
         
     @property
     def _adb_target(self):
@@ -96,22 +103,7 @@ class Scrcpy:
         cmd = [self.adb_path]
         if self._adb_target:
             cmd.extend(['-s', self._adb_target])
-        server_cmd = (
-            f"CLASSPATH={DEVICE_SERVER_PATH} app_process / "
-            f"com.genymobile.scrcpy.Server 3.1 "
-            f"tunnel_forward=true log_level=VERBOSE "
-            f"video_bit_rate={self.video_bit_rate} "
-            f"video_codec=h264 "
-            f"audio=false"
-        )
-        if self.stream_mode == "raw":
-            server_cmd += " raw_stream=true send_dummy_byte=false"
-        elif self.stream_mode == "protocol":
-            server_cmd += " send_dummy_byte=false"
-        if self.max_size > 0:
-            server_cmd += f" max_size={self.max_size}"
-        if self.max_fps > 0:
-            server_cmd += f" max_fps={self.max_fps}"
+        server_cmd = self._build_server_command()
         cmd.extend(["shell", server_cmd])
         self.android_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         while not self.stop:
@@ -123,12 +115,72 @@ class Scrcpy:
                 log.info("SCRCPY_SERVER target=%s line=%s", self._adb_target, stderr_line)
         self.android_process.wait()
         log.info("SCRCPY_SERVER_STOPPED target=%s returncode=%s", self._adb_target, self.android_process.returncode)
+        if not self.stop:
+            self._notify_stream_exit(f"scrcpy server exited with code {self.android_process.returncode}")
+
+    def _build_server_command(self):
+        server_cmd = (
+            f"CLASSPATH={DEVICE_SERVER_PATH} app_process / "
+            f"com.genymobile.scrcpy.Server 3.1 "
+            f"tunnel_forward=true log_level=VERBOSE "
+            f"video_bit_rate={self.video_bit_rate} "
+            f"video_codec=h264 "
+            f"video_codec_options=i-frame-interval={SCRCPY_I_FRAME_INTERVAL} "
+            f"audio=false"
+        )
+        if self.stream_mode == "raw":
+            server_cmd += " send_device_meta=false send_frame_meta=false send_codec_meta=false"
+        if self.max_size > 0:
+            server_cmd += f" max_size={self.max_size}"
+        if self.max_fps > 0:
+            server_cmd += f" max_fps={self.max_fps}"
+        return server_cmd
+
+    def _connect_forward_socket(self, *, receive_buffer=0, tcp_nodelay=False, expect_dummy=False):
+        deadline = time.monotonic() + SOCKET_READY_TIMEOUT
+        last_error = None
+        while time.monotonic() < deadline and not self.stop:
+            process = self.android_process
+            if process is not None and process.poll() is not None:
+                raise ConnectionError(self.last_error or f"scrcpy server exited with code {process.returncode}")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if receive_buffer:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer)
+            if tcp_nodelay:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            try:
+                sock.settimeout(min(1.0, max(0.1, deadline - time.monotonic())))
+                sock.connect(('localhost', self.local_port))
+                if expect_dummy:
+                    dummy = sock.recv(1)
+                    if dummy != b"\x00":
+                        raise ConnectionError("scrcpy server did not confirm the forwarded connection")
+                sock.settimeout(None)
+                return sock
+            except (OSError, ConnectionError, socket.error) as exc:
+                last_error = exc
+                sock.close()
+                time.sleep(0.1)
+        raise ConnectionError(f"scrcpy socket was not ready: {last_error or 'timeout'}")
+
+    def _notify_stream_exit(self, reason):
+        callback = self.stream_exit_callback
+        if self.stop or not callback:
+            return
+        with self._exit_notify_lock:
+            if self._exit_notified or self.stop:
+                return
+            self._exit_notified = True
+            self.unexpected_exit_reason = reason
+        try:
+            callback(reason)
+        except Exception as exc:
+            log.warning("SCRCPY_EXIT_CALLBACK_FAILED target=%s error=%s", self._adb_target, exc)
 
     def receive_video_data(self):
         log.info("SCRCPY_VIDEO_RECV_START target=%s mode=%s", self._adb_target, self.stream_mode)
+        exit_reason = "video socket closed"
         try:
-            if self.stream_mode == "legacy":
-                self.video_socket.recv(1)
             while not self.stop:
                 try:
                     data = self.video_socket.recv(65536)
@@ -138,13 +190,17 @@ class Scrcpy:
                 except (OSError, ConnectionError, socket.error) as e:
                     if not self.stop:
                         self.last_error = str(e)
+                        exit_reason = f"video socket error: {e}"
                         log.warning("SCRCPY_VIDEO_SOCKET_ERROR target=%s error=%s", self._adb_target, e)
                     break
         except (OSError, ConnectionError, socket.error) as e:
             if not self.stop:
                 self.last_error = str(e)
+                exit_reason = f"video socket error: {e}"
                 log.warning("SCRCPY_VIDEO_SOCKET_INIT_ERROR target=%s error=%s", self._adb_target, e)
         log.info("SCRCPY_VIDEO_RECV_STOP target=%s", self._adb_target)
+        if not self.stop:
+            self._notify_stream_exit(exit_reason)
 
     def receive_audio_data(self):
         log.info("SCRCPY_AUDIO_RECV_START target=%s", self._adb_target)
@@ -167,7 +223,6 @@ class Scrcpy:
     def handle_control_conn(self):
         log.info("SCRCPY_CONTROL_RECV_START target=%s", self._adb_target)
         try:
-            self.control_socket.recv(1)
             while not self.stop:
                 try:
                     data = self.control_socket.recv(1024)
@@ -183,14 +238,25 @@ class Scrcpy:
                 log.warning("SCRCPY_CONTROL_SOCKET_INIT_ERROR target=%s error=%s", self._adb_target, e)
         log.info("SCRCPY_CONTROL_RECV_STOP target=%s", self._adb_target)
 
-    def scrcpy_start(self, video_callback, video_bit_rate, max_size=0, max_fps=0, stream_mode="raw"):
+    def scrcpy_start(
+        self,
+        video_callback,
+        video_bit_rate,
+        max_size=0,
+        max_fps=0,
+        stream_mode="raw",
+        stream_exit_callback=None,
+    ):
         self.video_bit_rate = video_bit_rate
         self.max_size = max_size
         self.max_fps = max_fps
         self.stream_mode = stream_mode if stream_mode in ("raw", "protocol", "legacy") else "raw"
         self.video_callback = video_callback
+        self.stream_exit_callback = stream_exit_callback
         self.stop = False
         self.last_error = ""
+        self.unexpected_exit_reason = ""
+        self._exit_notified = False
 
         # Check device connection state and avoid misreading the adb devices header.
         state = self.adb_manager.get_device_state(self._adb_target)
@@ -205,22 +271,17 @@ class Scrcpy:
             self.last_error = "failed to push scrcpy server"
             return False
 
-        self.setup_adb_forward()
-        self.android_thread = Thread(target=self.start_server, daemon=True)
-        self.android_thread.start()
-        time.sleep(1)
-
         try:
+            self.setup_adb_forward()
+            self.android_thread = Thread(target=self.start_server, daemon=True)
+            self.android_thread.start()
+
             # video connection
-            self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.video_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
-            self.video_socket.connect(('localhost', self.local_port))
+            self.video_socket = self._connect_forward_socket(receive_buffer=1024 * 1024, expect_dummy=True)
             log.info("SCRCPY_VIDEO_SOCKET_CONNECTED target=%s port=%s", self._adb_target, self.local_port)
 
             # control connection
-            self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.control_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.control_socket.connect(('localhost', self.local_port))
+            self.control_socket = self._connect_forward_socket(tcp_nodelay=True)
             log.info("SCRCPY_CONTROL_SOCKET_CONNECTED target=%s port=%s", self._adb_target, self.local_port)
 
             self.video_thread = Thread(target=self.receive_video_data, daemon=True)

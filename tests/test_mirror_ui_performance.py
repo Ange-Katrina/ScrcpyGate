@@ -55,6 +55,23 @@ class MirrorUiPerformanceContractTests(unittest.TestCase):
         self.assertIn("state.layoutFrame=requestAnimationFrame", self.script)
         self.assertIn("new ResizeObserver(handleViewportResize)", self.script)
 
+    def test_raw_player_groups_slices_and_recovers_missing_frames(self):
+        self.assertIn("onMissingVideoFrames:()=>schedulePlayerReset()", self.script)
+        self.assertIn("state.jmuxer.feed({video:completeAnnexBChunk(buf)});", self.script)
+        self.assertNotIn("duration:frameDurationMs()", self.script)
+        self.assertNotIn("last_keyframe_payload", self.script)
+
+    def test_video_and_control_reconnects_are_bounded(self):
+        self.assertIn("const RECONNECT_DELAYS=[500, 1000, 2000, 4000, 8000]", self.script)
+        self.assertIn("function scheduleVideoReconnect(id)", self.script)
+        self.assertIn("function scheduleControlReconnect(id)", self.script)
+        self.assertIn("attempt >= RECONNECT_DELAYS.length", self.script)
+        self.assertIn("openVideo(id, {force:true, phase:'reconnecting', reconnect:true})", self.script)
+        self.assertIn("openControl(id, {force:true, reconnect:true})", self.script)
+        self.assertIn("function pauseReconnectTimers()", self.script)
+        self.assertIn("state.resumeDeviceId=state.activeDeviceId", self.script)
+        self.assertIn("reconnectSockets(resumeDeviceId, 'reconnecting')", self.script)
+
 
 if __name__ == "__main__":
     unittest.main()

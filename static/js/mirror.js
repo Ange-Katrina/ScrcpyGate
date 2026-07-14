@@ -9,8 +9,8 @@ const state = {
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
   alasConfigs:[], alasConfigsLoaded:false, alasConfigsLoading:false, alasConfigsError:'', alasCatalogRevision:0, selectedAlasConfig:'', alasStatusLoading:false, alasStatusError:'', alasSwitching:false, alasStatusRefreshPending:false, alasStatusEpoch:0, alasOperationSeq:0,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
-  playerResetTimer:null, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, layoutFrame:null, renderFrame:null,
-  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false,
+  playerResetTimer:null, videoReconnectTimer:null, videoReconnectAttempts:0, controlReconnectTimer:null, controlReconnectAttempts:0, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, layoutFrame:null, renderFrame:null,
+  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false, resumeDeviceId:'',
   deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map(),
   devicesLoaded:false, deviceLoading:true, deviceLoadError:'', deviceQuery:'', deviceFilter:'all', connectionPhase:'idle', mirrorError:'',
   sidebarTrigger:null, toolTrigger:null, sidebarCollapsed:false, controlRequest:null
@@ -1085,6 +1085,8 @@ async function saveOrApplyQuality(){
   }
 }
 function closeVideoSocket(){
+  if (state.videoReconnectTimer) { clearTimeout(state.videoReconnectTimer); state.videoReconnectTimer=null; }
+  state.videoReconnectAttempts=0;
   state.videoSeq += 1;
   const ws = state.videoWs;
   state.videoWs = null;
@@ -1131,6 +1133,8 @@ function settleControlRequest(error){
   else pending.resolve();
 }
 function closeControlSocket(){
+  if (state.controlReconnectTimer) { clearTimeout(state.controlReconnectTimer); state.controlReconnectTimer=null; }
+  state.controlReconnectAttempts=0;
   state.controlSeq += 1;
   const ws = state.controlWs;
   state.controlWs = null;
@@ -1189,12 +1193,6 @@ function sendPlayerReset(){
   const msg=JSON.stringify({type:'player_reset'});
   if (state.videoWs && state.videoWs.readyState === WebSocket.OPEN) { try { state.videoWs.send(msg); } catch(_){} }
 }
-function requestVideoPrime(ws){
-  const target = ws || state.videoWs;
-  if (target && target.readyState === WebSocket.OPEN) {
-    try { target.send(JSON.stringify({type:'player_reset'})); } catch(_) {}
-  }
-}
 function resetVideoElement(){
   const video = $('phoneVideo');
   if (!video) return;
@@ -1211,7 +1209,8 @@ function jmuxerConfig(video){
     maxDelay:220,
     fps,
     clearBuffer:true,
-    onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); }
+    onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); },
+    onMissingVideoFrames:()=>schedulePlayerReset()
   };
 }
 function completeAnnexBChunk(data){
@@ -1224,10 +1223,7 @@ function completeAnnexBChunk(data){
 function schedulePlayerReset(){
   if (state.playerResetTimer) return;
   const now = Date.now();
-  if (now - state.lastPlayerResetAt < 1400) {
-    requestVideoPrime();
-    return;
-  }
+  if (now - state.lastPlayerResetAt < 1400) return;
   state.lastPlayerResetAt = now;
   state.playerResetTimer=setTimeout(()=>{
     state.playerResetTimer=null;
@@ -1251,13 +1247,61 @@ function trimPlaybackDelay(video){
     }
   } catch (_) {}
 }
-function frameDurationMs(){
-  const fps = Number(qualityPayload().max_fps || 24);
-  return Math.round(1000 / Math.max(1, fps));
+const RECONNECT_DELAYS=[500, 1000, 2000, 4000, 8000];
+function canReconnectChannel(id){
+  const session=state.sessions[id];
+  return !state.pageLeaving && !document.hidden && state.activeDeviceId === id && state.selectedDeviceId === id && !!(session && session.running);
+}
+function scheduleVideoReconnect(id){
+  if (state.videoReconnectTimer || !canReconnectChannel(id)) return;
+  const attempt=state.videoReconnectAttempts;
+  if (attempt >= RECONNECT_DELAYS.length) {
+    state.connectionPhase='error';
+    state.mirrorError='视频通道多次重连失败，请重新开始投屏';
+    render();
+    return;
+  }
+  state.videoReconnectAttempts=attempt + 1;
+  state.connectionPhase='reconnecting';
+  render();
+  state.videoReconnectTimer=setTimeout(()=>{
+    state.videoReconnectTimer=null;
+    if (canReconnectChannel(id)) openVideo(id, {force:true, phase:'reconnecting', reconnect:true});
+  }, RECONNECT_DELAYS[attempt]);
+}
+function scheduleControlReconnect(id){
+  if (state.controlReconnectTimer || !canReconnectChannel(id)) return;
+  const attempt=state.controlReconnectAttempts;
+  if (attempt >= RECONNECT_DELAYS.length) return;
+  state.controlReconnectAttempts=attempt + 1;
+  state.controlReconnectTimer=setTimeout(()=>{
+    state.controlReconnectTimer=null;
+    if (canReconnectChannel(id)) openControl(id, {force:true, reconnect:true});
+  }, RECONNECT_DELAYS[attempt]);
+}
+function pauseReconnectTimers(){
+  if (state.videoReconnectTimer) {
+    clearTimeout(state.videoReconnectTimer);
+    state.videoReconnectTimer=null;
+    state.videoReconnectAttempts=Math.max(0, state.videoReconnectAttempts - 1);
+  }
+  if (state.controlReconnectTimer) {
+    clearTimeout(state.controlReconnectTimer);
+    state.controlReconnectTimer=null;
+    state.controlReconnectAttempts=Math.max(0, state.controlReconnectAttempts - 1);
+  }
 }
 function openVideo(id, options={}){
   if (!options.force && state.activeDeviceId === id && socketLive(state.videoWs)) return state.videoWs;
-  closeVideoSocket();
+  if (options.reconnect) {
+    state.videoSeq += 1;
+    const previous=state.videoWs;
+    state.videoWs=null;
+    state.videoConnected=false;
+    if (previous) { try { previous.close(); } catch(_){} }
+    if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; }
+    resetVideoElement();
+  } else closeVideoSocket();
   state.activeDeviceId=id;
   state.connectionPhase=options.phase || 'connecting';
   state.mirrorError='';
@@ -1267,26 +1311,35 @@ function openVideo(id, options={}){
   const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/video`));
   state.videoWs = ws;
   ws.binaryType='arraybuffer';
-  ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; state.connectionPhase='connected'; state.mirrorError=''; render(); requestVideoPrime(ws); setTimeout(()=>{ if (state.videoSeq === token && state.videoWs === ws) requestVideoPrime(ws); }, 450); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
+  ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; state.connectionPhase='connected'; state.mirrorError=''; render(); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
   ws.onmessage = async (event) => {
     if (state.videoSeq !== token || state.videoWs !== ws) return;
-    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) updateRealtimeSession(id, msg.session); render(); requestVideoPrime(ws); return; }
+    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) updateRealtimeSession(id, msg.session); render(); return; }
     const buf = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
     if (state.videoSeq !== token || state.videoWs !== ws) return;
     if (!state.jmuxer) return;
-    state.jmuxer.feed({video:completeAnnexBChunk(buf), duration:frameDurationMs()});
+    state.videoReconnectAttempts=0;
+    state.jmuxer.feed({video:completeAnnexBChunk(buf)});
     trimPlaybackDelay(video);
     if (video.paused) video.play().catch(()=>{});
   };
   ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) { state.connectionPhase='error'; state.mirrorError='视频通道连接失败'; show(state.mirrorError); render(); } };
-  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); };
+  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; } resetVideoElement(); state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); scheduleVideoReconnect(id); };
   video.onloadedmetadata = () => updateInputSize();
   video.onresize = () => updateInputSize();
   return ws;
 }
 function openControl(id, options={}){
   if (!options.force && state.activeDeviceId === id && socketLive(state.controlWs)) return state.controlWs;
-  closeControlSocket();
+  if (options.reconnect) {
+    state.controlSeq += 1;
+    const previous=state.controlWs;
+    state.controlWs=null;
+    state.controlConnected=false;
+    setControlOwnership(false);
+    destroyInput();
+    if (previous) { try { previous.close(); } catch(_){} }
+  } else closeControlSocket();
   state.activeDeviceId=id;
   const token = ++state.controlSeq;
   const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/control`));
@@ -1298,6 +1351,7 @@ function openControl(id, options={}){
     if (typeof event.data !== 'string') return;
     const msg=JSON.parse(event.data);
     if (msg.type === 'hello' && state.sessions[id]) {
+      state.controlReconnectAttempts=0;
       const session=Object.assign({}, state.sessions[id], {control_lock:msg.lock || null});
       updateRealtimeSession(id, session);
     }
@@ -1329,7 +1383,7 @@ function openControl(id, options={}){
     render();
   };
   ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) { settleControlRequest(new Error('控制通道连接失败')); show('控制通道连接失败'); } };
-  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); settleControlRequest(new Error('控制通道已关闭')); };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); settleControlRequest(new Error('控制通道已关闭')); scheduleControlReconnect(id); };
   return ws;
 }
 function updateInputSize(){
@@ -1752,20 +1806,39 @@ else if (mobileSidebarMedia.addListener) mobileSidebarMedia.addListener(syncSide
 window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
 window.addEventListener('focus', ()=>cancelInactiveStop());
 document.addEventListener('visibilitychange', ()=>{
-  if (document.hidden) scheduleInactiveStop('document_hidden');
-  else cancelInactiveStop();
+  if (document.hidden) {
+    pauseReconnectTimers();
+    scheduleInactiveStop('document_hidden');
+  }
+  else {
+    cancelInactiveStop();
+    const id=state.activeDeviceId;
+    if (id && canReconnectChannel(id)) {
+      if (!socketLive(state.videoWs)) scheduleVideoReconnect(id);
+      if (!socketLive(state.controlWs)) scheduleControlReconnect(id);
+    }
+  }
   syncRefreshLoops();
 });
 window.addEventListener('pagehide', ()=>{
   state.pageLeaving=true;
+  state.resumeDeviceId=state.activeDeviceId;
   closeEvents();
   closeVideo();
 });
 window.addEventListener('pageshow', event=>{
   if (!event.persisted) return;
   state.pageLeaving=false;
+  const resumeDeviceId=state.resumeDeviceId;
+  state.resumeDeviceId='';
   openEvents();
-  loadAll({force:true}).catch(e=>show(e.message));
+  loadAll({force:true}).then(()=>{
+    const session=resumeDeviceId && state.sessions[resumeDeviceId];
+    if (!resumeDeviceId || !session || !session.running || document.hidden) return;
+    state.selectedDeviceId=resumeDeviceId;
+    localStorage.setItem(SELECTED_KEY, resumeDeviceId);
+    reconnectSockets(resumeDeviceId, 'reconnecting');
+  }).catch(e=>show(e.message));
 });
 openEvents();
 loadAll().catch(e=>show(e.message));

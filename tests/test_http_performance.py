@@ -72,7 +72,7 @@ class HttpPerformanceTests(unittest.TestCase):
 
     def test_large_static_asset_is_gzipped(self):
         response = self.client.get(
-            "/static/js/input.js?v=4abd1c7fbd4d",
+            "/static/js/input.js?v=dad3e85fe2fa",
             headers={"accept-encoding": "gzip"},
         )
 
@@ -82,10 +82,10 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertGreater(len(response.content), 500)
 
     def test_static_cache_headers_require_one_recognized_version(self):
-        versioned = self.client.get("/static/js/input.js?v=4abd1c7fbd4d")
+        versioned = self.client.get("/static/js/input.js?v=dad3e85fe2fa")
         unversioned = self.client.get("/static/js/input.js")
         invalid = self.client.get("/static/js/input.js?v=short")
-        repeated = self.client.get("/static/js/input.js?v=4abd1c7fbd4d&v=70381d825b1a")
+        repeated = self.client.get("/static/js/input.js?v=dad3e85fe2fa&v=70381d825b1a")
 
         self.assertEqual(
             versioned.headers.get("cache-control"),

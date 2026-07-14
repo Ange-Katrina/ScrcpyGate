@@ -11,7 +11,6 @@ class ScrcpyInput {
         this._geometryKey = ''
         this._pendingMoveData = null
         this._moveFlushTimer = null
-        this._moveIntervalMs = 16
         this._keyboardProxy = this.createKeyboardProxy();
         this._onMobileBeforeInput = null;
         this._onMobileInput = null;
@@ -467,7 +466,7 @@ class ScrcpyInput {
 
     sendControlData(data) {
         if (this._moveFlushTimer) {
-            clearTimeout(this._moveFlushTimer);
+            cancelAnimationFrame(this._moveFlushTimer);
             this._moveFlushTimer = null;
         }
         this.flushPendingMove();
@@ -477,10 +476,10 @@ class ScrcpyInput {
     sendMoveData(data) {
         this._pendingMoveData = data;
         if (this._moveFlushTimer) return;
-        this._moveFlushTimer = setTimeout(() => {
+        this._moveFlushTimer = requestAnimationFrame(() => {
             this._moveFlushTimer = null;
             this.flushPendingMove();
-        }, this._moveIntervalMs);
+        });
     }
 
     flushPendingMove() {
@@ -871,7 +870,7 @@ class ScrcpyInput {
     destroy() {
         try {
             if (this._moveFlushTimer) {
-                clearTimeout(this._moveFlushTimer);
+                cancelAnimationFrame(this._moveFlushTimer);
                 this._moveFlushTimer = null;
             }
             this._pendingMoveData = null;

@@ -49,6 +49,9 @@ class MainLifespanTests(unittest.TestCase):
         async def monitor_stop():
             events.append("monitor_stop")
 
+        async def mirror_stop_all():
+            events.append("mirror_stop_all")
+
         async def autostop_loop():
             await asyncio.Event().wait()
 
@@ -59,6 +62,7 @@ class MainLifespanTests(unittest.TestCase):
                 mock.patch.object(main.storage, "init_db", side_effect=lambda: events.append("init_db")),
                 mock.patch.object(main.adb_monitor, "start", side_effect=monitor_start),
                 mock.patch.object(main.adb_monitor, "stop", side_effect=monitor_stop),
+                mock.patch.object(main.manager, "stop_all", side_effect=mirror_stop_all),
                 mock.patch.object(main, "mirror_autostop_loop", side_effect=autostop_loop),
             ):
                 with TestClient(main.app) as client:
@@ -73,7 +77,7 @@ class MainLifespanTests(unittest.TestCase):
                 self.assertIsNone(main.mirror_autostop_task)
                 self.assertTrue(task.cancelled())
 
-        self.assertEqual(events, ["init_db", "monitor_start", "monitor_stop"])
+        self.assertEqual(events, ["init_db", "monitor_start", "mirror_stop_all", "monitor_stop"])
         deprecations = [item for item in caught if issubclass(item.category, DeprecationWarning)]
         self.assertEqual(deprecations, [])
 

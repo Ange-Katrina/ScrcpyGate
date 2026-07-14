@@ -19,7 +19,7 @@ from . import alas, alas_embed, security, storage
 from .adb_monitor import adb_monitor, adb_state_label
 from .devices import devices_payload, sessions_payload
 from .logging_config import setup_logging, tail_log
-from .mirror import control_socket, manager, video_socket
+from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
     BANDWIDTH_RECOMMENDATIONS,
     MIN_PRESET_MAX_SIZE,
@@ -75,6 +75,7 @@ async def lifespan(_app: FastAPI):
             except asyncio.CancelledError:
                 pass
             mirror_autostop_task = None
+        await manager.stop_all()
         await adb_monitor.stop()
 
 
@@ -791,7 +792,7 @@ async def api_control_acquire(device_id: str, request: Request):
         raise HTTPException(status_code=403, detail="device denied")
     payload = await parse_body(request)
     force = bool(payload.get("force") and user["role"] == "admin")
-    result = storage.acquire_lock(real_device_id, user["username"], "http", force=force)
+    result, _epoch = acquire_control_lock(real_device_id, user["username"], "http", force=force)
     await manager.broadcast({"type": "control_lock", "device_id": real_device_id, "lock": storage.get_lock(real_device_id)})
     return result
 
@@ -801,7 +802,7 @@ async def api_control_release(device_id: str, request: Request):
     security.verify_csrf(request)
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
-    ok = storage.release_lock(real_device_id, user["username"], force=user["role"] == "admin", client_id="http")
+    ok = release_control_lock(real_device_id, user["username"], force=user["role"] == "admin", client_id="http")
     await manager.broadcast({"type": "control_lock", "device_id": real_device_id, "lock": storage.get_lock(real_device_id)})
     return {"ok": ok}
 
