@@ -117,8 +117,8 @@ Also note:
 
 ### Requirements
 
-- Docker
-- Docker Compose
+- A Linux server with `apt-get`, `apk`, `dnf`, `yum`, `pacman`, or `zypper`
+- Docker and Docker Compose; the guided installer can install missing packages from the system repository
 - An Android device or emulator reachable through network ADB
 
 ### Use the Deployment Helper (Recommended)
@@ -128,9 +128,15 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The guided flow asks for the deployment mode, port, data directory, public URL, and proxy settings, then shows a summary before saving anything.
+Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The wizard detects the server's default-route IPv4 address. Leaving the service port empty selects an unused listening port in `20000–59999`, and the final value is shown in the confirmation summary.
 
-On its first run, the installer creates a permission-restricted `.env` from `.env.example`. Repeated runs never overwrite an existing database, user, or password, and configuration changes require confirmation. In a non-interactive environment, running the script performs an unattended install with the current configuration; use `./deploy.sh --install` to request that behavior explicitly.
+LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode asks separately for the internal bind IP, public domain, HTTP/HTTPS, external port, trusted proxy IP/CIDR, and optional extra origins. It then generates `PUBLIC_BASE_URL`, `ALLOWED_HOSTS`, `ALLOWED_ORIGINS`, and the secure-cookie setting. An empty external port means HTTPS `443` or HTTP `80`; it is not randomized because it must match the WAF or reverse-proxy configuration.
+
+On its first run, the installer creates a permission-restricted `.env` from `.env.example`. Repeated runs never overwrite an existing database, user, or password, and configuration changes require confirmation. If Docker or Compose is missing, interactive mode shows the detected OS, package manager, and planned command before asking for confirmation. Packages come from the distribution repository; the installer never runs `curl | sh`.
+
+In a non-interactive environment, the script deploys the application with the current configuration but never installs system software implicitly. Use `./deploy.sh --install-deps` or set `SCRCPYGATE_AUTO_INSTALL_DEPS=true` to authorize Docker/Compose installation. Non-root users need working `sudo`; Docker socket permission changes normally require a new login.
+
+On Arch Linux, dependency installation uses `pacman -Syu` to avoid unsupported partial upgrades, so existing system packages may also be updated. Review the command shown by the wizard before confirming.
 
 To customize the port, LAN address, or reverse-proxy settings, prepare the configuration first:
 
@@ -145,6 +151,7 @@ Common installer options:
 ./deploy.sh --pull        # Refresh base images and rebuild
 ./deploy.sh --skip-build  # Reuse the existing scrcpygate:local image
 ./deploy.sh --configure   # Run only the configuration wizard
+./deploy.sh --install-deps # Install missing Docker/Compose, then deploy
 ./deploy.sh --status      # Show container status
 ./deploy.sh --help
 ```
@@ -193,6 +200,8 @@ Normal users only see authorized devices. They do not see real ADB addresses.
 ## Reverse Proxy Deployment
 
 When deploying behind HTTPS, a WAF, or a reverse proxy, explicitly configure the public URL, allowed hosts, allowed origins, and trusted proxy source.
+
+The recommended path is `./deploy.sh`, then “guided configuration and installation → reverse proxy / HTTPS.” Enter only the hostname for the domain, for example `example.com`; protocol, path, and port do not belong in that field because protocol and external port have separate prompts.
 
 Example:
 
@@ -316,7 +325,7 @@ Common environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `WEB_SCRCPY_BIND` | `127.0.0.1` | Host bind address |
-| `WEB_SCRCPY_PORT` | `5000` | Host port |
+| `WEB_SCRCPY_PORT` | `5000` | Host port; leaving the wizard prompt empty selects an unused port in `20000–59999` |
 | `WEB_SCRCPY_DATA_HOST` | `./data` | Host data directory |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | Public base URL |
 | `SCRCPYGATE_HEALTH_TIMEOUT` | `90` | Installer health-check timeout in seconds (`10–600`) |

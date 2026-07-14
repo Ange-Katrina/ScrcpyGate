@@ -116,8 +116,8 @@ ScrcpyGate 只调整 scrcpy 输出流，不修改 Android 设备或模拟器的�
 
 ### 环境要求
 
-- Docker
-- Docker Compose
+- Linux 服务器（支持 `apt-get`、`apk`、`dnf`、`yum`、`pacman` 或 `zypper`）
+- Docker 与 Docker Compose；缺失时可由引导脚本从系统软件仓库安装
 - 可通过网络 ADB 访问的 Android 设备或模拟器
 
 ### 使用部署脚本（推荐）
@@ -127,9 +127,15 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-在交互式终端直接运行会打开彩色管理面板，可选择“引导配置并安装”、安装更新、启停/重启、状态、日志、修改配置和重置管理员密码。选择“引导配置并安装”后，向导会依次询问部署模式、端口、数据目录、访问地址和代理设置，显示摘要并确认后才写入配置。
+在交互式终端直接运行会打开彩色管理面板，可选择“引导配置并安装”、安装更新、启停/重启、状态、日志、修改配置和重置管理员密码。向导会自动探测服务器默认路由的 IPv4 地址；服务端口留空时会在 `20000–59999` 中选择当前未监听的端口，最终值会显示在确认摘要中。
 
-首次打开会自动从 `.env.example` 创建权限受限的 `.env`。重复运行不会覆盖现有数据库、用户或密码；修改 `.env` 前会明确显示并确认。非交互环境直接运行时会使用当前配置自动安装，也可以显式执行 `./deploy.sh --install`。
+局域网模式可直接采用探测到的 IP，也可手动覆盖。反向代理模式会分别询问内部绑定 IP、外部域名、HTTP/HTTPS、外部端口、可信代理 IP/CIDR 和额外 Origin，再自动生成 `PUBLIC_BASE_URL`、`ALLOWED_HOSTS`、`ALLOWED_ORIGINS` 与 Cookie 安全设置。外部端口留空时使用 HTTPS `443` 或 HTTP `80`；该端口不会随机，因为还需要与你的 WAF/反向代理配置一致。
+
+首次打开会自动从 `.env.example` 创建权限受限的 `.env`。重复运行不会覆盖现有数据库、用户或密码；修改 `.env` 前会明确显示并确认。如果 Docker 或 Compose 缺失，交互模式会显示检测到的系统、软件包管理器和安装命令，确认后才使用发行版的软件仓库安装，不会执行 `curl | sh`。
+
+非交互环境直接运行时会使用当前配置安装应用，但不会擅自安装系统软件。需要同时安装 Docker/Compose 时，显式执行 `./deploy.sh --install-deps`，或设置 `SCRCPYGATE_AUTO_INSTALL_DEPS=true`。非 root 用户需要可用的 `sudo`；Docker socket 权限变更后通常需要重新登录。
+
+Arch Linux 使用 `pacman -Syu` 安装依赖，以避免不受支持的部分升级，因此可能同时更新已有系统软件包；执行前请查看向导显示的命令。
 
 需要修改端口、局域网地址或反向代理参数时，先执行：
 
@@ -144,6 +150,7 @@ cp .env.example .env
 ./deploy.sh --pull        # 更新基础镜像并重新构建
 ./deploy.sh --skip-build  # 复用已有 scrcpygate:local 镜像
 ./deploy.sh --configure   # 只运行配置向导
+./deploy.sh --install-deps # 安装缺失的 Docker/Compose 后继续部署
 ./deploy.sh --status      # 查看容器状态
 ./deploy.sh --help
 ```
@@ -192,6 +199,8 @@ http://127.0.0.1:5000
 ## 反向代理部署
 
 在 HTTPS、WAF 或反向代理后部署时，需要显式配置对外地址、Host、Origin 和可信代理来源。
+
+推荐直接运行 `./deploy.sh` 并选择“引导配置并安装 → 反向代理 / HTTPS”。域名只输入主机名，例如 `example.com`，不要附带协议、路径或端口；协议与外部端口由后续问题单独填写。
 
 示例：
 
@@ -372,7 +381,7 @@ curl -fsS http://127.0.0.1:5000/healthz
 | 变量 | 默认值 | 作用 | 什么时候修改 |
 | --- | --- | --- | --- |
 | `WEB_SCRCPY_BIND` | `127.0.0.1` | Docker 端口绑定的宿主机地址 | 局域网直接访问时改为服务器 IP 或 `0.0.0.0`；反代部署建议保持内网地址 |
-| `WEB_SCRCPY_PORT` | `5000` | 宿主机暴露端口 | 旧服务已停用并希望 ScrcpyGate 接管时用 `5000`；并行测试可用 `5001` |
+| `WEB_SCRCPY_PORT` | `5000` | 宿主机暴露端口 | 手工配置默认 `5000`；配置向导中留空会自动选择 `20000–59999` 的未监听端口 |
 | `WEB_SCRCPY_DATA_HOST` | `./data` | 宿主机数据目录，挂载到容器 `/app/data` | 正式部署建议使用固定绝对路径，例如 `/root/ScrcpyGate/data` |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | 用户实际访问的外部地址 | 反代、HTTPS、域名、局域网 IP 访问时必须改成真实访问地址 |
 | `SCRCPYGATE_HEALTH_TIMEOUT` | `90` | 安装器等待服务健康的秒数 | 慢速主机可调大，允许范围为 `10–600` |
