@@ -29,11 +29,17 @@ venv/
 env/
 build/
 dist/
+node_modules/
 
 .vscode/
 .idea/
 *.tmp
 *.temp
+
+logs/
+log/
+/.trae/
+docs/superpowers/
 
 ALAS_EMBED_STATUS.md
 __tmp_alas_home.html
