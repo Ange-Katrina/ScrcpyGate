@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=01993ae46d72">
+  <link rel="stylesheet" href="/static/css/admin.css?v=d56aad883ae8">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -121,7 +121,6 @@
           <div class="section-heading"><div><h3 id="presetParamsTitle">四档画质参数</h3><p>所有用户共用流畅、稳定、高清和低延迟四档；上行有限时优先调低码率。</p></div></div>
           <div class="actions spaced-bottom-12" id="bandwidthPresetActions"></div>
           <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">预设</th><th scope="col">码率 Mbps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
-          <p class="muted">输出尺寸下拉项按 16:9 显示完整参考值，可选 854 × 480、960 × 540、1280 × 720、1600 × 900、1920 × 1080，也可设置 854–1920 的自定义最长边。</p>
           <p class="muted">scrcpy 实际使用最长边上限并保持设备原始比例；竖屏、非 16:9 设备的另一边会自动换算，不会拉伸画面。2/5/10/20 Mbps 按钮会填入四档推荐值。</p>
           <p class="muted">H.264 24–30fps 参考：480p 最低约 0.6M、推荐约 1.4M；540p 最低约 0.9M、推荐约 1.8M；720p 最低约 1.2M、推荐 2.4–4M；900p 最低约 2.5M、推荐约 5M；1080p 最低约 3M、推荐 6–8.5M。游戏等高动态画面应优先采用推荐值。</p>
         </section>
@@ -131,7 +130,7 @@
             <div class="col-2"><label for="customProfileId">档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
             <div class="col-3"><label for="customProfileLabel">显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
             <div class="col-2"><label for="customProfileBitrate">码率 Mbps</label><input id="customProfileBitrate" type="number" min="0.1" max="100" step="0.05" inputmode="decimal" value="0.9"></div>
-            <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">输出尺寸</label><select id="customProfileSizeSelect"><option value="854">854 × 480（480p）</option><option value="960" selected>960 × 540（540p）</option><option value="1280">1280 × 720（720p）</option><option value="1600">1600 × 900（900p）</option><option value="1920">1920 × 1080（1080p）</option><option value="custom">自定义尺寸…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><label for="customProfileSize">自定义最长边</label><input id="customProfileSize" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric"><output id="customProfileSizeReference" for="customProfileSize">参考 960 × 540</output></div></div>
+            <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">输出尺寸</label><select id="customProfileSizeSelect"><option value="854">854 × 480（480p）</option><option value="960" selected>960 × 540（540p）</option><option value="1280">1280 × 720（720p）</option><option value="1600">1600 × 900（900p）</option><option value="1920">1920 × 1080（1080p）</option><option value="custom">自定义尺寸…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><div class="custom-size-pair" role="group" aria-label="自定义输出尺寸"><label class="custom-size-field" for="customProfileWidth"><span>宽度 px</span><input id="customProfileWidth" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric" required></label><span class="custom-size-separator" aria-hidden="true">×</span><label class="custom-size-field" for="customProfileHeight"><span>高度 px</span><input id="customProfileHeight" type="number" min="480" max="1080" step="1" value="540" inputmode="numeric" required></label></div><output id="customProfileSizeReference" for="customProfileWidth customProfileHeight">将使用最长边 960px</output></div></div>
             <div class="col-2"><label for="customProfileFps">帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
             <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加自定义档位</button></div>
           </div>
@@ -414,6 +413,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=fe8737901a40" defer></script>
+<script src="/static/js/admin.js?v=2ddbe1f5000a" defer></script>
 </body>
 </html>

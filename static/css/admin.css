@@ -794,14 +794,39 @@ td.actions {
 
 .custom-size-editor {
   display: grid;
-  grid-template-columns: minmax(100px, 0.72fr) minmax(112px, 1fr);
-  align-items: center;
   gap: var(--ui-space-2);
 }
 
-.custom-size-editor label {
-  grid-column: 1 / -1;
+.custom-size-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 6px;
+}
+
+.custom-size-field {
+  min-width: 0;
   margin: 0;
+}
+
+.custom-size-field span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.custom-size-field input {
+  min-width: 0;
+}
+
+.custom-size-separator {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  color: var(--ui-color-text-muted);
+  font-weight: var(--ui-weight-semibold);
 }
 
 .custom-size-editor output {
@@ -2545,6 +2570,12 @@ td.actions {
   .stream-mode-toggle input {
     min-width: 24px;
     min-height: 24px;
+  }
+
+  .preset-size-control select,
+  .custom-profile-size-field > select,
+  .custom-size-field input {
+    min-height: 44px;
   }
 
   .admin-editor-drawer .ui-icon-button {

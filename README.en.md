@@ -127,7 +127,7 @@ All persistent data is stored under `WEB_SCRCPY_DATA_HOST`. Back up that directo
 
 The mirror page presents the same four profiles to every user: Smooth, Balanced, Sharp, and Low latency. Administrators can tune their bitrate, frame rate, and output size for the server's available upstream bandwidth.
 
-Quality settings only affect the scrcpy output stream; they do not change the Android device or emulator's physical resolution. The administration workspace offers complete reference sizes from `854 × 480` through `1920 × 1080`, plus a custom longest edge within that range; scrcpy preserves the device's aspect ratio.
+Quality settings only affect the scrcpy output stream; they do not change the Android device or emulator's physical resolution. The administration workspace offers sizes from `854 × 480` through `1920 × 1080`, plus linked 16:9 custom width and height inputs. These are converted to scrcpy's longest-edge limit, while the stream preserves the device's aspect ratio.
 
 `raw` is the default and recommended stream mode. `protocol` and `legacy` are intended mainly for compatibility tests and troubleshooting and can be enabled from the administration workspace.
 

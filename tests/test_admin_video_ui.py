@@ -64,7 +64,34 @@ const STANDARD_OUTPUT_SIZES=[
             ],
         )
 
+    def test_custom_height_links_back_to_a_16_by_9_width(self):
+        result = self.run_node(
+            ("dimensionsFromHeight",),
+            "[480,540,720,900,1080].map(value=>dimensionsFromHeight(value))",
+            "const MIN_OUTPUT_SIZE=854; const MAX_OUTPUT_SIZE=1920; const MIN_OUTPUT_HEIGHT=480; const MAX_OUTPUT_HEIGHT=1080;",
+        )
+        self.assertEqual(
+            [(item["width"], item["height"]) for item in result],
+            [(854, 480), (960, 540), (1280, 720), (1600, 900), (1920, 1080)],
+        )
+
+        unstable = self.run_node(
+            ("outputSizeMeta", "dimensionsFromHeight"),
+            "Array.from({length:601},(_,index)=>index+480).filter(value=>{const item=dimensionsFromHeight(value);return outputSizeMeta(item.maxSize).height!==item.height})",
+            """
+const MIN_OUTPUT_SIZE=854; const MAX_OUTPUT_SIZE=1920; const MIN_OUTPUT_HEIGHT=480; const MAX_OUTPUT_HEIGHT=1080;
+const STANDARD_OUTPUT_SIZES=[
+  {maxSize:854,width:854,height:480,quality:'480p'}, {maxSize:960,width:960,height:540,quality:'540p'},
+  {maxSize:1280,width:1280,height:720,quality:'720p'}, {maxSize:1600,width:1600,height:900,quality:'900p'},
+  {maxSize:1920,width:1920,height:1080,quality:'1080p'}
+];
+""",
+        )
+        self.assertEqual(unstable, [])
+
     def test_size_selector_offers_standard_and_custom_resolutions(self):
+        self.assertNotIn("输出尺寸下拉项按 16:9 显示完整参考值", self.template)
+        self.assertNotIn("输出尺寸提供 854 × 480", self.template)
         for label in (
             "854 × 480（480p）",
             "960 × 540（540p）",
@@ -74,15 +101,21 @@ const STANDARD_OUTPUT_SIZES=[
             "自定义尺寸…",
         ):
             self.assertIn(label, self.template if label != "自定义尺寸…" else self.template + self.script)
-        self.assertIn('id="customProfileSize" type="number" min="854" max="1920"', self.template)
+        self.assertIn('id="customProfileWidth" type="number" min="854" max="1920"', self.template)
+        self.assertIn('id="customProfileHeight" type="number" min="480" max="1080"', self.template)
+        self.assertIn('aria-label="自定义输出尺寸"', self.template)
         self.assertIn("const STANDARD_OUTPUT_SIZES = Object.freeze([", self.script)
         self.assertIn("function presetSizeControl(profile,value)", self.script)
         self.assertIn("function syncPresetSizeControl(control,value,forceCustom=false)", self.script)
-        self.assertIn("!sizeInput.checkValidity()", self.script)
-        self.assertIn("sizeInput.reportValidity()", self.script)
-        self.assertIn("自定义最长边必须在 ${MIN_OUTPUT_SIZE}–${MAX_OUTPUT_SIZE} 之间", self.script)
+        self.assertIn("function syncPresetCustomDimensions(control,source)", self.script)
+        self.assertIn("width.dataset.customWidth='1'", self.script)
+        self.assertIn("height.dataset.customHeight='1'", self.script)
+        self.assertIn("!width.checkValidity() || !height.checkValidity()", self.script)
+        self.assertIn("自定义宽度或高度超出允许范围", self.script)
         self.assertIn(".preset-size-control", self.styles)
         self.assertIn(".custom-size-editor", self.styles)
+        self.assertIn(".custom-size-pair", self.styles)
+        self.assertIn(".custom-size-field input {\n    min-height: 44px;", self.styles)
 
     def test_collect_video_presets_reads_standard_and_custom_size_controls(self):
         result = self.run_node(
@@ -99,7 +132,9 @@ const STANDARD_OUTPUT_SIZES=[
   {maxSize:1600,width:1600,height:900,quality:'900p'},
   {maxSize:1920,width:1920,height:1080,quality:'1080p'}
 ];
-const customContainer={querySelector:()=>({value:'1000'})};
+const customWidth={value:'1000',checkValidity:()=>true,reportValidity:()=>{}};
+const customHeight={value:'563',checkValidity:()=>true,reportValidity:()=>{}};
+const customContainer={querySelector:selector=>selector.includes('width')?customWidth:customHeight};
 const inputs=[
   {dataset:{presetProfile:'smooth',presetField:'video_bit_rate'},value:'1.25'},
   {dataset:{presetProfile:'smooth',presetField:'max_size'},value:'854'},
