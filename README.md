@@ -121,7 +121,10 @@ docker compose up -d
 | 重启服务 | `./deploy.sh --restart` |
 | 拉取基础镜像并重新部署当前代码 | `./deploy.sh --pull` |
 | 重置管理员密码 | `./deploy.sh --reset-admin` |
+| 安全卸载 | `./deploy.sh --uninstall` |
 | 查看全部选项 | `./deploy.sh --help` |
+
+卸载只会接管由当前目录、当前 `compose.yaml` 和当前数据挂载共同创建的 ScrcpyGate 容器。非交互环境仅移除服务容器和 Compose 网络，并始终保留镜像、`.env` 与数据；交互环境可分别选择清理镜像、项目内数据和 `.env`。永久删除数据时必须再次输入脚本显示的完整规范化路径，项目外数据目录只能手工处理。
 
 ## 画质与流模式
 

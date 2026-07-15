@@ -121,7 +121,10 @@ All persistent data is stored under `WEB_SCRCPY_DATA_HOST`. Back up that directo
 | Restart the service | `./deploy.sh --restart` |
 | Pull base images and redeploy the current source | `./deploy.sh --pull` |
 | Reset the administrator password | `./deploy.sh --reset-admin` |
+| Safe uninstall | `./deploy.sh --uninstall` |
 | Show every option | `./deploy.sh --help` |
+
+Uninstall only manages a ScrcpyGate container whose working directory, `compose.yaml`, image, service labels, and data mount all match this checkout. In non-interactive environments it removes only the service container and Compose network and always preserves the image, `.env`, and data. In an interactive terminal, image, in-project data, and `.env` cleanup are optional and confirmed separately. Permanent data deletion requires retyping the full canonical path shown by the script; external data directories must be removed manually.
 
 ## Quality and Stream Modes
 

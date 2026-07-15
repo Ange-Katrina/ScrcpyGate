@@ -137,6 +137,7 @@ ScrcpyGate 引导式安装与管理脚本
 服务管理:
   ./deploy.sh --start | --stop | --restart
   ./deploy.sh --status | --logs | --reset-admin
+  ./deploy.sh --uninstall    安全移除当前服务；交互模式可选择清理本地文件
 
 其他:
   ./deploy.sh --help
@@ -167,6 +168,7 @@ while [ "$#" -gt 0 ]; do
     --status) ACTION=status ;;
     --logs) ACTION=logs ;;
     --reset-admin) ACTION=reset_admin ;;
+    --uninstall) ACTION=uninstall ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     *) die "未知参数 / unknown option: $1 (use --help)" ;;
@@ -886,11 +888,21 @@ check_system_dependencies() {
 detect_scrcpygate_instance() {
   EXISTING_SCRCPYGATE_STATE=""
   EXISTING_SCRCPYGATE_PROJECT=""
+  EXISTING_SCRCPYGATE_SERVICE=""
+  EXISTING_SCRCPYGATE_WORKING_DIR=""
+  EXISTING_SCRCPYGATE_CONFIG_FILES=""
+  EXISTING_SCRCPYGATE_IMAGE=""
+  EXISTING_SCRCPYGATE_DATA_SOURCE=""
   command -v docker >/dev/null 2>&1 || return 0
   docker info >/dev/null 2>&1 || return 0
   EXISTING_SCRCPYGATE_STATE=$(docker inspect --format '{{.State.Status}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
   [ -n "$EXISTING_SCRCPYGATE_STATE" ] || return 0
   EXISTING_SCRCPYGATE_PROJECT=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_SERVICE=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_WORKING_DIR=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_CONFIG_FILES=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_IMAGE=$(docker inspect --format '{{.Config.Image}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_DATA_SOURCE=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
 }
 
 show_existing_scrcpygate() {
@@ -898,15 +910,33 @@ show_existing_scrcpygate() {
   panel_line "容器" "scrcpygate"
   panel_line "状态" "$EXISTING_SCRCPYGATE_STATE"
   panel_line "Compose 项目" "${EXISTING_SCRCPYGATE_PROJECT:-未知/手工创建}"
+  panel_line "Compose 服务" "${EXISTING_SCRCPYGATE_SERVICE:-未知}"
+  panel_line "工作目录" "${EXISTING_SCRCPYGATE_WORKING_DIR:-未知}"
   print_rule
 }
 
 existing_instance_can_be_managed() {
-  case "$EXISTING_SCRCPYGATE_PROJECT" in scrcpygate) return 0 ;;
+  [ -n "$EXISTING_SCRCPYGATE_STATE" ] || return 1
+  expected_config="$SCRIPT_DIR/compose.yaml"
+  ownership_error=""
+  case "$EXISTING_SCRCPYGATE_PROJECT" in scrcpygate) ;; *) ownership_error="Compose 项目不匹配" ;;
   esac
-  show_existing_scrcpygate
-  warn_msg "同名容器属于其他 Compose 项目，脚本不会自动接管；请先人工确认并迁移该容器"
-  return 1
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_SERVICE" != scrcpygate ]; then ownership_error="Compose 服务不匹配"; fi
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_WORKING_DIR" != "$SCRIPT_DIR" ]; then ownership_error="Compose 工作目录不匹配"; fi
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_CONFIG_FILES" != "$expected_config" ]; then ownership_error="Compose 配置文件不匹配"; fi
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != scrcpygate:local ]; then ownership_error="容器镜像不匹配"; fi
+  if [ -z "${ownership_error:-}" ]; then
+    expected_data=$(configured_data_dir_from_disk) || ownership_error="无法从磁盘配置解析数据目录"
+  fi
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_DATA_SOURCE" != "$expected_data" ]; then ownership_error="数据挂载目录不匹配"; fi
+  if [ -n "${ownership_error:-}" ]; then
+    show_existing_scrcpygate
+    warn_msg "${ownership_error}，脚本不会自动接管；请人工确认该容器"
+    ownership_error=""
+    return 1
+  fi
+  ownership_error=""
+  return 0
 }
 
 service_status_line() {
@@ -1088,6 +1118,8 @@ show_install_summary() {
 
 apply_configuration_to_running_instance() {
   prepare_deployment
+  prepare_data_directory
+  ensure_data_permissions
   log "正在应用新配置并重启 ScrcpyGate..."
   compose up -d --force-recreate scrcpygate
   wait_for_health
@@ -1096,9 +1128,11 @@ apply_configuration_to_running_instance() {
 
 configure_only_flow() {
   detect_scrcpygate_instance
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
+    existing_instance_can_be_managed || return 0
+  fi
   configure_wizard || return 1
   case "$EXISTING_SCRCPYGATE_STATE" in running|restarting|paused) ;; *) return 0 ;; esac
-  existing_instance_can_be_managed || return 0
   show_existing_scrcpygate
   if ! prompt_confirm_no "是否立即重建并重启以应用新配置？"; then
     warn_msg "配置已保存，当前运行实例仍使用旧配置；可稍后选择“重启服务”应用"
@@ -1109,9 +1143,11 @@ configure_only_flow() {
 
 configure_and_install_flow() {
   detect_scrcpygate_instance
-  configure_wizard || return 1
   if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
     existing_instance_can_be_managed || return 0
+  fi
+  configure_wizard || return 1
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
     show_existing_scrcpygate
     case "$EXISTING_SCRCPYGATE_STATE" in
       running|restarting|paused) deploy_question="是否重新构建并部署，重启现有 ScrcpyGate？" ;;
@@ -1185,11 +1221,164 @@ reset_admin() {
   password=""
 }
 
+load_uninstall_settings() {
+  if [ -f .env ]; then
+    WEB_SCRCPY_DATA_HOST=$(dotenv_value WEB_SCRCPY_DATA_HOST)
+  else
+    WEB_SCRCPY_DATA_HOST=./data
+  fi
+  WEB_SCRCPY_DATA_HOST=${WEB_SCRCPY_DATA_HOST:-./data}
+}
+
+configured_data_dir_from_disk() {
+  load_uninstall_settings
+  [ -d "$WEB_SCRCPY_DATA_HOST" ] || return 1
+  (CDPATH= cd -- "$WEB_SCRCPY_DATA_HOST" && pwd -P)
+}
+
+resolve_uninstall_data_dir() {
+  UNINSTALL_DATA_DIR=$(configured_data_dir_from_disk) \
+    || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
+  case "$UNINSTALL_DATA_DIR" in
+    '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝删除不安全的数据目录: $UNINSTALL_DATA_DIR" ;;
+  esac
+  case "$SCRIPT_DIR/" in
+    "$UNINSTALL_DATA_DIR/"*) die "拒绝删除项目目录的父目录: $UNINSTALL_DATA_DIR" ;;
+  esac
+}
+
+uninstall_data_can_be_removed() {
+  case "$UNINSTALL_DATA_DIR" in "$SCRIPT_DIR"/*) return 0 ;; esac
+  return 1
+}
+
+confirm_permanent_data_deletion() {
+  printf '\n%s>%s 数据将永久删除；请输入完整路径 %s 继续: ' "$C_RED" "$C_RESET" "$UNINSTALL_DATA_DIR"
+  IFS= read -r answer || return 1
+  answer=$(printf '%s' "$answer" | tr -d '\r')
+  [ "$answer" = "$UNINSTALL_DATA_DIR" ] || return 1
+  current_data_dir=$(configured_data_dir_from_disk) || return 1
+  [ "$current_data_dir" = "$UNINSTALL_DATA_DIR" ]
+}
+
+compose_down_owned_project() (
+  unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR
+  COMPOSE_REMOVE_ORPHANS=0
+  export COMPOSE_REMOVE_ORPHANS
+  compose --project-name scrcpygate --file "$SCRIPT_DIR/compose.yaml" down
+)
+
+uninstall_service() {
+  load_uninstall_settings
+  require_docker
+  detect_scrcpygate_instance
+  if [ -z "$EXISTING_SCRCPYGATE_STATE" ]; then
+    success_msg "未检测到当前目录所属的 ScrcpyGate 服务容器，无需卸载"
+    return 0
+  fi
+  existing_instance_can_be_managed || return 1
+  resolve_uninstall_data_dir
+
+  if is_interactive; then
+    panel_top "卸载 ScrcpyGate"
+    panel_line "服务容器" "scrcpygate（将停止并移除）"
+    panel_line "本地镜像" "scrcpygate:local（默认保留）"
+    panel_line "数据目录" "$UNINSTALL_DATA_DIR（默认保留）"
+    panel_line "部署配置" ".env（默认保留）"
+    print_rule
+    warn_msg "删除数据目录会永久移除账号、设备、权限和全部应用配置"
+    if ! prompt_confirm_no "确认停止并移除当前目录所属的 ScrcpyGate 服务容器？"; then
+      warn_msg "已取消卸载，未修改任何文件或容器"
+      return 0
+    fi
+  fi
+
+  compose_down_owned_project || die "无法移除 ScrcpyGate 服务容器；未继续清理镜像或文件"
+  if docker inspect scrcpygate >/dev/null 2>&1; then
+    die "Compose 执行完成后容器仍然存在；未继续清理镜像或文件"
+  fi
+  success_msg "ScrcpyGate 服务容器和 Compose 网络已移除"
+
+  if ! is_interactive; then
+    success_msg "非交互卸载已保留本地镜像、数据目录和 .env"
+    return 0
+  fi
+
+  image_status="不存在"
+  cleanup_failed=false
+  if docker image inspect scrcpygate:local >/dev/null 2>&1; then
+    if prompt_confirm_no "是否删除本地镜像 scrcpygate:local？下次安装需要重新构建"; then
+      if docker image rm scrcpygate:local; then
+        image_status="已删除"
+        success_msg "本地镜像已删除"
+      else
+        image_status="删除失败"
+        cleanup_failed=true
+        warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
+      fi
+    else
+      image_status="已保留"
+      success_msg "已保留本地镜像 scrcpygate:local"
+    fi
+  fi
+
+  data_status="已保留"
+  if uninstall_data_can_be_removed; then
+    if prompt_confirm_no "是否删除数据目录 ${UNINSTALL_DATA_DIR}？此操作不可恢复"; then
+      if ! confirm_permanent_data_deletion; then
+        warn_msg "确认路径不匹配或目录已变化，已保留数据目录"
+      else
+        rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
+        data_status="已删除"
+        success_msg "数据目录已删除"
+      fi
+    else
+      success_msg "已保留数据目录"
+    fi
+  else
+    warn_msg "数据目录位于项目目录之外，脚本不会自动删除：$(safe_display "$UNINSTALL_DATA_DIR")"
+    warn_msg "确认不再需要后请手工备份并删除该目录"
+  fi
+
+  env_status="不存在"
+  if [ -f .env ]; then
+    if prompt_confirm_no "是否删除 .env 部署配置？"; then
+      rm -f -- "$SCRIPT_DIR/.env" || die "无法删除 .env"
+      env_status="已删除"
+      success_msg ".env 部署配置已删除"
+    else
+      env_status="已保留"
+      success_msg "已保留 .env 部署配置"
+    fi
+  fi
+
+  panel_top "卸载完成"
+  panel_line "服务容器" "已移除"
+  panel_line "本地镜像" "$image_status"
+  panel_line "数据目录" "$data_status"
+  panel_line "部署配置" "$env_status"
+  print_rule
+  [ "$cleanup_failed" = false ]
+}
+
+load_menu_settings() {
+  if [ -f .env ]; then
+    WEB_SCRCPY_BIND=$(dotenv_value WEB_SCRCPY_BIND)
+    WEB_SCRCPY_PORT=$(dotenv_value WEB_SCRCPY_PORT)
+    WEB_SCRCPY_DATA_HOST=$(dotenv_value WEB_SCRCPY_DATA_HOST)
+    PUBLIC_BASE_URL=$(dotenv_value PUBLIC_BASE_URL)
+  else
+    WEB_SCRCPY_BIND=127.0.0.1
+    WEB_SCRCPY_PORT=5000
+    WEB_SCRCPY_DATA_HOST=./data
+    PUBLIC_BASE_URL=http://127.0.0.1:5000
+  fi
+}
+
 show_menu() {
   require_interactive
-  ensure_env_file
   while :; do
-    load_settings
+    load_menu_settings
 
     panel_top "ScrcpyGate 安装与管理面板"
     panel_line "状态" "$(service_status_line)"
@@ -1215,6 +1404,7 @@ show_menu() {
     menu_item 10 "重置管理员密码" "$C_RED"
     menu_item 11 "检查/安装 Docker 与 Compose" "$C_CYAN"
     menu_item 12 "查看命令帮助" "$C_GRAY"
+    menu_item 13 "卸载 ScrcpyGate" "$C_RED"
     menu_item 0 "退出" "$C_GRAY"
 
     printf '\n%s>%s 请选择 / Choose: ' "$C_YELLOW" "$C_RESET"
@@ -1232,13 +1422,17 @@ show_menu() {
       6) (restart_service) || true; pause_menu ;;
       7) (show_status) || true; pause_menu ;;
       8) (show_logs) || true; pause_menu ;;
-      9) configure_only_flow || true; pause_menu ;;
+      9) (configure_only_flow) || true; pause_menu ;;
       10)
         if prompt_confirm "确认重置 admin 密码？"; then (reset_admin) || true; fi
         pause_menu
         ;;
       11) (check_system_dependencies) || true; pause_menu ;;
       12) usage; pause_menu ;;
+      13)
+        (uninstall_service) || true
+        pause_menu
+        ;;
       0|q|Q|quit|exit) exit 0 ;;
       *) error_msg "无效选项 / invalid choice: $choice"; pause_menu ;;
     esac
@@ -1259,5 +1453,6 @@ case "$ACTION" in
   status) show_status ;;
   logs) show_logs ;;
   reset_admin) reset_admin ;;
+  uninstall) uninstall_service ;;
   *) die "unsupported action: $ACTION" ;;
 esac
