@@ -58,10 +58,69 @@ class MirrorUiPerformanceContractTests(unittest.TestCase):
         self.assertIn("new ResizeObserver(handleViewportResize)", self.script)
 
     def test_raw_player_groups_slices_and_recovers_missing_frames(self):
-        self.assertIn("onMissingVideoFrames:()=>schedulePlayerReset()", self.script)
+        self.assertIn("onMissingVideoFrames:()=>requestVideoKeyframe(playerSeq)", self.script)
+        self.assertIn("if(state.playerSeq!==playerSeq) return;", self.script)
         self.assertIn("state.jmuxer.feed({video:completeAnnexBChunk(buf)});", self.script)
         self.assertNotIn("duration:frameDurationMs()", self.script)
         self.assertNotIn("last_keyframe_payload", self.script)
+
+    def test_stale_player_callbacks_cannot_reset_the_current_player(self):
+        start = self.script.index("function sendPlayerReset()")
+        end = self.script.index("function trimPlaybackDelay", start)
+        helpers = self.script[start:end]
+        program = f"""
+const scheduled=[];
+globalThis.setTimeout=(callback)=>{{ scheduled.push(callback); return scheduled.length; }};
+globalThis.clearTimeout=()=>{{}};
+const sent=[];
+const video={{pause:()=>{{}},removeAttribute:()=>{{}},load:()=>{{}}}};
+const state={{
+  videoWs:{{readyState:1,send:message=>sent.push(JSON.parse(message))}},
+  jmuxer:null,
+  playerSeq:0,
+  playerResetTimer:null,
+  lastPlayerResetAt:0,
+  lastKeyframeRequestAt:0,
+}};
+const WebSocket={{OPEN:1}};
+const $=()=>video;
+const qualityPayload=()=>({{max_fps:24}});
+class JMuxer {{
+  constructor(options){{ this.options=options; this.destroyed=0; }}
+  destroy(){{ this.destroyed+=1; }}
+}}
+{helpers}
+recreateVideoPlayer(video);
+const stale=state.jmuxer;
+recreateVideoPlayer(video);
+const current=state.jmuxer;
+stale.options.onError(new Error('stale'));
+stale.options.onMissingVideoFrames();
+const afterStale={{scheduled:scheduled.length,sent:sent.length,currentDestroyed:current.destroyed}};
+current.options.onMissingVideoFrames();
+const afterMissing={{scheduled:scheduled.length,sent:sent.length,currentDestroyed:current.destroyed}};
+state.lastPlayerResetAt=0;
+current.options.onError(new Error('current'));
+scheduled.shift()();
+console.log(JSON.stringify({{
+  afterStale,
+  afterMissing,
+  afterCurrent:{{sent:sent.length,currentDestroyed:current.destroyed,replaced:state.jmuxer!==current}}
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["afterStale"], {"scheduled": 0, "sent": 0, "currentDestroyed": 0})
+        self.assertEqual(result["afterMissing"], {"scheduled": 0, "sent": 1, "currentDestroyed": 0})
+        self.assertEqual(result["afterCurrent"], {"sent": 2, "currentDestroyed": 1, "replaced": True})
 
     def test_player_rebuilds_when_h264_sps_changes_after_rotation(self):
         start = self.script.index("function annexBNalUnit")
@@ -102,16 +161,19 @@ console.log(JSON.stringify({{result,sps:Array.from(annexBNalUnit(spsA,7)),spsAft
         self.assertIn("if(configurationChanged){ state.videoReconfiguring=true; recreateVideoPlayer(video); }", self.script)
         rebuild = self.script.index("if(configurationChanged){ state.videoReconfiguring=true; recreateVideoPlayer(video); }")
         feed = self.script.index("state.jmuxer.feed({video:completeAnnexBChunk(buf)});")
-        reset = self.script.index("if(configurationChanged) sendPlayerReset();")
         self.assertLess(
             rebuild,
             feed,
         )
-        self.assertLess(feed, reset)
+        self.assertNotIn("if(configurationChanged) sendPlayerReset();", self.script)
+        self.assertIn("if(msg && msg.type==='stream_reset')", self.script)
+        self.assertIn("if(generation>state.streamGeneration)", self.script)
         self.assertIn("video.onresize = () => updateInputSize();", self.script)
         self.assertIn("if(metadataW>0 && metadataH>0) state.videoReconfiguring=false;", self.script)
         self.assertIn("if (state.videoReconfiguring && isTouch) return;", self.script)
-        self.assertEqual(self.script.count("if(configurationChanged) sendPlayerReset();"), 1)
+        quality_start = self.script.index("async function saveOrApplyQuality()")
+        quality_end = self.script.index("function closeVideoSocket()", quality_start)
+        self.assertNotIn("reconnectSockets(", self.script[quality_start:quality_end])
 
         update_start = self.script.index("function updateInputSize()")
         update_end = self.script.index("function layoutVideo()", update_start)

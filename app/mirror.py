@@ -102,6 +102,11 @@ def release_control_lock(
         return ok
 
 
+@dataclass(frozen=True)
+class StreamReset:
+    generation: int
+
+
 @dataclass
 class ClientSession:
     id: str
@@ -146,6 +151,11 @@ class ClientSession:
             self.needs_keyframe = True
             return True
         return False
+
+    def push_stream_reset(self, generation: int) -> None:
+        self.clear_queue()
+        self.needs_keyframe = True
+        self.queue.put_nowait(StreamReset(generation))
 
 
 @dataclass
@@ -225,14 +235,24 @@ class MirrorSession:
 
     async def start(self, options: dict[str, Any] | None = None, force_restart: bool = False) -> bool:
         target_options = public_video_options(options or settings_to_video_options(storage.get_settings()))
-        if self.running:
-            if not force_restart and signature(self.video_options) == signature(target_options):
-                log.info("MIRROR_ALREADY_RUNNING device=%s mode=%s", self.device_id, self.effective_stream_mode)
-                return True
-            await self.stop()
+        if self.running and signature(self.video_options) == signature(target_options):
+            self.video_options = target_options
+            log.info("MIRROR_ALREADY_RUNNING device=%s mode=%s", self.device_id, self.effective_stream_mode)
+            return True
         async with self._lock:
             if self.running:
-                return True
+                if signature(self.video_options) == signature(target_options):
+                    self.video_options = target_options
+                    return True
+                scpy = self.scrcpy
+                self.scrcpy = None
+                self.running = False
+                self._video_generation += 1
+                if self._video_reset_task and not self._video_reset_task.done():
+                    self._video_reset_task.cancel()
+                self._video_reset_task = None
+                if scpy:
+                    await asyncio.to_thread(scpy.scrcpy_stop)
             if self._transport_cleanup_task and not self._transport_cleanup_task.done():
                 await self._transport_cleanup_task
             self.last_client_left_at = None
@@ -372,8 +392,7 @@ class MirrorSession:
         self._protocol_invalid_logged = False
         self._protocol_payload_logged = False
         for client in self.clients.values():
-            client.clear_queue()
-            client.needs_keyframe = True
+            client.push_stream_reset(self._video_generation)
 
     async def _wait_for_stream_health(self, mode: str) -> bool:
         deadline = time.monotonic() + STREAM_HEALTH_TIMEOUT
@@ -826,6 +845,9 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
                 if frame is None:
                     await websocket.close(code=1011, reason="video stream ended")
                     return
+                if isinstance(frame, StreamReset):
+                    await websocket.send_json({"type": "stream_reset", "generation": frame.generation})
+                    continue
                 await websocket.send_bytes(frame)
         except (WebSocketDisconnect, asyncio.CancelledError):
             raise

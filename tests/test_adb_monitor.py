@@ -7,7 +7,10 @@ from app.adb_monitor import AdbDeviceMonitor
 class AdbDeviceMonitorTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_device_records_disabled_without_probe(self):
         monitor = AdbDeviceMonitor()
-        with patch.object(monitor, "_probe") as probe:
+        with (
+            patch("app.adb_monitor.storage.get_device", return_value=None),
+            patch.object(monitor, "_probe") as probe,
+        ):
             result = await monitor.ensure_connected(
                 {"id": "disabled-device", "address": "192.0.2.10:30100", "enabled": False},
                 force=True,
@@ -19,7 +22,10 @@ class AdbDeviceMonitorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_probe_exception_becomes_unknown_status(self):
         monitor = AdbDeviceMonitor()
-        with patch.object(monitor, "_probe", side_effect=RuntimeError("probe failed")):
+        with (
+            patch("app.adb_monitor.storage.get_device", return_value=None),
+            patch.object(monitor, "_probe", side_effect=RuntimeError("probe failed")),
+        ):
             result = await monitor.ensure_connected(
                 {"id": "new-device", "address": "192.0.2.10:30100", "enabled": True},
                 force=True,

@@ -9,7 +9,7 @@ const state = {
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
   alasConfigs:[], alasConfigsLoaded:false, alasConfigsLoading:false, alasConfigsError:'', alasCatalogRevision:0, selectedAlasConfig:'', alasStatusLoading:false, alasStatusError:'', alasSwitching:false, alasStatusRefreshPending:false, alasStatusEpoch:0, alasOperationSeq:0,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
-  playerResetTimer:null, videoReconnectTimer:null, videoReconnectAttempts:0, controlReconnectTimer:null, controlReconnectAttempts:0, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastDelayTrimAt:0, videoSpsSignature:'', videoReconfiguring:false, layoutFrame:null, renderFrame:null,
+  playerResetTimer:null, playerSeq:0, streamGeneration:0, videoReconnectTimer:null, videoReconnectAttempts:0, controlReconnectTimer:null, controlReconnectAttempts:0, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastKeyframeRequestAt:0, lastDelayTrimAt:0, videoSpsSignature:'', videoReconfiguring:false, layoutFrame:null, renderFrame:null,
   idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false, resumeDeviceId:'',
   deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map(),
   devicesLoaded:false, deviceLoading:true, deviceLoadError:'', deviceQuery:'', deviceFilter:'all', connectionPhase:'idle', mirrorError:'',
@@ -1093,9 +1093,11 @@ async function saveOrApplyQuality(){
     state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
     replaceMutationSessions(result.sessions);
     if (result.restarted) {
-      reconnectSockets(id, 'reconnecting');
       setQualityStatus('画质已应用，投屏流已重启');
       show('画质已应用，投屏已按新参数重启');
+    } else if (running) {
+      setQualityStatus('');
+      show('画质设置已确认，当前投屏参数未变化');
     } else {
       setQualityStatus('');
       show('画质偏好已保存，下次启动投屏生效');
@@ -1116,7 +1118,9 @@ function closeVideoSocket(){
   state.videoWs = null;
   state.videoConnected = false;
   if (ws) { try { ws.close(); } catch(_){} }
+  state.playerSeq += 1;
   if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; }
+  state.streamGeneration=0;
   state.videoSpsSignature='';
   state.videoReconfiguring=false;
   resetVideoElement();
@@ -1225,7 +1229,7 @@ function resetVideoElement(){
   try { video.pause(); } catch(_) {}
   try { video.removeAttribute('src'); video.load(); } catch(_) {}
 }
-function jmuxerConfig(video){
+function jmuxerConfig(video, playerSeq){
   const q = qualityPayload();
   const fps = q.max_fps > 0 ? q.max_fps : 24;
   return {
@@ -1235,8 +1239,8 @@ function jmuxerConfig(video){
     maxDelay:220,
     fps,
     clearBuffer:true,
-    onError:(error)=>{ console.warn('JMuxer error', error); schedulePlayerReset(); },
-    onMissingVideoFrames:()=>schedulePlayerReset()
+    onError:(error)=>{ if(state.playerSeq!==playerSeq) return; console.warn('JMuxer error', error); schedulePlayerReset(playerSeq); },
+    onMissingVideoFrames:()=>requestVideoKeyframe(playerSeq)
   };
 }
 function annexBNalUnit(data, targetType){
@@ -1290,17 +1294,27 @@ function completeAnnexBChunk(data){
 }
 function recreateVideoPlayer(video){
   if(state.playerResetTimer){ clearTimeout(state.playerResetTimer); state.playerResetTimer=null; }
+  const playerSeq=++state.playerSeq;
   if(state.jmuxer){ try { state.jmuxer.destroy(); } catch(_){} }
   resetVideoElement();
-  state.jmuxer=new JMuxer(jmuxerConfig(video));
+  state.jmuxer=new JMuxer(jmuxerConfig(video, playerSeq));
 }
-function schedulePlayerReset(){
+function requestVideoKeyframe(playerSeq=state.playerSeq){
+  if(state.playerSeq!==playerSeq) return;
+  const now=Date.now();
+  if(now-state.lastKeyframeRequestAt<1000) return;
+  state.lastKeyframeRequestAt=now;
+  sendPlayerReset();
+}
+function schedulePlayerReset(playerSeq=state.playerSeq){
+  if(state.playerSeq!==playerSeq) return;
   if (state.playerResetTimer) return;
   const now = Date.now();
   if (now - state.lastPlayerResetAt < 1400) return;
   state.lastPlayerResetAt = now;
   state.playerResetTimer=setTimeout(()=>{
     state.playerResetTimer=null;
+    if(state.playerSeq!==playerSeq) return;
     const video=$('phoneVideo');
     recreateVideoPlayer(video);
     sendPlayerReset();
@@ -1371,6 +1385,7 @@ function openVideo(id, options={}){
     state.videoWs=null;
     state.videoConnected=false;
     if (previous) { try { previous.close(); } catch(_){} }
+    state.playerSeq += 1;
     if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; }
     resetVideoElement();
   } else closeVideoSocket();
@@ -1378,17 +1393,34 @@ function openVideo(id, options={}){
   state.connectionPhase=options.phase || 'connecting';
   state.mirrorError='';
   state.videoSpsSignature='';
+  state.streamGeneration=0;
   state.videoReconfiguring=true;
   const token = ++state.videoSeq;
   const video=$('phoneVideo');
-  state.jmuxer = new JMuxer(jmuxerConfig(video));
+  recreateVideoPlayer(video);
   const ws = new WebSocket(wsUrl(`/ws/devices/${encodeURIComponent(id)}/video`));
   state.videoWs = ws;
   ws.binaryType='arraybuffer';
   ws.onopen=()=>{ if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=true; state.connectionPhase='connected'; state.mirrorError=''; render(); if (document.hidden || !document.hasFocus()) scheduleInactiveStop('open_in_background'); };
   ws.onmessage = async (event) => {
     if (state.videoSeq !== token || state.videoWs !== ws) return;
-    if (typeof event.data === 'string') { const msg=JSON.parse(event.data); if (msg.session) updateRealtimeSession(id, msg.session); render(); return; }
+    if (typeof event.data === 'string') {
+      let msg=null;
+      try { msg=JSON.parse(event.data); } catch(_) { return; }
+      if(msg && msg.type==='stream_reset'){
+        const generation=Number(msg.generation)||0;
+        if(generation>state.streamGeneration){
+          state.streamGeneration=generation;
+          state.videoSpsSignature='';
+          state.videoReconfiguring=true;
+          recreateVideoPlayer(video);
+        }
+        return;
+      }
+      if (msg && msg.session) updateRealtimeSession(id, msg.session);
+      render();
+      return;
+    }
     const buf = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
     if (state.videoSeq !== token || state.videoWs !== ws) return;
     if (!state.jmuxer) return;
@@ -1396,12 +1428,11 @@ function openVideo(id, options={}){
     const configurationChanged=videoConfigurationChanged(buf);
     if(configurationChanged){ state.videoReconfiguring=true; recreateVideoPlayer(video); }
     state.jmuxer.feed({video:completeAnnexBChunk(buf)});
-    if(configurationChanged) sendPlayerReset();
     trimPlaybackDelay(video);
     if (video.paused) video.play().catch(()=>{});
   };
   ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) { state.connectionPhase='error'; state.mirrorError='视频通道连接失败'; show(state.mirrorError); render(); } };
-  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; } state.videoSpsSignature=''; state.videoReconfiguring=false; resetVideoElement(); state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); scheduleVideoReconnect(id); };
+  ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; state.playerSeq+=1; if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; } state.streamGeneration=0; state.videoSpsSignature=''; state.videoReconfiguring=false; resetVideoElement(); state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); scheduleVideoReconnect(id); };
   video.onloadedmetadata = () => updateInputSize();
   video.onresize = () => updateInputSize();
   return ws;

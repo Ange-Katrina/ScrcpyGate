@@ -40,6 +40,7 @@ from .video_options import (
     public_video_options,
     serialize_custom_profiles,
     settings_to_video_options,
+    signature,
     stream_mode_or_default,
 )
 
@@ -761,10 +762,15 @@ async def api_mirror_settings(device_id: str, request: Request):
     except VideoOptionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     sessions = await manager.snapshot()
-    running = bool((sessions.get(real_device_id) or {}).get("running"))
+    current_session = sessions.get(real_device_id) or {}
+    running = bool(current_session.get("running"))
+    current_video = current_session.get("video")
+    restart_required = running and (
+        not isinstance(current_video, dict) or signature(current_video) != signature(options)
+    )
     storage.set_user_video_preference(user["username"], options)
     if running:
-        restart_ok = await manager.start(real_device_id, options, force_restart=True)
+        restart_ok = await manager.start(real_device_id, options, force_restart=restart_required)
         if not restart_ok:
             session = (await manager.snapshot()).get(real_device_id) or {}
             adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
@@ -779,7 +785,7 @@ async def api_mirror_settings(device_id: str, request: Request):
                 "sessions": await public_sessions_for_user(user),
             }
     storage.audit(user["username"], "mirror_settings", f"{real_device_id}:{json.dumps(public_video_options(options), ensure_ascii=False)}")
-    return {"ok": True, "restarted": running, "preferences": public_video_options(options), "sessions": await public_sessions_for_user(user)}
+    return {"ok": True, "restarted": restart_required, "preferences": public_video_options(options), "sessions": await public_sessions_for_user(user)}
 
 
 @app.post("/api/devices/{device_id}/mirror/stop")

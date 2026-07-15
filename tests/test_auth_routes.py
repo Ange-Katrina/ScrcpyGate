@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -35,7 +35,7 @@ class AuthRouteTests(unittest.TestCase):
         os.environ["LOGIN_RATE_LIMIT_WINDOW_SECONDS"] = "60"
         os.environ["LOGIN_LOCKOUT_SECONDS"] = "30"
         os.environ.pop("ALLOW_NULL_ORIGIN", None)
-        reset_app_modules(["app.main", "app.mirror", "app.storage", "app.security"])
+        reset_app_modules(["app.main", "app.mirror", "app.devices", "app.storage", "app.security"])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.storage.upsert_user("admin", "AdminPassword123", "admin")
@@ -55,7 +55,7 @@ class AuthRouteTests(unittest.TestCase):
             "ALLOW_NULL_ORIGIN",
         ):
             os.environ.pop(key, None)
-        reset_app_modules(["app.main", "app.mirror", "app.storage", "app.security"])
+        reset_app_modules(["app.main", "app.mirror", "app.devices", "app.storage", "app.security"])
 
     def test_login_route_rate_limits_repeated_failures(self):
         payload = {"username": "admin", "password": "wrong-password"}
@@ -265,6 +265,42 @@ class AuthRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_size", response.json()["detail"])
+
+    def test_mirror_settings_restarts_only_when_effective_quality_changes(self):
+        self.storage.upsert_device("dev_1", "Device", "192.0.2.10:5555")
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+        current = self.main.user_video_options("admin", {"profile": "balanced"})
+        snapshot = {"dev_1": {"device_id": "dev_1", "running": True, "video": current}}
+
+        with (
+            patch.object(self.main.manager, "snapshot", new=AsyncMock(return_value=snapshot)),
+            patch.object(self.main.manager, "start", new=AsyncMock(return_value=True)) as start,
+        ):
+            unchanged = self.client.put(
+                "/api/devices/dev_1/mirror/settings",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json=current,
+            )
+
+        self.assertEqual(unchanged.status_code, 200)
+        self.assertFalse(unchanged.json()["restarted"])
+        start.assert_awaited_once_with("dev_1", current, force_restart=False)
+
+        changed = self.main.user_video_options("admin", {"profile": "smooth"})
+        with (
+            patch.object(self.main.manager, "snapshot", new=AsyncMock(return_value=snapshot)),
+            patch.object(self.main.manager, "start", new=AsyncMock(return_value=True)) as start,
+        ):
+            restarted = self.client.put(
+                "/api/devices/dev_1/mirror/settings",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json=changed,
+            )
+
+        self.assertEqual(restarted.status_code, 200)
+        self.assertTrue(restarted.json()["restarted"])
+        start.assert_awaited_once_with("dev_1", changed, force_restart=True)
 
     def test_admin_device_save_returns_fresh_adb_status(self):
         session = self.storage.create_session("admin")

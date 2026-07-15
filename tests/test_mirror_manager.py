@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app import mirror
-from app.mirror import ClientSession, ControlLeaseState, EventClient, MirrorManager, MirrorSession
+from app.mirror import ClientSession, ControlLeaseState, EventClient, MirrorManager, MirrorSession, StreamReset
 
 
 class FakeControlWebSocket:
@@ -61,6 +61,30 @@ class FakeEventRegistrationWebSocket:
 
     async def receive_text(self):
         raise mirror.WebSocketDisconnect()
+
+
+class FakeVideoWebSocket:
+    def __init__(self):
+        self.sent = []
+        self.accepted = False
+        self.frame_sent = asyncio.Event()
+
+    async def accept(self):
+        self.accepted = True
+
+    async def send_json(self, payload):
+        self.sent.append(("json", payload))
+
+    async def send_bytes(self, payload):
+        self.sent.append(("bytes", payload))
+        self.frame_sent.set()
+
+    async def receive_text(self):
+        await self.frame_sent.wait()
+        raise mirror.WebSocketDisconnect()
+
+    async def close(self, code=1000, reason=""):
+        self.sent.append(("close", {"code": code, "reason": reason}))
 
 
 class FakeMirrorSession:
@@ -343,6 +367,120 @@ class MirrorRawRecoveryTests(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_stream_reset_boundary_precedes_the_new_keyframe(self):
+        client = ClientSession("client", "alice", None)
+        client.needs_keyframe = False
+        client.push_frame(b"old-frame")
+
+        client.push_stream_reset(7)
+        client.push_frame(b"new-p-frame")
+        client.push_frame(b"new-idr", keyframe=True, config=b"new-config")
+
+        boundary = client.queue.get_nowait()
+        self.assertIsInstance(boundary, StreamReset)
+        self.assertEqual(boundary.generation, 7)
+        self.assertEqual(client.queue.get_nowait(), b"new-confignew-idr")
+        self.assertTrue(client.queue.empty())
+
+    def test_video_socket_sends_stream_reset_before_new_generation_bytes(self):
+        async def run():
+            websocket = FakeVideoWebSocket()
+
+            class FakeSession:
+                device_id = "dev1"
+                running = True
+
+                def __init__(self):
+                    self.client = None
+
+                def add_client(self, client):
+                    self.client = client
+                    client.push_stream_reset(11)
+                    client.push_frame(b"cfg-idr", keyframe=True)
+
+                def remove_client(self, client_id):
+                    self.client = None
+
+                def snapshot(self):
+                    return {"device_id": "dev1", "running": True, "clients": 1}
+
+            session = FakeSession()
+            user = {"username": "alice", "role": "user"}
+            with (
+                patch.object(mirror.storage, "user_can", return_value=True),
+                patch.object(mirror.manager, "get_or_create", new=AsyncMock(return_value=session)),
+            ):
+                await mirror.video_socket(websocket, user, "dev1")
+
+            self.assertTrue(websocket.accepted)
+            self.assertEqual(websocket.sent[0][0], "json")
+            self.assertEqual(websocket.sent[0][1]["type"], "hello")
+            self.assertEqual(websocket.sent[1], ("json", {"type": "stream_reset", "generation": 11}))
+            self.assertEqual(websocket.sent[2], ("bytes", b"cfg-idr"))
+
+        asyncio.run(run())
+
+    def test_same_quality_never_restarts_even_when_forced(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            scrcpy = SimpleNamespace(scrcpy_stop=Mock())
+            session.running = True
+            session.scrcpy = scrcpy
+            target_options = dict(session.video_options)
+            target_options["profile"] = "custom"
+
+            with patch.object(mirror.adb_monitor, "ensure_connected", new=AsyncMock()) as ensure_connected:
+                result = await session.start(target_options, force_restart=True)
+
+            self.assertTrue(result)
+            self.assertTrue(session.running)
+            self.assertIs(session.scrcpy, scrcpy)
+            self.assertEqual(session.video_options["profile"], "custom")
+            scrcpy.scrcpy_stop.assert_not_called()
+            ensure_connected.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_quality_restart_preserves_clients_and_control_lease(self):
+        async def run():
+            session = self.make_session(asyncio.get_running_loop())
+            old_scrcpy = SimpleNamespace(scrcpy_stop=Mock())
+            new_scrcpy = SimpleNamespace()
+            session.running = True
+            session.scrcpy = old_scrcpy
+            client = ClientSession("client", "alice", None)
+            client.needs_keyframe = False
+            client.queue.put_nowait(b"old-frame")
+            session.clients[client.id] = client
+            target_options = dict(session.video_options)
+            target_options["max_size"] = 960 if int(target_options["max_size"]) != 960 else 1280
+
+            def start_new_stream(*_args):
+                session.scrcpy = new_scrcpy
+                return True
+
+            with (
+                patch.object(mirror.adb_monitor, "ensure_connected", new=AsyncMock(return_value={"ok": True, "state": "online"})),
+                patch.object(mirror.storage, "get_setting", return_value="raw"),
+                patch.object(session, "_start_scrcpy", side_effect=start_new_stream),
+                patch.object(session, "_wait_for_stream_health", new=AsyncMock(return_value=True)),
+                patch.object(mirror, "release_control_lock") as release_control,
+            ):
+                result = await session.start(target_options, force_restart=True)
+
+            self.assertTrue(result)
+            self.assertTrue(session.running)
+            self.assertIs(session.scrcpy, new_scrcpy)
+            self.assertIn(client.id, session.clients)
+            boundary = client.queue.get_nowait()
+            self.assertIsInstance(boundary, StreamReset)
+            self.assertEqual(boundary.generation, session._video_generation)
+            self.assertTrue(client.needs_keyframe)
+            old_scrcpy.scrcpy_stop.assert_called_once_with()
+            release_control.assert_not_called()
+
+        asyncio.run(run())
+
     def test_queue_overflow_requests_fresh_keyframe(self):
         async def run():
             session = self.make_session(asyncio.get_running_loop())
@@ -413,7 +551,10 @@ class MirrorRawRecoveryTests(unittest.TestCase):
             session.running = True
             session.scrcpy = scrcpy
 
-            with patch.object(mirror.manager, "broadcast", new=AsyncMock()) as broadcast:
+            with (
+                patch.object(mirror.manager, "broadcast", new=AsyncMock()) as broadcast,
+                patch.object(mirror.storage, "get_lock", return_value=None),
+            ):
                 session._handle_stream_transport_closed(session._video_generation, scrcpy, "video socket closed")
                 await session._transport_cleanup_task
 
