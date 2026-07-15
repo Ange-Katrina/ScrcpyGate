@@ -1010,7 +1010,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", False, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"action":"start","config":"挂机-云"}')
@@ -1027,7 +1027,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, False)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"method":"settings.save","config_name":"挂机-云"}')
@@ -1060,7 +1060,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"config":"其它"}')
@@ -1076,7 +1076,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"params":{"config":"其它"}}')
@@ -1093,7 +1093,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_bytes('{"config":"其它"}'.encode("utf-8"))
@@ -1110,7 +1110,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_bytes(b"\xff\xfe")
@@ -1143,7 +1143,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"event":"alas.config_list"}')
@@ -1160,7 +1160,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream()
+        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"menu":"Alas","task":"Alas","config":"挂机-云"}')
