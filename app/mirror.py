@@ -193,6 +193,7 @@ class MirrorSession:
         self.clients: dict[str, ClientSession] = {}
         self.running = False
         self.last_error = ""
+        self.available = True
         self.video_parser = H264AnnexBParser()
         self.protocol_demuxer: ScrcpyProtocolDemuxer | None = None
         self.sps = b""
@@ -235,14 +236,15 @@ class MirrorSession:
 
     async def start(self, options: dict[str, Any] | None = None, force_restart: bool = False) -> bool:
         target_options = public_video_options(options or settings_to_video_options(storage.get_settings()))
-        if self.running and signature(self.video_options) == signature(target_options):
-            self.video_options = target_options
-            log.info("MIRROR_ALREADY_RUNNING device=%s mode=%s", self.device_id, self.effective_stream_mode)
-            return True
         async with self._lock:
+            if not self.available:
+                self.running = False
+                self.last_error = "device unavailable"
+                return False
             if self.running:
                 if signature(self.video_options) == signature(target_options):
                     self.video_options = target_options
+                    log.info("MIRROR_ALREADY_RUNNING device=%s mode=%s", self.device_id, self.effective_stream_mode)
                     return True
                 scpy = self.scrcpy
                 self.scrcpy = None
@@ -637,18 +639,24 @@ class MirrorManager:
 
     async def get_or_create(self, device_id: str) -> MirrorSession:
         async with self._lock:
-            if device_id in self.sessions:
-                return self.sessions[device_id]
+            cached = self.sessions.get(device_id)
+            if cached and cached.available:
+                return cached
             device = storage.get_device(device_id)
-            if not device:
-                raise KeyError("unknown device")
+            if not device or not bool(device["enabled"]):
+                raise KeyError("unknown or disabled device")
+            if cached:
+                self.sessions.pop(device_id, None)
             loop = asyncio.get_running_loop()
             session = MirrorSession(device_id, device["address"], loop)
             self.sessions[device_id] = session
             return session
 
     async def start(self, device_id: str, options: dict[str, Any] | None = None, force_restart: bool = False) -> bool:
-        session = await self.get_or_create(device_id)
+        try:
+            session = await self.get_or_create(device_id)
+        except KeyError:
+            return False
         ok = await session.start(options, force_restart=force_restart)
         await self.broadcast({"type": "mirror_status", "device_id": device_id, "running": ok, "session": session.snapshot()})
         return ok
@@ -658,6 +666,84 @@ class MirrorManager:
         ok = await session.stop()
         await self.broadcast({"type": "mirror_status", "device_id": device_id, "running": False, "session": session.snapshot()})
         return ok
+
+    @staticmethod
+    def _terminate_video_clients(session: MirrorSession, device_id: str, reason: str) -> None:
+        for client in list(session.clients.values()):
+            try:
+                client.clear_queue()
+                client.queue.put_nowait(None)
+            except Exception:
+                log.exception("VIDEO_CLIENT_TERMINATE_FAILED device=%s reason=%s", device_id, reason)
+
+    async def reconfigure_device(self, device_id: str, address: str) -> bool:
+        """Stop a cached transport before changing its mutable ADB endpoint."""
+        async with self._lock:
+            session = self.sessions.get(device_id)
+        if not session:
+            return False
+        was_running = session.running
+        session.available = False
+        try:
+            await session.stop()
+        except Exception:
+            log.exception("MIRROR_RECONFIGURE_STOP_FAILED device=%s", device_id)
+            release_control_lock(device_id, "", force=True)
+            self._terminate_video_clients(session, device_id, "device_updated")
+            async with self._lock:
+                if self.sessions.get(device_id) is session:
+                    self.sessions.pop(device_id, None)
+            await self.broadcast(
+                {"type": "mirror_status", "device_id": device_id, "running": False, "reason": "device_updated"}
+            )
+            return False
+        session.address = address
+        session.available = True
+        if was_running:
+            await self.broadcast(
+                {
+                    "type": "mirror_status",
+                    "device_id": device_id,
+                    "running": False,
+                    "session": session.snapshot(),
+                    "reason": "device_updated",
+                }
+            )
+        return True
+
+    async def event_usernames_for_device(self, device_id: str) -> set[str]:
+        usernames = {client.username for client in self.events.values()}
+        if not usernames:
+            return set()
+        return await asyncio.to_thread(event_users_with_view_access, usernames, device_id)
+
+    async def remove_device(
+        self,
+        device_id: str,
+        reason: str = "device_deleted",
+        notify_users: set[str] | None = None,
+    ) -> bool:
+        async with self._lock:
+            session = self.sessions.pop(device_id, None)
+            if session:
+                session.available = False
+        if session:
+            try:
+                await session.stop()
+            except Exception:
+                log.exception("MIRROR_REMOVE_STOP_FAILED device=%s reason=%s", device_id, reason)
+                release_control_lock(device_id, "", force=True)
+            self._terminate_video_clients(session, device_id, reason)
+        else:
+            release_control_lock(device_id, "", force=True)
+        message = {"type": "mirror_status", "device_id": device_id, "running": False, "reason": reason}
+        if session:
+            try:
+                message["session"] = session.snapshot()
+            except Exception:
+                log.exception("MIRROR_REMOVE_SNAPSHOT_FAILED device=%s reason=%s", device_id, reason)
+        await self.broadcast(message, allowed_users=notify_users)
+        return session is not None
 
     async def stop_other_no_client_sessions(self, keep_device_id: str, allowed_device_ids: list[str]) -> list[str]:
         allowed = set(allowed_device_ids)
@@ -714,16 +800,17 @@ class MirrorManager:
             if isinstance(result, Exception):
                 log.warning("MIRROR_SHUTDOWN_STOP_FAILED device=%s error=%s", device_id, result)
 
-    async def broadcast(self, message: dict[str, Any]) -> None:
+    async def broadcast(self, message: dict[str, Any], allowed_users: set[str] | None = None) -> None:
         clients = list(self.events.items())
         if not clients:
             return
         real_device_id = str(message.get("device_id") or "").strip()
         public_device_id = ""
-        allowed_users: set[str] | None = None
         if real_device_id:
-            usernames = {client.username for _, client in clients}
-            public_device_id, allowed_users = await asyncio.to_thread(event_public_context, usernames, real_device_id)
+            public_device_id = storage.public_device_id(real_device_id)
+            if allowed_users is None:
+                usernames = {client.username for _, client in clients}
+                allowed_users = await asyncio.to_thread(event_users_with_view_access, usernames, real_device_id)
         device_encoded = json.dumps(public_event_payload(message, real_device_id, public_device_id), ensure_ascii=False) if real_device_id else ""
         global_encoded = json.dumps(message, ensure_ascii=False) if not real_device_id else ""
         recipients = [
@@ -783,13 +870,13 @@ def event_users_with_view_access(usernames: set[str], device_id: str) -> set[str
         try:
             if storage.user_can(username, device_id, "view"):
                 allowed.add(username)
+                continue
+            user = storage.get_user(username)
+            if user and user["role"] == "admin":
+                allowed.add(username)
         except Exception:
             log.exception("EVENT_PERMISSION_CHECK_FAILED user=%s device=%s", username, device_id)
     return allowed
-
-
-def event_public_context(usernames: set[str], device_id: str) -> tuple[str, set[str]]:
-    return storage.public_device_id(device_id), event_users_with_view_access(usernames, device_id)
 
 
 manager = MirrorManager()
@@ -832,7 +919,11 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
         await websocket.close(code=4403)
         return
     await websocket.accept()
-    session = await manager.get_or_create(device_id)
+    try:
+        session = await manager.get_or_create(device_id)
+    except KeyError:
+        await websocket.close(code=4403)
+        return
     client = ClientSession(str(uuid.uuid4()), user["username"], websocket)
     session.add_client(client)
     public_id = exposed_device_id or device_id
@@ -903,12 +994,17 @@ async def control_socket(websocket: WebSocket, user: dict, device_id: str, expos
     try:
         while True:
             message = await websocket.receive()
+            if not await asyncio.to_thread(storage.user_can, user["username"], device_id, "control"):
+                await websocket.close(code=4403)
+                return
             if message.get("text") is not None:
                 await handle_control_text(websocket, user, device_id, client_id, message["text"], lease)
             elif message.get("bytes") is not None:
                 await handle_control_bytes(websocket, user, device_id, client_id, message["bytes"], lease)
     except WebSocketDisconnect:
         pass
+    except KeyError:
+        await websocket.close(code=4403)
     finally:
         release_control_lock(device_id, user["username"], force=False, client_id=client_id)
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})

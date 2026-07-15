@@ -25,11 +25,14 @@ const PERMISSION_USER_KEY = 'scrcpygate:admin:permissions:user';
 const ALAS_USER_KEY = 'scrcpygate:admin:alas:user';
 const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
 const USER_PAGE_SIZE = 20;
+const DEVICE_STATUS_POLL_INTERVAL = 5000;
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
 const ADB_STATUS_META = Object.freeze({
   online:{label:'ADB 在线',tone:'ok'},
   offline:{label:'ADB 离线',tone:'danger'},
+  network_unreachable:{label:'网络不可达',tone:'danger'},
   unauthorized:{label:'ADB 等待授权',tone:'warn'},
+  checking:{label:'正在检测 ADB',tone:'warn'},
   reconnecting:{label:'正在检测 ADB',tone:'warn'},
   disabled:{label:'ADB 未启用',tone:''},
   unknown:{label:'ADB 未检测',tone:'warn'}
@@ -74,6 +77,8 @@ let alasPermissionsNeedsRefresh = false;
 const adminNavMedia = window.matchMedia('(max-width: 920px)');
 let adminNavReturnFocus = null;
 let pendingConfirmation = null;
+let deviceStatusPollTimer = null;
+let deviceStatusPollGeneration = 0;
 const EDITOR_DRAWERS = ['device','user','alasConnection','alasAssignment','alasConfig'];
 
 function managedLayerOpen(){
@@ -329,7 +334,9 @@ function clear(el){ el.textContent=''; }
 function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
 function td(text){ const cell=document.createElement('td'); cell.textContent=text == null ? '' : String(text); return cell; }
 function btn(text, cls, fn){ const b=document.createElement('button'); b.className=`btn ${cls||''}`.trim(); b.type='button'; b.textContent=text; b.onclick=()=>{ try{ const result=fn && fn(); if(result && typeof result.then==='function') withBusy(b, ()=>result).catch(e=>show(e.message)); }catch(e){ show(e.message); } }; return b; }
+function heartbeatField(label,key,value){ const row=document.createElement('div'); const term=document.createElement('dt'); term.textContent=label; const detail=document.createElement('dd'); detail.setAttribute(`data-device-${key}`,''); detail.textContent=value; row.append(term,detail); return row; }
 function ts(value){ return value ? new Date(value * 1000).toLocaleString() : ''; }
+function relativeTs(value){ const timestamp=Number(value); if(!Number.isFinite(timestamp) || timestamp<=0) return ''; const seconds=Math.max(0,Math.round(Date.now()/1000-timestamp)); if(seconds<10) return '刚刚'; if(seconds<60) return `${seconds} 秒前`; if(seconds<3600) return `${Math.floor(seconds/60)} 分钟前`; if(seconds<86400) return `${Math.floor(seconds/3600)} 小时前`; return new Date(timestamp*1000).toLocaleString([], {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function actionText(action){ return ({login_success:'登录成功', login_failed:'登录失败', logout:'退出登录', password_change:'修改密码', page_index:'进入投屏页', page_admin:'进入后台', mirror_start:'开始投屏', mirror_stop:'停止投屏', mirror_settings:'画质设置', user_upsert:'保存用户', user_delete:'删除用户', permission_set:'设备权限', device_upsert:'保存设备', device_delete:'删除设备', alas_toggle:'ALAS 操作', alas_admin_toggle:'后台 ALAS 操作', alas_settings:'ALAS 设置', alas_binding_set:'ALAS 绑定', alas_binding_delete:'取消 ALAS 绑定', alas_embed_open:'打开 ALAS 页面', alas_embed_denied:'ALAS 嵌入拒绝', alas_embed_proxy_failed:'ALAS 页面代理失败', alas_embed_ws_denied:'ALAS WebSocket 拒绝'})[action] || action; }
 function activeSessions(){ return state.devices.filter(d => d.session && d.session.running).length; }
 function renderOverview(){
@@ -382,12 +389,15 @@ function renderDevices(){
     const id=getDeviceId(device);
     const card=document.createElement('div');
     card.className='device-card';
+    card.dataset.deviceId=id;
     const heading=document.createElement('div');
     heading.className='device-card__heading';
     const title=document.createElement('h3');
     title.textContent=device.name || id;
     const adbMeta=deviceAdbMeta(device);
-    heading.append(title,chip(adbMeta.label,adbMeta.tone));
+    const statusChip=chip(adbMeta.label,adbMeta.tone);
+    statusChip.dataset.deviceStatus='1';
+    heading.append(title,statusChip);
     const address=document.createElement('div');
     address.className='device-address';
     address.textContent=`ADB · ${device.address || id}`;
@@ -396,18 +406,22 @@ function renderDevices(){
     statuses.appendChild(chip(device.enabled?'启用':'禁用', device.enabled?'ok':'warn'));
     statuses.appendChild(chip(device.session&&device.session.running?'投屏中':'未投屏', device.session&&device.session.running?'ok':''));
     if(device.session&&device.session.control_lock) statuses.appendChild(chip(`控制: ${device.session.control_lock.username || '已占用'}`, 'warn'));
+    const heartbeat=document.createElement('dl');
+    heartbeat.className='device-heartbeat';
+    heartbeat.append(heartbeatField('网络延迟','latency','—'),heartbeatField('最后检测','checked','尚未检测'),heartbeatField('最后在线','seen','尚未在线'));
     const actions=document.createElement('div');
     actions.className='actions';
-    const probeButton=btn(deviceProbeRequests.has(id)?'检测中':'测试 ADB','',()=>testDevice(id));
+    const probeButton=btn(deviceProbeRequests.has(id)?'检测中':'立即检测','',()=>testDevice(id));
+    probeButton.dataset.deviceProbe='1';
     probeButton.disabled=deviceProbeRequests.has(id);
     actions.append(
       btn('编辑','',()=>editDevice(device)),
       probeButton,
-      btn(device.session&&device.session.running?'停止投屏':'开始投屏', device.session&&device.session.running?'warn':'primary', ()=>device.session&&device.session.running?stopDevice(id):startDevice(id)),
       btn('删除','danger',()=>deleteDevice(id))
     );
-    card.append(heading,address,statuses,actions);
+    card.append(heading,address,statuses,heartbeat,actions);
     box.appendChild(card);
+    updateDeviceCardHeartbeat(device);
   });
 }
 function deviceAdbMeta(device){
@@ -425,11 +439,33 @@ function applyDeviceAdbResult(id,result={}){
     adb_detail:result.detail || '',
     last_error:result.last_error || (result.ok ? '' : result.detail || ''),
     last_checked_at:result.last_checked_at || device.last_checked_at || null,
-    last_seen_at:result.last_seen_at || device.last_seen_at || null
+    last_seen_at:result.last_seen_at || device.last_seen_at || null,
+    latency_ms:result.latency_ms ?? null
   });
-  renderDevices();
-  renderOverview();
+  updateDeviceCardHeartbeat(device);
   return device;
+}
+function updateDeviceCardHeartbeat(device){
+  const id=getDeviceId(device);
+  const card=$('deviceCards').querySelector(`.device-card[data-device-id="${CSS.escape(id)}"]`);
+  if(!card) return;
+  const meta=deviceAdbMeta(device);
+  const badge=card.querySelector('[data-device-status]');
+  if(badge){ badge.textContent=meta.label; badge.className=`chip ${meta.tone || ''}`.trim(); badge.dataset.deviceStatus='1'; }
+  const latency=card.querySelector('[data-device-latency]');
+  const checked=card.querySelector('[data-device-checked]');
+  const seen=card.querySelector('[data-device-seen]');
+  const hasLatency=device.latency_ms!==null && device.latency_ms!==undefined && device.latency_ms!=='' && Number.isFinite(Number(device.latency_ms));
+  if(latency) latency.textContent=hasLatency ? `${Math.round(Number(device.latency_ms))} ms` : '—';
+  if(checked){ checked.textContent=relativeTs(device.last_checked_at) || '尚未检测'; checked.title=ts(device.last_checked_at); }
+  if(seen){ seen.textContent=relativeTs(device.last_seen_at) || '尚未在线'; seen.title=ts(device.last_seen_at); }
+  const probe=card.querySelector('[data-device-probe]');
+  if(probe){ probe.textContent=deviceProbeRequests.has(id)?'检测中':'立即检测'; probe.disabled=deviceProbeRequests.has(id); }
+}
+function applyDeviceStatuses(data){
+  const statuses=data && data.devices || {};
+  Object.entries(statuses).forEach(([id,status])=>applyDeviceAdbResult(id,status || {}));
+  renderOverview();
 }
 function bitrateBpsToMbps(value){ const bps=Number(value); return Number.isFinite(bps) ? bps / 1000000 : ''; }
 function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFinite(mbps) ? Math.round(mbps * 1000000) : 0; }
@@ -531,7 +567,7 @@ function renderVideo(){
 function setDeviceDrawerContext(device=null){
   const id=device ? getDeviceId(device) : '';
   $('deviceDrawerTitle').textContent=device?'编辑设备':'新建设备';
-  $('deviceDrawerContext').textContent=device ? `正在编辑 ${device.name || id}（${id}）` : '填写设备标识、名称与 ADB 地址';
+  $('deviceDrawerContext').textContent=device ? `正在编辑 ${device.name || id}` : '填写名称、ADB 地址与启用状态';
 }
 function editDevice(device){
   const id=getDeviceId(device);
@@ -1526,6 +1562,29 @@ function applyRuntimeLogs(data){
 }
 function loadOverview(options={}){ return requestResource('overview', signal=>api('/api/admin/overview',{signal}), applyOverview, options); }
 function loadDevices(options={}){ return requestResource('devices', signal=>api('/api/admin/devices',{signal}), applyDevices, options); }
+function loadDeviceStatuses(options={}){ return requestResource('deviceStatuses', signal=>api('/api/admin/adb/status',{signal}), applyDeviceStatuses, options); }
+function deviceStatusPollingAllowed(){ return activeTab==='devices' && !document.hidden; }
+function stopDeviceStatusPolling(abort=false){
+  clearTimeout(deviceStatusPollTimer);
+  deviceStatusPollTimer=null;
+  if(abort){ deviceStatusPollGeneration+=1; markResourceStale('deviceStatuses'); }
+}
+function scheduleDeviceStatusPoll(){
+  stopDeviceStatusPolling(false);
+  if(!deviceStatusPollingAllowed()) return;
+  deviceStatusPollTimer=setTimeout(refreshDeviceStatuses,DEVICE_STATUS_POLL_INTERVAL);
+}
+async function refreshDeviceStatuses(){
+  if(!deviceStatusPollingAllowed()) return stopDeviceStatusPolling(true);
+  const generation=deviceStatusPollGeneration;
+  try{ await loadDeviceStatuses({force:true}); }
+  catch(error){ if(!isAbortError(error)) console.warn('设备心跳状态刷新失败',error); }
+  finally{ if(generation===deviceStatusPollGeneration) scheduleDeviceStatusPoll(); }
+}
+function syncDeviceStatusPolling(){
+  stopDeviceStatusPolling(true);
+  if(deviceStatusPollingAllowed()) refreshDeviceStatuses();
+}
 function loadUsers(options={}){ return requestResource('users', signal=>api('/api/admin/users',{signal}), applyUsers, options); }
 function loadPermissions(options={}){
   const epoch=permissionsEpoch;
@@ -1706,17 +1765,26 @@ async function deleteUser(username){
   await refreshDomains('overview','users','permissions','alas');
 }
 async function saveDevice(){
-  const id=$('deviceId').value.trim();
-  const result=await api('/api/admin/devices',{method:'PUT', body:{device_id:id, name:$('deviceName').value.trim() || id, address:$('deviceAddress').value.trim() || id, enabled:$('deviceEnabled').value==='true'}});
-  markResourceStale('devices');
-  applyDevices(result);
-  loadedResources.add('devices');
-  markResourceStale('overview');
-  const saved=state.devices.find(device=>getDeviceId(device)===id);
-  show(`设备已保存 · ${deviceAdbMeta(saved).label}`);
-  closeEditorDrawer('device');
-  clearDeviceForm();
-  await refreshDomains('permissions');
+  stopDeviceStatusPolling(true);
+  try{
+    const id=$('deviceId').value.trim();
+    const address=$('deviceAddress').value.trim();
+    const body={name:$('deviceName').value.trim() || address,address,enabled:$('deviceEnabled').value==='true'};
+    if(id) body.device_id=id;
+    const result=await api('/api/admin/devices',{method:'PUT',body});
+    markResourceStale('devices');
+    applyDevices(result);
+    loadedResources.add('devices');
+    markResourceStale('overview');
+    const savedId=String(result.device_id || id).trim();
+    const saved=state.devices.find(device=>getDeviceId(device)===savedId);
+    show(`设备已保存 · ${deviceAdbMeta(saved).label}`);
+    closeEditorDrawer('device');
+    clearDeviceForm();
+    await refreshDomains('permissions');
+  } finally {
+    scheduleDeviceStatusPoll();
+  }
 }
 async function deleteDevice(id){
   const confirmed=await confirmDanger({
@@ -1725,14 +1793,20 @@ async function deleteDevice(id){
     confirmText:'删除设备'
   });
   if(!confirmed) return;
-  await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'});
-  show('设备已删除');
-  await refreshDomains('overview','devices','permissions');
+  stopDeviceStatusPolling(true);
+  try{
+    await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'});
+    show('设备已删除');
+    await refreshDomains('overview','devices','permissions');
+  } finally {
+    scheduleDeviceStatusPoll();
+  }
 }
 async function testDevice(id){
   if(deviceProbeRequests.has(id)) return;
+  stopDeviceStatusPolling(true);
   deviceProbeRequests.add(id);
-  applyDeviceAdbResult(id,{state:'reconnecting',ok:false});
+  applyDeviceAdbResult(id,{state:'checking',ok:false});
   try{
     const result=await api(`/api/admin/devices/${encodeURIComponent(id)}/adb/test`,{method:'POST'});
     applyDeviceAdbResult(id,result);
@@ -1742,11 +1816,12 @@ async function testDevice(id){
     throw error;
   } finally {
     deviceProbeRequests.delete(id);
-    renderDevices();
+    const device=state.devices.find(item=>getDeviceId(item)===id);
+    if(device) updateDeviceCardHeartbeat(device);
+    renderOverview();
+    scheduleDeviceStatusPoll();
   }
 }
-async function startDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/start`,{method:'POST'}); show('投屏已启动'); await refreshDomains('overview','devices','permissions'); }
-async function stopDevice(id){ await api(`/api/devices/${encodeURIComponent(id)}/mirror/stop`,{method:'POST'}); show('投屏已停止'); await refreshDomains('overview','devices','permissions'); }
 async function savePermission(){
   const user=selectedPermissionUser();
   if(!user) throw new Error('请先选择用户');
@@ -1869,6 +1944,7 @@ function activateTab(tabId, save=true, focusPanel=false){
   });
   if(save) localStorage.setItem(ADMIN_TAB_KEY, target);
   loadTab(target).catch(error=>reportRequestError(error));
+  syncDeviceStatusPolling();
   if(focusPanel) requestAnimationFrame(()=>$(target).focus({preventScroll:true}));
 }
 function initializeTabs(){
@@ -2053,6 +2129,7 @@ initializeVideoSizeControls();
 initializeTabs();
 initializeAccessWorkspace();
 initializeAlasWorkspace();
+document.addEventListener('visibilitychange',syncDeviceStatusPolling);
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
 activateTab('overview', false);
 bindAction('reloadAll', loadAll, '刷新中');

@@ -21,6 +21,7 @@ class FakeControlWebSocket:
         self.messages = list(messages or [])
         self.sent = []
         self.accepted = False
+        self.closed = None
 
     async def accept(self):
         self.accepted = True
@@ -32,6 +33,9 @@ class FakeControlWebSocket:
 
     async def send_json(self, payload):
         self.sent.append(payload)
+
+    async def close(self, code=1000):
+        self.closed = code
 
 
 class FakeEventWebSocket:
@@ -103,6 +107,157 @@ class FakeMirrorSession:
 
 
 class MirrorManagerTests(unittest.TestCase):
+    def test_reconfigure_device_stops_cached_session_and_updates_address(self):
+        async def run():
+            manager = MirrorManager()
+            session = FakeMirrorSession(running=True)
+            session.address = "192.0.2.10:30100"
+            manager.sessions["stable-device"] = session
+
+            changed = await manager.reconfigure_device("stable-device", "192.0.2.20:30100")
+
+            self.assertTrue(changed)
+            self.assertTrue(session.stopped)
+            self.assertEqual(session.address, "192.0.2.20:30100")
+
+        asyncio.run(run())
+
+    def test_remove_device_evicts_cached_session(self):
+        async def run():
+            manager = MirrorManager()
+            session = FakeMirrorSession(running=False)
+            manager.sessions["old-device"] = session
+
+            removed = await manager.remove_device("old-device")
+
+            self.assertTrue(removed)
+            self.assertTrue(session.stopped)
+            self.assertNotIn("old-device", manager.sessions)
+
+        asyncio.run(run())
+
+    def test_remove_device_without_session_releases_lock_and_broadcasts(self):
+        async def run():
+            manager = MirrorManager()
+            with (
+                patch.object(mirror, "release_control_lock", return_value=True) as release,
+                patch.object(manager, "broadcast", new=AsyncMock()) as broadcast,
+            ):
+                removed = await manager.remove_device("old-device")
+
+            self.assertFalse(removed)
+            release.assert_called_once_with("old-device", "", force=True)
+            broadcast.assert_awaited_once()
+            self.assertEqual(broadcast.await_args.args[0]["reason"], "device_deleted")
+
+        asyncio.run(run())
+
+    def test_remove_device_stop_failure_still_closes_clients_and_broadcasts(self):
+        async def run():
+            manager = MirrorManager()
+            client = ClientSession("client", "alice", None)
+            client.queue.put_nowait(b"old-frame")
+            session = SimpleNamespace(
+                running=True,
+                available=True,
+                clients={client.id: client},
+                stop=AsyncMock(side_effect=RuntimeError("stop failed")),
+                snapshot=lambda: {"running": False, "clients": 1},
+            )
+            manager.sessions["old-device"] = session
+            with (
+                patch.object(mirror, "release_control_lock", return_value=True) as release,
+                patch.object(manager, "broadcast", new=AsyncMock()) as broadcast,
+            ):
+                removed = await manager.remove_device("old-device", notify_users={"alice"})
+
+            self.assertTrue(removed)
+            self.assertFalse(session.available)
+            self.assertEqual(client.queue.get_nowait(), None)
+            release.assert_called_once_with("old-device", "", force=True)
+            broadcast.assert_awaited_once()
+            self.assertEqual(broadcast.await_args.kwargs["allowed_users"], {"alice"})
+
+        asyncio.run(run())
+
+    def test_reconfigure_stop_failure_evicts_unavailable_session(self):
+        async def run():
+            manager = MirrorManager()
+            session = FakeMirrorSession(running=True)
+            session.address = "192.0.2.10:30100"
+            client = ClientSession("client", "alice", None)
+            client.queue.put_nowait(b"old-frame")
+            session.clients[client.id] = client
+            session.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+            manager.sessions["stable-device"] = session
+            with (
+                patch.object(mirror, "release_control_lock", return_value=True),
+                patch.object(manager, "broadcast", new=AsyncMock()) as broadcast,
+            ):
+                changed = await manager.reconfigure_device("stable-device", "192.0.2.20:30100")
+
+            self.assertFalse(changed)
+            self.assertFalse(session.available)
+            self.assertNotIn("stable-device", manager.sessions)
+            self.assertIsNone(client.queue.get_nowait())
+            self.assertTrue(client.queue.empty())
+            broadcast.assert_awaited_once()
+
+        asyncio.run(run())
+
+    def test_remove_device_notifies_prechange_permission_snapshot(self):
+        async def run():
+            manager = MirrorManager()
+            allowed = FakeEventWebSocket()
+            denied = FakeEventWebSocket()
+            manager.events = {
+                "allowed": EventClient("alice", allowed, ready=True),
+                "denied": EventClient("bob", denied, ready=True),
+            }
+            with (
+                patch.object(mirror, "release_control_lock", return_value=True),
+                patch.object(mirror.storage, "public_device_id", return_value="dev_public"),
+                patch.object(mirror.storage, "user_can") as user_can,
+            ):
+                await manager.remove_device("old-device", notify_users={"alice"})
+
+            self.assertEqual(len(allowed.sent), 1)
+            self.assertEqual(allowed.sent[0]["device_id"], "dev_public")
+            self.assertEqual(allowed.sent[0]["reason"], "device_deleted")
+            self.assertEqual(denied.sent, [])
+            user_can.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_get_or_create_uses_available_cached_session_without_database_io(self):
+        async def run():
+            manager = MirrorManager()
+            session = FakeMirrorSession(running=True)
+            session.available = True
+            manager.sessions["cached-device"] = session
+            with patch.object(mirror.storage, "get_device", side_effect=AssertionError("unexpected database read")):
+                resolved = await manager.get_or_create("cached-device")
+            self.assertIs(resolved, session)
+
+        asyncio.run(run())
+
+    def test_unavailable_session_cannot_restart_after_device_removal(self):
+        async def run():
+            with (
+                patch.object(mirror.storage, "get_settings", return_value={}),
+                patch.object(mirror, "_stream_mode", return_value="raw"),
+            ):
+                session = MirrorSession("dev1", "127.0.0.1:5555", asyncio.get_running_loop())
+            session.available = False
+            with patch.object(mirror.adb_monitor, "ensure_connected", new=AsyncMock()) as ensure_connected:
+                result = await session.start(dict(session.video_options))
+
+            self.assertFalse(result)
+            self.assertEqual(session.last_error, "device unavailable")
+            ensure_connected.assert_not_awaited()
+
+        asyncio.run(run())
+
     def test_exposed_video_snapshot_uses_public_session_sanitizer(self):
         session = SimpleNamespace(
             device_id="real-device",
@@ -181,6 +336,7 @@ class MirrorManagerTests(unittest.TestCase):
 
             with (
                 patch.object(mirror.storage, "user_can", side_effect=lambda username, *_: username == "alice") as user_can,
+                patch.object(mirror.storage, "get_user", return_value={"role": "user"}),
                 patch.object(mirror.storage, "public_device_id", return_value="dev_public") as public_device_id,
             ):
                 await manager.broadcast(message)
@@ -209,6 +365,21 @@ class MirrorManagerTests(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_video_socket_closes_cleanly_when_device_disappears_during_connect(self):
+        async def run():
+            websocket = FakeVideoWebSocket()
+            user = {"username": "alice", "role": "user"}
+            with (
+                patch.object(mirror.storage, "user_can", return_value=True),
+                patch.object(mirror.manager, "get_or_create", new=AsyncMock(side_effect=KeyError("deleted"))),
+            ):
+                await mirror.video_socket(websocket, user, "dev1")
+
+            self.assertTrue(websocket.accepted)
+            self.assertIn(("close", {"code": 4403, "reason": ""}), websocket.sent)
+
+        asyncio.run(run())
+
     def test_device_event_rechecks_permission_on_every_broadcast(self):
         async def run():
             manager = MirrorManager()
@@ -218,6 +389,7 @@ class MirrorManagerTests(unittest.TestCase):
 
             with (
                 patch.object(mirror.storage, "user_can", side_effect=[True, False]) as user_can,
+                patch.object(mirror.storage, "get_user", return_value={"role": "user"}),
                 patch.object(mirror.storage, "public_device_id", return_value="dev_public"),
             ):
                 await manager.broadcast(message)
@@ -569,6 +741,26 @@ class MirrorRawRecoveryTests(unittest.TestCase):
 
 
 class MirrorControlTests(unittest.TestCase):
+    def test_control_socket_closes_when_device_is_disabled_after_connect(self):
+        async def run():
+            websocket = FakeControlWebSocket([{"bytes": b"payload"}])
+            user = {"username": "alice", "role": "user"}
+            handle_bytes = AsyncMock()
+            with (
+                patch.object(mirror.storage, "user_can", side_effect=[True, False]),
+                patch.object(mirror.storage, "get_lock", return_value=None),
+                patch.object(mirror, "release_control_lock", return_value=True),
+                patch.object(mirror, "handle_control_bytes", new=handle_bytes),
+                patch.object(mirror.manager, "broadcast", new=AsyncMock()),
+            ):
+                await mirror.control_socket(websocket, user, "dev1")
+
+            self.assertTrue(websocket.accepted)
+            self.assertEqual(websocket.closed, 4403)
+            handle_bytes.assert_not_awaited()
+
+        asyncio.run(run())
+
     def test_control_socket_passes_client_id_for_binary_messages(self):
         async def run():
             websocket = FakeControlWebSocket([{"bytes": b"payload"}])

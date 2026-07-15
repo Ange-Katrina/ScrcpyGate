@@ -81,11 +81,26 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "正在检测 ADB",
             "ADB 在线",
             "ADB 离线",
+            "网络不可达",
             "ADB 等待授权",
+            "last_checked_at",
+            "last_seen_at",
+            "latency_ms",
+            "function syncDeviceStatusPolling()",
+            "activeTab==='devices' && !document.hidden",
+            "api('/api/admin/adb/status'",
         ):
             self.assertIn(token, self.script)
+        self.assertIn('id="deviceId" type="hidden"', self.template)
+        self.assertIn('id="deviceCards" class="device-grid"', self.template)
+        self.assertNotIn('id="deviceCards" class="device-grid" aria-live=', self.template)
+        self.assertNotIn("async function startDevice", self.script)
+        self.assertNotIn("async function stopDevice", self.script)
         self.assertIn(".device-card__heading", self.styles)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", self.styles)
+        self.assertIn(".device-heartbeat", self.styles)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", self.styles)
+        self.assertIn("Object.entries(statuses).forEach", self.script)
+        self.assertIn("Object.entries(statuses).forEach(([id,status])=>applyDeviceAdbResult(id,status || {}));\n  renderOverview();", self.script)
 
 
 if __name__ == "__main__":

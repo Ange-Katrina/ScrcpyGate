@@ -303,6 +303,7 @@ class AuthRouteTests(unittest.TestCase):
         start.assert_awaited_once_with("dev_1", changed, force_restart=True)
 
     def test_admin_device_save_returns_fresh_adb_status(self):
+        self.storage.upsert_device("new-device", "Old device", "192.0.2.5:30100", True)
         session = self.storage.create_session("admin")
         self.client.cookies.set("wsid", session["sid"])
 
@@ -335,6 +336,135 @@ class AuthRouteTests(unittest.TestCase):
             self.assertTrue(saved["adb_ok"])
         finally:
             self.main.adb_monitor._statuses.pop("new-device", None)
+
+    def test_admin_device_save_generates_id_when_omitted(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        async def record_online(device_id):
+            return self.main.adb_monitor._set_status(device_id, "online", ok=True, detail="device")
+
+        with (
+            patch.object(self.storage, "generate_device_id", return_value="device_0123456789abcdef"),
+            patch.object(self.main.adb_monitor, "reconnect_device", side_effect=record_online) as reconnect,
+        ):
+            response = self.client.put(
+                "/api/admin/devices",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json={"name": "", "address": "192.0.2.20:30100", "enabled": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["device_id"], "device_0123456789abcdef")
+        reconnect.assert_awaited_once_with("device_0123456789abcdef")
+        saved = self.storage.get_device("device_0123456789abcdef")
+        self.assertEqual(saved["name"], "192.0.2.20:30100")
+        self.assertEqual(saved["address"], "192.0.2.20:30100")
+
+    def test_admin_device_save_rejects_client_chosen_id_for_new_device(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        response = self.client.put(
+            "/api/admin/devices",
+            headers={"x-csrf-token": session["csrf_token"]},
+            json={
+                "device_id": "chosen-by-client",
+                "name": "Device",
+                "address": "192.0.2.25:30100",
+                "enabled": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(self.storage.get_device("chosen-by-client"))
+
+    def test_disabling_device_stops_cached_session_and_revokes_access(self):
+        self.storage.upsert_device("stable-device", "Device", "192.0.2.10:30100", True)
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        with (
+            patch.object(self.main.manager, "remove_device", new_callable=AsyncMock) as remove,
+            patch.object(
+                self.main.adb_monitor,
+                "reconnect_device",
+                new=AsyncMock(return_value={"state": "disabled", "ok": False}),
+            ),
+        ):
+            response = self.client.put(
+                "/api/admin/devices",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json={
+                    "device_id": "stable-device",
+                    "name": "Device",
+                    "address": "192.0.2.10:30100",
+                    "enabled": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        remove.assert_awaited_once_with("stable-device", reason="device_disabled", notify_users=set())
+        self.assertFalse(self.storage.user_can("admin", "stable-device", "view"))
+
+    def test_mirror_failure_responses_hide_private_adb_details(self):
+        self.storage.upsert_device("dev_1", "Device", "192.0.2.10:30100", True)
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+        raw_session = {
+            "device_id": "dev_1",
+            "running": True,
+            "last_error": "192.0.2.10:30100 scrcpy failed",
+            "stream_mode": "raw",
+            "adb": {"state": "offline", "ok": False, "detail": "192.0.2.10:30100 refused"},
+        }
+
+        with (
+            patch.object(self.main.manager, "start", new=AsyncMock(return_value=False)),
+            patch.object(self.main.manager, "snapshot", new=AsyncMock(return_value={"dev_1": raw_session})),
+        ):
+            started = self.client.post(
+                "/api/devices/dev_1/mirror/start",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json={},
+            )
+            settings = self.client.put(
+                "/api/devices/dev_1/mirror/settings",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json={"profile": "smooth"},
+            )
+
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(settings.status_code, 200)
+        for payload in (started.json(), settings.json()):
+            encoded = str(payload)
+            self.assertNotIn("192.0.2.10", encoded)
+            self.assertIn("设备视频流不可用", payload["error"])
+
+    def test_admin_device_address_edit_invalidates_cached_mirror_session(self):
+        self.storage.upsert_device("stable-device", "Device", "192.0.2.10:30100", True)
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        with (
+            patch.object(self.main.manager, "reconfigure_device", new_callable=AsyncMock) as reconfigure,
+            patch.object(self.main.adb_monitor, "reconnect_device", new_callable=AsyncMock) as reconnect,
+        ):
+            response = self.client.put(
+                "/api/admin/devices",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json={
+                    "device_id": "stable-device",
+                    "name": "Device",
+                    "address": "192.0.2.30:30100",
+                    "enabled": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        reconfigure.assert_awaited_once_with("stable-device", "192.0.2.30:30100")
+        reconnect.assert_awaited_once_with("stable-device")
+        self.assertEqual(self.storage.get_device("stable-device")["address"], "192.0.2.30:30100")
 
     def test_normal_user_cannot_open_unassigned_device_websockets(self):
         self.storage.upsert_user("alice", "AlicePassword123", "user")

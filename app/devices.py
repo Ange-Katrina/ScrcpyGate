@@ -25,6 +25,7 @@ PUBLIC_ADB_FIELDS = (
     "status_label",
     "last_checked_at",
     "last_seen_at",
+    "latency_ms",
 )
 
 
@@ -102,6 +103,9 @@ def device_payload(
         "adb_state": status.get("adb_state") or status.get("state") or "unknown",
         "adb_ok": bool(status.get("adb_ok") or status.get("ok")),
         "status_label": status.get("status_label") or status.get("state") or "unknown",
+        "last_checked_at": status.get("last_checked_at"),
+        "last_seen_at": status.get("last_seen_at"),
+        "latency_ms": status.get("latency_ms"),
         "session": session,
     }
     if include_address:
@@ -109,8 +113,6 @@ def device_payload(
         payload["real_device_id"] = real_id
         payload["adb_detail"] = status.get("detail", "")
         payload["last_error"] = status.get("last_error", "")
-        payload["last_checked_at"] = status.get("last_checked_at")
-        payload["last_seen_at"] = status.get("last_seen_at")
     return payload
 
 

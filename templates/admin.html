@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=d56aad883ae8">
+  <link rel="stylesheet" href="/static/css/admin.css?v=5b8b403caef0">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -100,7 +100,7 @@
         </div>
         <section class="workspace-section" aria-labelledby="deviceListTitle">
           <div class="section-heading"><div><h3 id="deviceListTitle">设备列表</h3><p>设备操作保持在同一行，状态变化不会打断浏览位置。</p></div></div>
-          <div id="deviceCards" class="device-grid" aria-live="polite"></div>
+          <div id="deviceCards" class="device-grid"></div>
         </section>
       </section>
 
@@ -334,12 +334,12 @@
 <aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
   <div class="drawer-heading"><div><p class="eyebrow">Device</p><h2 id="deviceDrawerTitle">保存设备</h2><p id="deviceDrawerContext" class="drawer-context">新建设备</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="关闭设备编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
-    <div class="col-6"><label for="deviceId">设备 ID</label><input id="deviceId" placeholder="emulator-1" autocomplete="off"></div>
-    <div class="col-6"><label for="deviceName">名称</label><input id="deviceName" placeholder="模拟器 1" autocomplete="off"></div>
+    <input id="deviceId" type="hidden">
+    <div class="col-12"><label for="deviceName">名称（可选）</label><input id="deviceName" placeholder="例如：模拟器 1" autocomplete="off"></div>
     <div class="col-8"><label for="deviceAddress">ADB 地址</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
     <div class="col-4"><label for="deviceEnabled">状态</label><select id="deviceEnabled"><option value="true">启用</option><option value="false">禁用</option></select></div>
   </div>
-  <p class="muted drawer-note">设备 ID 建议使用别名；ADB 地址填写实际连接地址，仅管理员后台可见。</p>
+  <p class="muted drawer-note">设备标识由系统自动生成。ADB 地址填写实际连接地址；修改地址不会影响已分配的用户权限。</p>
   <div class="drawer-actions"><button id="clearDeviceForm" class="btn" type="button">清空</button><button id="cancelDeviceForm" class="btn" type="button">取消</button><button id="saveDevice" class="btn primary" type="button">保存设备</button></div>
 </aside>
 
@@ -413,6 +413,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=2ddbe1f5000a" defer></script>
+<script src="/static/js/admin.js?v=d1791a89c19e" defer></script>
 </body>
 </html>

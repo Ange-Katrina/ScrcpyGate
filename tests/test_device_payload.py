@@ -45,13 +45,32 @@ class DevicePayloadTests(unittest.TestCase):
     def test_public_payload_includes_adb_state_without_address(self):
         payload = device_payload(
             {"id": "dev-c", "name": "emu", "address": "192.0.2.10:30100", "enabled": 1},
-            statuses={"dev-c": {"state": "online", "ok": True}},
+            statuses={"dev-c": {"state": "online", "ok": True, "latency_ms": 12.5}},
             include_address=False,
         )
 
         self.assertEqual(payload["adb_state"], "online")
         self.assertTrue(payload["adb_ok"])
+        self.assertEqual(payload["latency_ms"], 12.5)
         self.assertNotIn("address", payload)
+
+    def test_admin_payload_includes_heartbeat_timing(self):
+        payload = device_payload(
+            {"id": "dev-c", "name": "emu", "address": "192.0.2.10:30100", "enabled": 1},
+            statuses={
+                "dev-c": {
+                    "state": "online",
+                    "ok": True,
+                    "latency_ms": 12.5,
+                    "last_checked_at": 100,
+                    "last_seen_at": 90,
+                }
+            },
+        )
+
+        self.assertEqual(payload["latency_ms"], 12.5)
+        self.assertEqual(payload["last_checked_at"], 100)
+        self.assertEqual(payload["last_seen_at"], 90)
 
     def test_public_payload_hides_adb_address(self):
         tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-device-payload-"))

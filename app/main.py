@@ -13,11 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
-from adb_manager import ADBManager
-
 from . import alas, alas_embed, security, storage
-from .adb_monitor import adb_monitor, adb_state_label
-from .devices import devices_payload, sessions_payload
+from .adb_monitor import adb_monitor
+from .devices import devices_payload, public_adb_payload, session_payload, sessions_payload
 from .logging_config import setup_logging, tail_log
 from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
@@ -503,30 +501,15 @@ async def public_sessions_for_user(user: dict) -> dict:
     return sessions_payload(devices, sessions, public_id=True)
 
 
-def probe_adb_device(device_id: str, address: str) -> dict:
-    adb = ADBManager()
-    detail = []
-    target = address or device_id
-    state = adb.get_device_state(target)
-    if not state and address and ":" in address:
-        ok, output = adb._run_adb_command(["connect", address])
-        if output:
-            detail.append(output.strip())
-        state = adb.get_device_state(address)
-        if not state and address != target:
-            state = adb.get_device_state(target)
-        if not ok and not state:
-            return {"ok": False, "state": "unknown", "detail": "\n".join(item for item in detail if item)}
-    label = adb_state_label(state)
-    if label == "unknown":
-        for item in adb.get_devices():
-            if item.get("id") in {device_id, address}:
-                label = adb_state_label(item.get("state"))
-                detail.append(f"{item.get('id')} {item.get('state')}")
-                break
-    if not detail and state:
-        detail.append(f"{target}: {state}")
-    return {"ok": label == "online", "state": label, "detail": "\n".join(item for item in detail if item)}
+def public_mirror_failure(device_id: str, session: dict, adb_status: dict, default_error: str) -> dict:
+    exposed_id = storage.public_device_id(device_id)
+    safe_session = session_payload(session, device_id, exposed_id, public=True) or {}
+    safe_adb = public_adb_payload(adb_status, exposed_id) or {}
+    return {
+        "error": safe_session.get("last_error") or default_error,
+        "detail": safe_adb.get("detail") or safe_session.get("last_error") or "",
+    }
+
 
 def set_session_cookie(response: Response, sid: str) -> None:
     response.set_cookie(
@@ -734,12 +717,13 @@ async def api_mirror_start(device_id: str, request: Request):
         sessions = await public_sessions_for_user(user)
         session = (await manager.snapshot()).get(real_device_id) or {}
         adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
+        failure = public_mirror_failure(real_device_id, session, adb_status, "mirror start failed")
         return {
             "ok": False,
-            "error": session.get("last_error") or "mirror start failed",
+            "error": failure["error"],
             "adb_state": adb_status.get("state", "unknown"),
             "stream_mode": session.get("stream_mode", "none"),
-            "detail": adb_status.get("detail") or session.get("last_error") or "",
+            "detail": failure["detail"],
             "sessions": sessions,
         }
     visible_devices = storage.list_devices_for_user(user["username"], user["role"] == "admin")
@@ -774,13 +758,14 @@ async def api_mirror_settings(device_id: str, request: Request):
         if not restart_ok:
             session = (await manager.snapshot()).get(real_device_id) or {}
             adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
+            failure = public_mirror_failure(real_device_id, session, adb_status, "mirror restart failed")
             return {
                 "ok": False,
                 "restarted": False,
-                "error": session.get("last_error") or "mirror restart failed",
+                "error": failure["error"],
                 "adb_state": adb_status.get("state", "unknown"),
                 "stream_mode": session.get("stream_mode", "none"),
-                "detail": adb_status.get("detail") or session.get("last_error") or "",
+                "detail": failure["detail"],
                 "preferences": public_video_options(options),
                 "sessions": await public_sessions_for_user(user),
             }
@@ -1124,18 +1109,37 @@ async def admin_upsert_device(request: Request):
     admin = security.require_admin(request)
     payload = await parse_body(request)
     device_id = str(payload.get("device_id", "")).strip()
-    name = str(payload.get("name", device_id)).strip() or device_id
     address = str(payload.get("address", "")).strip()
+    if not address:
+        raise HTTPException(status_code=400, detail="address is required")
+    name = str(payload.get("name", "")).strip() or address
     enabled = parse_bool(payload.get("enabled"), True)
-    if not device_id or not address:
-        raise HTTPException(status_code=400, detail="device_id and address are required")
-    storage.upsert_device(device_id, name, address, enabled)
+    previous = storage.get_device(device_id) if device_id else None
+    if device_id and not previous:
+        raise HTTPException(status_code=404, detail="device not found")
+    disabling = bool(previous and bool(previous["enabled"]) and not enabled)
+    notify_users = await manager.event_usernames_for_device(device_id) if disabling else None
+    if previous:
+        adb_monitor.invalidate_device(device_id)
+        if not storage.update_device(device_id, name, address, enabled):
+            raise HTTPException(status_code=404, detail="device not found")
+    else:
+        device_id = storage.create_device(name, address, enabled)
     if admin["role"] == "admin":
         storage.set_permission(admin["username"], device_id, True, True)
     storage.audit(admin["username"], "device_upsert", device_id)
-    sessions = await manager.snapshot()
+    address_changed = bool(previous and str(previous["address"]) != address)
+    if previous and not enabled and (bool(previous["enabled"]) or address_changed):
+        await manager.remove_device(device_id, reason="device_disabled", notify_users=notify_users)
+    elif address_changed:
+        await manager.reconfigure_device(device_id, address)
     await adb_monitor.reconnect_device(device_id)
-    return {"ok": True, "devices": devices_payload(storage.list_all_devices(), sessions, adb_monitor.snapshot())}
+    sessions = await manager.snapshot()
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "devices": devices_payload(storage.list_all_devices(), sessions, adb_monitor.snapshot()),
+    }
 
 
 @app.post("/api/admin/devices/{device_id}/adb/test")
@@ -1171,8 +1175,17 @@ async def admin_reconnect_adb_device(device_id: str, request: Request):
 async def admin_delete_device(device_id: str, request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
-    await manager.stop(device_id)
-    storage.delete_device(device_id)
+    if not storage.get_device(device_id):
+        raise HTTPException(status_code=404, detail="device not found")
+    notify_users = await manager.event_usernames_for_device(device_id)
+    adb_monitor.forget_device(device_id)
+    try:
+        if not storage.delete_device(device_id):
+            raise HTTPException(status_code=404, detail="device not found")
+    except Exception:
+        adb_monitor.restore_device(device_id)
+        raise
+    await manager.remove_device(device_id, notify_users=notify_users)
     storage.audit(admin["username"], "device_delete", device_id)
     sessions = await manager.snapshot()
     return {"ok": True, "devices": devices_payload(storage.list_all_devices(), sessions, adb_monitor.snapshot())}

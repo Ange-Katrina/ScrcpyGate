@@ -1078,22 +1078,79 @@ def list_all_devices() -> list[dict]:
         return [dict(row) for row in conn.execute("SELECT * FROM devices ORDER BY id")]
 
 
+def generate_device_id() -> str:
+    """Return an opaque device ID candidate.
+
+    Product code should use ``create_device`` so collision handling and the
+    insert happen in one transaction.
+    """
+    return f"device_{secrets.token_hex(8)}"
+
+
+def _grant_device_to_admins(conn: sqlite3.Connection, device_id: str) -> None:
+    admins = conn.execute("SELECT username FROM users WHERE role='admin'").fetchall()
+    for row in admins:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_devices(username,device_id,can_view,can_control) VALUES(?,?,1,1)",
+            (row["username"], device_id),
+        )
+
+
+def create_device(name: str, address: str, enabled: bool = True) -> str:
+    """Create a device with an opaque ID without ever overwriting an existing row."""
+    created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for _ in range(10):
+            device_id = generate_device_id()
+            try:
+                conn.execute(
+                    "INSERT INTO devices(id,name,address,enabled,created_at) VALUES(?,?,?,?,?)",
+                    (device_id, name or address or device_id, address, 1 if enabled else 0, created_at),
+                )
+            except sqlite3.IntegrityError:
+                continue
+            _grant_device_to_admins(conn, device_id)
+            conn.commit()
+            return device_id
+        conn.rollback()
+    raise RuntimeError("unable to allocate a unique device id")
+
+
+def update_device(device_id: str, name: str, address: str, enabled: bool = True) -> bool:
+    """Update an existing device while preserving its identity and permissions."""
+    with db_connect() as conn:
+        cursor = conn.execute(
+            "UPDATE devices SET name=?, address=?, enabled=? WHERE id=?",
+            (name or address or device_id, address, 1 if enabled else 0, device_id),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+
 def upsert_device(device_id: str, name: str, address: str, enabled: bool = True) -> None:
     with db_connect() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO devices(id,name,address,enabled,created_at) VALUES(?,?,?,?,COALESCE((SELECT created_at FROM devices WHERE id=?),?))",
-            (device_id, name or device_id, address or device_id, 1 if enabled else 0, device_id, time.strftime("%Y-%m-%d %H:%M:%S")),
+            """
+            INSERT INTO devices(id,name,address,enabled,created_at) VALUES(?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                address=excluded.address,
+                enabled=excluded.enabled
+            """,
+            (device_id, name or address or device_id, address or device_id, 1 if enabled else 0, time.strftime("%Y-%m-%d %H:%M:%S")),
         )
-        admins = conn.execute("SELECT username FROM users WHERE role='admin'").fetchall()
-        for row in admins:
-            conn.execute("INSERT OR IGNORE INTO user_devices(username,device_id,can_view,can_control) VALUES(?,?,1,1)", (row["username"], device_id))
+        _grant_device_to_admins(conn, device_id)
         conn.commit()
 
 
-def delete_device(device_id: str) -> None:
+def delete_device(device_id: str) -> bool:
     with db_connect() as conn:
-        conn.execute("DELETE FROM devices WHERE id=?", (device_id,))
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
+        cursor = conn.execute("DELETE FROM devices WHERE id=?", (device_id,))
         conn.commit()
+        return cursor.rowcount == 1
 
 
 def get_device(device_id: str):
@@ -1102,12 +1159,23 @@ def get_device(device_id: str):
 
 
 def user_can(username: str, device_id: str, action: str) -> bool:
-    user = get_user(username)
-    if user and user["role"] == "admin":
-        return True
     col = "can_control" if action == "control" else "can_view"
     with db_connect() as conn:
-        row = conn.execute(f"SELECT {col} FROM user_devices WHERE username=? AND device_id=?", (username, device_id)).fetchone()
+        user = conn.execute("SELECT role FROM users WHERE username=?", (username,)).fetchone()
+        if not user:
+            return False
+        if user["role"] == "admin":
+            row = conn.execute("SELECT enabled FROM devices WHERE id=?", (device_id,)).fetchone()
+            return bool(row and row["enabled"])
+        row = conn.execute(
+            f"""
+            SELECT ud.{col}
+            FROM user_devices ud
+            JOIN devices d ON d.id=ud.device_id
+            WHERE ud.username=? AND ud.device_id=? AND d.enabled=1
+            """,
+            (username, device_id),
+        ).fetchone()
     return bool(row and row[col])
 
 

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -318,6 +319,67 @@ class StorageCoreTests(unittest.TestCase):
         self.assertTrue(storage.lock_owned_by("dev1", "admin", "client-admin"))
         self.assertTrue(storage.release_lock("dev1", "admin", client_id="client-admin"))
         self.assertFalse(storage.lock_owned_by("dev1", "admin", "client-admin"))
+
+    def test_device_upsert_preserves_permissions_and_created_at(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_device("stable-device", "Old name", "192.0.2.10:30100", True)
+        storage.set_permission("alice", "stable-device", True, False)
+        before = dict(storage.get_device("stable-device"))
+
+        storage.upsert_device("stable-device", "New name", "192.0.2.20:30100", False)
+
+        after = dict(storage.get_device("stable-device"))
+        self.assertEqual(after["id"], "stable-device")
+        self.assertEqual(after["address"], "192.0.2.20:30100")
+        self.assertEqual(after["created_at"], before["created_at"])
+        permission = next(item for item in storage.list_permissions() if item["username"] == "alice")
+        self.assertTrue(permission["can_view"])
+        self.assertFalse(storage.user_can("alice", "stable-device", "view"))
+        self.assertFalse(storage.user_can("alice", "stable-device", "control"))
+
+    def test_generated_device_ids_are_opaque_and_unique(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        first = storage.generate_device_id()
+        storage.upsert_device(first, "Device", "192.0.2.10:30100", True)
+        second = storage.generate_device_id()
+
+        self.assertRegex(first, r"^device_[0-9a-f]{16}$")
+        self.assertNotEqual(first, second)
+        self.assertNotIn("192.0.2.10", first)
+
+    def test_create_device_retries_collision_without_overwriting_existing_device(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        existing_id = f"device_{'a' * 16}"
+        storage.upsert_device(existing_id, "Existing", "192.0.2.10:30100", True)
+
+        with patch.object(storage.secrets, "token_hex", side_effect=["a" * 16, "b" * 16]):
+            created_id = storage.create_device("Created", "192.0.2.20:30100", True)
+
+        self.assertEqual(created_id, f"device_{'b' * 16}")
+        self.assertEqual(storage.get_device(existing_id)["name"], "Existing")
+        self.assertEqual(storage.get_device(created_id)["name"], "Created")
+
+    def test_update_device_never_creates_missing_id(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        self.assertFalse(storage.update_device("chosen-by-client", "Device", "192.0.2.30:30100", True))
+        self.assertIsNone(storage.get_device("chosen-by-client"))
+
+    def test_delete_device_clears_control_lock_without_cached_session(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_device("dev-delete", "Device", "192.0.2.40:30100", True)
+        storage.acquire_lock("dev-delete", "admin", "http")
+
+        self.assertTrue(storage.delete_device("dev-delete"))
+        self.assertIsNone(storage.get_device("dev-delete"))
+        self.assertIsNone(storage.get_lock("dev-delete"))
 
     def test_control_lock_reacquire_requires_same_user_and_client(self):
         storage = load_storage(self.tmp)
