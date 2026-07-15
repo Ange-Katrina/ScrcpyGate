@@ -127,7 +127,7 @@ class UiTemplateContractTests(unittest.TestCase):
                 "permissionDeviceFilter", "permissionDeviceResultCount", "permissionSaveStatus",
                 "savePermission", "permissionRows", "alas",
                 "alasBaseUrl", "alasToken", "saveAlas", "alasOperateConfig", "alasStatus",
-                "toggleAlas", "reloadAlas", "alasBindUser", "alasBindConfig", "alasBindRun",
+                "toggleAlas", "reloadAlas", "alasBindUser", "alasBindConfig", "alasBindConfigCustomField", "alasBindConfigCustom", "alasBindRun",
                 "alasBindEnabled", "saveAlasBinding", "alasBindRows", "configSource", "configTarget",
                 "alasAssignmentSummary", "alasAssignmentUserName", "alasAssignmentUserMeta",
                 "alasAssignmentConfigSummary", "alasAssignmentConfigName", "alasAssignmentConfigMeta",

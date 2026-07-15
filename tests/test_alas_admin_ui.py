@@ -56,7 +56,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
             "is_default:$('alasBindDefault').value==='true' ? true : null",
         ):
             self.assertIn(token, self.script)
-        self.assertIn("editingAlasAssignment ? editingAlasAssignment.config_name", self.script)
+        self.assertIn("if(editingAlasAssignment) return configKey(editingAlasAssignment.config_name)", self.script)
         self.assertIn("await mutateAlasPermissions(payload)", self.script)
         self.assertIn("await mutateAlasPermissions({username:binding.username", self.script)
         remove_binding = self.script.split("async function removeAlasBinding", 1)[1].split("function renderAlas", 1)[0]
@@ -91,7 +91,8 @@ class AlasAdminUiContractTests(unittest.TestCase):
             'id="alasAssignmentOwnerHint"',
             'aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint"',
             "function configOwnership(configName)",
-            "return !ownership.owners.length",
+            "group.label='已归属其他用户（不可选）'",
+            "option.disabled=true",
             "otherOwners=configOwnership(configName).owners.filter(owner=>owner!==username)",
             "不能直接分配给",
             "ownership.owner?`归属 ${ownership.owner}`:'未分配'",
@@ -100,6 +101,32 @@ class AlasAdminUiContractTests(unittest.TestCase):
         ):
             self.assertIn(token, combined)
         self.assertIn('.alas-owner-note[data-state="error"]', self.styles)
+
+    def test_assignment_uses_standard_select_with_explicit_manual_entry(self):
+        self.assertIn('<select id="alasBindConfig"', self.template)
+        self.assertNotIn('list="alasConfigSuggestions"', self.template)
+        self.assertNotIn('<datalist', self.template)
+        for token in (
+            'id="alasBindConfigCustomField" class="col-12" hidden',
+            'id="alasBindConfigCustom"',
+            "function alasAssignmentConfigName()",
+            "function alasAssignmentManualSelected()",
+            "function syncAlasAssignmentConfigMode",
+            "function renderAlasAssignmentConfigOptions",
+            "group.label='未分配配置'",
+            "group.label='当前用户已拥有'",
+            "group.label='已归属其他用户（不可选）'",
+            "manual.dataset.manual='true'",
+            "manual.textContent='手动输入配置名称…'",
+            "customInput.disabled=!manual",
+            "$('alasBindConfig').onchange=",
+            "$('alasBindConfigCustom').oninput=",
+            "$('alasAssignmentDrawer').addEventListener('keydown',event=>",
+            "event.stopPropagation();",
+            "closeEditorDrawer('alasAssignment');",
+        ):
+            self.assertIn(token, self.template + self.script)
+        self.assertNotIn("ALAS_CONFIG_MANUAL_VALUE", self.script)
 
     def test_config_identity_errors_and_focus_are_explicit(self):
         for token in (
@@ -156,12 +183,19 @@ class AlasAdminUiContractTests(unittest.TestCase):
             self.assertIn(token, self.template + self.script)
         for token in (
             ".alas-assignment-summary",
+            "flex: 0 0 auto",
             ".alas-choice__kind",
             "font-size: 15px",
             "font-size: 16px",
             "box-shadow: inset 3px 0 0 var(--ui-color-primary)",
+            '.alas-assignment-summary__arrow::before',
+            'content: "↓"',
+            "grid-template-rows: auto 24px auto",
+            ".alas-assignment-summary__item--config",
+            "grid-row: 3",
         ):
             self.assertIn(token, self.styles)
+        self.assertNotIn("transform: rotate(90deg)", self.styles)
 
     def test_promise_driven_config_and_toggle_guards(self):
         harness = textwrap.dedent(

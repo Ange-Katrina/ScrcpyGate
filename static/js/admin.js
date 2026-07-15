@@ -184,6 +184,12 @@ function closeEditorDrawer(name){
   const drawer=$(`${name}Drawer`);
   if(!drawer) return;
   if(name==='alasConfig') invalidateAlasConfigRead(true);
+  if(name==='alasAssignment'){
+    editingAlasAssignment=null;
+    $('alasBindConfigCustom').value='';
+    $('alasBindConfigCustomField').hidden=true;
+    $('alasBindConfigCustom').disabled=true;
+  }
   if(window.ScrcpyGateUI) window.ScrcpyGateUI.closeDrawer(drawer);
   else {
     drawer.classList.remove('is-open');
@@ -1251,23 +1257,111 @@ function renderAlasConfigDetail(){
   else currentUsers.appendChild(emptyMessage('此配置尚未分配给用户。'));
   $('alasCurrentUserCount').textContent=ownership.conflict?'需处理':ownership.owner?'已分配':'未分配';
 }
+function alasAssignmentUsername(){
+  return editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
+}
+function alasAssignmentManualSelected(){
+  const selected=$('alasBindConfig').selectedOptions[0];
+  return !!selected && selected.dataset.manual==='true';
+}
+function alasAssignmentConfigName(){
+  if(editingAlasAssignment) return configKey(editingAlasAssignment.config_name);
+  return configKey(alasAssignmentManualSelected() ? $('alasBindConfigCustom').value : $('alasBindConfig').value);
+}
+function syncAlasAssignmentConfigMode(focusCustom=false){
+  const select=$('alasBindConfig');
+  const customField=$('alasBindConfigCustomField');
+  const customInput=$('alasBindConfigCustom');
+  const manual=!editingAlasAssignment && alasAssignmentManualSelected();
+  customField.hidden=!manual;
+  customInput.disabled=!manual;
+  customInput.required=manual;
+  if(manual && focusCustom) requestAnimationFrame(()=>customInput.focus({preventScroll:true}));
+}
+function renderAlasAssignmentConfigOptions(preferredValue=null){
+  const select=$('alasBindConfig');
+  const previous=preferredValue===null ? String(select.value || '') : String(preferredValue || '');
+  const previousManual=preferredValue===null && alasAssignmentManualSelected();
+  const username=alasAssignmentUsername();
+  const unassigned=[];
+  const ownedByCurrent=[];
+  const occupied=[];
+  uniqueAlasConfigs().forEach(name=>{
+    const ownership=configOwnership(name);
+    const otherOwners=ownership.owners.filter(owner=>owner!==username);
+    const entry={name,ownership,otherOwners};
+    if(ownership.conflict || otherOwners.length) occupied.push(entry);
+    else if(ownership.owner===username) ownedByCurrent.push(entry);
+    else unassigned.push(entry);
+  });
+  clear(select);
+  const placeholder=document.createElement('option');
+  placeholder.value='';
+  placeholder.textContent='请选择 Runtime 配置';
+  placeholder.disabled=true;
+  select.appendChild(placeholder);
+  if(unassigned.length){
+    const group=document.createElement('optgroup');
+    group.label='未分配配置';
+    unassigned.forEach(({name})=>{
+      const option=document.createElement('option');
+      option.value=name;
+      option.textContent=`${name} · 未分配`;
+      group.appendChild(option);
+    });
+    select.appendChild(group);
+  }
+  if(ownedByCurrent.length){
+    const group=document.createElement('optgroup');
+    group.label='当前用户已拥有';
+    ownedByCurrent.forEach(({name})=>{
+      const option=document.createElement('option');
+      option.value=name;
+      option.textContent=`${name} · 已归属当前用户`;
+      group.appendChild(option);
+    });
+    select.appendChild(group);
+  }
+  if(occupied.length){
+    const group=document.createElement('optgroup');
+    group.label='已归属其他用户（不可选）';
+    occupied.forEach(({name,ownership,otherOwners})=>{
+      const option=document.createElement('option');
+      option.value=name;
+      option.textContent=ownership.conflict ? `${name} · 归属冲突 ${ownership.owners.join('、')}` : `${name} · 已归属 ${otherOwners.join('、')}`;
+      option.disabled=true;
+      group.appendChild(option);
+    });
+    select.appendChild(group);
+  }
+  const manual=document.createElement('option');
+  manual.value='';
+  manual.dataset.manual='true';
+  manual.textContent='手动输入配置名称…';
+  select.appendChild(manual);
+  select.disabled=!!editingAlasAssignment;
+  if(editingAlasAssignment){
+    const current=[...select.options].find(option=>configKey(option.value)===configKey(editingAlasAssignment.config_name));
+    if(current) select.value=current.value;
+  } else if(previousManual){
+    manual.selected=true;
+  } else {
+    const current=[...select.options].find(option=>!option.disabled && configKey(option.value)===configKey(previous));
+    select.value=current ? current.value : '';
+  }
+  syncAlasAssignmentConfigMode(false);
+}
 function renderAlasCompatibilityFields(){
   const configs=uniqueAlasConfigs();
   const select=$('alasOperateConfig');
   clear(select);
   configs.forEach(name=>{ const option=document.createElement('option'); option.value=name; option.textContent=name; select.appendChild(option); });
   select.value=selectedAlasConfig();
-  const suggestions=$('alasConfigSuggestions');
-  clear(suggestions);
-  const suggestionConfigs=configs.filter(name=>{
-    const ownership=configOwnership(name);
-    return !ownership.owners.length || !!(editingAlasAssignment && configKey(editingAlasAssignment.config_name)===configKey(name));
-  });
-  suggestionConfigs.forEach(name=>{ const option=document.createElement('option'); option.value=name; suggestions.appendChild(option); });
   const userSelect=$('alasBindUser');
   const previous=userSelect.value || selectedAlasUsername;
   fillSelect(userSelect,alasUsers().map(user=>({value:user.username,text:`${user.username} · ${alasRoleLabel(user.role)}`})),item=>item.text);
   if([...userSelect.options].some(option=>option.value===previous)) userSelect.value=previous;
+  renderAlasAssignmentConfigOptions();
   updateAlasAssignmentOwnerHint();
   syncAlasAssignmentSummary();
 }
@@ -1363,26 +1457,26 @@ function openAlasAssignmentDrawer(binding=null,trigger=document.activeElement){
   const users=alasUsers();
   if(!users.length) return show('请先创建用户');
   editingAlasAssignment=binding ? {username:binding.username,config_name:binding.config_name} : null;
+  $('alasBindConfigCustom').value='';
   renderAlasCompatibilityFields();
   const username=binding && binding.username || selectedAlasUsername || users[0].username;
   $('alasBindUser').value=username;
   $('alasBindUser').disabled=!!binding;
-  $('alasBindConfig').value=binding && binding.config_name || '';
-  $('alasBindConfig').readOnly=!!binding;
+  renderAlasAssignmentConfigOptions(binding && binding.config_name || '');
   $('alasBindRun').value=binding && binding.can_run ? 'true' : 'false';
   $('alasBindEdit').value=binding && binding.can_edit ? 'true' : 'false';
   $('alasBindDefault').value='keep';
   $('alasBindEnabled').value='true';
   $('alasAssignmentDrawerTitle').textContent=binding?'编辑配置归属与权限':'分配配置归属';
-  $('alasAssignmentDrawerContext').textContent=binding ? `正在编辑 ${binding.username} → ${binding.config_name}` : `为 ${username} 分配一个独占配置`;
+  $('alasAssignmentDrawerContext').textContent=binding ? `正在编辑 ${binding.username} → ${binding.config_name}；如需更换归属，请先移除当前归属` : `为 ${username} 分配一个独占配置`;
   updateAlasAssignmentOwnerHint();
   syncAlasAssignmentSummary();
   openEditorDrawer('alasAssignment',trigger);
   loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置建议加载失败'));
 }
 function syncAlasAssignmentSummary(){
-  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
-  const configName=editingAlasAssignment ? editingAlasAssignment.config_name : String($('alasBindConfig').value || '').trim();
+  const username=alasAssignmentUsername();
+  const configName=alasAssignmentConfigName();
   const user=alasUsers().find(item=>item.username===username);
   $('alasAssignmentUserName').textContent=username || '待选择用户';
   $('alasAssignmentUserMeta').textContent=user ? `${alasRoleLabel(user.role)} · 已拥有 ${assignmentsForUser(username).length} 个配置` : '选择接收配置的用户';
@@ -1410,8 +1504,8 @@ function syncAlasAssignmentSummary(){
 function updateAlasAssignmentOwnerHint(){
   const hint=$('alasAssignmentOwnerHint');
   if(!hint) return;
-  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
-  const configName=editingAlasAssignment ? editingAlasAssignment.config_name : String($('alasBindConfig').value || '').trim();
+  const username=alasAssignmentUsername();
+  const configName=alasAssignmentConfigName();
   let blocked=false;
   let stateName='ready';
   if(!configName){
@@ -1432,7 +1526,7 @@ function updateAlasAssignmentOwnerHint(){
   }
   hint.dataset.state=stateName;
   const saveButton=$('saveAlasBinding');
-  if(saveButton && !saveButton.classList.contains('busy')) saveButton.disabled=blocked;
+  if(saveButton && !saveButton.classList.contains('busy')) saveButton.disabled=blocked || !username || !configName;
 }
 function requireAlasSuccess(result, fallback='ALAS 操作失败'){
   if(result && result.ok===false) throw new Error(result.error || result.detail || fallback);
@@ -1903,10 +1997,10 @@ async function saveConfig(){
 }
 async function saveAlasBinding(){
   const wasEditing=!!editingAlasAssignment;
-  const username=editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
-  const configName=configKey(editingAlasAssignment ? editingAlasAssignment.config_name : $('alasBindConfig').value);
+  const username=alasAssignmentUsername();
+  const configName=alasAssignmentConfigName();
   if(!username) return show('请选择用户');
-  if(!configName) return show('请输入或选择配置名称');
+  if(!configName) return show('请选择配置或输入配置名称');
   const otherOwners=configOwnership(configName).owners.filter(owner=>owner!==username);
   if(otherOwners.length) return show(`${configName} 已归属 ${otherOwners.join('、')}；请先移除原归属后再分配`);
   const payload={
@@ -2017,6 +2111,12 @@ function initializeEditorDrawers(){
   $('cancelAlasConnection').onclick=()=>closeEditorDrawer('alasConnection');
   $('alasAssignmentDrawerClose').onclick=()=>closeEditorDrawer('alasAssignment');
   $('cancelAlasAssignment').onclick=()=>closeEditorDrawer('alasAssignment');
+  $('alasAssignmentDrawer').addEventListener('keydown',event=>{
+    if(event.key!=='Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeEditorDrawer('alasAssignment');
+  });
   $('alasConfigDrawerClose').onclick=()=>closeEditorDrawer('alasConfig');
   $('cancelAlasConfig').onclick=()=>closeEditorDrawer('alasConfig');
 }
@@ -2093,8 +2193,9 @@ function initializeAlasWorkspace(){
   $('alasUserSearch').oninput=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
   $('alasUserFilter').onchange=()=>{ renderAlasUserList(); renderAlasUserDetail(); };
   $('alasConfigSearch').oninput=()=>renderAlasConfigList();
-  $('alasBindUser').onchange=()=>{ updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
-  $('alasBindConfig').oninput=()=>{ updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
+  $('alasBindUser').onchange=()=>{ renderAlasAssignmentConfigOptions(); updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
+  $('alasBindConfig').onchange=()=>{ syncAlasAssignmentConfigMode(true); updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
+  $('alasBindConfigCustom').oninput=()=>{ updateAlasAssignmentOwnerHint(); syncAlasAssignmentSummary(); };
   $('openAlasAssignment').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
   $('openAlasAssignmentDetail').onclick=event=>openAlasAssignmentDrawer(null,event.currentTarget);
   $('openAlasConnection').onclick=event=>openAlasConnectionDrawer(event.currentTarget);

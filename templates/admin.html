@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=5b8b403caef0">
+  <link rel="stylesheet" href="/static/css/admin.css?v=34f8ae9f41c7">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -384,7 +384,8 @@
   </div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
-    <div class="col-12"><label for="alasBindConfig">归属配置</label><input id="alasBindConfig" list="alasConfigSuggestions" placeholder="优先选择未分配配置，或输入准确名称" autocomplete="off"><datalist id="alasConfigSuggestions"></datalist></div>
+    <div class="col-12"><label for="alasBindConfig">归属配置</label><select id="alasBindConfig" aria-controls="alasBindConfigCustomField" aria-describedby="alasAssignmentOwnerHint"><option value="" disabled selected>请选择 Runtime 配置</option></select></div>
+    <div id="alasBindConfigCustomField" class="col-12" hidden><label for="alasBindConfigCustom">手动输入配置名称</label><input id="alasBindConfigCustom" placeholder="输入 Runtime 中的准确配置名称" autocomplete="off" spellcheck="false" aria-describedby="alasAssignmentOwnerHint"></div>
     <div class="col-6"><label for="alasBindRun">运行权限</label><select id="alasBindRun"><option value="true">允许启动与停止</option><option value="false">仅查看状态</option></select></div>
     <div class="col-6"><label for="alasBindEdit">编辑权限</label><select id="alasBindEdit"><option value="false">不允许编辑</option><option value="true">允许编辑配置</option></select></div>
     <div class="col-12"><label for="alasBindDefault">该用户的默认入口</label><select id="alasBindDefault"><option value="keep">保持当前默认</option><option value="true">设为默认配置</option></select></div>
@@ -413,6 +414,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=d1791a89c19e" defer></script>
+<script src="/static/js/admin.js?v=f96c56fc5101" defer></script>
 </body>
 </html>
