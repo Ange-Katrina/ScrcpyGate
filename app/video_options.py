@@ -5,17 +5,22 @@ from typing import Any
 
 VIDEO_LIMITS = {
     "video_bit_rate": (100000, 100000000),
-    "max_size": (0, 8192),
+    "max_size": (854, 1920),
     "max_fps": (0, 240),
 }
 
 STREAM_MODES = ("raw", "protocol", "legacy")
 NORMAL_PROFILE_NAMES = ("smooth", "balanced", "sharp", "low_latency")
-ALAS_PROFILE_NAMES = ("alas_smooth", "alas_balanced", "alas_sharp", "alas_low_latency")
-PROFILE_NAMES = NORMAL_PROFILE_NAMES + ALAS_PROFILE_NAMES
+LEGACY_PROFILE_ALIASES = {
+    "alas_smooth": "smooth",
+    "alas_balanced": "balanced",
+    "alas_sharp": "sharp",
+    "alas_low_latency": "low_latency",
+}
+PROFILE_NAMES = NORMAL_PROFILE_NAMES
 PROFILE_FIELDS = ("video_bit_rate", "max_size", "max_fps")
-MIN_PRESET_MAX_SIZE = 480
-ALAS_PROFILE_MAX_SIZE = 1280
+MIN_PRESET_MAX_SIZE = 854
+MAX_PRESET_MAX_SIZE = 1920
 MAX_CUSTOM_PROFILES = 12
 CUSTOM_PROFILE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{1,31}$")
 
@@ -29,14 +34,10 @@ DEFAULT_VIDEO_OPTIONS = {
 }
 
 VIDEO_PROFILES = {
-    "smooth": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
+    "smooth": {"video_bit_rate": 1000000, "max_size": 854, "max_fps": 24},
     "balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
     "sharp": {"video_bit_rate": 6000000, "max_size": 1920, "max_fps": 30},
     "low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
-    "alas_smooth": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
-    "alas_balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
-    "alas_sharp": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
-    "alas_low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
 }
 
 PROFILE_LABELS = {
@@ -44,10 +45,6 @@ PROFILE_LABELS = {
     "balanced": "稳定",
     "sharp": "高清",
     "low_latency": "低延迟",
-    "alas_smooth": "流畅",
-    "alas_balanced": "稳定",
-    "alas_sharp": "高清",
-    "alas_low_latency": "低延迟",
 }
 
 BANDWIDTH_RECOMMENDATIONS = {
@@ -56,40 +53,24 @@ BANDWIDTH_RECOMMENDATIONS = {
         "balanced": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
         "sharp": {"video_bit_rate": 1300000, "max_size": 1280, "max_fps": 24},
         "low_latency": {"video_bit_rate": 1000000, "max_size": 854, "max_fps": 30},
-        "alas_smooth": {"video_bit_rate": 800000, "max_size": 854, "max_fps": 20},
-        "alas_balanced": {"video_bit_rate": 1000000, "max_size": 960, "max_fps": 24},
-        "alas_sharp": {"video_bit_rate": 1300000, "max_size": 1280, "max_fps": 20},
-        "alas_low_latency": {"video_bit_rate": 1000000, "max_size": 854, "max_fps": 30},
     },
     "5mbps": {
         "smooth": {"video_bit_rate": 1200000, "max_size": 960, "max_fps": 24},
         "balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
         "sharp": {"video_bit_rate": 3200000, "max_size": 1280, "max_fps": 30},
         "low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
-        "alas_smooth": {"video_bit_rate": 1200000, "max_size": 960, "max_fps": 24},
-        "alas_balanced": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
-        "alas_sharp": {"video_bit_rate": 3200000, "max_size": 1280, "max_fps": 30},
-        "alas_low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
     },
     "10mbps": {
         "smooth": {"video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24},
         "balanced": {"video_bit_rate": 3500000, "max_size": 1280, "max_fps": 30},
         "sharp": {"video_bit_rate": 6500000, "max_size": 1920, "max_fps": 30},
         "low_latency": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 30},
-        "alas_smooth": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 24},
-        "alas_balanced": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 24},
-        "alas_sharp": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
-        "alas_low_latency": {"video_bit_rate": 2800000, "max_size": 1280, "max_fps": 30},
     },
     "20mbps": {
         "smooth": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 24},
         "balanced": {"video_bit_rate": 5000000, "max_size": 1600, "max_fps": 30},
         "sharp": {"video_bit_rate": 8500000, "max_size": 1920, "max_fps": 30},
         "low_latency": {"video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30},
-        "alas_smooth": {"video_bit_rate": 2000000, "max_size": 960, "max_fps": 24},
-        "alas_balanced": {"video_bit_rate": 3500000, "max_size": 1280, "max_fps": 30},
-        "alas_sharp": {"video_bit_rate": 4500000, "max_size": 1280, "max_fps": 30},
-        "alas_low_latency": {"video_bit_rate": 3000000, "max_size": 1280, "max_fps": 30},
     },
 }
 
@@ -166,7 +147,7 @@ def normalize_profile_id(value: Any) -> str:
     profile_id = str(value or "").strip()
     if not CUSTOM_PROFILE_RE.fullmatch(profile_id):
         raise VideoOptionError("custom profile id is invalid")
-    if profile_id in PROFILE_NAMES or profile_id in ("custom", "auto"):
+    if profile_id in PROFILE_NAMES or profile_id in LEGACY_PROFILE_ALIASES or profile_id in ("custom", "auto") or profile_id.startswith("alas_"):
         raise VideoOptionError("custom profile id is reserved")
     return profile_id
 
@@ -200,8 +181,8 @@ def normalize_single_profile(values: dict[str, Any], fallback: dict[str, Any]) -
     result: dict[str, int] = {}
     for field in PROFILE_FIELDS:
         value = int_value(values.get(field), field, int(fallback[field]))
-        if field == "max_size" and value and value < MIN_PRESET_MAX_SIZE:
-            raise VideoOptionError(f"max_size must be at least {MIN_PRESET_MAX_SIZE}")
+        if field == "max_size" and not MIN_PRESET_MAX_SIZE <= value <= MAX_PRESET_MAX_SIZE:
+            raise VideoOptionError(f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
         result[field] = value
     return result
 
@@ -218,10 +199,8 @@ def profile_payloads(settings: dict[str, Any] | None = None) -> dict[str, dict[s
                 value = int_value(settings.get(key), field, int(profiles[profile][field]))
             except VideoOptionError:
                 continue
-            if field == "max_size" and value and value < MIN_PRESET_MAX_SIZE:
+            if field == "max_size" and not MIN_PRESET_MAX_SIZE <= value <= MAX_PRESET_MAX_SIZE:
                 continue
-            if profile in ALAS_PROFILE_NAMES and field == "max_size":
-                value = min(value or ALAS_PROFILE_MAX_SIZE, ALAS_PROFILE_MAX_SIZE)
             profiles[profile][field] = value
     for profile, values in custom_profile_payloads(settings).items():
         profiles[profile] = {field: int(values[field]) for field in PROFILE_FIELDS}
@@ -238,10 +217,8 @@ def normalize_profile_payloads(payload: dict[str, Any] | None, fallback: dict[st
             raise VideoOptionError(f"{profile} preset must be an object")
         for field in PROFILE_FIELDS:
             value = int_value(values.get(field), field, int(result[profile][field]))
-            if field == "max_size" and value and value < MIN_PRESET_MAX_SIZE:
-                raise VideoOptionError(f"{profile} max_size must be at least {MIN_PRESET_MAX_SIZE}")
-            if profile in ALAS_PROFILE_NAMES and field == "max_size" and not 0 < value <= ALAS_PROFILE_MAX_SIZE:
-                raise VideoOptionError(f"{profile} max_size must be between {MIN_PRESET_MAX_SIZE} and {ALAS_PROFILE_MAX_SIZE}")
+            if field == "max_size" and not MIN_PRESET_MAX_SIZE <= value <= MAX_PRESET_MAX_SIZE:
+                raise VideoOptionError(f"{profile} max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
             result[profile][field] = value
     return result
 
@@ -285,6 +262,7 @@ def normalize_video_options(
     profiles = profiles or profile_payloads()
     payload = payload or {}
     profile = str(payload.get("profile", fallback.get("profile", DEFAULT_VIDEO_OPTIONS["profile"])) or "balanced").strip()
+    profile = LEGACY_PROFILE_ALIASES.get(profile, profile)
     if profile not in profiles and profile not in ("custom", "auto"):
         raise VideoOptionError("profile is invalid")
 
@@ -304,8 +282,8 @@ def normalize_video_options(
             str(base.get("scrcpy_stream_mode", "raw")),
         ),
     }
-    if int(options["max_size"]) and int(options["max_size"]) < MIN_PRESET_MAX_SIZE:
-        raise VideoOptionError(f"max_size must be 0 or at least {MIN_PRESET_MAX_SIZE}")
+    if not MIN_PRESET_MAX_SIZE <= int(options["max_size"]) <= MAX_PRESET_MAX_SIZE:
+        raise VideoOptionError(f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
     if enabled_stream_modes is not None:
         options["scrcpy_stream_mode"] = stream_mode_or_default(str(options["scrcpy_stream_mode"]), enabled_stream_modes)
     if profile in profiles:
@@ -345,6 +323,7 @@ def public_video_options(options: dict[str, Any] | None) -> dict[str, Any]:
     data = dict(base)
     data.update(options or {})
     profile = str(data.get("profile") or base["profile"])
+    profile = LEGACY_PROFILE_ALIASES.get(profile, profile)
     if profile not in PROFILE_NAMES and not CUSTOM_PROFILE_RE.fullmatch(profile) and profile not in ("custom", "auto"):
         profile = "custom"
     return {

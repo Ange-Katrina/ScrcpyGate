@@ -123,22 +123,22 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("function maxSizeQualityLabel(value)", self.script)
         self.assertIn("1280:'720p'", self.script)
         self.assertIn("上限 ${maxSizeQualityLabel(q.max_size)}", self.script)
-        self.assertIn("长边 1280≈720p", self.template)
+        self.assertIn("1280 × 720", self.template)
+        self.assertIn("`${size} × ${height}", self.script)
         self.assertNotIn("return `输出 ${size}", self.script)
 
-    def test_each_user_mode_renders_only_its_four_quality_profiles(self):
+    def test_workspace_renders_the_shared_four_quality_profiles(self):
         self.assertIn("const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency']", self.script)
-        self.assertIn("const ALAS_PROFILE_NAMES = ['alas_smooth','alas_balanced','alas_sharp','alas_low_latency']", self.script)
-        self.assertIn("const baseNames=qualityVideoMode()==='alas' ? ALAS_PROFILE_NAMES : NORMAL_PROFILE_NAMES", self.script)
-        self.assertIn("return baseNames.slice()", self.script)
+        self.assertIn("return NORMAL_PROFILE_NAMES.slice()", self.script)
+        self.assertNotIn("ALAS_PROFILE_NAMES", self.script)
+        self.assertNotIn("qualityVideoMode", self.script)
         profile_order = self.script[self.script.index("function qualityProfileOrder()"):self.script.index("function qualityProfileLabel")]
         self.assertNotIn("Object.keys(profiles)", profile_order)
         self.assertEqual(self.template.count('data-profile="'), 0)
-        self.assertIn('"video_mode": user.video_mode', self.template)
-        self.assertIn("(bootstrap.user && bootstrap.user.video_mode)", self.script)
+        self.assertNotIn('"video_mode": user.video_mode', self.template)
         self.assertIn("btn.disabled = !ready", self.script)
         self.assertIn("select.disabled = !ready", self.script)
-        self.assertIn('id="qualityModeNotice"', self.template)
+        self.assertNotIn('id="qualityModeNotice"', self.template)
 
 
 if __name__ == "__main__":

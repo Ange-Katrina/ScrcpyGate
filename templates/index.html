@@ -188,7 +188,6 @@
         <span>投屏画质</span>
         <span class="setting-group-help">应用后会重启投屏流</span>
       </div>
-      <div id="qualityModeNotice" class="quality-mode-notice" role="status" hidden></div>
       <div class="quality-grid" id="qualityProfiles" aria-busy="true">
         <label class="wide" for="qualityStreamMode">scrcpy 流模式
           <select id="qualityStreamMode">
@@ -200,7 +199,7 @@
       </div>
       <div id="qualityStatus" class="quality-status" role="status" aria-live="polite"></div>
     </div>
-    <p class="quality-note">投屏中点击预设会自动重启投屏流；清晰度显示为 16:9 等效值（长边 1280≈720p），只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+    <p class="quality-note">投屏中点击预设会自动重启投屏流；清晰度显示完整的 16:9 参考尺寸（例如 1280 × 720），只调整 scrcpy 输出上限，不修改设备真实分辨率。</p>
   </section>
 
   <section id="alasTools" class="tools drawer-panel alas-panel" aria-labelledby="alasToolsTitle">
@@ -255,7 +254,7 @@
     <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
   </section>
 </aside>
-<script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin", "video_mode": user.video_mode | default("normal", true)}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=0cc25ef70b95" defer></script>
+<script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
+<script src="/static/js/mirror.js?v=1c5e2d8d9222" defer></script>
 </body>
 </html>

@@ -3,10 +3,18 @@ const csrfToken = bootstrap.csrf_token;
 const currentUsername = bootstrap.user.username;
 const state = { overview:null, users:[], devices:[], permissions:[], logs:[], runtimeLogs:[], video:{}, alas:null };
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
-const ALAS_PROFILE_NAMES = ['alas_smooth','alas_balanced','alas_sharp','alas_low_latency'];
-const ALL_PROFILE_NAMES = NORMAL_PROFILE_NAMES.concat(ALAS_PROFILE_NAMES);
-const profileLabels = {smooth:'\u6d41\u7545', balanced:'\u7a33\u5b9a', sharp:'\u9ad8\u6e05', low_latency:'\u4f4e\u5ef6\u8fdf', alas_smooth:'\u6d41\u7545', alas_balanced:'\u7a33\u5b9a', alas_sharp:'\u9ad8\u6e05', alas_low_latency:'\u4f4e\u5ef6\u8fdf'};
-const profileHints = {smooth:'\u6700\u4f4e\u4e0a\u884c\u8d1f\u8f7d', balanced:'\u65e5\u5e38\u9ed8\u8ba4', sharp:'\u753b\u9762\u66f4\u6e05\u6670', low_latency:'\u64cd\u4f5c\u4f18\u5148', alas_smooth:'ALAS \u7701\u5e26\u5bbd', alas_balanced:'ALAS \u65e5\u5e38', alas_sharp:'ALAS 720p \u753b\u8d28\u4f18\u5148', alas_low_latency:'ALAS \u64cd\u4f5c\u4f18\u5148'};
+const profileLabels = {smooth:'\u6d41\u7545', balanced:'\u7a33\u5b9a', sharp:'\u9ad8\u6e05', low_latency:'\u4f4e\u5ef6\u8fdf'};
+const profileHints = {smooth:'\u6700\u4f4e\u4e0a\u884c\u8d1f\u8f7d', balanced:'\u65e5\u5e38\u9ed8\u8ba4', sharp:'\u753b\u9762\u66f4\u6e05\u6670', low_latency:'\u64cd\u4f5c\u4f18\u5148'};
+const STANDARD_OUTPUT_SIZES = Object.freeze([
+  {maxSize:854,width:854,height:480,quality:'480p'},
+  {maxSize:960,width:960,height:540,quality:'540p'},
+  {maxSize:1280,width:1280,height:720,quality:'720p'},
+  {maxSize:1600,width:1600,height:900,quality:'900p'},
+  {maxSize:1920,width:1920,height:1080,quality:'1080p'}
+]);
+const CUSTOM_OUTPUT_SIZE = 'custom';
+const MIN_OUTPUT_SIZE = 854;
+const MAX_OUTPUT_SIZE = 1920;
 const customProfiles = {};
 const $ = (id)=>document.getElementById(id);
 const ADMIN_TAB_KEY = 'scrcpygate:admin:tab';
@@ -423,23 +431,31 @@ function applyDeviceAdbResult(id,result={}){
 }
 function bitrateBpsToMbps(value){ const bps=Number(value); return Number.isFinite(bps) ? bps / 1000000 : ''; }
 function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFinite(mbps) ? Math.round(mbps * 1000000) : 0; }
-function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const labels={640:'360p',854:'480p',960:'540p',1280:'720p',1600:'900p',1920:'1080p',2560:'1440p',3840:'2160p'}; return `${labels[size] || `约 ${Math.round(size*9/16)}p`} · 长边 ${size}px`; }
+function outputSizeMeta(value){ const maxSize=Math.min(MAX_OUTPUT_SIZE,Math.max(MIN_OUTPUT_SIZE,Math.round(Number(value)||MIN_OUTPUT_SIZE))); const standard=STANDARD_OUTPUT_SIZES.find(item=>item.maxSize===maxSize); return standard || {maxSize,width:maxSize,height:Math.round(maxSize*9/16),quality:''}; }
+function outputSizeOptionLabel(item){ return `${item.width} × ${item.height}${item.quality ? `（${item.quality}）` : ''}`; }
+function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const item=outputSizeMeta(size); return `${outputSizeOptionLabel(item)} · 最长边 ${item.maxSize}px`; }
 function presetFieldDisplayValue(field, value){ return field==='video_bit_rate' ? bitrateBpsToMbps(value) : value; }
-function presetInput(profile, field, value){ const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : presetFieldDisplayValue(field, value); input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='0.1'; input.max='100'; input.step='0.05'; input.inputMode='decimal'; } else if(field==='max_size'){ input.min='480'; input.step='1'; input.title=maxSizeQualityLabel(value); input.oninput=()=>{ input.title=maxSizeQualityLabel(input.value); }; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
-function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(input){ input.value=presetFieldDisplayValue(field, value); if(field==='max_size') input.title=maxSizeQualityLabel(value); } }
+function populateOutputSizeSelect(select,value){ clear(select); STANDARD_OUTPUT_SIZES.forEach(item=>{ const option=document.createElement('option'); option.value=String(item.maxSize); option.textContent=outputSizeOptionLabel(item); select.appendChild(option); }); const custom=document.createElement('option'); custom.value=CUSTOM_OUTPUT_SIZE; custom.textContent='自定义尺寸…'; select.appendChild(custom); select.value=STANDARD_OUTPUT_SIZES.some(item=>item.maxSize===Number(value)) ? String(value) : CUSTOM_OUTPUT_SIZE; }
+function syncPresetSizeControl(control,value,forceCustom=false){ const select=control.querySelector('select'); const editor=control.querySelector('.custom-size-editor'); const input=control.querySelector('[data-custom-max-size]'); const output=control.querySelector('output'); const numeric=outputSizeMeta(value).maxSize; const standard=!forceCustom && STANDARD_OUTPUT_SIZES.some(item=>item.maxSize===numeric); select.value=standard ? String(numeric) : CUSTOM_OUTPUT_SIZE; if(!standard || !input.value) input.value=String(numeric); editor.hidden=select.value!==CUSTOM_OUTPUT_SIZE; input.disabled=editor.hidden; output.value=`参考 ${outputSizeOptionLabel(outputSizeMeta(input.value))}`; output.textContent=output.value; }
+function presetSizeControl(profile,value){ const control=document.createElement('div'); control.className='preset-size-control'; const select=document.createElement('select'); select.dataset.presetProfile=profile; select.dataset.presetField='max_size'; select.setAttribute('aria-label',`${profileLabels[profile] || profile}输出尺寸`); populateOutputSizeSelect(select,value); const editor=document.createElement('div'); editor.className='custom-size-editor'; const input=document.createElement('input'); input.type='number'; input.min=String(MIN_OUTPUT_SIZE); input.max=String(MAX_OUTPUT_SIZE); input.step='1'; input.inputMode='numeric'; input.dataset.customMaxSize='1'; input.setAttribute('aria-label',`${profileLabels[profile] || profile}自定义最长边`); const output=document.createElement('output'); output.setAttribute('aria-live','polite'); editor.append(input,output); control.append(select,editor); select.onchange=()=>syncPresetSizeControl(control,select.value===CUSTOM_OUTPUT_SIZE ? input.value : select.value,select.value===CUSTOM_OUTPUT_SIZE); input.oninput=()=>syncPresetSizeControl(control,input.value,true); syncPresetSizeControl(control,value); return control; }
+function presetInput(profile, field, value){ if(field==='max_size') return presetSizeControl(profile,value); const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : presetFieldDisplayValue(field, value); input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='0.1'; input.max='100'; input.step='0.05'; input.inputMode='decimal'; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
+function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(!input) return; if(field==='max_size'){ syncPresetSizeControl(input.closest('.preset-size-control'),value); return; } input.value=presetFieldDisplayValue(field, value); }
 function renderBandwidthActions(recommendations){ const box=$('bandwidthPresetActions'); if(!box) return; clear(box); Object.keys(recommendations).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(name=>box.appendChild(btn(name.toUpperCase(), 'warn', ()=>applyBandwidthRecommendation(name)))); }
 function applyBandwidthRecommendation(name){ const rec=((state.video || {}).bandwidth_recommendations || {})[name]; if(!rec) return; Object.entries(rec).forEach(([profile, values])=>['video_bit_rate','max_size','max_fps'].forEach(field=>setPresetValue(profile, field, values[field]))); show(`${name.toUpperCase()} \u63a8\u8350\u503c\u5df2\u586b\u5165\uff0c\u786e\u8ba4\u540e\u70b9\u4fdd\u5b58`); }
 async function removeCustomProfile(id){
   const confirmed=await confirmDanger({
-    title:'删除专属画质',
-    message:`将专属画质 ${id} 从当前设置中移除。保存画质设置后生效。`,
-    confirmText:'删除画质'
+    title:'删除自定义档位',
+    message:`将自定义档位 ${id} 从当前设置中移除。保存画质设置后生效。`,
+    confirmText:'删除档位'
   });
   if(!confirmed) return;
   delete customProfiles[id];
   renderCustomProfiles();
-  show('专属设定已移除，确认后点保存');
+  show('自定义档位已移除，确认后点保存');
 }
+function syncCustomProfileSizeEditor(){ const select=$('customProfileSizeSelect'); const input=$('customProfileSize'); const wrap=$('customProfileSizeCustomWrap'); const output=$('customProfileSizeReference'); if(!select || !input || !wrap || !output) return; const custom=select.value===CUSTOM_OUTPUT_SIZE; wrap.hidden=!custom; input.disabled=!custom; if(!custom) input.value=select.value; const raw=Number(input.value); output.value=custom && (!Number.isFinite(raw) || raw<MIN_OUTPUT_SIZE || raw>MAX_OUTPUT_SIZE) ? `请输入 ${MIN_OUTPUT_SIZE}–${MAX_OUTPUT_SIZE}` : `参考 ${outputSizeOptionLabel(outputSizeMeta(input.value))}`; output.textContent=output.value; }
+function setCustomProfileSize(value){ const select=$('customProfileSizeSelect'); const input=$('customProfileSize'); if(!select || !input) return; const item=outputSizeMeta(value); const standard=STANDARD_OUTPUT_SIZES.some(option=>option.maxSize===Number(value)); select.value=standard ? String(item.maxSize) : CUSTOM_OUTPUT_SIZE; input.value=String(item.maxSize); syncCustomProfileSizeEditor(); }
+function customProfileSizeValue(){ const select=$('customProfileSizeSelect'); const input=$('customProfileSize'); return outputSizeMeta(select && select.value!==CUSTOM_OUTPUT_SIZE ? select.value : input && input.value).maxSize; }
 function renderCustomProfiles(){
   const rows=$('customProfileRows');
   if(!rows) return;
@@ -455,7 +471,7 @@ function renderCustomProfiles(){
         $('customProfileId').value=id;
         $('customProfileLabel').value=profile.label || id;
         $('customProfileBitrate').value=bitrateBpsToMbps(profile.video_bit_rate || 900000);
-        $('customProfileSize').value=profile.max_size || 960;
+        setCustomProfileSize(profile.max_size || 960);
         $('customProfileFps').value=profile.max_fps || 24;
       }),
       btn('删除','danger',()=>removeCustomProfile(id))
@@ -492,13 +508,10 @@ function renderVideo(){
   if(rows){
     clear(rows);
     const profiles=data.profiles || {};
-    ALL_PROFILE_NAMES.forEach(name=>{
+    NORMAL_PROFILE_NAMES.forEach(name=>{
       const profile=profiles[name] || {};
       const tr=document.createElement('tr');
-      const profileGroup=name.startsWith('alas_') ? 'alas' : 'normal';
-      tr.dataset.profileGroup=profileGroup;
-      const group=profileGroup==='alas' ? 'ALAS · ' : '普通 · ';
-      tr.append(td(`${group}${labels[name] || profileLabels[name] || name}`));
+      tr.append(td(labels[name] || profileLabels[name] || name));
       ['video_bit_rate','max_size','max_fps'].forEach(field=>{
         const cell=document.createElement('td');
         cell.appendChild(presetInput(name, field, profile[field]));
@@ -540,7 +553,6 @@ function clearUserForm(){
   $('newUsername').value='';
   $('newPassword').value='';
   $('newRole').value='user';
-  $('newVideoMode').value='normal';
   $('userDrawerTitle').textContent='新建用户';
   $('userDrawerContext').textContent='创建新的后台账户并选择角色';
 }
@@ -552,13 +564,11 @@ function editUser(user){
   $('newUsername').value=user.username;
   $('newPassword').value='';
   $('newRole').value=user.role;
-  $('newVideoMode').value=user.video_mode || 'normal';
   $('userDrawerTitle').textContent='编辑用户';
   $('userDrawerContext').textContent=`正在编辑 ${user.username}，留空密码将保留原密码`;
   openEditorDrawer('user', document.activeElement);
 }
 function accessRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
-function videoModeLabel(mode){ return mode==='alas'?'ALAS 专属':'普通画质'; }
 function appendTableEmpty(rows, columns, message){
   const row=document.createElement('tr');
   row.className='access-empty-row';
@@ -583,7 +593,7 @@ function renderUsers(){
   clear(rows);
   pageUsers.forEach(user=>{
     const tr=document.createElement('tr');
-    tr.append(td(user.username), td(accessRoleLabel(user.role)), td(videoModeLabel(user.video_mode)), td(user.created_at));
+    tr.append(td(user.username), td(accessRoleLabel(user.role)), td(user.created_at));
     const actions=document.createElement('td');
     actions.className='actions';
     actions.append(btn('编辑','',()=>editUser(user)));
@@ -591,7 +601,7 @@ function renderUsers(){
     tr.appendChild(actions);
     rows.appendChild(tr);
   });
-  if(!pageUsers.length) appendTableEmpty(rows,5,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
+  if(!pageUsers.length) appendTableEmpty(rows,4,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
   $('userResultCount').textContent=filtered.length===state.users.length ? `${filtered.length} 位` : `${filtered.length} / ${state.users.length} 位`;
   $('userPageStatus').textContent=`第 ${userAccountPage} / ${pageCount} 页`;
   $('userPagePrevious').disabled=userAccountPage<=1;
@@ -1675,7 +1685,7 @@ async function refreshDomains(...names){
   results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${refresh[index]} 刷新失败`); });
 }
 async function saveUser(){
-  await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value, video_mode:$('newVideoMode').value}});
+  await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value}});
   show('用户已保存');
   closeEditorDrawer('user');
   await refreshDomains('overview','users','permissions','alas');
@@ -1757,8 +1767,8 @@ async function savePermission(){
   if(failed.length) throw new Error(`${failed.length} 台设备权限保存失败，已重新读取服务器状态`);
   show(`已保存 ${changes.length} 台设备的权限`);
 }
-function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; presets[name]=presets[name] || {}; presets[name][field]=field==='video_bit_rate' ? bitrateMbpsToBps(input.value) : Number(input.value); }); return presets; }
-function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(ALL_PROFILE_NAMES.concat(['custom','auto']).includes(id)) return show('这个 ID 是保留名称'); customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:Number($('customProfileSize').value || 960), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('专属设定已加入，确认后点保存'); }
+function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; let value=input.value; if(field==='video_bit_rate') value=bitrateMbpsToBps(value); else if(field==='max_size' && value===CUSTOM_OUTPUT_SIZE) value=outputSizeMeta(input.closest('.preset-size-control').querySelector('[data-custom-max-size]').value).maxSize; else value=Number(value); presets[name]=presets[name] || {}; presets[name][field]=value; }); return presets; }
+function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(NORMAL_PROFILE_NAMES.concat(['custom','auto']).includes(id) || id.startsWith('alas_')) return show('这个 ID 是保留名称'); const sizeInput=$('customProfileSize'); if($('customProfileSizeSelect').value===CUSTOM_OUTPUT_SIZE && !sizeInput.checkValidity()){ sizeInput.reportValidity(); return show(`自定义最长边必须在 ${MIN_OUTPUT_SIZE}–${MAX_OUTPUT_SIZE} 之间`); } customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:customProfileSizeValue(), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('自定义档位已加入，确认后点保存'); }
 async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
 async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','alas'); }
 async function reloadAlas(){
@@ -2031,9 +2041,11 @@ function initializeConfirmDialog(){
     restoreConfirmationFocus(pending.trigger);
   });
 }
+function initializeVideoSizeControls(){ const select=$('customProfileSizeSelect'); const input=$('customProfileSize'); if(select) select.onchange=syncCustomProfileSizeEditor; if(input) input.oninput=syncCustomProfileSizeEditor; syncCustomProfileSizeEditor(); }
 initializeAdminNavigation();
 initializeEditorDrawers();
 initializeConfirmDialog();
+initializeVideoSizeControls();
 initializeTabs();
 initializeAccessWorkspace();
 initializeAlasWorkspace();

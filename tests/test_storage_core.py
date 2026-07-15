@@ -132,7 +132,7 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual((int(settings["video_bit_rate"]), int(settings["max_size"]), int(settings["max_fps"])), expected["sharp"])
         self.assertEqual(storage.get_user_video_preference("admin")["max_size"], 1280)
         manual = storage.get_user_video_preference("manual")
-        self.assertEqual((manual["profile"], manual["video_bit_rate"], manual["max_size"]), ("custom", 1100000, 720))
+        self.assertEqual((manual["profile"], manual["video_bit_rate"], manual["max_size"]), ("custom", 1100000, 854))
         self.assertEqual(settings["video_quality_migration_version"], storage.VIDEO_QUALITY_MIGRATION_VERSION)
 
     def test_quality_migration_requires_a_complete_known_matrix_and_never_downgrades_marker(self):
@@ -151,9 +151,9 @@ class StorageCoreTests(unittest.TestCase):
         settings = storage.get_settings()
         self.assertEqual(
             tuple(int(settings[f"video_preset_smooth_{field}"]) for field in ("video_bit_rate", "max_size", "max_fps")),
-            (450000, 720, 20),
+            (450000, 854, 20),
         )
-        self.assertEqual(settings["video_custom_profiles"], custom_json)
+        self.assertEqual(json.loads(settings["video_custom_profiles"])["manual"]["max_size"], 854)
 
         legacy = {
             "smooth": (450000, 720, 20),
@@ -164,15 +164,15 @@ class StorageCoreTests(unittest.TestCase):
         for profile, values in legacy.items():
             for field, value in zip(("video_bit_rate", "max_size", "max_fps"), values):
                 storage.set_setting(f"video_preset_{profile}_{field}", str(value))
-        storage.set_setting("video_quality_migration_version", "3")
+        storage.set_setting("video_quality_migration_version", "4")
 
         storage.init_db()
 
         settings = storage.get_settings()
-        self.assertEqual(settings["video_quality_migration_version"], "3")
+        self.assertEqual(settings["video_quality_migration_version"], "4")
         self.assertEqual(int(settings["video_preset_sharp_video_bit_rate"]), 1100000)
 
-    def test_legacy_env_video_values_are_imported_before_quality_marker(self):
+    def test_legacy_env_video_values_are_normalized_after_every_import(self):
         (self.tmp / ".env").write_text(
             "VIDEO_BIT_RATE=650000\nMAX_SIZE=720\nMAX_FPS=24\n",
             encoding="utf-8",
@@ -180,24 +180,93 @@ class StorageCoreTests(unittest.TestCase):
         storage = load_storage(self.tmp)
 
         storage.init_db()
+        storage.init_db()
 
         settings = storage.get_settings()
-        self.assertEqual((settings["video_bit_rate"], settings["max_size"], settings["max_fps"]), ("650000", "720", "24"))
+        self.assertEqual((settings["video_bit_rate"], settings["max_size"], settings["max_fps"]), ("650000", "854", "24"))
         self.assertEqual(settings["video_quality_migration_version"], storage.VIDEO_QUALITY_MIGRATION_VERSION)
 
-    def test_user_video_mode_is_validated_and_preserved_when_omitted(self):
+    def test_invalid_text_video_sizes_are_repaired_idempotently(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AliceInvalidSize123", "user")
+        storage.set_user_video_preference(
+            "alice",
+            {"profile": "balanced", "adaptive": False, "video_bit_rate": 2400000, "max_size": 1280, "max_fps": 24, "scrcpy_stream_mode": "raw"},
+        )
+        storage.set_setting("max_size", "not-a-number")
+        storage.set_setting("video_preset_smooth_max_size", "not-a-number")
+        storage.set_setting(
+            "video_custom_profiles",
+            '{"office":{"label":"Office","video_bit_rate":1800000,"max_size":"not-a-number","max_fps":24}}',
+        )
+        with storage.db_connect() as conn:
+            conn.execute("UPDATE user_video_preferences SET max_size='not-a-number' WHERE username='alice'")
+            conn.commit()
+
+        storage.init_db()
+        storage.init_db()
+
+        settings = storage.get_settings()
+        self.assertEqual(settings["max_size"], "1280")
+        self.assertEqual(settings["video_preset_smooth_max_size"], "854")
+        self.assertEqual(json.loads(settings["video_custom_profiles"])["office"]["max_size"], 1280)
+        self.assertEqual(storage.get_user_video_preference("alice")["max_size"], 1280)
+
+    def test_v2_known_matrix_with_invalid_text_sizes_does_not_abort_migration(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("alice", "AliceLegacySize123", "user")
+        legacy = {
+            "smooth": (450000, 720, 20),
+            "balanced": (650000, 720, 24),
+            "sharp": (1100000, 720, 24),
+            "low_latency": (750000, 720, 30),
+        }
+        for profile, values in legacy.items():
+            for field, value in zip(("video_bit_rate", "max_size", "max_fps"), values):
+                storage.set_setting(f"video_preset_{profile}_{field}", str(value))
+        storage.set_setting("video_profile", "sharp")
+        storage.set_setting("video_bit_rate", "1100000")
+        storage.set_setting("max_size", "not-a-number")
+        storage.set_setting("max_fps", "24")
+        storage.set_setting("video_quality_migration_version", "2")
+        storage.set_user_video_preference(
+            "alice",
+            {"profile": "sharp", "adaptive": False, "video_bit_rate": 1100000, "max_size": 1280, "max_fps": 24, "scrcpy_stream_mode": "raw"},
+        )
+        with storage.db_connect() as conn:
+            conn.execute("UPDATE user_video_preferences SET max_size='not-a-number' WHERE username='alice'")
+            conn.commit()
+
+        storage.init_db()
+
+        settings = storage.get_settings()
+        self.assertEqual(settings["video_quality_migration_version"], "3")
+        self.assertEqual(settings["max_size"], "1280")
+        self.assertEqual(settings["video_preset_sharp_max_size"], "1280")
+        self.assertEqual(storage.get_user_video_preference("alice")["max_size"], 1280)
+
+    def test_legacy_alas_video_mode_and_profile_are_normalized(self):
         storage = load_storage(self.tmp)
         storage.init_db()
         storage.upsert_user("alice", "AliceVideoMode123", "user", "alas")
+        storage.set_user_video_preference(
+            "alice",
+            {"profile": "alas_sharp", "adaptive": False, "video_bit_rate": 4000000, "max_size": 1280, "max_fps": 30, "scrcpy_stream_mode": "raw"},
+        )
+        with storage.db_connect() as conn:
+            conn.execute("UPDATE users SET video_mode='alas' WHERE username='alice'")
+            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('video_preset_alas_sharp_max_size','1280')")
+            conn.commit()
 
-        self.assertEqual(storage.get_user("alice")["video_mode"], "alas")
-        self.assertEqual(next(user for user in storage.list_users() if user["username"] == "alice")["video_mode"], "alas")
-        storage.upsert_user("alice", None, "user")
-        self.assertEqual(storage.get_user("alice")["video_mode"], "alas")
-        storage.upsert_user("alice", None, "user", "normal")
+        storage.init_db()
+
         self.assertEqual(storage.get_user("alice")["video_mode"], "normal")
-        with self.assertRaisesRegex(ValueError, "invalid_video_mode"):
-            storage.upsert_user("alice", None, "user", "invalid")
+        self.assertEqual(next(user for user in storage.list_users() if user["username"] == "alice")["video_mode"], "normal")
+        preference = storage.get_user_video_preference("alice")
+        self.assertEqual((preference["profile"], preference["max_size"]), ("sharp", 1920))
+        self.assertEqual(storage.get_setting("video_preset_alas_sharp_max_size"), "1280")
 
     def test_legacy_plaintext_password_is_hashed_before_migration(self):
         (self.tmp / "users.json").write_text(json.dumps({

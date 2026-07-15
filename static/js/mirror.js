@@ -199,8 +199,7 @@ function socketLive(ws){
   return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
 }
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
-const ALAS_PROFILE_NAMES = ['alas_smooth','alas_balanced','alas_sharp','alas_low_latency'];
-const BUILTIN_PROFILE_LABELS = {smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟', alas_smooth:'流畅', alas_balanced:'稳定', alas_sharp:'高清', alas_low_latency:'低延迟'};
+const BUILTIN_PROFILE_LABELS = {smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'};
 const ADB_STATE_LABELS = {online:'在线', offline:'离线', unauthorized:'未授权', reconnecting:'重连中', unknown:'未知'};
 const STREAM_HEALTH_LABELS = {healthy:'正常', idle:'空闲', starting:'启动中', config:'等待配置', invalid_h264:'视频异常', adb_failed:'ADB 失败', failed:'失败', stopped:'已停止', unknown:'未知'};
 const ALAS_STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', disabled:'服务未启用', disconnected:'未连接', error:'异常', unavailable:'不可达', unbound:'未授权', invalid_config:'配置无效', unknown:'未知'};
@@ -211,7 +210,7 @@ function labelFrom(map, value, fallback){
 function adbStateLabel(value){ return labelFrom(ADB_STATE_LABELS, value, '未知'); }
 function streamModeLabel(mode){ return ({raw:'原始流 raw', protocol:'协议流 protocol', legacy:'诊断 legacy'}[mode]) || mode; }
 function streamModeShortLabel(mode){ return ({raw:'原始流', protocol:'协议流', legacy:'诊断流', none:'无'}[mode]) || mode || '未知'; }
-function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const labels={640:'360p',854:'480p',960:'540p',1280:'720p',1600:'900p',1920:'1080p',2560:'1440p',3840:'2160p'}; return `${labels[size] || `约 ${Math.round(size*9/16)}p`}（长边 ${size}px）`; }
+function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const height=Math.round(size*9/16); const labels={854:'480p',960:'540p',1280:'720p',1600:'900p',1920:'1080p'}; return `${size} × ${height}${labels[size] ? `（${labels[size]}）` : ''}`; }
 function streamHealthLabel(value){ return labelFrom(STREAM_HEALTH_LABELS, value, '未知'); }
 function alasStatusLabel(value){ return labelFrom(ALAS_STATUS_LABELS, value, '未知'); }
 function qualitySummary(){
@@ -223,7 +222,6 @@ function enabledStreamModes(){
   const modes = state.videoPrefs && state.videoPrefs.enabled_stream_modes;
   return Array.isArray(modes) && modes.length ? modes : ['raw'];
 }
-function qualityVideoMode(){ const mode=(state.videoPrefs && state.videoPrefs.video_mode) || (state.user && state.user.video_mode) || (bootstrap.user && bootstrap.user.video_mode); return mode === 'alas' ? 'alas' : 'normal'; }
 function renderQualityStreamMode(selected){
   const select = $('qualityStreamMode');
   if (!select) return;
@@ -242,10 +240,9 @@ function renderQualityStreamMode(selected){
   select.value = modes.includes(selected) ? selected : modes[0];
 }
 function qualityPayload(){
-  const profile = state.qualityProfile || (qualityVideoMode()==='alas' ? 'alas_balanced' : 'balanced');
+  const profile = state.qualityProfile || 'balanced';
   const presets = state.videoPrefs && state.videoPrefs.profiles;
-  const fallbackProfile=qualityVideoMode()==='alas' ? 'alas_balanced' : 'balanced';
-  const preset = (presets && presets[profile]) || (presets && presets[fallbackProfile]) || {video_bit_rate:2400000, max_size:1280, max_fps:24};
+  const preset = (presets && presets[profile]) || (presets && presets.balanced) || {video_bit_rate:2400000, max_size:1280, max_fps:24};
   const modes = enabledStreamModes();
   return {
     profile,
@@ -257,16 +254,14 @@ function qualityPayload(){
   };
 }
 function applyQualityToForm(options){
-  const fallbackProfile=qualityVideoMode()==='alas' ? 'alas_balanced' : 'balanced';
-  const q = options || (state.videoPrefs && state.videoPrefs.effective) || {profile:fallbackProfile, adaptive:false, video_bit_rate:2400000, max_size:1280, max_fps:24};
+  const q = options || (state.videoPrefs && state.videoPrefs.effective) || {profile:'balanced', adaptive:false, video_bit_rate:2400000, max_size:1280, max_fps:24};
   const profiles = (state.videoPrefs && state.videoPrefs.profiles) || {};
-  state.qualityProfile = profiles[q.profile] ? q.profile : fallbackProfile;
+  state.qualityProfile = profiles[q.profile] ? q.profile : 'balanced';
   renderQualityStreamMode(q.scrcpy_stream_mode || 'raw');
   renderQualityButtons();
 }
 function qualityProfileOrder(){
-  const baseNames=qualityVideoMode()==='alas' ? ALAS_PROFILE_NAMES : NORMAL_PROFILE_NAMES;
-  return baseNames.slice();
+  return NORMAL_PROFILE_NAMES.slice();
 }
 function qualityProfileLabel(profile){
   const labels = (state.videoPrefs && state.videoPrefs.profile_labels) || {};
@@ -312,8 +307,6 @@ function renderQualityButtons(){
   const ready=qualityProfileOrder().every(name=>profiles[name]);
   const grid=$('qualityProfiles');
   if(grid) grid.setAttribute('aria-busy', ready ? 'false' : 'true');
-  const notice=$('qualityModeNotice');
-  if(notice){ notice.hidden=qualityVideoMode()!=='alas'; notice.textContent=qualityVideoMode()==='alas'?'当前账户使用 ALAS 专属画质；四档均由管理员维护，最高 720p。':''; }
   document.querySelectorAll('[data-profile]').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile);
     btn.disabled = !ready || !!state.qualityApplying || actionBusy('quality');

@@ -189,7 +189,7 @@ class AuthRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_admin_assigns_alas_video_mode_and_backend_enforces_720p_profiles(self):
+    def test_all_users_receive_the_same_four_profiles_and_legacy_mode_is_ignored(self):
         admin_session = self.storage.create_session("admin")
         self.client.cookies.set("wsid", admin_session["sid"])
         created = self.client.put(
@@ -200,47 +200,38 @@ class AuthRouteTests(unittest.TestCase):
 
         self.assertEqual(created.status_code, 200)
         alice_row = next(user for user in created.json()["users"] if user["username"] == "alice")
-        self.assertEqual(alice_row["video_mode"], "alas")
+        self.assertEqual(alice_row["video_mode"], "normal")
 
         alice_session = self.storage.create_session("alice")
         self.client.cookies.clear()
         self.client.cookies.set("wsid", alice_session["sid"])
-        alas_response = self.client.get("/api/video/preferences")
-        self.assertEqual(alas_response.status_code, 200)
-        alas_data = alas_response.json()
-        self.assertEqual(alas_data["video_mode"], "alas")
-        self.assertEqual(set(alas_data["profiles"]), {"alas_smooth", "alas_balanced", "alas_sharp", "alas_low_latency"})
-        self.assertTrue(all(profile["max_size"] <= 1280 for profile in alas_data["profiles"].values()))
-
-        forced = self.client.put(
-            "/api/video/preferences",
-            headers={"x-csrf-token": alice_session["csrf_token"]},
-            json={"profile": "sharp", "video_bit_rate": 100000000, "max_size": 8192, "max_fps": 240},
-        )
-        self.assertEqual(forced.status_code, 200)
-        self.assertEqual(forced.json()["effective"]["profile"], "alas_balanced")
-        self.assertEqual(forced.json()["effective"]["max_size"], 1280)
+        preferences_response = self.client.get("/api/video/preferences")
+        self.assertEqual(preferences_response.status_code, 200)
+        data = preferences_response.json()
+        self.assertEqual(data["video_mode"], "normal")
+        self.assertEqual(set(data["profiles"]), {"smooth", "balanced", "sharp", "low_latency"})
+        self.assertEqual(data["profiles"]["smooth"]["max_size"], 854)
+        self.assertEqual(data["profiles"]["sharp"]["max_size"], 1920)
 
         selected = self.client.put(
             "/api/video/preferences",
             headers={"x-csrf-token": alice_session["csrf_token"]},
-            json={"profile": "alas_sharp", "video_bit_rate": 100000000, "max_size": 8192, "max_fps": 240},
+            json={"profile": "alas_sharp"},
         )
         self.assertEqual(selected.status_code, 200)
-        self.assertEqual(selected.json()["effective"]["profile"], "alas_sharp")
-        self.assertEqual(selected.json()["effective"]["max_size"], 1280)
+        self.assertEqual(selected.json()["effective"]["profile"], "sharp")
+        self.assertEqual(selected.json()["effective"]["max_size"], 1920)
 
         self.storage.set_setting(
             "video_custom_profiles",
             '{"office":{"label":"Office","video_bit_rate":1800000,"max_size":960,"max_fps":24}}',
         )
-        self.storage.upsert_user("alice", None, "user", "normal")
         normal_data = self.client.get("/api/video/preferences").json()
         self.assertEqual(normal_data["video_mode"], "normal")
         self.assertIn("office", normal_data["profiles"])
         self.assertFalse(any(name.startswith("alas_") for name in normal_data["profiles"]))
 
-    def test_admin_user_route_rejects_invalid_video_mode(self):
+    def test_admin_user_route_ignores_obsolete_video_mode_values(self):
         session = self.storage.create_session("admin")
         self.client.cookies.set("wsid", session["sid"])
 
@@ -250,10 +241,11 @@ class AuthRouteTests(unittest.TestCase):
             json={"username": "alice", "password": "AlicePassword123", "role": "user", "video_mode": "invalid"},
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "invalid_video_mode")
+        self.assertEqual(response.status_code, 200)
+        alice = next(user for user in response.json()["users"] if user["username"] == "alice")
+        self.assertEqual(alice["video_mode"], "normal")
 
-    def test_admin_cannot_raise_alas_profile_above_720p(self):
+    def test_admin_video_rejects_output_sizes_outside_480p_to_1080p(self):
         session = self.storage.create_session("admin")
         self.client.cookies.set("wsid", session["sid"])
 
@@ -262,9 +254,9 @@ class AuthRouteTests(unittest.TestCase):
             headers={"x-csrf-token": session["csrf_token"]},
             json={
                 "presets": {
-                    "alas_sharp": {
+                    "sharp": {
                         "video_bit_rate": 6000000,
-                        "max_size": 1920,
+                        "max_size": 2560,
                         "max_fps": 30,
                     }
                 }
@@ -272,7 +264,7 @@ class AuthRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "alas_sharp max_size must be between 480 and 1280")
+        self.assertIn("max_size", response.json()["detail"])
 
     def test_admin_device_save_returns_fresh_adb_status(self):
         session = self.storage.create_session("admin")

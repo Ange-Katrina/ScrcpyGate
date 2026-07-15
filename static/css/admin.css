@@ -781,13 +781,39 @@ td.actions {
   min-width: 152px;
 }
 
-[data-table="video-presets"] tr[data-profile-group="normal"] + tr[data-profile-group="alas"] td {
-  border-top: 2px solid var(--ui-color-border-strong);
+[data-table="video-presets"] th:nth-child(3),
+[data-table="video-presets"] td:nth-child(3) {
+  min-width: 270px;
 }
 
-[data-table="video-presets"] tr[data-profile-group="alas"] td:first-child {
-  color: var(--ui-color-info);
-  font-weight: 600;
+.preset-size-control {
+  display: grid;
+  gap: var(--ui-space-2);
+  min-width: 240px;
+}
+
+.custom-size-editor {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.72fr) minmax(112px, 1fr);
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.custom-size-editor label {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.custom-size-editor output {
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.custom-profile-size-field > .custom-size-editor {
+  margin-top: var(--ui-space-2);
 }
 
 .access-view-tabs {
@@ -2321,15 +2347,6 @@ td.actions {
     overflow-wrap: anywhere;
   }
 
-  [data-table="video-presets"] tr[data-profile-group="normal"] + tr[data-profile-group="alas"] {
-    border-top-width: 2px;
-    border-top-color: var(--ui-color-border-strong);
-  }
-
-  [data-table="video-presets"] tr[data-profile-group="normal"] + tr[data-profile-group="alas"] td {
-    border-top: 0;
-  }
-
   .responsive-table td::before {
     content: attr(data-label);
     color: var(--ui-color-text-muted);
@@ -2355,24 +2372,29 @@ td.actions {
     min-width: 0;
   }
 
+  .responsive-table .preset-size-control {
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+  }
+
   [data-table="users"] td:nth-child(1):not([data-label])::before { content: "用户名"; }
   [data-table="users"] td:nth-child(2):not([data-label])::before { content: "角色"; }
-  [data-table="users"] td:nth-child(3):not([data-label])::before { content: "画质类型"; }
-  [data-table="users"] td:nth-child(4):not([data-label])::before { content: "创建时间"; }
-  [data-table="users"] td:nth-child(5):not([data-label])::before { content: "操作"; }
+  [data-table="users"] td:nth-child(3):not([data-label])::before { content: "创建时间"; }
+  [data-table="users"] td:nth-child(4):not([data-label])::before { content: "操作"; }
   [data-table="permissions"] td:nth-child(1):not([data-label])::before { content: "用户"; }
   [data-table="permissions"] td:nth-child(2):not([data-label])::before { content: "设备"; }
   [data-table="permissions"] td:nth-child(3):not([data-label])::before { content: "查看"; }
   [data-table="permissions"] td:nth-child(4):not([data-label])::before { content: "控制"; }
   [data-table="video-presets"] td:nth-child(1):not([data-label])::before { content: "预设"; }
   [data-table="video-presets"] td:nth-child(2):not([data-label])::before { content: "码率 Mbps"; }
-  [data-table="video-presets"] td:nth-child(3):not([data-label])::before { content: "最长边 px"; }
+  [data-table="video-presets"] td:nth-child(3):not([data-label])::before { content: "输出尺寸"; }
   [data-table="video-presets"] td:nth-child(4):not([data-label])::before { content: "帧率"; }
   [data-table="video-presets"] td:nth-child(5):not([data-label])::before { content: "建议"; }
   [data-table="custom-profiles"] td:nth-child(1):not([data-label])::before { content: "ID"; }
   [data-table="custom-profiles"] td:nth-child(2):not([data-label])::before { content: "名称"; }
   [data-table="custom-profiles"] td:nth-child(3):not([data-label])::before { content: "码率 Mbps"; }
-  [data-table="custom-profiles"] td:nth-child(4):not([data-label])::before { content: "最长边"; }
+  [data-table="custom-profiles"] td:nth-child(4):not([data-label])::before { content: "输出尺寸"; }
   [data-table="custom-profiles"] td:nth-child(5):not([data-label])::before { content: "帧率"; }
   [data-table="alas-bindings"] td:nth-child(1):not([data-label])::before { content: "用户"; }
   [data-table="alas-bindings"] td:nth-child(2):not([data-label])::before { content: "角色"; }

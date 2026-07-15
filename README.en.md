@@ -23,7 +23,7 @@ ScrcpyGate brings the video and control capabilities of [scrcpy](https://github.
 - Per-user device access; real ADB endpoints are hidden from regular users.
 - Multiple viewers with one active controller at a time.
 - Network ADB auto-connect, health checks, and reconnect.
-- Separate normal and ALAS quality profiles, assigned per user and maintained by administrators.
+- Four shared quality profiles—Smooth, Balanced, Sharp, and Low latency—maintained centrally by administrators.
 - Optional [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre) integration: a user may own multiple configurations, while each configuration has at most one owner.
 - Dark, light, and system themes with a responsive administration workspace.
 - Login protection, permission isolation, trusted proxies, and audit logs.
@@ -87,7 +87,7 @@ The one-off root command only grants the container's `app` user write access to 
 
 1. Sign in as `admin` and open the administration workspace.
 2. Add a device with a display name and network ADB endpoint, then confirm it is online.
-3. Create regular users and assign device view/control permissions and a quality type.
+3. Create regular users and assign device view/control permissions.
 4. Return to the mirror page, select a device, start mirroring, and acquire control when needed.
 
 Administrators can also tune quality profiles, inspect runtime logs, manage users and devices, and configure the optional ALAS integration.
@@ -125,9 +125,9 @@ All persistent data is stored under `WEB_SCRCPY_DATA_HOST`. Back up that directo
 
 ## Quality and Stream Modes
 
-The mirror page always presents four user-facing profiles: Smooth, Balanced, Sharp, and Low latency. Administrators may assign normal quality or an ALAS-specific profile set capped at 720p, then tune the presets for the server's available upstream bandwidth.
+The mirror page presents the same four profiles to every user: Smooth, Balanced, Sharp, and Low latency. Administrators can tune their bitrate, frame rate, and output size for the server's available upstream bandwidth.
 
-Quality settings only affect the scrcpy output stream; they do not change the Android device or emulator's physical resolution. `max_size` is the longest output edge, so `1280` is approximately 720p for 16:9 content.
+Quality settings only affect the scrcpy output stream; they do not change the Android device or emulator's physical resolution. The administration workspace offers complete reference sizes from `854 × 480` through `1920 × 1080`, plus a custom longest edge within that range; scrcpy preserves the device's aspect ratio.
 
 `raw` is the default and recommended stream mode. `protocol` and `legacy` are intended mainly for compatibility tests and troubleshooting and can be enabled from the administration workspace.
 
