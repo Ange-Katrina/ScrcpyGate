@@ -1,511 +1,161 @@
-﻿# ScrcpyGate
+# ScrcpyGate
 
-English | [简体中文](README.md)
+<p align="center">
+  A multi-user browser gateway for Android mirroring, control, and ALAS management over network ADB.
+</p>
 
-ScrcpyGate is a FastAPI, native WebSocket, and scrcpy based browser gateway for Android screen mirroring and remote control. It is designed for network ADB devices, multi-user viewing, permission control, mobile operation, low upload bandwidth, and reverse-proxy deployments.
+<p align="center">
+  <a href="https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml"><img src="https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml/badge.svg?branch=dev" alt="Builds"></a>
+  <a href="https://github.com/Ange-Katrina/ScrcpyGate/stargazers"><img src="https://img.shields.io/github/stars/Ange-Katrina/ScrcpyGate" alt="GitHub Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Ange-Katrina/ScrcpyGate" alt="Apache-2.0 License"></a>
+</p>
 
-It is not a thin page that simply exposes ADB. It is a lightweight management gateway with login, device authorization, explicit control locks, security boundaries, audit logs, and tunable video quality profiles.
+<p align="center">
+  <a href="README.md">简体中文</a> · English
+</p>
 
-## Table of Contents
+ScrcpyGate brings the video and control capabilities of [scrcpy](https://github.com/Genymobile/scrcpy) to the browser, with accounts, device permissions, an exclusive control lease, quality profiles, runtime status, and audit logs. It is designed for managing Android devices and emulators on a LAN or behind an HTTPS reverse proxy.
 
-- [Use Cases](#use-cases)
-- [Highlights](#highlights)
-- [Architecture](#architecture)
-- [Safety Boundary](#safety-boundary)
-- [Quick Start](#quick-start)
-- [First-Time Setup](#first-time-setup)
-- [Reverse Proxy Deployment](#reverse-proxy-deployment)
-- [Video Quality and Stream Modes](#video-quality-and-stream-modes)
-- [ALAS / Alas-Gyre Overlay](#alas--alas-gyre-overlay)
-- [Common Commands](#common-commands)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Development Checks](#development-checks)
-- [Acknowledgements](#acknowledgements)
-- [License](#license)
+## Features
 
-## Use Cases
-
-ScrcpyGate is useful when you need to:
-
-- remotely access Android emulators over LAN or behind a reverse proxy
-- allow multiple users to watch one device while only one user controls it
-- avoid exposing real ADB addresses and ports to normal users
-- reduce upload bandwidth with low-bitrate and low-output-size presets
-- stop idle mirror sessions automatically to save bandwidth
-- expose ALAS start, stop, and restart controls through your own UI
-- deploy with Docker while keeping audit logs and explicit security settings
-
-It is not focused on:
-
-- plug-and-play USB ADB management
-- WebRTC ultra-low-latency streaming
-- reverse-proxying the original ALAS web UI while hiding its config list
-- changing the real Android device resolution
-
-## Highlights
-
-| Area | Capability |
-| --- | --- |
-| Backend | FastAPI, Uvicorn, native WebSocket |
-| Video | scrcpy H264 output with jMuxer playback |
-| Data | SQLite database under `data/` |
-| Users | Login, admin users, normal users, self-service password change |
-| Devices | Device management, permissions, network ADB auto-connect and heartbeat |
-| Control | Explicit control locks to prevent simultaneous control conflicts |
-| Quality | Smooth, stable, sharp, and low-latency presets with admin tuning |
-| Security | Host, Origin, CSRF, trusted-proxy checks, security response headers |
-| Privacy | Real ADB IP and port hidden from normal user APIs and UI |
-| ALAS | Alas-Gyre Overlay proxy with multi-config single-owner assignment, per-config permissions, and embedded access |
-| Operations | Docker Compose, health check, audit log, runtime log |
-
-## Architecture
-
-```mermaid
-flowchart LR
-    Browser[Browser]
-    Proxy[Reverse Proxy / WAF]
-    App[ScrcpyGate FastAPI]
-    DB[(SQLite data/)]
-    ADB[ADB server]
-    Device[Android device / emulator]
-    Gyre[Alas-Gyre Overlay Runtime]
-    ALAS[ALAS]
-
-    Browser -->|HTTPS / HTTP| Proxy
-    Proxy -->|HTTP / WebSocket| App
-    Browser -. local / direct .-> App
-    App --> DB
-    App -->|adb connect / adb -s| ADB
-    ADB --> Device
-    App -->|scrcpy video / control| Device
-    App -->|optional /api/gyre| Gyre
-    Gyre --> ALAS
-```
-
-Design points:
-
-- Browsers talk to ScrcpyGate, not directly to ADB.
-- Normal users receive public device IDs instead of real ADB addresses.
-- Video and control channels are separated.
-- Multiple browsers can watch the same device; control is governed by a lock.
-- ALAS tokens stay on the backend and are never shown to normal users.
-
-## Safety Boundary
-
-ScrcpyGate only changes the scrcpy output stream. It must not change the real Android device or emulator display configuration.
-
-Do not add runtime paths for:
-
-- `wm size`
-- `wm density`
-- `modifydev`
-- changing `Physical size`
-- changing `Override size`
-
-This is especially important for ALAS setups, where automation often depends on a fixed real emulator resolution such as `1280x720`. The web UI longest-edge limit maps only to scrcpy `max_size`; it does not change the real device resolution. For 16:9 landscape content, `max_size=720` is about `720x405`; `max_size=1280` is the value that corresponds to 720p.
-
-Also note:
-
-- Do not commit `.env`, `data/`, databases, logs, or initial password files.
-- Public deployments should use HTTPS.
-- Set `TRUST_PROXY=true` only when requests really come from a trusted reverse proxy.
-- Set `TRUSTED_PROXY_IPS` to the real source IP or CIDR of that proxy.
-- Do not expose the original ALAS web UI directly to normal users.
+- View and control Android devices from desktop and mobile browsers.
+- Automatically adapt to portrait/landscape changes and recover after stream configuration changes or dropped frames.
+- Per-user device access; real ADB endpoints are hidden from regular users.
+- Multiple viewers with one active controller at a time.
+- Network ADB auto-connect, health checks, heartbeat, and reconnect.
+- Separate normal and ALAS quality profiles, assigned per user and maintained by administrators.
+- Optional [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre) integration: a user may own multiple configurations, while each configuration has at most one owner.
+- Dark, light, and system themes with a responsive administration workspace.
+- Host, Origin, CSRF, trusted-proxy, login rate-limit, and audit-log protection.
 
 ## Quick Start
 
 ### Requirements
 
-- A Linux server with `apt-get`, `apk`, `dnf`, `yum`, `pacman`, or `zypper`
-- Docker and Docker Compose; the guided installer can install missing packages from the system repository
-- An Android device or emulator reachable through network ADB
+- A Linux host.
+- Docker and Docker Compose; the deployment helper can guide their installation when missing.
+- An Android device or emulator reachable through network ADB.
 
-### Use the Deployment Helper (Recommended)
+> The default deployment targets network ADB only. USB ADB requires additional device mappings and host permissions.
+
+### Guided installation (recommended)
 
 ```bash
+git clone --branch dev --single-branch https://github.com/Ange-Katrina/ScrcpyGate.git
+cd ScrcpyGate
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-Running the script in an interactive terminal opens a colored management panel for guided configuration and installation, updates, start/stop/restart, status, logs, configuration changes, and admin password resets. The wizard detects the server's default-route IPv4 address. Leaving the service port empty uses the fixed default port `5000`; enter another port explicitly when needed.
-
-LAN mode can use the detected IP or a manually entered value. Reverse-proxy mode shows an example so the domain field contains only a hostname such as `example.com`, never `http://`, `https://`, a path, or a port. Protocol and external port have separate prompts. The wizard also asks for trusted proxy IPs/CIDRs, optional extra origins, and whether the WAF requires `Origin: null` compatibility. An empty external port means HTTPS `443` or HTTP `80`.
-
-To keep terminal screenshots and installer logs from exposing internal topology, RFC 1918 private addresses are displayed as `<private-ip>` by default while their real detected values are still written to the configuration. Set `SCRCPYGATE_SHOW_PRIVATE_IPS=true` only when local debugging requires the values to be shown.
-
-When changing configuration or using guided configuration and installation, the script performs a soft check for an existing container named `scrcpygate`. If it is running, the script shows its state and asks—with No as the safe default—whether to recreate and restart it. Declining preserves the saved configuration, but the running container keeps its old settings. The Restart menu action recreates the container through Compose so changed port mappings and environment variables take effect.
-
-On its first run, the installer creates a permission-restricted `.env` from `.env.example`. Repeated runs never overwrite an existing database, user, or password, and configuration changes require confirmation. If Docker or Compose is missing, interactive mode shows the detected OS, package manager, and planned command before asking for confirmation. Packages come from the distribution repository; the installer never runs `curl | sh`.
-
-In a non-interactive environment, the script deploys the application with the current configuration but never installs system software implicitly. Use `./deploy.sh --install-deps` or set `SCRCPYGATE_AUTO_INSTALL_DEPS=true` to authorize Docker/Compose installation. Non-root users need working `sudo`; Docker socket permission changes normally require a new login.
-
-On Arch Linux, dependency installation uses `pacman -Syu` to avoid unsupported partial upgrades, so existing system packages may also be updated. Review the command shown by the wizard before confirming.
-
-To customize the port, LAN address, or reverse-proxy settings, prepare the configuration first:
+The deployment menu guides local, LAN, or reverse-proxy setup, including the port, data directory, public hostname, and trusted proxies. In a non-interactive environment, use the following command to deploy with the default configuration and install Docker/Compose if missing:
 
 ```bash
-cp .env.example .env
-# Edit .env, then run ./deploy.sh
+./deploy.sh --install-deps
 ```
 
-Common installer options:
-
-```bash
-./deploy.sh --pull        # Refresh base images and rebuild
-./deploy.sh --skip-build  # Reuse the existing scrcpygate:local image
-./deploy.sh --configure   # Run only the configuration wizard
-./deploy.sh --install-deps # Install missing Docker/Compose, then deploy
-./deploy.sh --status      # Show container status
-./deploy.sh --help
-```
-
-When a new database is created, the installer prints the admin account immediately, so a later health-check failure cannot hide the initial password:
+On a new database, the initial administrator credentials are printed once:
 
 ```text
 username: admin
 password: <auto-generated-password>
 ```
 
-The initial password is shown once and is not stored in plaintext under `data/`. If the data directory already contains an admin account, the installer reports that existing account but never reveals or repeats its password. Interactive installation asks, with No as the default, whether to generate and display a new password immediately. Non-interactive installation never resets an existing password. Installation failures return a non-zero status and include container status and recent logs.
+Save the password immediately. Existing data directories are preserved during later deployments, and old passwords are never printed again.
 
-### Use Docker Compose Manually
+The default local URL is <http://127.0.0.1:5000>.
+
+### Docker Compose
+
+For non-interactive deployment:
 
 ```bash
 cp .env.example .env
+# Edit .env for your deployment
 docker compose build
+docker compose run --rm --no-deps --user 0 scrcpygate chown -R app:app /app/data
 docker compose run --rm --no-deps scrcpygate python -m app.cli bootstrap-admin
 docker compose up -d
 ```
 
-Save the initial password printed by `bootstrap-admin` before starting the service. Do not run `docker compose up` before the first bootstrap, because an automatically generated password would not be displayed. An existing database intentionally prints no password; use the guided reset prompt or `reset-admin` below.
+The one-off root command only grants the container's `app` user write access to the mounted data directory. Save the password printed by `bootstrap-admin`. Compose automatically uses [compose.yaml](compose.yaml) from the repository root.
 
-Resetting the admin password also revokes that account's existing sessions, so every device must sign in again with the new password.
+## First Use
 
-Default URL:
+1. Sign in as `admin` and open the administration workspace.
+2. Add a device with a display name and network ADB endpoint, then confirm it is online.
+3. Create regular users and assign device view/control permissions and a quality type.
+4. Return to the mirror page, select a device, start mirroring, and acquire control when needed.
 
-```text
-http://127.0.0.1:5000
-```
+Administrators can also tune quality profiles, inspect runtime logs, manage users and devices, and configure the optional ALAS integration.
 
-## First-Time Setup
+## Deployment Configuration
 
-1. Log in to the admin panel as `admin`.
-2. Add a device on the Devices page:
-   - Device ID: use an alias such as `emu-1`
-   - Name: the display name shown to users
-   - ADB address: the real connection address, such as `192.0.2.10:30100`
-3. Click Test ADB and confirm the device is online.
-4. Create normal users on the Users page.
-5. Grant each user device view/control permissions.
-6. Choose default quality presets on the Video page.
-7. Return to the mirror page, select a device, and start mirroring.
+Use `./deploy.sh --configure` for most changes. See [.env.example](.env.example) for every supported setting and default. The commonly used values are:
 
-Normal users only see authorized devices. They do not see real ADB addresses.
+| Variable | Purpose |
+| --- | --- |
+| `WEB_SCRCPY_BIND` | Host bind address; defaults to `127.0.0.1`. |
+| `WEB_SCRCPY_PORT` | Web service port; defaults to `5000`. |
+| `WEB_SCRCPY_DATA_HOST` | SQLite, log, and runtime data directory; defaults to `./data`. |
+| `PUBLIC_BASE_URL` | Complete external URL used by clients. |
+| `ALLOWED_HOSTS` | Allowed hostnames or IPs, without scheme or port. |
+| `ALLOWED_ORIGINS` | Complete browser origins allowed to access the service. |
+| `SESSION_COOKIE_SECURE` | Set to `true` for HTTPS deployments. |
+| `TRUST_PROXY` / `TRUSTED_PROXY_IPS` | Enable only behind a trusted proxy and restrict the actual proxy sources. |
 
-## Reverse Proxy Deployment
+Public deployments should use HTTPS, and the reverse proxy must forward both HTTP and WebSocket traffic. Never expose Android ADB ports or the ALAS Runtime directly to the public internet.
 
-When deploying behind HTTPS, a WAF, or a reverse proxy, explicitly configure the public URL, allowed hosts, allowed origins, and trusted proxy source.
+### Data and updates
 
-The recommended path is `./deploy.sh`, then “guided configuration and installation → reverse proxy / HTTPS.” Enter only the hostname for the domain, for example `example.com`; protocol, path, and port do not belong in that field because protocol and external port have separate prompts.
+All persistent data is stored under `WEB_SCRCPY_DATA_HOST`. Back up that directory before upgrades or migration.
 
-Example:
+| Action | Command |
+| --- | --- |
+| Show status | `./deploy.sh --status` |
+| Show recent logs | `./deploy.sh --logs` |
+| Restart the service | `./deploy.sh --restart` |
+| Pull base images and redeploy the current source | `./deploy.sh --pull` |
+| Reset the administrator password | `./deploy.sh --reset-admin` |
+| Show every option | `./deploy.sh --help` |
 
-```bash
-WEB_SCRCPY_BIND=127.0.0.1 \
-PUBLIC_BASE_URL=https://example.com \
-ALLOWED_HOSTS=example.com,127.0.0.1,localhost \
-ALLOWED_ORIGINS=https://example.com \
-SESSION_COOKIE_SECURE=true \
-TRUST_PROXY=true \
-TRUSTED_PROXY_IPS=127.0.0.1 \
-SCRCPY_STREAM_MODE=raw \
-./deploy.sh
-```
+## Quality and Stream Modes
 
-If the reverse proxy runs on another machine, set `TRUSTED_PROXY_IPS` to the source IP used by that proxy when it connects to ScrcpyGate.
+The mirror page always presents four user-facing profiles: Smooth, Balanced, Sharp, and Low latency. Administrators may assign normal quality or an ALAS-specific profile set capped at 720p, then tune the presets for the server's available upstream bandwidth.
 
-For direct LAN access:
+Quality settings only affect the scrcpy output stream; they do not change the Android device or emulator's physical resolution. `max_size` is the longest output edge, so `1280` is approximately 720p for 16:9 content.
 
-```bash
-WEB_SCRCPY_BIND=0.0.0.0 \
-PUBLIC_BASE_URL=http://192.0.2.10:5000 \
-ALLOWED_HOSTS=192.0.2.10,127.0.0.1,localhost \
-ALLOWED_ORIGINS=http://192.0.2.10:5000 \
-SESSION_COOKIE_SECURE=false \
-TRUST_PROXY=false \
-./deploy.sh
-```
+`raw` is the default and recommended stream mode. `protocol` and `legacy` are intended mainly for compatibility tests and troubleshooting and can be enabled from the administration workspace.
 
-Replace the documentation address `192.0.2.10` with your server LAN IP.
+## ALAS Integration
 
-## Video Quality and Stream Modes
+ALAS support requires a running [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre). Configure its Runtime URL and API token in the administration workspace.
 
-Default stream mode:
+- A user may own one or more ALAS configurations.
+- Each ALAS configuration has at most one owner and may remain unassigned.
+- Run, edit, and default-entry permissions are configured per item.
+- Regular users can access only their own configurations; the Runtime URL and token remain server-side.
 
-```env
-SCRCPY_STREAM_MODE=raw
-```
+ScrcpyGate does not run [AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript) itself. It provides a controlled entry point through the Overlay Runtime.
 
-Keep `raw` as the default mode unless you have tested another mode in your environment. `protocol` and `legacy` remain available as optional diagnostic modes and can be enabled from the admin panel.
-
-### Quality Presets
-
-| Preset | Goal | Suggested use |
-| --- | --- | --- |
-| Smooth | Minimum bandwidth pressure | Weak upload bandwidth or mobile networks |
-| Stable | Stability first | Everyday default |
-| Sharp | Clearer image | Better upload bandwidth |
-| Low latency | Faster control response | Frequent tapping or swiping |
-
-Admins can tune each preset:
-
-- bitrate
-- scrcpy longest-edge limit
-- frame rate
-
-Admins can assign each user either the four normal profiles or four ALAS-specific profiles. The mirror page always shows only the selected group: Smooth, Balanced, Sharp, and Low latency. Normal Sharp may reach 1080p, while every ALAS profile is enforced within a `480–1280` longest-edge range and therefore remains capped at about 720p.
-
-The 2/5/10/20 Mbps recommendation buttons update both four-profile groups. Each group contains at least one true 720p option (`max_size=1280`) without forcing all four profiles to 720p. The 2 Mbps tier ranges from 480p to a low-bitrate 720p option; higher normal tiers progressively add 900p and 1080p, while ALAS remains capped at 720p. The values are calibrated against the official scrcpy default, Amazon IVS low-latency recommendations, Zoom bandwidth requirements, and YouTube Live H.264 guidance. The admin UI displays bitrate in Mbps, while the API and database continue to use integer bps values.
-
-These values only affect the scrcpy output stream. Some changes may require restarting the mirror session to fully take effect.
-
-## ALAS / Alas-Gyre Overlay
-
-ALAS control requires Alas-Gyre Overlay Runtime to be installed and running first. ScrcpyGate does not run ALAS directly; it only proxies user actions to the Overlay API.
-
-The admin ALAS page needs:
-
-- Runtime URL, for example `http://127.0.0.1:22267`
-- API Token
-- The Runtime config catalog
-- One-to-many user-to-config ownership, with run, edit, and per-user default permissions
-
-Each normal user can own one or more configs and switch only within that set. A config can belong to exactly one user and must never be assigned to multiple users at the same time. The admin “User authorization” view manages ownership; the owner can inspect status and may run, edit, or use the config by default according to that assignment's permissions. The “Config library” operates the actual Runtime instance and does not create per-user copies. To transfer a config, remove it from the current owner before assigning the same config name to another user. The frontend does not expose other users' ownership records, configs owned by another user, config content, or the Runtime Token.
-
-Related projects:
-
-- [ALAS / AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript)
-- [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre)
-
-## Common Commands
-
-Show containers:
-
-```bash
-docker compose ps
-```
-
-Show logs:
-
-```bash
-docker logs --tail=120 scrcpygate
-```
-
-Stop the service:
-
-```bash
-docker compose down
-```
-
-Refresh base images and redeploy:
-
-```bash
-./deploy.sh --pull
-```
-
-Reset admin:
-
-```bash
-docker compose exec -T scrcpygate python -m app.cli reset-admin
-```
-
-Health check:
-
-```bash
-curl -fsS http://127.0.0.1:5000/healthz
-```
-
-## Configuration
-
-Common environment variables:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `WEB_SCRCPY_BIND` | `127.0.0.1` | Host bind address |
-| `WEB_SCRCPY_PORT` | `5000` | Host port; leaving the wizard prompt empty uses `5000` |
-| `WEB_SCRCPY_DATA_HOST` | `./data` | Host data directory |
-| `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | Public base URL |
-| `SCRCPYGATE_HEALTH_TIMEOUT` | `90` | Installer health-check timeout in seconds (`10–600`) |
-| `ALLOWED_HOSTS` | `127.0.0.1,localhost` | Allowed Host values |
-| `ALLOWED_ORIGINS` | empty | Allowed Origin values |
-| `ALLOW_NULL_ORIGIN` | `false` | Allow `Origin: null` in WAF/proxy deployments |
-| `SESSION_COOKIE_SECURE` | `false` | Send session cookies only over HTTPS |
-| `TRUST_PROXY` | `false` | Trust reverse proxy headers |
-| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | Trusted proxy IPs or CIDRs |
-| `ENABLE_API_DOCS` | `false` | Enable FastAPI `/docs`, `/redoc`, and `/openapi.json` |
-| `MIN_PASSWORD_LENGTH` | `12` | Minimum password length |
-| `PASSWORD_PBKDF2_ITERATIONS` | `310000` | PBKDF2-SHA256 password hash iterations |
-| `LOGIN_RATE_LIMIT_ENABLED` | `true` | Enable login brute-force protection |
-| `LOGIN_RATE_LIMIT_MAX` | `6` | Failed login attempts allowed per window |
-| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | Failed login counting window in seconds |
-| `LOGIN_LOCKOUT_SECONDS` | `600` | Lockout duration after the limit is reached |
-| `ADB_AUTOCONNECT` | `true` | Auto-connect enabled devices on startup |
-| `ADB_HEARTBEAT_INTERVAL` | `15` | ADB heartbeat interval in seconds |
-| `ADB_CONNECT_TIMEOUT` | `8` | ADB connection timeout in seconds |
-| `ADB_RECONNECT_BACKOFF` | `5` | ADB reconnect backoff in seconds |
-| `SCRCPY_STREAM_MODE` | `raw` | Default scrcpy stream mode |
-| `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | Video stream health timeout |
-| `SCRCPY_I_FRAME_INTERVAL` | `1` | Natural Android encoder keyframe interval in seconds |
-| `SCRCPY_SOCKET_READY_TIMEOUT` | `8` | Timeout for the Android-side scrcpy connection handshake |
-| `VIDEO_RESET_COOLDOWN` | `0.75` | Minimum interval between fresh configuration/keyframe requests |
-| `CONTROL_LEASE_VERIFY_INTERVAL` | `0.5` | Control-lock verification interval during high-frequency touch input |
-| `VIDEO_QUEUE_MAXSIZE` | `24` | Per-client video queue hard limit |
-| `VIDEO_QUEUE_SOFT_LIMIT` | `8` | Per-client soft limit; drops stale frames and requests a fresh keyframe |
-| `LOG_LEVEL` | `INFO` | Log level |
-
-See [.env.example](.env.example) for more options.
-
-## Project Layout
-
-```text
-./
-  app/                    FastAPI backend
-  templates/              Plain HTML pages
-  static/                 Frontend JS/CSS assets
-  tests/                  Unit tests
-  adb/                    Android platform-tools compatibility files
-  Dockerfile              Docker image build file
-  compose.yaml            Auto-discovered Docker Compose file
-  deploy.sh               Deployment helper
-  requirements.txt        Production Python dependencies
-  requirements-dev.txt    Development, test, and audit dependencies
-  README.md               Chinese documentation
-  README.en.md            English documentation
-```
-
-## Troubleshooting
-
-### The site shows Forbidden
-
-Common causes:
-
-- `ALLOWED_HOSTS` does not include the current domain or IP
-- `ALLOWED_ORIGINS` does not include the current page origin
-- a reverse proxy or WAF makes browser login requests send `Origin: null`, but `ALLOW_NULL_ORIGIN=true` is not set
-- a reverse proxy sends `X-Forwarded-*` headers but `TRUST_PROXY` and `TRUSTED_PROXY_IPS` are not configured correctly
-
-Check logs:
-
-```bash
-docker logs --tail=120 scrcpygate
-```
-
-Look for `HOST_REJECT`, `ORIGIN_REJECT`, or `PROXY_HEADER_REJECT`.
-
-- `PROXY_HEADER_REJECT remote=...`: add the actual logged `remote` IP (or the smallest necessary CIDR) to `TRUSTED_PROXY_IPS`; do not trust the whole LAN without a reason.
-- `ORIGIN_REJECT origin=null`: only after confirming the WAF or embed flow causes it, set `ALLOW_NULL_ORIGIN=true` and recreate the container.
-- `HOST_REJECT`: verify that the WAF preserves the external Host and that it is present in `ALLOWED_HOSTS`.
-
-### Login returns to the login page
-
-Check:
-
-- whether HTTPS deployments set `SESSION_COOKIE_SECURE=true`
-- whether direct HTTP LAN deployments accidentally set `SESSION_COOKIE_SECURE=true`
-- whether `PUBLIC_BASE_URL`, `ALLOWED_HOSTS`, and `ALLOWED_ORIGINS` match the actual access URL
-
-### Mirror start fails
-
-Check:
-
-- the real ADB address in the admin device form
-- whether Test ADB reports online
-- whether the container can reach the device network
-- whether ADB debugging is authorized on the device
-
-### Black screen or corrupted video
-
-Suggestions:
-
-- use `raw` stream mode by default
-- lower bitrate, output size, and frame rate
-- stop and restart the mirror session
-- check runtime logs for scrcpy and WebSocket errors
-
-### ALAS does not start
-
-Check:
-
-- Alas-Gyre Overlay Runtime is running
-- Runtime URL is reachable from ScrcpyGate
-- API Token matches
-- the user has an ALAS config binding
-
-## Development Checks
-
-Install development and test dependencies:
+## Development
 
 ```bash
 python -m pip install -r requirements-dev.txt
-```
-
-Compile check:
-
-```bash
 python -m compileall -q app tests
-```
-
-Unit tests:
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-```
-
-Audit runtime dependencies:
-
-```bash
-pip-audit -r requirements.txt --progress-spinner off
-```
-
-Project-maintained frontend JavaScript syntax checks:
-
-```bash
-node --check static/js/theme-init.js
-node --check static/js/ui-core.js
-node --check static/js/input.js
-node --check static/js/admin.js
+python -m unittest discover -s tests
 node --check static/js/mirror.js
-node --check static/js/login.js
-node --check static/js/alas-shell.js
+node --check static/js/admin.js
 ```
 
-Resolution safety scan:
-
-```bash
-rg -n "wm size|wm density|modifydev|Physical size|Override size" .
-```
-
-Sensitive data scan example:
-
-```bash
-rg -l --hidden --glob '!.git/**' -- '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .
-```
-
-No output means no high-confidence credential shape was found. The scan prints file names only, never matched contents.
+Use [GitHub Issues](https://github.com/Ange-Katrina/ScrcpyGate/issues) for bug reports and feature requests.
 
 ## Acknowledgements
 
-ScrcpyGate's early direction and parts of its implementation were inspired by the original project [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy). Thanks to that project for the Web-based scrcpy mirroring idea, baseline structure, and practical reference.
-
-Thanks also to these open-source projects:
-
-- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy): Android screen capture and control.
-- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer): H264 remuxing and MSE playback in the browser.
-- [FastAPI](https://github.com/fastapi/fastapi): HTTP and WebSocket backend framework.
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy) — Android mirroring and control.
+- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer) — H.264/MSE playback in the browser.
+- [FastAPI](https://github.com/fastapi/fastapi) — HTTP and WebSocket backend.
+- [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy) — early web mirroring reference.
 
 ## License
 
-Except for separately identified third-party components, ScrcpyGate source code is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
-
-Third-party components and provenance notes are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
+ScrcpyGate is licensed under the [Apache License 2.0](LICENSE). Third-party components and licenses are listed in [THIRD_PARTY.md](THIRD_PARTY.md).

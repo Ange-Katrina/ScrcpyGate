@@ -1,665 +1,161 @@
 # ScrcpyGate
 
-[English](README.en.md) | 简体中文
+<p align="center">
+  面向网络 ADB 设备的多用户浏览器投屏、控制与 ALAS 管理网关。
+</p>
 
-ScrcpyGate 是一个基于 FastAPI、原生 WebSocket 和 scrcpy 的浏览器投屏网关。它面向网络 ADB 设备、多人观看、权限控制、移动端操作、低上行带宽和反向代理部署场景。
+<p align="center">
+  <a href="https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml"><img src="https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml/badge.svg?branch=dev" alt="Builds"></a>
+  <a href="https://github.com/Ange-Katrina/ScrcpyGate/stargazers"><img src="https://img.shields.io/github/stars/Ange-Katrina/ScrcpyGate" alt="GitHub Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Ange-Katrina/ScrcpyGate" alt="Apache-2.0 License"></a>
+</p>
 
-它不是一个公开暴露 ADB 的简单网页外壳，而是一个带登录、设备授权、控制锁、安全边界、审计日志和可调画质策略的轻量管理网关。
+<p align="center">
+  简体中文 · <a href="README.en.md">English</a>
+</p>
 
-## 目录
+ScrcpyGate 将 [scrcpy](https://github.com/Genymobile/scrcpy) 的视频与控制能力安全地提供给浏览器，并增加账户、设备权限、独占控制权、画质预设、运行状态和审计日志。它适合在局域网或 HTTPS 反向代理后集中管理 Android 设备与模拟器。
 
-- [适用场景](#适用场景)
-- [核心特性](#核心特性)
-- [架构概览](#架构概览)
-- [安全边界](#安全边界)
-- [快速开始](#快速开始)
-- [首次配置流程](#首次配置流程)
-- [反向代理部署](#反向代理部署)
-- [画质与流模式](#画质与流模式)
-- [ALAS / Alas-Gyre Overlay](#alas--alas-gyre-overlay)
-- [常用命令](#常用命令)
-- [配置项](#配置项)
-- [故障排查](#故障排查)
-- [开发检查](#开发检查)
-- [致谢](#致谢)
-- [许可证](#许可证)
+## 功能
 
-## 适用场景
-
-ScrcpyGate 适合这些使用方式：
-
-- 在局域网或反向代理后远程访问 Android 模拟器
-- 多个用户观看同一台设备，但同一时间只允许一个人控制
-- 不想把真实 ADB 地址、端口和控制能力直接暴露给普通用户
-- 上行带宽有限，需要低码率、低分辨率输出和自动停止空闲投屏
-- 需要把 ALAS 的启动、停止、重启能力代理到用户界面
-- 希望 Docker 部署后保留清晰的审计日志和安全配置
-
-不适合这些目标：
-
-- 需要 USB ADB 即插即用管理
-- 需要 WebRTC 超低延迟
-- 需要浏览器直接访问 ALAS 原网页并隐藏配置列表
-- 需要修改 Android 设备真实分辨率
-
-## 核心特性
-
-| 模块 | 能力 |
-| --- | --- |
-| 后端 | FastAPI、Uvicorn、原生 WebSocket |
-| 视频 | scrcpy H264 输出，浏览器端 jMuxer 播放 |
-| 数据 | SQLite，默认数据目录 `data/` |
-| 用户 | 登录、管理员、普通用户、用户自助改密 |
-| 设备 | 设备管理、权限分配、网络 ADB 自动连接、心跳保活 |
-| 控制 | 显式控制锁，防止多人同时操作同一设备 |
-| 画质 | 流畅、稳定、高清、低延迟预设，后台可调默认值 |
-| 安全 | Host / Origin / CSRF / Trusted Proxy 检查，安全响应头 |
-| 隐私 | 普通用户 API 和界面隐藏真实 ADB IP:端口 |
-| ALAS | 代理 Alas-Gyre Overlay，支持多配置单一归属、分项权限和嵌入访问 |
-| 运维 | Docker Compose、健康检查、审计日志、运行日志 |
-
-## 架构概览
-
-```mermaid
-flowchart LR
-    Browser[Browser]
-    Proxy[Reverse Proxy / WAF]
-    App[ScrcpyGate FastAPI]
-    DB[(SQLite data/)]
-    ADB[ADB server]
-    Device[Android device / emulator]
-    Gyre[Alas-Gyre Overlay Runtime]
-    ALAS[ALAS]
-
-    Browser -->|HTTPS / HTTP| Proxy
-    Proxy -->|HTTP / WebSocket| App
-    Browser -. local / direct .-> App
-    App --> DB
-    App -->|adb connect / adb -s| ADB
-    ADB --> Device
-    App -->|scrcpy video / control| Device
-    App -->|optional /api/gyre| Gyre
-    Gyre --> ALAS
-```
-
-核心设计：
-
-- 浏览器只访问 ScrcpyGate，不直接访问 ADB。
-- 普通用户拿到的是设备公开 ID，不是真实 ADB 地址。
-- 视频通道和控制通道分离。
-- 多个浏览器可以观看同一设备，控制权由控制锁决定。
-- ALAS Token 只保存在后端，普通用户前台不可见。
-
-## 安全边界
-
-ScrcpyGate 只调整 scrcpy 输出流，不修改 Android 设备或模拟器的真实显示参数。
-
-严禁加入以下运行时能力：
-
-- `wm size`
-- `wm density`
-- `modifydev`
-- 修改 `Physical size`
-- 修改 `Override size`
-
-这对 ALAS 场景尤其重要，因为 ALAS 通常依赖固定的模拟器真实分辨率，例如 `1280x720`。网页里的“输出最长边”只映射到 scrcpy `max_size`，不会改变设备真实分辨率。
-
-还需要注意：
-
-- 不要提交 `.env`、`data/`、数据库、日志或初始密码文件。
-- 公网部署必须使用 HTTPS。
-- 只有在请求确实来自可信反向代理时才启用 `TRUST_PROXY=true`。
-- `TRUSTED_PROXY_IPS` 应填写反向代理的真实来源 IP 或 CIDR。
-- 不建议把 ALAS 原网页直接暴露给普通用户。
+- 浏览器内查看和控制 Android 设备，支持桌面与移动端。
+- 自动适配横竖屏切换，并在丢帧或配置变化后恢复视频。
+- 多用户设备授权；普通用户看不到真实 ADB 地址。
+- 多人可同时观看，同一时刻只有控制权持有者可以操作。
+- 网络 ADB 自动连接、在线检测、心跳与断线恢复。
+- 普通与 ALAS 两组画质预设，可按用户分配并由管理员统一维护。
+- 可选的 [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre) 集成：一个用户可管理多个配置，每个配置最多归属一个用户。
+- 暗色、亮色、跟随系统主题，以及响应式管理后台。
+- Host、Origin、CSRF、可信代理、登录限速和审计日志保护。
 
 ## 快速开始
 
 ### 环境要求
 
-- Linux 服务器（支持 `apt-get`、`apk`、`dnf`、`yum`、`pacman` 或 `zypper`）
-- Docker 与 Docker Compose；缺失时可由引导脚本从系统软件仓库安装
-- 可通过网络 ADB 访问的 Android 设备或模拟器
+- Linux 主机。
+- Docker 与 Docker Compose；缺失时部署脚本可以引导安装。
+- 主机能够访问已开启网络 ADB 的 Android 设备或模拟器。
 
-### 使用部署脚本（推荐）
+> ScrcpyGate 默认只面向网络 ADB。USB ADB 需要额外的设备映射和宿主机权限，不属于默认部署范围。
+
+### 引导式安装（推荐）
 
 ```bash
+git clone --branch dev --single-branch https://github.com/Ange-Katrina/ScrcpyGate.git
+cd ScrcpyGate
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-在交互式终端直接运行会打开彩色管理面板，可选择“引导配置并安装”、安装更新、启停/重启、状态、日志、修改配置和重置管理员密码。向导会自动探测服务器默认路由的 IPv4 地址；服务端口留空时固定使用默认端口 `5000`，也可以明确输入其他端口。
-
-局域网模式可直接采用探测到的 IP，也可手动覆盖。反向代理模式会用示例提醒域名栏只填写 `example.com` 这类主机名，不要填写 `http://`、`https://`、路径或端口；协议和外部端口由后续问题单独填写。向导还会询问信任代理 IP/CIDR、额外 Origin，以及是否兼容 WAF 的 `Origin: null`，再自动生成对应安全配置。外部端口留空时使用 HTTPS `443` 或 HTTP `80`。
-
-为避免终端截图或安装日志泄露内网拓扑，向导默认把 RFC 1918 私网地址显示为 `<private-ip>`，但仍会使用真实检测值写入配置。仅在本机调试确实需要回显时，可临时设置 `SCRCPYGATE_SHOW_PRIVATE_IPS=true`。
-
-修改配置或选择“引导配置并安装”时，脚本会软检测名为 `scrcpygate` 的现有容器。若实例正在运行，会显示状态并以默认 No 询问是否重建/重启；拒绝不会丢失刚保存的配置，但运行实例仍使用旧配置。菜单中的“重启服务”会通过 Compose 重建容器，以应用新的端口映射和环境变量。
-
-首次打开会自动从 `.env.example` 创建权限受限的 `.env`。重复运行不会覆盖现有数据库、用户或密码；修改 `.env` 前会明确显示并确认。如果 Docker 或 Compose 缺失，交互模式会显示检测到的系统、软件包管理器和安装命令，确认后才使用发行版的软件仓库安装，不会执行 `curl | sh`。
-
-非交互环境直接运行时会使用当前配置安装应用，但不会擅自安装系统软件。需要同时安装 Docker/Compose 时，显式执行 `./deploy.sh --install-deps`，或设置 `SCRCPYGATE_AUTO_INSTALL_DEPS=true`。非 root 用户需要可用的 `sudo`；Docker socket 权限变更后通常需要重新登录。
-
-Arch Linux 使用 `pacman -Syu` 安装依赖，以避免不受支持的部分升级，因此可能同时更新已有系统软件包；执行前请查看向导显示的命令。
-
-需要修改端口、局域网地址或反向代理参数时，先执行：
+部署菜单可引导选择本机、局域网或反向代理模式，配置端口、数据目录、域名和可信代理，并检测已有实例。非交互环境中如需使用默认配置部署并自动安装缺失的 Docker/Compose，可运行：
 
 ```bash
-cp .env.example .env
-# 编辑 .env 后再运行 ./deploy.sh
+./deploy.sh --install-deps
 ```
 
-安装器常用选项：
-
-```bash
-./deploy.sh --pull        # 更新基础镜像并重新构建
-./deploy.sh --skip-build  # 复用已有 scrcpygate:local 镜像
-./deploy.sh --configure   # 只运行配置向导
-./deploy.sh --install-deps # 安装缺失的 Docker/Compose 后继续部署
-./deploy.sh --status      # 查看容器状态
-./deploy.sh --help
-```
-
-首次创建数据库时会立即输出管理员账号，即使后续健康检查失败也不会丢失初始密码：
+首次创建数据库时，终端会显示一次管理员凭据：
 
 ```text
 username: admin
 password: <auto-generated-password>
 ```
 
-初始密码只会显示一次，不会以明文写入 `data/`。如果数据目录中已经存在管理员，安装器会明确显示“检测到现有管理员账号”，但不会泄露或重复显示旧密码；交互安装会以默认 No 询问是否立即生成并显示一个新密码。非交互安装永远不会自动重置现有密码。安装失败会返回非零状态并显示容器状态和最近日志。
+请立即保存密码。已有数据目录不会再次显示旧密码，也不会在更新时被覆盖。
 
-### 手动使用 Docker Compose
+默认本机地址为 <http://127.0.0.1:5000>。
+
+### Docker Compose
+
+需要非交互部署时：
 
 ```bash
 cp .env.example .env
+# 按部署环境编辑 .env
 docker compose build
+docker compose run --rm --no-deps --user 0 scrcpygate chown -R app:app /app/data
 docker compose run --rm --no-deps scrcpygate python -m app.cli bootstrap-admin
 docker compose up -d
 ```
 
-请保存 `bootstrap-admin` 输出的初始密码，再启动服务。不要在首次初始化前直接执行 `docker compose up`，否则自动生成的密码不会显示。已有数据库需要重置密码时，使用后面的 `reset-admin` 命令。
+其中的一次性 root 命令只用于让容器内 `app` 用户写入挂载的数据目录。保存 `bootstrap-admin` 输出的初始密码。Compose 会自动读取仓库根目录的 [compose.yaml](compose.yaml)。
 
-默认访问地址：
+## 首次使用
 
-```text
-http://127.0.0.1:5000
-```
+1. 使用 `admin` 登录并打开管理后台。
+2. 新建设备，填写设备名称和网络 ADB 地址，然后确认状态为“在线”。
+3. 创建普通用户，并分配设备的查看/控制权限和画质类型。
+4. 返回投屏页，选择设备并开始投屏；需要操作时获取控制权。
 
-## 首次配置流程
+管理员可以在后台调整画质、查看运行日志、管理用户与设备，并配置可选的 ALAS 集成。
 
-1. 使用 `admin` 登录后台。
-2. 在“设备”页添加设备：
-   - 设备 ID：建议使用别名，例如 `emu-1`
-   - 名称：显示给用户看的名称
-   - ADB 地址：真实连接地址，例如 `192.0.2.10:30100`
-3. 点击“测试 ADB”，确认设备状态为 online。
-4. 在“用户权限”页创建普通用户。
-5. 给用户分配设备查看和控制权限。
-6. 在“画质”页选择适合上行带宽的默认预设。
-7. 回到投屏页，选择设备并开始投屏。
+## 部署配置
 
-普通用户只能看到被授权设备，不会看到真实 ADB 地址。
+推荐使用 `./deploy.sh --configure` 修改配置。完整选项和默认值见 [.env.example](.env.example)。通常只需要关注：
 
-## 反向代理部署
+| 变量 | 用途 |
+| --- | --- |
+| `WEB_SCRCPY_BIND` | 宿主机监听地址；默认仅监听 `127.0.0.1`。 |
+| `WEB_SCRCPY_PORT` | Web 服务端口，默认 `5000`。 |
+| `WEB_SCRCPY_DATA_HOST` | SQLite、日志和运行数据目录，默认 `./data`。 |
+| `PUBLIC_BASE_URL` | 用户实际访问的完整外部地址。 |
+| `ALLOWED_HOSTS` | 允许访问的域名或 IP，不含协议和端口。 |
+| `ALLOWED_ORIGINS` | 允许的完整浏览器 Origin。 |
+| `SESSION_COOKIE_SECURE` | HTTPS 部署设为 `true`。 |
+| `TRUST_PROXY` / `TRUSTED_PROXY_IPS` | 只在可信反向代理后启用，并限制真实代理来源。 |
 
-在 HTTPS、WAF 或反向代理后部署时，需要显式配置对外地址、Host、Origin 和可信代理来源。
+公网部署请使用 HTTPS，并确保反向代理同时转发 HTTP 与 WebSocket。不要直接将 Android ADB 端口或 ALAS Runtime 暴露到公网。
 
-推荐直接运行 `./deploy.sh` 并选择“引导配置并安装 → 反向代理 / HTTPS”。域名只输入主机名，例如 `example.com`，不要附带协议、路径或端口；协议与外部端口由后续问题单独填写。
+### 数据与更新
 
-示例：
+所有持久数据位于 `WEB_SCRCPY_DATA_HOST`。升级或迁移前请备份该目录。
 
-```bash
-WEB_SCRCPY_BIND=127.0.0.1 \
-PUBLIC_BASE_URL=https://example.com \
-ALLOWED_HOSTS=example.com,127.0.0.1,localhost \
-ALLOWED_ORIGINS=https://example.com \
-SESSION_COOKIE_SECURE=true \
-TRUST_PROXY=true \
-TRUSTED_PROXY_IPS=127.0.0.1 \
-SCRCPY_STREAM_MODE=raw \
-./deploy.sh
-```
-
-如果反向代理不在同一台机器，请把 `TRUSTED_PROXY_IPS` 改成反向代理访问 ScrcpyGate 时的来源 IP。
-
-如果局域网直接访问，可以使用：
-
-```bash
-WEB_SCRCPY_BIND=0.0.0.0 \
-PUBLIC_BASE_URL=http://192.0.2.10:5000 \
-ALLOWED_HOSTS=192.0.2.10,127.0.0.1,localhost \
-ALLOWED_ORIGINS=http://192.0.2.10:5000 \
-SESSION_COOKIE_SECURE=false \
-TRUST_PROXY=false \
-./deploy.sh
-```
-
-把文档示例地址 `192.0.2.10` 替换为你的服务器局域网 IP。
+| 操作 | 命令 |
+| --- | --- |
+| 查看状态 | `./deploy.sh --status` |
+| 查看日志 | `./deploy.sh --logs` |
+| 重启服务 | `./deploy.sh --restart` |
+| 拉取基础镜像并重新部署当前代码 | `./deploy.sh --pull` |
+| 重置管理员密码 | `./deploy.sh --reset-admin` |
+| 查看全部选项 | `./deploy.sh --help` |
 
 ## 画质与流模式
 
-ScrcpyGate 的画质设置只控制 scrcpy 输出流，不修改 Android 设备或模拟器真实分辨率。
-也就是说，后台和前台里的“输出最长边”会传给 scrcpy 的 `max_size`，不会执行 `wm size`、`wm density`，也不会改 `Physical size` 或 `Override size`。`max_size` 同时限制宽和高；对于 16:9 横屏，`720` 实际约为 `720x405`，`1280` 才约为 `1280x720`。
+主页始终向用户显示四档画质：流畅、稳定、高清和低延迟。管理员可以为用户选择普通画质或最高 720p 的 ALAS 专属画质，并按服务器上行带宽调整预设。
 
-### 流模式
+画质只影响 scrcpy 输出流，不修改 Android 设备或模拟器的真实分辨率。`max_size` 表示输出最长边，例如 16:9 画面中 `1280` 约等于 720p。
 
-默认流模式：
+`raw` 是默认且推荐的流模式。`protocol` 和 `legacy` 主要用于兼容性测试与故障排查，可在管理后台按需启用。
 
-```env
-SCRCPY_STREAM_MODE=raw
-```
+## ALAS 集成
 
-| 模式 | 状态 | 作用 | 建议 |
-| --- | --- | --- | --- |
-| `raw` | 推荐默认 | scrcpy 直接输出 H264 Annex-B，后端按纯 H264 推给浏览器 | 优先使用，公网部署也建议先保持此模式 |
-| `protocol` | 诊断/备用 | 解析完整 scrcpy video protocol，再拆出 H264 | 当前兼容性依赖 scrcpy server 版本，稳定前不建议给普通用户开放 |
-| `legacy` | 诊断 | 旧版 H264 起始码扫描兼容路径 | 只用于排查，不建议生产长期使用 |
+ALAS 功能需要先部署并启动 [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre)。然后在后台填写 Runtime URL 和 API Token。
 
-后台可以配置“允许的流模式”。如果只启用 `raw`，即使用户请求 `protocol`，后端也会回退到 `raw`。这适合在 `protocol` 未稳定前先禁用，避免用户误选导致黑屏或绿屏。
+- 一个用户可以拥有一个或多个 ALAS 配置。
+- 每个 ALAS 配置最多归属一个用户，也可以暂不分配。
+- 启停、编辑和默认入口权限按配置单独设置。
+- 普通用户只能访问自己的配置；Runtime 地址和 Token 只保存在后端。
 
-### 画质预设
+ScrcpyGate 不直接运行 [AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript)，而是通过 Overlay Runtime 提供受控入口。
 
-画质预设由三个核心参数组成：
-
-| 参数 | 单位 | 作用 | 说明 |
-| --- | --- | --- | --- |
-| `video_bit_rate` | bps | 视频目标码率 | 越高越清晰，但越占上行；低带宽环境优先压低它 |
-| `max_size` | px | 输出流最长边上限 | 只影响投屏输出，不改设备分辨率；`1280` 在 16:9 横屏中约等于 720p |
-| `max_fps` | fps | 输出最大帧率 | 越高越顺滑，但码率和 CPU 压力也会上升 |
-
-内置默认值：
-
-| 预设 | 码率 | 最长边 | 约等效清晰度 | 帧率 | 目标 | 建议场景 |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
-| 流畅 `smooth` | 1.0 Mbps | 960 | 540p | 24 | 尽量省上行 | 上行紧张、多人观看、移动网络 |
-| 稳定 `balanced` | 2.4 Mbps | 1280 | 720p | 24 | 稳定优先 | 默认推荐，兼顾清晰度和带宽 |
-| 高清 `sharp` | 6.0 Mbps | 1920 | 1080p | 30 | 更清晰 | 上行较充足、画面细节更重要 |
-| 低延迟 `low_latency` | 1.8 Mbps | 960 | 540p | 30 | 操作响应优先 | 频繁点击、滑动、需要更跟手 |
-
-后台可为每个用户选择“普通画质”或“ALAS 专属画质”。主页始终只显示所选类型的四档，不会同时堆叠八个按钮。ALAS 专属默认值为：
-
-| ALAS 预设 | 码率 | 最长边 | 约等效清晰度 | 帧率 | 目标 |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 流畅 `alas_smooth` | 1.0 Mbps | 960 | 540p | 24 | 节省带宽 |
-| 稳定 `alas_balanced` | 2.4 Mbps | 1280 | 720p | 24 | 日常默认 |
-| 高清 `alas_sharp` | 4.0 Mbps | 1280 | 720p | 30 | 720p 画质优先 |
-| 低延迟 `alas_low_latency` | 1.8 Mbps | 960 | 540p | 30 | 操作响应优先 |
-
-ALAS 四档可以分别维护码率、最长边和帧率，但最长边强制限制在 `480–1280`，避免超过 ALAS ADB 设备的 720p 上限。普通画质的高清档仍可使用 1080p。
-
-H.264 24–30fps 参考区间：
-
-| 约等效清晰度 | scrcpy 最长边 | 低动态最低可用 | 高动态推荐 |
-| --- | ---: | ---: | ---: |
-| 360p | 640 | 0.45 Mbps | 0.7 Mbps |
-| 480p | 854 | 0.6 Mbps | 1.4 Mbps |
-| 540p | 960 | 0.9 Mbps | 1.8 Mbps |
-| 720p | 1280 | 1.2 Mbps | 2.4–4 Mbps |
-| 900p | 1600 | 2.5 Mbps | 5 Mbps |
-| 1080p | 1920 | 3 Mbps | 6–8.5 Mbps |
-
-这些值综合参考 [scrcpy 视频文档](https://github.com/Genymobile/scrcpy/blob/master/doc/video.md)、[Amazon IVS 低延迟编码建议](https://docs.aws.amazon.com/ivs/latest/LowLatencyUserGuide/streaming-config.html)、[Zoom 带宽要求](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0060748)和 [YouTube Live H.264 建议](https://support.google.com/youtube/answer/2853702)。最低值只适合画面变化较少或允许压缩痕迹的情况；游戏、粒子特效和频繁切换场景应使用推荐值。
-
-带宽推荐会在后台同时“一键套用”普通和 ALAS 两组四档预设。它不是固定限制，而是帮管理员根据服务器上行快速生成一组更合理的默认值。
-
-普通画质推荐：
-
-| 上行档位 | 流畅 | 稳定 | 高清 | 低延迟 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| 2 Mbps | 0.8M / 854 / 20 | 1.0M / 960 / 24 | 1.3M / 1280 / 24 | 1.0M / 854 / 30 | 仅高清档达到低码率 720p，其他档优先稳定 |
-| 5 Mbps | 1.2M / 960 / 24 | 2.4M / 1280 / 24 | 3.2M / 1280 / 30 | 1.8M / 960 / 30 | 日常 720p，并给低延迟档保留带宽余量 |
-| 10 Mbps | 2.4M / 1280 / 24 | 3.5M / 1280 / 30 | 6.5M / 1920 / 30 | 3.0M / 1280 / 30 | 720p 为主，高清档提升到 1080p |
-| 20 Mbps | 3.0M / 1280 / 24 | 5.0M / 1600 / 30 | 8.5M / 1920 / 30 | 4.0M / 1280 / 30 | 上行充足，覆盖 720p、900p 与 1080p |
-
-ALAS 专属推荐：
-
-| 上行档位 | 流畅 | 稳定 | 高清 | 低延迟 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| 2 Mbps | 0.8M / 854 / 20 | 1.0M / 960 / 24 | 1.3M / 1280 / 20 | 1.0M / 854 / 30 | 低带宽下保留一个 720p 选择 |
-| 5 Mbps | 1.2M / 960 / 24 | 2.4M / 1280 / 24 | 3.2M / 1280 / 30 | 1.8M / 960 / 30 | 日常 720p 与低延迟兼顾 |
-| 10 Mbps | 1.8M / 960 / 24 | 3.0M / 1280 / 24 | 4.0M / 1280 / 30 | 2.8M / 1280 / 30 | 720p 画质优先，避免无效提升分辨率 |
-| 20 Mbps | 2.0M / 960 / 24 | 3.5M / 1280 / 30 | 4.5M / 1280 / 30 | 3.0M / 1280 / 30 | 高带宽仍封顶 720p，把余量留给稳定性 |
-
-表格格式为：`码率 / scrcpy 最长边 / 帧率`。
-
-后台可以修改每个预设的：
-
-- 码率
-- 输出最长边
-- 帧率
-- 自定义预设名称和值
-
-使用建议：
-
-- 上行有限时，优先降低 `video_bit_rate`，其次降低 `max_size`，最后再降 `max_fps`。
-- 每个带宽推荐组的四个预设中至少有一个真正的 720p（最长边 1280），但不会把四个预设全部强制为 720p。
-- 多人同时观看同一设备时，服务器总上行会接近“单路码率 × 观看人数”，应给预设留余量。
-- `max_size=0` 表示不限制 scrcpy 输出最长边，不建议在上行有限或公网环境使用。
-- 修改画质后可能需要重启投屏才能完全生效；这不会修改设备真实分辨率，也不会影响 ALAS 对 `1280x720` 模拟器环境的识别。
-
-## ALAS / Alas-Gyre Overlay
-
-ALAS 控制功能需要先安装并启动 Alas-Gyre 的 Overlay Runtime。ScrcpyGate 不直接运行 ALAS，只把用户操作代理到 Overlay API。
-
-后台 ALAS 模块需要配置：
-
-- Runtime URL，例如 `http://127.0.0.1:22267`
-- API Token
-- Runtime 配置目录
-- 用户和 ALAS 配置的一对多归属关系，以及每项配置的运行、编辑和默认入口权限
-
-ScrcpyGate 还可以通过 `/alas/embed/` 代理嵌入 ALAS 原页面。管理员可访问完整原页面；普通用户必须先由管理员分配 ALAS 配置，并只能访问当前选中归属配置内的主页、任务、配置和设置。Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267，域名会尝试 80、443、22267。
-
-访问规则与安全注意事项：
-
-- 普通用户前台入口为“打开 ALAS 页面”，管理员后台入口为“打开完整 ALAS 页面”。
-- 每个普通用户可以拥有一个或多个 ALAS 配置，并在自己的配置范围内切换；每个配置只能归属一个用户，不能同时分配给多人。管理员可以访问完整 ALAS 原页面。
-- 后台“用户授权”管理配置归属；所属用户可以查看状态，并按该项权限启停、编辑或默认使用配置。“配置库”直接操作 Runtime 中的配置实例，不会为用户复制配置。
-- 转移配置归属时，应先移除原用户的关系，再把同名配置分配给新用户，避免两个用户同时持有同一配置。
-- HTTP / WebSocket 代理会校验登录态、用户角色和 ALAS 绑定关系，并拒绝其它配置、管理入口和未授权长连接消息。
-- ALAS Runtime 地址和 Token 只保存在 ScrcpyGate 后端，不会在普通用户界面展示。
-- 建议让 ALAS Runtime 只对 ScrcpyGate 或受信局域网可达，不要把 Runtime 直接暴露给普通用户或公网。
-
-普通用户只能查看或操作自己当前选中的归属配置，并受该项配置的运行、编辑权限限制。前台不会暴露其他用户的配置归属、未归属给自己的配置、配置内容或 Runtime Token。
-
-相关项目：
-
-- [ALAS / AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript)
-- [Alas-Gyre Overlay](https://github.com/Ange-Katrina/Alas-Gyre)
-
-## 常用命令
-
-查看容器：
-
-```bash
-docker compose ps
-```
-
-查看日志：
-
-```bash
-docker logs --tail=120 scrcpygate
-```
-
-停止服务：
-
-```bash
-docker compose down
-```
-
-更新基础镜像并重新部署：
-
-```bash
-./deploy.sh --pull
-```
-
-重置管理员：
-
-```bash
-docker compose exec -T scrcpygate python -m app.cli reset-admin
-```
-
-查看健康状态：
-
-```bash
-curl -fsS http://127.0.0.1:5000/healthz
-```
-
-## 配置项
-
-配置来源有三类：
-
-- `.env` / 环境变量：影响容器启动、网络边界、安全策略和默认运行参数。
-- 后台管理页：影响设备、用户、权限、ALAS、画质预设等业务配置，保存到 SQLite。
-- 用户个人设置：影响当前用户自己的画质偏好和密码，不改变后台默认值。
-
-更多示例见 [.env.example](.env.example)。
-
-### 部署与数据目录
-
-| 变量 | 默认值 | 作用 | 什么时候修改 |
-| --- | --- | --- | --- |
-| `WEB_SCRCPY_BIND` | `127.0.0.1` | Docker 端口绑定的宿主机地址 | 局域网直接访问时改为服务器 IP 或 `0.0.0.0`；反代部署建议保持内网地址 |
-| `WEB_SCRCPY_PORT` | `5000` | 宿主机暴露端口 | 配置向导中留空使用 `5000`；需要其他端口时明确输入 |
-| `WEB_SCRCPY_DATA_HOST` | `./data` | 宿主机数据目录，挂载到容器 `/app/data` | 正式部署建议使用固定绝对路径，例如 `/root/ScrcpyGate/data` |
-| `PUBLIC_BASE_URL` | `http://127.0.0.1:5000` | 用户实际访问的外部地址 | 反代、HTTPS、域名、局域网 IP 访问时必须改成真实访问地址 |
-| `SCRCPYGATE_HEALTH_TIMEOUT` | `90` | 安装器等待服务健康的秒数 | 慢速主机可调大，允许范围为 `10–600` |
-| `LOG_LEVEL` | `INFO` | 应用日志级别 | 排查问题时可临时改为 `DEBUG`，稳定后用 `INFO` |
-
-`data/` 中保存 SQLite 数据库、设置、审计日志和运行期状态。不要提交到 GitHub，也不要在升级时删除。
-
-### Host、Origin 与反向代理
-
-| 变量 | 默认值 | 作用 | 说明 |
-| --- | --- | --- | --- |
-| `ALLOWED_HOSTS` | `127.0.0.1,localhost` | 允许访问的 Host 名称 | 必须包含浏览器地址栏里的域名或 IP，不含协议和端口 |
-| `ALLOWED_ORIGINS` | 空 | 允许的浏览器 Origin | 推荐填写完整源，例如 `https://example.com:443` 或 `http://192.0.2.10:5000` |
-| `ALLOW_NULL_ORIGIN` | `false` | 是否允许 `Origin: null` | 只建议在本地 file/iframe/WAF 特殊场景临时开启；公网默认不要开启 |
-| `TRUST_PROXY` | `false` | 是否信任 `X-Forwarded-*` 代理头 | 只有请求确实来自可信反代时才开启 |
-| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | 可信代理来源 IP 或 CIDR | 填写反向代理访问 ScrcpyGate 时的真实来源 IP |
-| `SESSION_COOKIE_SECURE` | `false` | Cookie 是否仅 HTTPS 发送 | HTTPS 域名部署设为 `true`；纯 HTTP 局域网必须为 `false` |
-| `ENABLE_API_DOCS` | `false` | 是否开启 `/docs`、`/redoc`、`/openapi.json` | 仅本地开发调试开启，公网环境保持关闭 |
-
-常见组合：
-
-| 场景 | 推荐配置 |
-| --- | --- |
-| 本机直接访问 | `PUBLIC_BASE_URL=http://127.0.0.1:5000`，`SESSION_COOKIE_SECURE=false` |
-| 局域网 HTTP | `PUBLIC_BASE_URL=http://服务器IP:5000`，`ALLOWED_HOSTS=服务器IP,127.0.0.1,localhost` |
-| HTTPS 反代 | `PUBLIC_BASE_URL=https://域名`，`SESSION_COOKIE_SECURE=true`，`TRUST_PROXY=true` |
-| WAF 出现 `Origin: null` | 先检查反代配置；确认无法避免时再设 `ALLOW_NULL_ORIGIN=true` |
-
-### 密码与登录保护
-
-| 变量 | 默认值 | 作用 | 说明 |
-| --- | --- | --- | --- |
-| `MIN_PASSWORD_LENGTH` | `12` | 新密码最小长度 | 管理员创建用户、用户改密码、重置管理员密码都会校验 |
-| `PASSWORD_PBKDF2_ITERATIONS` | `310000` | PBKDF2-SHA256 哈希迭代次数 | 越高越抗暴力破解，但登录和改密会更耗 CPU |
-| `LOGIN_RATE_LIMIT_ENABLED` | `true` | 登录防爆破开关 | 建议保持开启 |
-| `LOGIN_RATE_LIMIT_MAX` | `6` | 单窗口失败次数 | 达到后进入锁定 |
-| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | 失败统计窗口 | 默认 5 分钟 |
-| `LOGIN_LOCKOUT_SECONDS` | `600` | 锁定时间 | 默认 10 分钟 |
-
-初始管理员密码只在全新数据库首次部署时显示一次，不写入明文文件。重复使用原有 `data/` 目录时不会再次显示；可以在安装器提示时选择生成新密码，或稍后使用：
-
-```bash
-docker compose exec -T scrcpygate python -m app.cli reset-admin
-```
-
-重置管理员密码会同时撤销该账号现有的登录会话，所有设备都需要使用新密码重新登录。
-
-### ADB 自动连接
-
-| 变量 | 默认值 | 作用 | 说明 |
-| --- | --- | --- | --- |
-| `ADB_AUTOCONNECT` | `true` | 服务启动后自动连接后台已启用设备 | 避免首次登录后点击投屏才发现 ADB 未连接 |
-| `ADB_HEARTBEAT_INTERVAL` | `15` | 心跳间隔秒数 | 定期执行状态检查，掉线后尝试恢复 |
-| `ADB_CONNECT_TIMEOUT` | `8` | 单次连接超时秒数 | 网络差或设备较慢时可适当调大 |
-| `ADB_RECONNECT_BACKOFF` | `5` | 重连退避秒数 | 避免设备离线时高频重连打满日志 |
-
-后台设备表里的“设备 ID”建议使用别名，例如 `emu-1`；“ADB 地址”填写真实连接地址，例如 `192.0.2.10:30100`。普通用户接口和投屏页不会显示真实 ADB 地址。
-
-### 视频流、队列与稳定性
-
-| 变量 | 默认值 | 作用 | 调整建议 |
-| --- | --- | --- | --- |
-| `SCRCPY_STREAM_MODE` | `raw` | 默认 scrcpy 流模式 | 生产建议 `raw`；`protocol`、`legacy` 等稳定后再在后台开启 |
-| `SCRCPY_STREAM_HEALTH_TIMEOUT` | `5` | 启动后等待关键视频数据的秒数 | 设备启动慢时可调大；太大则失败反馈变慢 |
-| `SCRCPY_I_FRAME_INTERVAL` | `1` | Android 编码器自然关键帧间隔，单位秒 | 增大可降低关键帧开销，但丢帧后的自然恢复会变慢 |
-| `SCRCPY_SOCKET_READY_TIMEOUT` | `8` | 等待 Android 端 scrcpy 首连接确认的秒数 | 慢设备可适当调大；握手会在服务就绪后立即结束，不固定等待 |
-| `VIDEO_RESET_COOLDOWN` | `0.75` | 主动请求新配置和关键帧的最短间隔，单位秒 | 多观看端同时进入时避免反复重置编码器 |
-| `CONTROL_LEASE_VERIFY_INTERVAL` | `0.5` | 高频触摸期间重新核验控制锁的间隔，单位秒 | 减少每个 MOVE 都写 SQLite；调小会更快发现控制权变更但增加 I/O |
-| `VIDEO_QUEUE_MAXSIZE` | `24` | 每个浏览器视频队列硬上限 | 越大越抗抖动，但延迟和内存占用增加 |
-| `VIDEO_QUEUE_SOFT_LIMIT` | `8` | 队列软上限 | 慢客户端超过软上限后丢弃陈旧帧并主动请求新关键帧，不拖垮其他观看端 |
-
-队列是按浏览器客户端隔离的。一个慢客户端卡顿时，只会丢它自己的帧，不会拖慢同设备的其他观看者。新观看端和丢帧后的客户端不会复用旧 IDR，而是通过 scrcpy 控制通道请求新的 SPS/PPS 与关键帧，避免旧参考链导致绿屏或花屏。
-
-### Docker 构建参数
-
-| 参数 | 默认值 | 作用 |
-| --- | --- | --- |
-| `PYTHON_IMAGE` | `python:3.12-alpine` | Dockerfile 基础镜像 |
-| `PIP_INDEX_URL` | 空 | 构建时 pip 镜像源；国内服务器可使用清华、阿里等镜像 |
-
-示例：
-
-```bash
-PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-docker compose build
-```
-
-### 后台业务参数
-
-这些参数不通过 `.env` 配置，而是在后台保存到 SQLite：
-
-| 模块 | 参数 | 作用 |
-| --- | --- | --- |
-| 设备 | 设备 ID、名称、ADB 地址、启用状态 | 管理可投屏设备；普通用户只看到名称和在线状态 |
-| 权限 | 用户、设备、查看、控制 | 控制谁能看、谁能操作某台设备 |
-| 画质 | 默认预设、各预设码率/尺寸/帧率、自定义预设、允许的流模式 | 管理员按网络环境设置默认值，用户可选择预设 |
-| ALAS | Runtime URL、Token、配置目录、每项配置唯一用户归属（用户可拥有多项）、默认入口、运行与编辑权限 | 只代理当前用户所拥有且已选中配置的状态、启停、编辑和嵌入访问 |
-| 安全日志 | 登录、登出、权限、ALAS、投屏操作记录 | 方便追踪异常登录和越权访问 |
-
-## 项目结构
-
-```text
-./
-  app/                    FastAPI 后端
-  templates/              原生 HTML 页面
-  static/                 前端 JS/CSS 资源
-  tests/                  单元测试
-  adb/                    Android platform-tools 兼容文件
-  Dockerfile              Docker 镜像构建文件
-  compose.yaml            Docker Compose 配置（自动识别）
-  deploy.sh               部署辅助脚本
-  requirements.txt        生产运行时 Python 依赖
-  requirements-dev.txt    开发、测试与审计依赖
-  README.md               中文说明
-  README.en.md            English documentation
-```
-
-## 故障排查
-
-### 访问显示 Forbidden
-
-常见原因：
-
-- `ALLOWED_HOSTS` 没有包含当前访问域名或 IP
-- `ALLOWED_ORIGINS` 没有包含当前页面 Origin
-- 反向代理或 WAF 让浏览器登录请求携带 `Origin: null`，但没有设置 `ALLOW_NULL_ORIGIN=true`
-- 反向代理传了 `X-Forwarded-*`，但没有正确设置 `TRUST_PROXY` 和 `TRUSTED_PROXY_IPS`
-
-处理：
-
-```bash
-docker logs --tail=120 scrcpygate
-```
-
-查看是否有 `HOST_REJECT`、`ORIGIN_REJECT` 或 `PROXY_HEADER_REJECT`。
-
-- `PROXY_HEADER_REJECT remote=...`：把日志中的实际 `remote` IP（或必要的最小 CIDR）加入 `TRUSTED_PROXY_IPS`，不要盲目信任整个局域网。
-- `ORIGIN_REJECT origin=null`：确认是 WAF/嵌入场景造成后，再设置 `ALLOW_NULL_ORIGIN=true` 并重建容器。
-- `HOST_REJECT`：检查 WAF 是否保留外部 Host，以及该域名是否位于 `ALLOWED_HOSTS`。
-
-### 登录后仍回到登录页
-
-检查：
-
-- HTTPS 部署时是否设置 `SESSION_COOKIE_SECURE=true`
-- HTTP 局域网部署时是否错误设置了 `SESSION_COOKIE_SECURE=true`
-- `PUBLIC_BASE_URL`、`ALLOWED_HOSTS`、`ALLOWED_ORIGINS` 是否一致
-
-### 投屏启动失败
-
-检查：
-
-- 后台设备 ADB 地址是否正确
-- 后台“测试 ADB”是否 online
-- 容器内是否能访问设备网络
-- 设备是否允许 ADB 调试
-
-### 黑屏或花屏
-
-建议：
-
-- 默认使用 `raw` 流模式
-- 降低画质预设的码率、输出尺寸和帧率
-- 停止投屏后重新开始
-- 查看运行日志里的 scrcpy 和 WebSocket 错误
-
-### ALAS 无法启动
-
-检查：
-
-- Alas-Gyre Overlay Runtime 是否已启动
-- Runtime URL 是否能从 ScrcpyGate 服务访问
-- API Token 是否一致
-- 用户是否绑定了 ALAS 配置
-
-## 开发检查
-
-安装开发与测试依赖：
+## 开发
 
 ```bash
 python -m pip install -r requirements-dev.txt
-```
-
-编译检查：
-
-```bash
 python -m compileall -q app tests
-```
-
-单元测试：
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-```
-
-运行时依赖漏洞审计：
-
-```bash
-pip-audit -r requirements.txt --progress-spinner off
-```
-
-项目维护的前端 JavaScript 语法检查：
-
-```bash
-node --check static/js/theme-init.js
-node --check static/js/ui-core.js
-node --check static/js/input.js
-node --check static/js/admin.js
+python -m unittest discover -s tests
 node --check static/js/mirror.js
-node --check static/js/login.js
-node --check static/js/alas-shell.js
+node --check static/js/admin.js
 ```
 
-分辨率安全扫描：
-
-```bash
-rg -n "wm size|wm density|modifydev|Physical size|Override size" .
-```
-
-敏感信息扫描示例：
-
-```bash
-rg -l --hidden --glob '!.git/**' -- '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .
-```
-
-无输出表示未发现这些高置信凭据形态；扫描只打印文件名，不输出命中内容。
+提交问题或功能建议请使用 [GitHub Issues](https://github.com/Ange-Katrina/ScrcpyGate/issues)。
 
 ## 致谢
 
-ScrcpyGate 的早期方向和部分实现参考自原始项目 [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy)。感谢原项目提供 Web 端 scrcpy 投屏思路、基础结构和实践参考。
-
-同时感谢以下开源项目：
-
-- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)：Android 投屏与控制核心能力。
-- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer)：浏览器端 H264 remux 与 MSE 播放。
-- [FastAPI](https://github.com/fastapi/fastapi)：后端 HTTP 与 WebSocket 框架。
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy) — Android 投屏与控制核心。
+- [webstream-labs/jmuxer](https://github.com/webstream-labs/jmuxer) — 浏览器端 H.264/MSE 播放。
+- [FastAPI](https://github.com/fastapi/fastapi) — HTTP 与 WebSocket 后端。
+- [baixin1228/web-scrcpy](https://github.com/baixin1228/web-scrcpy) — 早期 Web 投屏实现参考。
 
 ## 许可证
 
-除单独列明的第三方组件外，ScrcpyGate 源码使用 Apache License 2.0。详见 [LICENSE](LICENSE)。
-
-第三方组件和来源说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+ScrcpyGate 使用 [Apache License 2.0](LICENSE)。第三方组件及许可证见 [THIRD_PARTY.md](THIRD_PARTY.md)。
