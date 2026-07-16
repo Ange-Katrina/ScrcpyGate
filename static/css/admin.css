@@ -978,7 +978,7 @@ td.actions {
 }
 
 .access-toolbar {
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px);
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 200px) minmax(170px, 220px);
 }
 
 .access-account-table-wrap {
@@ -1006,6 +1006,19 @@ td.actions {
   padding: var(--ui-space-6);
   color: var(--ui-color-text-muted);
   text-align: center;
+}
+
+.user-expiry {
+  min-width: 190px;
+  display: grid;
+  justify-items: start;
+  gap: var(--ui-space-1);
+}
+
+.user-expiry small {
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .permission-workspace {
@@ -2048,6 +2061,47 @@ td.actions {
   line-height: 1.55;
 }
 
+.user-expiry-field {
+  display: grid;
+  gap: var(--ui-space-3);
+}
+
+.user-expiry-field[hidden] {
+  display: none;
+}
+
+.user-expiry-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-space-2);
+}
+
+.user-expiry-shortcuts .btn {
+  min-width: 0;
+  padding-inline: var(--ui-space-2);
+}
+
+.user-expiry-preview {
+  margin: 0;
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.user-expiry-preview[data-state="expiring"] {
+  border-color: var(--ui-color-warning);
+  color: var(--ui-color-warning);
+}
+
+.user-expiry-preview[data-state="expired"] {
+  border-color: var(--ui-color-danger);
+  color: var(--ui-color-danger);
+}
+
 .drawer-actions {
   justify-content: flex-end;
   margin-top: auto;
@@ -2700,6 +2754,10 @@ td.actions {
   .permission-toolbar select,
   .permission-user-pane__mobile select {
     min-height: 44px;
+  }
+
+  .user-expiry-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .permission-toolbar .chip {

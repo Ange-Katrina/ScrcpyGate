@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=34f8ae9f41c7">
+  <link rel="stylesheet" href="/static/css/admin.css?v=084bd326a927">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -149,12 +149,13 @@
         </div>
 
         <section id="accessAccountsView" class="access-view" role="tabpanel" aria-labelledby="accessAccountsTab">
-          <div class="access-view-heading"><div><h3>用户账户</h3><p>每页最多显示 20 位用户，可按用户名和角色快速定位。</p></div><span id="userResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
+          <div class="access-view-heading"><div><h3>用户账户</h3><p>每页最多显示 20 位用户，可按用户名、角色和有效期快速定位。</p></div><span id="userResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
           <div class="access-toolbar">
             <div><label for="userSearch">搜索用户名</label><input id="userSearch" type="search" placeholder="输入用户名" autocomplete="off"></div>
             <div><label for="userRoleFilter">角色筛选</label><select id="userRoleFilter"><option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option></select></div>
+            <div><label for="userExpiryFilter">有效期筛选</label><select id="userExpiryFilter"><option value="all">全部状态</option><option value="permanent">永久有效</option><option value="active">有效</option><option value="expiring">即将到期</option><option value="expired">已到期</option></select></div>
           </div>
-          <div class="table-wrap access-account-table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
+          <div class="table-wrap access-account-table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">有效期</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
           <nav class="access-pagination" aria-label="用户账户分页">
             <button id="userPagePrevious" class="btn" type="button">上一页</button>
             <span id="userPageStatus" role="status" aria-live="polite">第 1 / 1 页</span>
@@ -350,7 +351,19 @@
     <div class="col-12"><label for="newUsername">用户名</label><input id="newUsername" autocomplete="username"></div>
     <div class="col-12"><label for="newPassword">密码</label><input id="newPassword" type="password" placeholder="至少12位" autocomplete="new-password"></div>
     <div class="col-12"><label for="newRole">角色</label><select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div>
+    <div class="col-12"><label for="userExpiryMode">账户有效期</label><select id="userExpiryMode"><option value="permanent">永久有效</option><option value="scheduled">指定到期时间</option></select></div>
+    <div id="userExpiresAtField" class="col-12 user-expiry-field" hidden>
+      <label for="userExpiresAt">到期时间</label>
+      <input id="userExpiresAt" type="datetime-local" step="60">
+      <div id="userExpiryShortcuts" class="user-expiry-shortcuts" aria-label="快捷延长账户有效期">
+        <button class="btn" type="button" data-days="1">+1 天</button>
+        <button class="btn" type="button" data-days="7">+7 天</button>
+        <button class="btn" type="button" data-days="30">+30 天</button>
+        <button class="btn" type="button" data-days="90">+90 天</button>
+      </div>
+    </div>
   </div>
+  <p id="userExpiryPreview" class="user-expiry-preview" role="status" aria-live="polite">账户永久有效</p>
   <p class="muted drawer-note">编辑用户时留空密码即可保留原密码。</p>
   <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">取消</button><button id="saveUser" class="btn primary" type="button">保存用户</button></div>
 </aside>
@@ -414,6 +427,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=f96c56fc5101" defer></script>
+<script src="/static/js/admin.js?v=903a384a7ede" defer></script>
 </body>
 </html>

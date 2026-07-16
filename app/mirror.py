@@ -872,7 +872,7 @@ def event_users_with_view_access(usernames: set[str], device_id: str) -> set[str
                 allowed.add(username)
                 continue
             user = storage.get_user(username)
-            if user and user["role"] == "admin":
+            if user and user["role"] == "admin" and storage.user_is_active(user):
                 allowed.add(username)
         except Exception:
             log.exception("EVENT_PERMISSION_CHECK_FAILED user=%s device=%s", username, device_id)

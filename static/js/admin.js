@@ -25,6 +25,7 @@ const PERMISSION_USER_KEY = 'scrcpygate:admin:permissions:user';
 const ALAS_USER_KEY = 'scrcpygate:admin:alas:user';
 const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
 const USER_PAGE_SIZE = 20;
+const USER_EXPIRY_REFRESH_INTERVAL = 30000;
 const DEVICE_STATUS_POLL_INTERVAL = 5000;
 const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
 const ADB_STATUS_META = Object.freeze({
@@ -52,6 +53,7 @@ const TAB_RESOURCES = {
 let activeTab = 'overview';
 let activeAccessView = localStorage.getItem(ACCESS_VIEW_KEY)==='permissions' ? 'permissions' : 'accounts';
 let userAccountPage = 1;
+let editingUsername = '';
 let selectedPermissionUsername = localStorage.getItem(PERMISSION_USER_KEY) || '';
 const permissionDrafts = new Map();
 const permissionIndex = new Map();
@@ -296,7 +298,14 @@ function bindAction(id, fn, text){
   el.onclick=()=>withBusy(el, fn, text).catch(e=>show(e.message));
 }
 function show(message){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),3200); }
-async function api(url, options={}){ const opts=Object.assign({}, options, {headers:Object.assign({}, options.headers || {})}); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`); return data; }
+const API_ERROR_MESSAGES = Object.freeze({
+  last_permanent_admin_required:'系统必须保留至少一个永久有效的管理员',
+  last_admin_required:'系统必须保留至少一个管理员',
+  invalid_expires_at:'账户到期时间无效',
+  password_required:'新建用户必须设置密码'
+});
+function apiErrorMessage(detail){ return API_ERROR_MESSAGES[String(detail || '')] || detail; }
+async function api(url, options={}){ const opts=Object.assign({}, options, {headers:Object.assign({}, options.headers || {})}); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(apiErrorMessage(data.detail) || `HTTP ${res.status}`); return data; }
 function isAbortError(error){ return !!error && (error.name === 'AbortError' || error.code === 20); }
 function reportRequestError(error, prefix='数据加载失败'){
   if(!isAbortError(error)) show(`${prefix}${error && error.message ? `：${error.message}` : ''}`);
@@ -596,9 +605,14 @@ function openNewDeviceDrawer(){
   openEditorDrawer('device', $('openDeviceDrawer'));
 }
 function clearUserForm(){
+  editingUsername='';
   $('newUsername').value='';
+  $('newUsername').readOnly=false;
   $('newPassword').value='';
   $('newRole').value='user';
+  $('userExpiryMode').value='permanent';
+  $('userExpiresAt').value='';
+  syncUserExpiryFields();
   $('userDrawerTitle').textContent='新建用户';
   $('userDrawerContext').textContent='创建新的后台账户并选择角色';
 }
@@ -607,14 +621,124 @@ function openNewUserDrawer(){
   openEditorDrawer('user', $('openUserDrawer'));
 }
 function editUser(user){
+  editingUsername=user.username;
   $('newUsername').value=user.username;
+  $('newUsername').readOnly=true;
   $('newPassword').value='';
   $('newRole').value=user.role;
+  $('userExpiryMode').value=user.expires_at == null ? 'permanent' : 'scheduled';
+  $('userExpiresAt').value=user.expires_at == null ? '' : epochToLocalInput(user.expires_at);
+  syncUserExpiryFields();
   $('userDrawerTitle').textContent='编辑用户';
   $('userDrawerContext').textContent=`正在编辑 ${user.username}，留空密码将保留原密码`;
   openEditorDrawer('user', document.activeElement);
 }
 function accessRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
+function epochToLocalInput(value){
+  const date=new Date(Number(value)*1000);
+  if(!Number.isFinite(date.getTime())) return '';
+  const pad=part=>String(part).padStart(2,'0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function localInputToEpoch(value){
+  const timestamp=new Date(String(value || '')).getTime();
+  return Number.isFinite(timestamp) ? Math.floor(timestamp/1000) : null;
+}
+function userExpirationState(user, now=Math.floor(Date.now()/1000)){
+  if(user.expires_at == null) return 'permanent';
+  const remaining=Number(user.expires_at)-now;
+  if(remaining<=0) return 'expired';
+  return remaining<=7*24*60*60 ? 'expiring' : 'active';
+}
+function formatUserExpiryDate(value){
+  const date=new Date(Number(value)*1000);
+  if(!Number.isFinite(date.getTime())) return '时间无效';
+  return new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
+}
+function formatRemainingSeconds(seconds){
+  const remaining=Math.max(0,Math.floor(Number(seconds) || 0));
+  const days=Math.floor(remaining/86400);
+  if(days>=1) return `${days} 天`;
+  const hours=Math.floor(remaining/3600);
+  if(hours>=1) return `${hours} 小时`;
+  return `${Math.max(1,Math.ceil(remaining/60))} 分钟`;
+}
+function userExpiryCell(user){
+  const wrapper=document.createElement('div');
+  wrapper.className='user-expiry';
+  wrapper.dataset.userExpiry=user.username;
+  updateUserExpiryNode(wrapper,user);
+  return wrapper;
+}
+function updateUserExpiryNode(wrapper,user){
+  const stateName=userExpirationState(user);
+  wrapper.dataset.expirationState=stateName;
+  wrapper.replaceChildren();
+  const badge=document.createElement('span');
+  badge.className=`chip ${stateName==='expired'?'danger':stateName==='expiring'?'warn':'ok'}`;
+  badge.textContent=stateName==='permanent'?'永久有效':stateName==='expired'?'已到期':stateName==='expiring'?'即将到期':'有效';
+  wrapper.appendChild(badge);
+  if(user.expires_at != null){
+    const detail=document.createElement('small');
+    const remaining=Math.max(0,Number(user.expires_at)-Math.floor(Date.now()/1000));
+    detail.textContent=stateName==='expired' ? formatUserExpiryDate(user.expires_at) : `${formatUserExpiryDate(user.expires_at)} · 剩余 ${formatRemainingSeconds(remaining)}`;
+    wrapper.appendChild(detail);
+  }
+}
+function refreshUserExpirationStatuses(){
+  if(document.visibilityState==='hidden' || !loadedResources.has('users')) return;
+  const now=Math.floor(Date.now()/1000);
+  let stateChanged=false;
+  state.users.forEach(user=>{
+    const next=userExpirationState(user,now);
+    if(user.expiration_state && user.expiration_state!==next) stateChanged=true;
+    user.expiration_state=next;
+    user.is_active=next!=='expired';
+    user.remaining_seconds=user.expires_at == null ? null : Math.max(0,Number(user.expires_at)-now);
+  });
+  if(stateChanged && $('userExpiryFilter').value!=='all'){
+    renderUsers();
+  } else {
+    const users=new Map(state.users.map(user=>[user.username,user]));
+    document.querySelectorAll('[data-user-expiry]').forEach(node=>{
+      const user=users.get(node.dataset.userExpiry);
+      if(user) updateUserExpiryNode(node,user);
+    });
+  }
+  if($('userDrawer').classList.contains('is-open')) updateUserExpiryPreview();
+}
+function updateUserExpiryPreview(){
+  const preview=$('userExpiryPreview');
+  if($('userExpiryMode').value==='permanent'){
+    preview.textContent='账户永久有效';
+    preview.dataset.state='permanent';
+    return;
+  }
+  const expiresAt=localInputToEpoch($('userExpiresAt').value);
+  if(expiresAt == null){
+    preview.textContent='请选择到期时间';
+    preview.dataset.state='empty';
+    return;
+  }
+  const remaining=expiresAt-Math.floor(Date.now()/1000);
+  preview.textContent=remaining<=0 ? `保存后立即到期 · ${formatUserExpiryDate(expiresAt)}` : `有效至 ${formatUserExpiryDate(expiresAt)} · 剩余 ${formatRemainingSeconds(remaining)}`;
+  preview.dataset.state=remaining<=0?'expired':remaining<=7*86400?'expiring':'active';
+}
+function syncUserExpiryFields(){
+  const scheduled=$('userExpiryMode').value==='scheduled';
+  $('userExpiresAtField').hidden=!scheduled;
+  $('userExpiresAt').disabled=!scheduled;
+  $('userExpiryShortcuts').querySelectorAll('button').forEach(button=>{ button.disabled=!scheduled; });
+  updateUserExpiryPreview();
+}
+function extendUserExpiry(days){
+  const now=Math.floor(Date.now()/1000);
+  const current=localInputToEpoch($('userExpiresAt').value);
+  const next=Math.max(now,current || 0)+Number(days)*86400;
+  $('userExpiryMode').value='scheduled';
+  $('userExpiresAt').value=epochToLocalInput(next);
+  syncUserExpiryFields();
+}
 function appendTableEmpty(rows, columns, message){
   const row=document.createElement('tr');
   row.className='access-empty-row';
@@ -628,7 +752,8 @@ function appendTableEmpty(rows, columns, message){
 function filteredAccountUsers(){
   const query=String($('userSearch').value || '').trim().toLocaleLowerCase();
   const role=$('userRoleFilter').value || 'all';
-  return state.users.filter(user=>(!query || user.username.toLocaleLowerCase().includes(query)) && (role==='all' || user.role===role));
+  const expiry=$('userExpiryFilter').value || 'all';
+  return state.users.filter(user=>(!query || user.username.toLocaleLowerCase().includes(query)) && (role==='all' || user.role===role) && (expiry==='all' || userExpirationState(user)===expiry));
 }
 function renderUsers(){
   const rows=$('userRows');
@@ -639,7 +764,9 @@ function renderUsers(){
   clear(rows);
   pageUsers.forEach(user=>{
     const tr=document.createElement('tr');
-    tr.append(td(user.username), td(accessRoleLabel(user.role)), td(user.created_at));
+    const expiry=document.createElement('td');
+    expiry.appendChild(userExpiryCell(user));
+    tr.append(td(user.username), td(accessRoleLabel(user.role)), expiry, td(user.created_at));
     const actions=document.createElement('td');
     actions.className='actions';
     actions.append(btn('编辑','',()=>editUser(user)));
@@ -647,7 +774,7 @@ function renderUsers(){
     tr.appendChild(actions);
     rows.appendChild(tr);
   });
-  if(!pageUsers.length) appendTableEmpty(rows,4,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
+  if(!pageUsers.length) appendTableEmpty(rows,5,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
   $('userResultCount').textContent=filtered.length===state.users.length ? `${filtered.length} 位` : `${filtered.length} / ${state.users.length} 位`;
   $('userPageStatus').textContent=`第 ${userAccountPage} / ${pageCount} 页`;
   $('userPagePrevious').disabled=userAccountPage<=1;
@@ -1842,9 +1969,17 @@ async function refreshDomains(...names){
   results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${refresh[index]} 刷新失败`); });
 }
 async function saveUser(){
-  await api('/api/admin/users',{method:'PUT', body:{username:$('newUsername').value, password:$('newPassword').value, role:$('newRole').value}});
+  const scheduled=$('userExpiryMode').value==='scheduled';
+  const expiresAt=scheduled ? localInputToEpoch($('userExpiresAt').value) : null;
+  if(scheduled && expiresAt == null) throw new Error('请选择有效的账户到期时间');
+  const username=editingUsername || $('newUsername').value.trim();
+  await api('/api/admin/users',{method:'PUT', body:{username, password:$('newPassword').value, role:$('newRole').value, expires_at:expiresAt}});
   show('用户已保存');
   closeEditorDrawer('user');
+  if(username===currentUsername && expiresAt != null && expiresAt<=Math.floor(Date.now()/1000)){
+    window.location.assign('/login');
+    return;
+  }
   await refreshDomains('overview','users','permissions','alas');
 }
 async function deleteUser(username){
@@ -2168,8 +2303,14 @@ function initializeAccessWorkspace(){
   });
   $('userSearch').oninput=()=>{ userAccountPage=1; renderUsers(); };
   $('userRoleFilter').onchange=()=>{ userAccountPage=1; renderUsers(); };
+  $('userExpiryFilter').onchange=()=>{ userAccountPage=1; renderUsers(); };
   $('userPagePrevious').onclick=()=>{ userAccountPage=Math.max(1,userAccountPage-1); renderUsers(); };
   $('userPageNext').onclick=()=>{ userAccountPage+=1; renderUsers(); };
+  $('userExpiryMode').onchange=syncUserExpiryFields;
+  $('userExpiresAt').oninput=updateUserExpiryPreview;
+  $('userExpiryShortcuts').querySelectorAll('[data-days]').forEach(button=>{
+    button.onclick=()=>extendUserExpiry(Number(button.dataset.days));
+  });
   $('permissionUserSearch').oninput=()=>{ renderPermissionUserList(); renderPermissionDetail(); };
   $('permissionUserList').onkeydown=handlePermissionUserListKeydown;
   $('permUser').onchange=()=>selectPermissionUser($('permUser').value);
@@ -2231,6 +2372,8 @@ initializeTabs();
 initializeAccessWorkspace();
 initializeAlasWorkspace();
 document.addEventListener('visibilitychange',syncDeviceStatusPolling);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshUserExpirationStatuses(); });
+setInterval(refreshUserExpirationStatuses,USER_EXPIRY_REFRESH_INTERVAL);
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
 activateTab('overview', false);
 bindAction('reloadAll', loadAll, '刷新中');

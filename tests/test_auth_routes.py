@@ -1,8 +1,10 @@
+import asyncio
 import importlib
 import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -244,6 +246,185 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         alice = next(user for user in response.json()["users"] if user["username"] == "alice")
         self.assertEqual(alice["video_mode"], "normal")
+
+    def test_admin_can_expire_and_reactivate_account_without_deleting_it(self):
+        self.storage.upsert_user("alice", "AlicePassword123", "user")
+        alice_session = self.storage.create_session("alice")
+        admin_session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", admin_session["sid"])
+        expired_at = int(time.time()) - 1
+
+        with patch.object(
+            self.main.account_connections,
+            "close_user_connections",
+            new=AsyncMock(return_value=1),
+        ) as close_connections:
+            expired = self.client.put(
+                "/api/admin/users",
+                headers={"x-csrf-token": admin_session["csrf_token"]},
+                json={"username": "alice", "password": "", "role": "user", "expires_at": expired_at},
+            )
+
+        self.assertEqual(expired.status_code, 200)
+        alice = next(user for user in expired.json()["users"] if user["username"] == "alice")
+        self.assertEqual(alice["expiration_state"], "expired")
+        self.assertFalse(alice["is_active"])
+        self.assertIsNotNone(self.storage.get_user("alice"))
+        self.assertIsNone(self.storage.get_session(alice_session["sid"]))
+        close_connections.assert_awaited_once_with("alice")
+
+        future = int(time.time()) + 30 * 86400
+        restored = self.client.put(
+            "/api/admin/users",
+            headers={"x-csrf-token": admin_session["csrf_token"]},
+            json={"username": "alice", "password": "", "role": "user", "expires_at": future},
+        )
+        self.assertEqual(restored.status_code, 200)
+        alice = next(user for user in restored.json()["users"] if user["username"] == "alice")
+        self.assertEqual(alice["expires_at"], future)
+        self.assertTrue(alice["is_active"])
+        self.assertIsNotNone(self.storage.authenticate("alice", "AlicePassword123"))
+        self.assertIsNone(self.storage.get_session(alice_session["sid"]))
+
+        permanent = self.client.put(
+            "/api/admin/users",
+            headers={"x-csrf-token": admin_session["csrf_token"]},
+            json={"username": "alice", "password": "", "role": "user", "expires_at": None},
+        )
+        self.assertEqual(permanent.status_code, 200)
+        alice = next(user for user in permanent.json()["users"] if user["username"] == "alice")
+        self.assertEqual(alice["expiration_state"], "permanent")
+
+    def test_any_expiration_policy_write_closes_preexisting_connections(self):
+        first_deadline = int(time.time()) + 10 * 86400
+        self.storage.upsert_user(
+            "alice",
+            "AlicePassword123",
+            "user",
+            expires_at=first_deadline,
+        )
+        admin_session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", admin_session["sid"])
+
+        with patch.object(
+            self.main.account_connections,
+            "close_user_connections",
+            new=AsyncMock(return_value=1),
+        ) as close_connections:
+            response = self.client.put(
+                "/api/admin/users",
+                headers={"x-csrf-token": admin_session["csrf_token"]},
+                json={
+                    "username": "alice",
+                    "password": "",
+                    "role": "user",
+                    "expires_at": first_deadline + 86400,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        close_connections.assert_awaited_once_with("alice")
+
+    def test_expired_login_uses_generic_failure_message(self):
+        self.storage.upsert_user(
+            "alice",
+            "AlicePassword123",
+            "user",
+            expires_at=int(time.time()) - 1,
+        )
+
+        response = self.client.post(
+            "/login",
+            data={"username": "alice", "password": "AlicePassword123"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("用户名或密码错误。", response.text)
+        self.assertNotIn("到期", response.text)
+
+    def test_login_expiration_race_still_uses_generic_failure_message(self):
+        user = dict(self.storage.get_user("admin"))
+        with patch.object(self.storage, "authenticate", return_value=user), patch.object(
+            self.storage,
+            "create_session",
+            side_effect=ValueError("account_expired_or_missing"),
+        ):
+            response = self.client.post(
+                "/login",
+                data={"username": "admin", "password": "AdminPassword123"},
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("用户名或密码错误。", response.text)
+        self.assertNotIn("account_expired_or_missing", response.text)
+
+    def test_last_permanent_admin_cannot_receive_a_deadline(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        response = self.client.put(
+            "/api/admin/users",
+            headers={"x-csrf-token": session["csrf_token"]},
+            json={
+                "username": "admin",
+                "password": "",
+                "role": "admin",
+                "expires_at": int(time.time()) + 86400,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "last_permanent_admin_required")
+
+    def test_websocket_registration_rechecks_session_after_registry_insert(self):
+        websocket = AsyncMock()
+        user = {"username": "alice", "role": "user"}
+        with patch.object(
+            self.main.account_connections,
+            "register",
+            new=AsyncMock(),
+        ) as register, patch.object(
+            self.main.account_connections,
+            "unregister",
+            new=AsyncMock(),
+        ) as unregister, patch.object(
+            self.main.security,
+            "get_current_user",
+            return_value=None,
+        ):
+            accepted = asyncio.run(self.main.register_current_user_websocket(websocket, user))
+
+        self.assertFalse(accepted)
+        register.assert_awaited_once_with("alice", websocket)
+        unregister.assert_awaited_once_with("alice", websocket)
+        websocket.close.assert_awaited_once_with(code=4403, reason="account expired")
+
+    def test_admin_expiration_immediately_closes_authenticated_event_websocket(self):
+        self.storage.upsert_user("alice", "AlicePassword123", "user")
+        alice_session = self.storage.create_session("alice")
+        admin_session = self.storage.create_session("admin")
+        alice_client = TestClient(self.main.app)
+        alice_client.cookies.set("wsid", alice_session["sid"])
+        self.client.cookies.set("wsid", admin_session["sid"])
+
+        with alice_client.websocket_connect("/ws/events") as websocket:
+            hello = websocket.receive_json()
+            self.assertEqual(hello["type"], "hello")
+            expired = self.client.put(
+                "/api/admin/users",
+                headers={"x-csrf-token": admin_session["csrf_token"]},
+                json={
+                    "username": "alice",
+                    "password": "",
+                    "role": "user",
+                    "expires_at": int(time.time()) - 1,
+                },
+            )
+            close_message = websocket.receive()
+
+        self.assertEqual(expired.status_code, 200)
+        self.assertEqual(close_message["type"], "websocket.close")
+        self.assertEqual(close_message["code"], 4403)
 
     def test_admin_video_rejects_output_sizes_outside_480p_to_1080p(self):
         session = self.storage.create_session("admin")

@@ -386,6 +386,8 @@ class StorageCoreTests(unittest.TestCase):
         storage.init_db()
         clock = [1000]
         storage.now_ts = lambda: clock[0]
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
 
         first = storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=90)
         self.assertTrue(first["ok"])
@@ -406,6 +408,7 @@ class StorageCoreTests(unittest.TestCase):
     def test_http_control_lock_can_be_upgraded_only_once(self):
         storage = load_storage(self.tmp)
         storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
 
         self.assertTrue(storage.acquire_lock("dev1", "alice", "http")["ok"])
         self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a")["ok"])
@@ -416,6 +419,7 @@ class StorageCoreTests(unittest.TestCase):
     def test_concurrent_http_control_lock_upgrade_has_one_winner(self):
         storage = load_storage(self.tmp)
         storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
         self.assertTrue(storage.acquire_lock("dev1", "alice", "http")["ok"])
 
         barrier = threading.Barrier(3)
@@ -442,6 +446,7 @@ class StorageCoreTests(unittest.TestCase):
     def test_control_lock_force_takeover_and_exact_release(self):
         storage = load_storage(self.tmp)
         storage.init_db()
+        storage.upsert_user("alice", "AlicePassword123", "user")
 
         self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a")["ok"])
         self.assertTrue(storage.acquire_lock("dev1", "admin", "client-admin", force=True)["ok"])
@@ -456,6 +461,8 @@ class StorageCoreTests(unittest.TestCase):
         storage.init_db()
         clock = [1000]
         storage.now_ts = lambda: clock[0]
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
 
         self.assertFalse(storage.renew_lock("missing", "alice", "client-a"))
         self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=10)["ok"])
@@ -470,11 +477,30 @@ class StorageCoreTests(unittest.TestCase):
         self.assertFalse(storage.renew_lock("dev1", "alice", "client-a", ttl_seconds=20))
         self.assertIsNone(storage.get_lock("dev1"))
 
+    def test_expired_account_cannot_recreate_or_renew_control_lock(self):
+        storage = load_storage(self.tmp)
+        with patch.object(storage, "now_ts", return_value=1000):
+            storage.init_db()
+            storage.upsert_user("timed", "TimedPassword123", "user", expires_at=1100)
+            storage.upsert_device("timed-device", "Timed device", "192.0.2.20:30100", True)
+            self.assertTrue(storage.acquire_lock("timed-device", "timed", "client-a")["ok"])
+
+        with patch.object(storage, "now_ts", return_value=1100):
+            self.assertFalse(storage.renew_lock("timed-device", "timed", "client-a"))
+            self.assertIsNone(storage.get_lock("timed-device"))
+            denied = storage.acquire_lock("timed-device", "timed", "client-b")
+
+        self.assertFalse(denied["ok"])
+        self.assertEqual(denied["error"], "account_expired")
+        self.assertIsNone(storage.get_lock("timed-device"))
+
     def test_expired_control_lock_can_be_replaced(self):
         storage = load_storage(self.tmp)
         storage.init_db()
         clock = [1000]
         storage.now_ts = lambda: clock[0]
+        storage.upsert_user("alice", "AlicePassword123", "user")
+        storage.upsert_user("bob", "BobPassword1234", "user")
 
         self.assertTrue(storage.acquire_lock("dev1", "alice", "client-a", ttl_seconds=5)["ok"])
         clock[0] = 1006
@@ -720,6 +746,217 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(storage.get_user("admin")["role"], "user")
         storage.delete_user("admin")
         self.assertIsNone(storage.get_user("admin"))
+
+    def test_user_expiration_migration_keeps_existing_accounts_permanent(self):
+        db_path = self.tmp / "webscrcpy.db"
+        self.tmp.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    must_change_password INTEGER NOT NULL DEFAULT 0,
+                    video_mode TEXT NOT NULL DEFAULT 'normal'
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO users(username,password_hash,role,created_at) VALUES('admin','legacy','admin','2026-01-01 00:00:00')"
+            )
+            conn.commit()
+
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        self.assertIsNone(storage.get_user("admin")["expires_at"])
+        listed = next(user for user in storage.list_users() if user["username"] == "admin")
+        self.assertEqual(listed["expiration_state"], "permanent")
+        self.assertTrue(listed["is_active"])
+        with sqlite3.connect(storage.DB_PATH) as conn:
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(users)")}
+        self.assertIn("idx_users_expires_at", indexes)
+
+    def test_user_expiration_payload_has_stable_boundary_states(self):
+        storage = load_storage(self.tmp)
+
+        permanent = storage.user_expiration_payload({"expires_at": None}, now=1000)
+        expired = storage.user_expiration_payload({"expires_at": 1000}, now=1000)
+        expiring = storage.user_expiration_payload({"expires_at": 1001}, now=1000)
+        active = storage.user_expiration_payload(
+            {"expires_at": 1000 + storage.ACCOUNT_EXPIRING_WINDOW_SECONDS + 1},
+            now=1000,
+        )
+
+        self.assertEqual(permanent, {
+            "expires_at": None,
+            "expiration_state": "permanent",
+            "remaining_seconds": None,
+            "is_active": True,
+        })
+        self.assertEqual(expired["expiration_state"], "expired")
+        self.assertEqual(expired["remaining_seconds"], 0)
+        self.assertFalse(expired["is_active"])
+        self.assertEqual(expiring["expiration_state"], "expiring")
+        self.assertEqual(active["expiration_state"], "active")
+
+    def test_account_expiration_rejects_non_finite_and_fractional_values(self):
+        storage = load_storage(self.tmp)
+
+        for value in (float("inf"), float("-inf"), float("nan"), 1234.5, "1234.5"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "invalid_expires_at"):
+                storage.normalize_expires_at(value)
+
+    def test_user_upsert_distinguishes_omitted_expiration_from_explicit_clear(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        future = storage.now_ts() + 86400
+        storage.upsert_user("alice", "AlicePassword123", "user", expires_at=future)
+
+        storage.upsert_user("alice", None, "user")
+        self.assertEqual(storage.get_user("alice")["expires_at"], future)
+
+        storage.upsert_user("alice", None, "user", expires_at=None)
+        self.assertIsNone(storage.get_user("alice")["expires_at"])
+
+    def test_expired_account_is_denied_auth_session_and_device_access(self):
+        storage = load_storage(self.tmp)
+        with patch.object(storage, "now_ts", return_value=1000):
+            storage.init_db()
+            storage.upsert_user("alice", "AlicePassword123", "user", expires_at=1100)
+            storage.upsert_device("dev1", "Device", "192.0.2.10:30100", True)
+            storage.set_permission("alice", "dev1", True, True)
+            session = storage.create_session("alice")
+
+        with patch.object(storage, "now_ts", return_value=1100):
+            self.assertIsNone(storage.authenticate("alice", "AlicePassword123"))
+            self.assertFalse(storage.user_can("alice", "dev1", "view"))
+            self.assertFalse(storage.user_can("alice", "dev1", "control"))
+            self.assertIsNone(storage.get_session(session["sid"]))
+            with self.assertRaisesRegex(ValueError, "account_expired_or_missing"):
+                storage.create_session("alice")
+
+        self.assertIsNotNone(storage.get_user("alice"))
+
+    def test_expiration_and_recovery_revoke_sessions_and_control_locks(self):
+        storage = load_storage(self.tmp)
+        with patch.object(storage, "now_ts", return_value=1000):
+            storage.init_db()
+            storage.upsert_user("alice", "AlicePassword123", "user", expires_at=1100)
+            storage.upsert_device("dev1", "Device", "192.0.2.10:30100", True)
+            session = storage.create_session("alice")
+            storage.acquire_lock("dev1", "alice", "http")
+
+        with patch.object(storage, "now_ts", return_value=1200):
+            updated = storage.set_user_expiration("alice", 2000)
+
+        self.assertEqual(updated["expires_at"], 2000)
+        self.assertIsNone(storage.get_session(session["sid"]))
+        self.assertIsNone(storage.get_lock("dev1"))
+        self.assertIsNotNone(storage.get_user("alice"))
+
+    def test_extend_user_expiration_uses_current_deadline_or_now(self):
+        storage = load_storage(self.tmp)
+        with patch.object(storage, "now_ts", return_value=1000):
+            storage.init_db()
+            storage.upsert_user("alice", "AlicePassword123", "user", expires_at=2000)
+            active = storage.extend_user_expiration("alice", 1)
+        self.assertEqual(active["expires_at"], 2000 + 86400)
+
+        with patch.object(storage, "now_ts", return_value=active["expires_at"] + 100):
+            expired = storage.extend_user_expiration("alice", 1)
+        self.assertEqual(expired["expires_at"], active["expires_at"] + 100 + 86400)
+
+        storage.upsert_user("bob", "BobPassword1234", "user")
+        with patch.object(storage, "now_ts", return_value=5000):
+            limited = storage.extend_user_expiration("bob", 7)
+        self.assertEqual(limited["expires_at"], 5000 + 7 * 86400)
+
+    def test_revoke_expired_access_keeps_users_but_removes_credentials(self):
+        storage = load_storage(self.tmp)
+        with patch.object(storage, "now_ts", return_value=1000):
+            storage.init_db()
+            storage.upsert_user("alice", "AlicePassword123", "user", expires_at=1100)
+            storage.upsert_user("bob", "BobPassword1234", "user", expires_at=2000)
+            storage.upsert_device("dev1", "Device", "192.0.2.10:30100", True)
+            alice_session = storage.create_session("alice")
+            bob_session = storage.create_session("bob")
+            storage.acquire_lock("dev1", "alice", "http")
+
+        expired = storage.revoke_expired_access(now=1100)
+
+        self.assertEqual(expired, {"alice"})
+        with patch.object(storage, "now_ts", return_value=1100):
+            self.assertIsNone(storage.get_session(alice_session["sid"]))
+            self.assertIsNotNone(storage.get_session(bob_session["sid"]))
+        self.assertIsNone(storage.get_lock("dev1"))
+        self.assertIsNotNone(storage.get_user("alice"))
+
+    def test_last_permanent_admin_cannot_be_limited(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        with self.assertRaisesRegex(ValueError, "last_permanent_admin_required"):
+            storage.set_user_expiration("admin", storage.now_ts() + 86400)
+
+        storage.upsert_user("temporary-admin", "TemporaryAdmin123", "admin", expires_at=storage.now_ts() + 86400)
+        with self.assertRaisesRegex(ValueError, "last_permanent_admin_required"):
+            storage.set_user_expiration("admin", storage.now_ts() + 86400)
+
+        storage.upsert_user("backup", "BackupPassword123", "admin")
+        storage.set_user_expiration("admin", storage.now_ts() + 86400)
+        self.assertIsNotNone(storage.get_user("admin")["expires_at"])
+        self.assertEqual(storage.permanent_admin_count(), 1)
+
+    def test_concurrent_admin_deletes_keep_one_permanent_admin(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user("backup", "BackupPassword123", "admin")
+        barrier = threading.Barrier(3)
+        errors = []
+
+        def remove(username):
+            barrier.wait()
+            try:
+                storage.delete_user(username)
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        threads = [
+            threading.Thread(target=remove, args=("admin",)),
+            threading.Thread(target=remove, args=("backup",)),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(storage.admin_count(), 1)
+        self.assertEqual(storage.permanent_admin_count(), 1)
+        self.assertEqual(errors, ["last_admin_required"])
+
+    def test_expiring_admin_does_not_allow_last_permanent_admin_removal_or_demotion(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.upsert_user(
+            "temporary-admin",
+            "TemporaryAdmin123",
+            "admin",
+            expires_at=storage.now_ts() + 86400,
+        )
+
+        with self.assertRaisesRegex(ValueError, "last_permanent_admin_required"):
+            storage.upsert_user("admin", None, "user")
+        with self.assertRaisesRegex(ValueError, "last_permanent_admin_required"):
+            storage.delete_user("admin")
+
+        storage.upsert_user("backup", "BackupPassword123", "admin")
+        storage.upsert_user("admin", None, "user")
+        self.assertEqual(storage.get_user("admin")["role"], "user")
 
     def test_set_permission_validates_user_and_device(self):
         storage = load_storage(self.tmp)

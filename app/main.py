@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
 from . import alas, alas_embed, security, storage
+from .account_access import account_connections, account_expiration_monitor
 from .adb_monitor import adb_monitor
 from .devices import devices_payload, public_adb_payload, session_payload, sessions_payload
 from .logging_config import setup_logging, tail_log
@@ -46,6 +47,7 @@ setup_logging()
 log = logging.getLogger("webscrcpy.main")
 api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
 mirror_autostop_task: asyncio.Task | None = None
+account_expiration_task: asyncio.Task | None = None
 STATIC_ASSET_VERSION_RE = re.compile(r"[a-f0-9]{12}")
 
 
@@ -59,11 +61,12 @@ class SelectiveGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global mirror_autostop_task
+    global account_expiration_task, mirror_autostop_task
     log.info("APP_STARTUP")
     storage.init_db()
     await adb_monitor.start()
     mirror_autostop_task = asyncio.create_task(mirror_autostop_loop())
+    account_expiration_task = asyncio.create_task(account_expiration_monitor(storage.revoke_expired_access))
     try:
         yield
     finally:
@@ -75,6 +78,13 @@ async def lifespan(_app: FastAPI):
             except asyncio.CancelledError:
                 pass
             mirror_autostop_task = None
+        if account_expiration_task:
+            account_expiration_task.cancel()
+            try:
+                await account_expiration_task
+            except asyncio.CancelledError:
+                pass
+            account_expiration_task = None
         await manager.stop_all()
         await adb_monitor.stop()
 
@@ -164,12 +174,25 @@ async def parse_body(request: Request) -> dict:
 
 
 def user_payload(user: dict) -> dict:
-    return {
+    payload = {
         "username": user["username"],
         "role": user["role"],
         "is_admin": user["role"] == "admin",
         "video_mode": "normal",
     }
+    payload.update(storage.user_expiration_payload(user))
+    return payload
+
+
+async def register_current_user_websocket(websocket: WebSocket, user: dict) -> bool:
+    """Register first, then recheck the session so expiration cannot slip between both steps."""
+    username = str(user.get("username") or "").strip()
+    await account_connections.register(username, websocket)
+    if security.get_current_user(websocket):
+        return True
+    await account_connections.unregister(username, websocket)
+    await websocket.close(code=4403, reason="account expired")
+    return False
 
 
 def parse_bool(value, default: bool = False) -> bool:
@@ -567,8 +590,18 @@ async def login(request: Request):
             {"error": "用户名或密码错误。", "username": username},
             status_code=401,
         )
+    try:
+        session = storage.create_session(user["username"])
+    except ValueError:
+        security.record_login_failure(request, username)
+        storage.audit(username or "anonymous", "login_failed", audit_detail(request))
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "用户名或密码错误。", "username": username},
+            status_code=401,
+        )
     security.record_login_success(request, username)
-    session = storage.create_session(user["username"])
     storage.audit(user["username"], "login_success", audit_detail(request))
     response = RedirectResponse("/", status_code=302)
     set_session_cookie(response, session["sid"])
@@ -1028,16 +1061,22 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
             decision.config_name,
         )
 
-    await alas_embed.proxy_websocket(
-        websocket,
-        settings.get("base_url") or raw_base_url,
-        path,
-        decision,
-        actor=user.get("username", ""),
-        role=user.get("role", ""),
-        connection_id=connection_id,
-        authorization_check=refresh_binding if decision.filtered else None,
-    )
+    username = user.get("username", "")
+    if not await register_current_user_websocket(websocket, user):
+        return
+    try:
+        await alas_embed.proxy_websocket(
+            websocket,
+            settings.get("base_url") or raw_base_url,
+            path,
+            decision,
+            actor=username,
+            role=user.get("role", ""),
+            connection_id=connection_id,
+            authorization_check=refresh_binding if decision.filtered else None,
+        )
+    finally:
+        await account_connections.unregister(username, websocket)
 
 
 @app.get("/api/admin/overview")
@@ -1074,10 +1113,20 @@ async def admin_upsert_user(request: Request):
     password = payload.get("password")
     password = str(password) if password else None
     role = str(payload.get("role", "user"))
+    previous = storage.get_user(username)
     try:
-        storage.upsert_user(username, password, role)
+        if "expires_at" in payload:
+            storage.upsert_user(username, password, role, expires_at=payload.get("expires_at"))
+        else:
+            storage.upsert_user(username, password, role)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    updated = storage.get_user(username)
+    should_close_connections = "expires_at" in payload or bool(password) or bool(
+        previous and updated and previous["role"] != updated["role"]
+    ) or not storage.user_is_active(updated) or bool(previous and not storage.user_is_active(previous))
+    if should_close_connections:
+        await account_connections.close_user_connections(username)
     storage.audit(admin["username"], "user_upsert", username)
     return {"ok": True, "users": storage.list_users()}
 
@@ -1092,6 +1141,7 @@ async def admin_delete_user(username: str, request: Request):
         storage.delete_user(username)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await account_connections.close_user_connections(username)
     storage.audit(admin["username"], "user_delete", username)
     return {"ok": True, "users": storage.list_users()}
 
@@ -1480,7 +1530,13 @@ async def ws_video(websocket: WebSocket, device_id: str):
     if not real_device_id:
         await websocket.close(code=4404)
         return
-    await video_socket(websocket, user, real_device_id, exposed_device_id=device_id)
+    username = user["username"]
+    if not await register_current_user_websocket(websocket, user):
+        return
+    try:
+        await video_socket(websocket, user, real_device_id, exposed_device_id=device_id)
+    finally:
+        await account_connections.unregister(username, websocket)
 
 
 @app.websocket("/ws/devices/{device_id}/control")
@@ -1496,7 +1552,13 @@ async def ws_control(websocket: WebSocket, device_id: str):
     if not real_device_id:
         await websocket.close(code=4404)
         return
-    await control_socket(websocket, user, real_device_id, exposed_device_id=device_id)
+    username = user["username"]
+    if not await register_current_user_websocket(websocket, user):
+        return
+    try:
+        await control_socket(websocket, user, real_device_id, exposed_device_id=device_id)
+    finally:
+        await account_connections.unregister(username, websocket)
 
 
 @app.websocket("/ws/events")
@@ -1508,5 +1570,11 @@ async def ws_events(websocket: WebSocket):
     if not user:
         await websocket.close(code=4401)
         return
-    await websocket.accept()
-    await manager.register_event_ws(websocket, user["username"])
+    username = user["username"]
+    if not await register_current_user_websocket(websocket, user):
+        return
+    try:
+        await websocket.accept()
+        await manager.register_event_ws(websocket, username)
+    finally:
+        await account_connections.unregister(username, websocket)

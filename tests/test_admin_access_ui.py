@@ -30,6 +30,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
             'aria-labelledby="accessPermissionsTab"',
             'id="userSearch"',
             'id="userRoleFilter"',
+            'id="userExpiryFilter"',
             'id="userResultCount"',
             'id="userPagePrevious"',
             'id="userPageNext"',
@@ -48,6 +49,15 @@ class AdminAccessUiContractTests(unittest.TestCase):
             'value="none"',
             'id="permissionRows"',
             'id="savePermission"',
+            'id="userExpiryMode"',
+            'id="userExpiresAtField"',
+            'id="userExpiresAt"',
+            'id="userExpiryShortcuts"',
+            'id="userExpiryPreview"',
+            'data-days="1"',
+            'data-days="7"',
+            'data-days="30"',
+            'data-days="90"',
         ):
             self.assertIn(token, self.template)
         for removed in ('id="permDevice"', 'id="permView"', 'id="permControl"'):
@@ -69,6 +79,9 @@ class AdminAccessUiContractTests(unittest.TestCase):
             ".permission-toggle",
             "min-height: 44px",
             ".access-toolbar input",
+            ".user-expiry",
+            ".user-expiry-shortcuts",
+            ".user-expiry-preview",
             ".permission-user-pane__mobile select",
             ".permission-load-state[data-state=\"error\"]",
             ".access-view-tabs button.has-drafts small",
@@ -105,6 +118,17 @@ class AdminAccessUiContractTests(unittest.TestCase):
             "function syncPermissionDraftIndicators()",
             "function handlePermissionBeforeUnload(event)",
             "window.addEventListener('beforeunload',handlePermissionBeforeUnload)",
+            "function userExpirationState(user, now=",
+            "function epochToLocalInput(value)",
+            "function localInputToEpoch(value)",
+            "function extendUserExpiry(days)",
+            "const USER_EXPIRY_REFRESH_INTERVAL = 30000",
+            "function refreshUserExpirationStatuses()",
+            "setInterval(refreshUserExpirationStatuses,USER_EXPIRY_REFRESH_INTERVAL)",
+            "let editingUsername = ''",
+            "$('newUsername').readOnly=true",
+            "expires_at:expiresAt",
+            "last_permanent_admin_required:'系统必须保留至少一个永久有效的管理员'",
         ):
             self.assertIn(token, self.script)
         render_permissions = self.script.split("function renderPermissions", 1)[1].split("function alasBindings", 1)[0]
@@ -168,6 +192,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
               var __elements = {
                 userSearch: {value: ''},
                 userRoleFilter: {value: 'all'},
+                userExpiryFilter: {value: 'all'},
                 permissionUserSearch: {value: ''},
                 permissionDeviceSearch: {value: ''},
                 permissionDeviceFilter: {value: 'all'},
@@ -202,6 +227,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
               function renderUsers(){}
               function renderDevices(){}
               function renderOverview(){}
+              ${sliceBetween('function epochToLocalInput', 'function appendTableEmpty')}
               ${sliceBetween('function filteredAccountUsers', 'function renderUsers')}
               ${sliceBetween('function permissionDraftKey', 'function alasBindings')}
               ${sliceBetween('function applyPermissions', 'function applyVideo')}
@@ -214,6 +240,14 @@ class AdminAccessUiContractTests(unittest.TestCase):
             vm.runInThisContext(selectedSource, {filename: 'admin-access-behavior.js'});
 
             (async () => {
+              const sampleEpoch = Math.floor(Date.now() / 1000);
+              const roundTripEpoch = localInputToEpoch(epochToLocalInput(sampleEpoch));
+              assert(Math.abs(roundTripEpoch - sampleEpoch) < 60);
+              assert.strictEqual(userExpirationState({expires_at: null}, 1000), 'permanent');
+              assert.strictEqual(userExpirationState({expires_at: 1000}, 1000), 'expired');
+              assert.strictEqual(userExpirationState({expires_at: 1001}, 1000), 'expiring');
+              assert.strictEqual(userExpirationState({expires_at: 1000 + 7 * 86400 + 1}, 1000), 'active');
+
               state.users = Array.from({length: 45}, (_, index) => ({
                 username: index === 0 ? 'Admin' : `user-${String(index).padStart(2, '0')}`,
                 role: index % 10 === 0 ? 'admin' : 'user',
@@ -223,6 +257,11 @@ class AdminAccessUiContractTests(unittest.TestCase):
               __elements.userSearch.value = '';
               __elements.userRoleFilter.value = 'admin';
               assert.strictEqual(filteredAccountUsers().length, 5);
+              __elements.userRoleFilter.value = 'all';
+              __elements.userExpiryFilter.value = 'expired';
+              state.users[1].expires_at = Math.floor(Date.now() / 1000) - 1;
+              assert.deepStrictEqual(filteredAccountUsers().map(user => user.username), ['user-01']);
+              __elements.userExpiryFilter.value = 'all';
 
               const alice = {username: 'alice', role: 'user'};
               const admin = {username: 'admin', role: 'admin'};

@@ -1,4 +1,5 @@
 ﻿import json
+import math
 import os
 import secrets
 import sqlite3
@@ -19,6 +20,9 @@ LEGACY_USERS_FILE = DATA_DIR / "users.json"
 LEGACY_ENV_FILE = DATA_DIR / ".env"
 MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH", "12") or "12")
 PASSWORD_PBKDF2_ITERATIONS = int(os.environ.get("PASSWORD_PBKDF2_ITERATIONS", "310000") or "310000")
+ACCOUNT_EXPIRING_WINDOW_SECONDS = 7 * 24 * 60 * 60
+MAX_ACCOUNT_EXPIRES_AT = 253402300799  # 9999-12-31T23:59:59Z
+EXPIRATION_UNSET = object()
 
 DEFAULT_SETTINGS = {
     "video_profile": "balanced",
@@ -96,6 +100,68 @@ class AlasConfigOwnershipError(ValueError):
 
 def now_ts() -> int:
     return int(time.time())
+
+
+def normalize_expires_at(value) -> int | None:
+    """Normalize the nullable UTC epoch used for account expiration."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("invalid_expires_at")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise ValueError("invalid_expires_at")
+    if isinstance(value, str) and not value.strip().isdecimal():
+        raise ValueError("invalid_expires_at")
+    try:
+        expires_at = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("invalid_expires_at") from exc
+    if expires_at < 0 or expires_at > MAX_ACCOUNT_EXPIRES_AT:
+        raise ValueError("invalid_expires_at")
+    return expires_at
+
+
+def _user_expires_at(user) -> int | None:
+    if not user:
+        return None
+    try:
+        value = user["expires_at"]
+    except (KeyError, IndexError):
+        return None
+    return int(value) if value is not None else None
+
+
+def user_is_active(user, now: int | None = None) -> bool:
+    if not user:
+        return False
+    expires_at = _user_expires_at(user)
+    return expires_at is None or expires_at > (now_ts() if now is None else int(now))
+
+
+def user_expiration_payload(user, now: int | None = None) -> dict:
+    """Return the stable public expiration state for one stored user."""
+    current = now_ts() if now is None else int(now)
+    expires_at = _user_expires_at(user)
+    if expires_at is None:
+        return {
+            "expires_at": None,
+            "expiration_state": "permanent",
+            "remaining_seconds": None,
+            "is_active": True,
+        }
+    remaining = max(0, expires_at - current)
+    if remaining <= 0:
+        state = "expired"
+    elif remaining <= ACCOUNT_EXPIRING_WINDOW_SECONDS:
+        state = "expiring"
+    else:
+        state = "active"
+    return {
+        "expires_at": expires_at,
+        "expiration_state": state,
+        "remaining_seconds": remaining,
+        "is_active": remaining > 0,
+    }
 
 
 def db_connect() -> sqlite3.Connection:
@@ -189,7 +255,8 @@ def init_db() -> bool:
                 role TEXT NOT NULL CHECK(role IN ('admin','user')),
                 created_at TEXT NOT NULL,
                 must_change_password INTEGER NOT NULL DEFAULT 0,
-                video_mode TEXT NOT NULL DEFAULT 'normal' CHECK(video_mode IN ('normal','alas'))
+                video_mode TEXT NOT NULL DEFAULT 'normal' CHECK(video_mode IN ('normal','alas')),
+                expires_at INTEGER NULL
             );
             CREATE TABLE IF NOT EXISTS devices (
                 id TEXT PRIMARY KEY,
@@ -256,6 +323,9 @@ def init_db() -> bool:
         user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "video_mode" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN video_mode TEXT NOT NULL DEFAULT 'normal'")
+        if "expires_at" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN expires_at INTEGER DEFAULT NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_expires_at ON users(expires_at)")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(user_video_preferences)").fetchall()}
         if "scrcpy_stream_mode" not in columns:
             conn.execute("ALTER TABLE user_video_preferences ADD COLUMN scrcpy_stream_mode TEXT NOT NULL DEFAULT 'raw'")
@@ -719,9 +789,16 @@ def get_user(username: str):
 
 def list_users() -> list[dict]:
     with db_connect() as conn:
-        users = [dict(row) for row in conn.execute("SELECT username,role,created_at,must_change_password FROM users ORDER BY username")]
+        users = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT username,role,created_at,must_change_password,expires_at FROM users ORDER BY username"
+            )
+        ]
+        current = now_ts()
         for user in users:
             user["video_mode"] = "normal"
+            user.update(user_expiration_payload(user, current))
         return users
 
 
@@ -732,7 +809,44 @@ def admin_count(conn: sqlite3.Connection | None = None) -> int:
         return admin_count(local_conn)
 
 
-def upsert_user(username: str, password: str | None, role: str, video_mode: str | None = None) -> None:
+def permanent_admin_count(conn: sqlite3.Connection | None = None) -> int:
+    if conn is not None:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role='admin' AND expires_at IS NULL"
+            ).fetchone()[0]
+        )
+    with db_connect() as local_conn:
+        return permanent_admin_count(local_conn)
+
+
+def _ensure_permanent_admin_transition(
+    conn: sqlite3.Connection,
+    current,
+    final_role: str,
+    final_expires_at: int | None,
+) -> None:
+    if not current:
+        return
+    currently_permanent = current["role"] == "admin" and current["expires_at"] is None
+    finally_permanent = final_role == "admin" and final_expires_at is None
+    if currently_permanent and not finally_permanent and permanent_admin_count(conn) <= 1:
+        raise ValueError("last_permanent_admin_required")
+
+
+def _revoke_user_access(conn: sqlite3.Connection, username: str) -> tuple[int, int]:
+    sessions = conn.execute("DELETE FROM sessions WHERE username=?", (username,)).rowcount
+    locks = conn.execute("DELETE FROM control_locks WHERE username=?", (username,)).rowcount
+    return int(sessions or 0), int(locks or 0)
+
+
+def upsert_user(
+    username: str,
+    password: str | None,
+    role: str,
+    video_mode: str | None = None,
+    expires_at=EXPIRATION_UNSET,
+) -> None:
     _ = video_mode  # 兼容旧调用；统一画质不再按用户保存模式。
     username = (username or "").strip()
     if not username or len(username) > 64 or any(ch.isspace() for ch in username):
@@ -744,21 +858,146 @@ def upsert_user(username: str, password: str | None, role: str, video_mode: str 
         if error:
             raise ValueError(error)
     with db_connect() as conn:
-        exists = conn.execute("SELECT username FROM users WHERE username=?", (username,)).fetchone()
-        if exists:
-            current = conn.execute("SELECT role FROM users WHERE username=?", (username,)).fetchone()
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute(
+            "SELECT username,role,expires_at FROM users WHERE username=?", (username,)
+        ).fetchone()
+        normalized_expires_at = (
+            _user_expires_at(current)
+            if expires_at is EXPIRATION_UNSET and current
+            else None
+            if expires_at is EXPIRATION_UNSET
+            else normalize_expires_at(expires_at)
+        )
+        if current:
             if current and current["role"] == "admin" and role != "admin" and admin_count(conn) <= 1:
                 raise ValueError("last_admin_required")
+            _ensure_permanent_admin_transition(conn, current, role, normalized_expires_at)
+            was_expired = not user_is_active(current)
+            will_be_expired = normalized_expires_at is not None and normalized_expires_at <= now_ts()
             if password:
-                conn.execute("UPDATE users SET password_hash=?, role=?, video_mode='normal' WHERE username=?", (hash_password(password), role, username))
+                conn.execute(
+                    "UPDATE users SET password_hash=?, role=?, video_mode='normal', expires_at=? WHERE username=?",
+                    (hash_password(password), role, normalized_expires_at, username),
+                )
                 conn.execute("DELETE FROM sessions WHERE username=?", (username,))
             else:
-                conn.execute("UPDATE users SET role=?, video_mode='normal' WHERE username=?", (role, username))
+                conn.execute(
+                    "UPDATE users SET role=?, video_mode='normal', expires_at=? WHERE username=?",
+                    (role, normalized_expires_at, username),
+                )
+            if was_expired or will_be_expired:
+                _revoke_user_access(conn, username)
         else:
             if not password:
                 raise ValueError("password_required")
-            conn.execute("INSERT INTO users(username,password_hash,role,created_at,must_change_password) VALUES(?,?,?,?,0)", (username, hash_password(password), role, time.strftime("%Y-%m-%d %H:%M:%S")))
+            if role == "admin" and normalized_expires_at is not None and permanent_admin_count(conn) < 1:
+                raise ValueError("last_permanent_admin_required")
+            conn.execute(
+                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at) VALUES(?,?,?,?,0,?)",
+                (
+                    username,
+                    hash_password(password),
+                    role,
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    normalized_expires_at,
+                ),
+            )
         conn.commit()
+
+
+def set_user_expiration(username: str, expires_at) -> dict:
+    """Set or clear an account deadline and revoke credentials when required."""
+    username = (username or "").strip()
+    normalized_expires_at = normalize_expires_at(expires_at)
+    current_time = now_ts()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if not current:
+            raise ValueError("invalid_user")
+        _ensure_permanent_admin_transition(conn, current, current["role"], normalized_expires_at)
+        was_expired = not user_is_active(current, current_time)
+        will_be_expired = normalized_expires_at is not None and normalized_expires_at <= current_time
+        conn.execute("UPDATE users SET expires_at=? WHERE username=?", (normalized_expires_at, username))
+        revoked_sessions = 0
+        revoked_locks = 0
+        if was_expired or will_be_expired:
+            revoked_sessions, revoked_locks = _revoke_user_access(conn, username)
+        updated = dict(conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone())
+        conn.commit()
+    updated.update(user_expiration_payload(updated, current_time))
+    updated["sessions_revoked"] = revoked_sessions
+    updated["control_locks_revoked"] = revoked_locks
+    return updated
+
+
+def extend_user_expiration(username: str, days: int) -> dict:
+    """Extend an active deadline, or restart an expired/permanent account from now."""
+    username = (username or "").strip()
+    if isinstance(days, bool):
+        raise ValueError("invalid_extension_days")
+    try:
+        extension_days = int(days)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_extension_days") from exc
+    if extension_days < 1 or extension_days > 3650:
+        raise ValueError("invalid_extension_days")
+    current_time = now_ts()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if not current:
+            raise ValueError("invalid_user")
+        old_expires_at = _user_expires_at(current)
+        base = max(current_time, old_expires_at or current_time)
+        new_expires_at = normalize_expires_at(base + extension_days * 86400)
+        _ensure_permanent_admin_transition(conn, current, current["role"], new_expires_at)
+        revoked_sessions = 0
+        revoked_locks = 0
+        if not user_is_active(current, current_time):
+            revoked_sessions, revoked_locks = _revoke_user_access(conn, username)
+        conn.execute("UPDATE users SET expires_at=? WHERE username=?", (new_expires_at, username))
+        updated = dict(conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone())
+        conn.commit()
+    updated.update(user_expiration_payload(updated, current_time))
+    updated["sessions_revoked"] = revoked_sessions
+    updated["control_locks_revoked"] = revoked_locks
+    return updated
+
+
+def revoke_user_access(username: str) -> dict:
+    username = (username or "").strip()
+    with db_connect() as conn:
+        sessions, locks = _revoke_user_access(conn, username)
+        conn.commit()
+    return {"sessions_revoked": sessions, "control_locks_revoked": locks}
+
+
+def revoke_expired_access(now: int | None = None) -> set[str]:
+    """Revoke durable access for every expired account without deleting users."""
+    current = now_ts() if now is None else int(now)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        usernames = {
+            str(row["username"])
+            for row in conn.execute(
+                "SELECT username FROM users WHERE expires_at IS NOT NULL AND expires_at<=?",
+                (current,),
+            ).fetchall()
+        }
+        conn.execute(
+            "DELETE FROM sessions WHERE username IN "
+            "(SELECT username FROM users WHERE expires_at IS NOT NULL AND expires_at<=?)",
+            (current,),
+        )
+        conn.execute(
+            "DELETE FROM control_locks WHERE username IN "
+            "(SELECT username FROM users WHERE expires_at IS NOT NULL AND expires_at<=?)",
+            (current,),
+        )
+        conn.commit()
+    return usernames
 
 
 def change_user_password(username: str, current_password: str, new_password: str) -> None:
@@ -784,11 +1023,15 @@ def change_user_password(username: str, current_password: str, new_password: str
 def delete_user(username: str) -> None:
     username = (username or "").strip()
     with db_connect() as conn:
-        user = conn.execute("SELECT role FROM users WHERE username=?", (username,)).fetchone()
+        conn.execute("BEGIN IMMEDIATE")
+        user = conn.execute("SELECT role,expires_at FROM users WHERE username=?", (username,)).fetchone()
         if user and user["role"] == "admin" and admin_count(conn) <= 1:
             raise ValueError("last_admin_required")
+        if user and user["role"] == "admin" and user["expires_at"] is None and permanent_admin_count(conn) <= 1:
+            raise ValueError("last_permanent_admin_required")
         conn.execute("DELETE FROM users WHERE username=?", (username,))
         conn.execute("DELETE FROM sessions WHERE username=?", (username,))
+        conn.execute("DELETE FROM control_locks WHERE username=?", (username,))
         conn.commit()
 
 
@@ -1160,9 +1403,12 @@ def get_device(device_id: str):
 
 def user_can(username: str, device_id: str, action: str) -> bool:
     col = "can_control" if action == "control" else "can_view"
+    current = now_ts()
     with db_connect() as conn:
-        user = conn.execute("SELECT role FROM users WHERE username=?", (username,)).fetchone()
+        user = conn.execute("SELECT role,expires_at FROM users WHERE username=?", (username,)).fetchone()
         if not user:
+            return False
+        if not user_is_active(user, current):
             return False
         if user["role"] == "admin":
             row = conn.execute("SELECT enabled FROM devices WHERE id=?", (device_id,)).fetchone()
@@ -1202,7 +1448,18 @@ def create_session(username: str, ttl_seconds: int = 43200) -> dict:
     csrf = secrets.token_urlsafe(24)
     ts = now_ts()
     with db_connect() as conn:
-        conn.execute("INSERT INTO sessions(sid,username,csrf_token,created_at,expires_at) VALUES(?,?,?,?,?)", (sid, username, csrf, ts, ts + ttl_seconds))
+        cursor = conn.execute(
+            """
+            INSERT INTO sessions(sid,username,csrf_token,created_at,expires_at)
+            SELECT ?,?,?,?,?
+            FROM users
+            WHERE username=? AND (expires_at IS NULL OR expires_at>?)
+            """,
+            (sid, username, csrf, ts, ts + ttl_seconds, username, ts),
+        )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            raise ValueError("account_expired_or_missing")
         conn.commit()
     return {"sid": sid, "csrf_token": csrf, "username": username, "expires_at": ts + ttl_seconds}
 
@@ -1210,15 +1467,36 @@ def create_session(username: str, ttl_seconds: int = 43200) -> dict:
 def get_session(sid: str | None) -> dict | None:
     if not sid:
         return None
+    current = now_ts()
     with db_connect() as conn:
-        row = conn.execute("SELECT * FROM sessions WHERE sid=?", (sid,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT s.*, u.username AS account_username, u.expires_at AS account_expires_at
+            FROM sessions s
+            LEFT JOIN users u ON u.username=s.username
+            WHERE s.sid=?
+            """,
+            (sid,),
+        ).fetchone()
         if not row:
             return None
-        if row["expires_at"] < now_ts():
+        if row["expires_at"] <= current:
             conn.execute("DELETE FROM sessions WHERE sid=?", (sid,))
             conn.commit()
             return None
-    return dict(row)
+        account_missing = row["account_username"] is None
+        account_expired = row["account_expires_at"] is not None and int(row["account_expires_at"]) <= current
+        if account_missing or account_expired:
+            _revoke_user_access(conn, row["username"])
+            conn.commit()
+            return None
+    return {
+        "sid": row["sid"],
+        "username": row["username"],
+        "csrf_token": row["csrf_token"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+    }
 
 
 def delete_session(sid: str | None) -> None:
@@ -1248,6 +1526,8 @@ def authenticate(username: str, password: str) -> dict | None:
         return None
     if not verify_password(password, user["password_hash"]):
         return None
+    if not user_is_active(user):
+        return None
     if password_hash_needs_upgrade(user["password_hash"]):
         with db_connect() as conn:
             conn.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_password(password), user["username"]))
@@ -1260,6 +1540,11 @@ def acquire_lock(device_id: str, username: str, client_id: str, force: bool = Fa
     expires = ts + ttl_seconds
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        account = conn.execute("SELECT expires_at FROM users WHERE username=?", (username,)).fetchone()
+        if not user_is_active(account, ts):
+            conn.execute("DELETE FROM control_locks WHERE username=?", (username,))
+            conn.commit()
+            return {"ok": False, "owner": "", "expires_at": 0, "error": "account_expired"}
         current = conn.execute("SELECT * FROM control_locks WHERE device_id=?", (device_id,)).fetchone()
         if current and current["expires_at"] < ts:
             conn.execute("DELETE FROM control_locks WHERE device_id=?", (device_id,))
@@ -1290,6 +1575,11 @@ def renew_lock(device_id: str, username: str, client_id: str, ttl_seconds: int =
     expires = ts + ttl_seconds
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        account = conn.execute("SELECT expires_at FROM users WHERE username=?", (username,)).fetchone()
+        if not user_is_active(account, ts):
+            conn.execute("DELETE FROM control_locks WHERE username=?", (username,))
+            conn.commit()
+            return False
         row = conn.execute("SELECT * FROM control_locks WHERE device_id=?", (device_id,)).fetchone()
         if not row:
             conn.commit()
