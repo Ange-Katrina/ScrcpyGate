@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{ default_locale }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,7 +9,8 @@
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
   <link rel="stylesheet" href="/static/css/admin.css?v=817f03c5eab3">
-  <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
+  <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
+  <script src="/static/js/ui-core.js?v=da189b55e2cd" defer></script>
 </head>
 <body data-ui-page="admin">
 <div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -43,11 +44,11 @@
       </div>
       <div class="ui-theme-picker" data-ui-theme-placement="top">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
-        <span class="ui-sr-only">界面主题</span>
-        <select id="adminTheme" data-ui-theme-select aria-label="界面主题">
-          <option value="dark">深色</option>
-          <option value="light">浅色</option>
-          <option value="system">跟随系统</option>
+        <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
+        <select id="adminTheme" data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
+          <option value="dark">{{ t("common.theme.dark") }}</option>
+          <option value="light">{{ t("common.theme.light") }}</option>
+          <option value="system">{{ t("common.theme.system") }}</option>
         </select>
       </div>
       <a class="admin-nav__link" href="/">返回投屏页</a>
@@ -438,6 +439,7 @@
   <div class="confirm-dialog__actions"><button id="confirmDialogCancel" class="btn" type="button">取消</button><button id="confirmDialogConfirm" class="btn danger" type="button">确认操作</button></div>
 </dialog>
 
+<script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
 <script src="/static/js/admin.js?v=01a13f171df4" defer></script>
 </body>

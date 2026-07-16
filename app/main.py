@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
-from . import alas, alas_embed, security, storage
+from . import alas, alas_embed, i18n, security, storage
 from .account_access import account_connections, account_expiration_monitor
 from .adb_monitor import adb_monitor
 from .devices import devices_payload, public_adb_payload, session_payload, sessions_payload
@@ -51,6 +51,22 @@ mirror_autostop_task: asyncio.Task | None = None
 account_expiration_task: asyncio.Task | None = None
 STATIC_ASSET_VERSION_RE = re.compile(r"[a-f0-9]{12}")
 ADMIN_ALAS_OVERVIEW_CONCURRENCY = ALAS_OVERVIEW_MAX_WORKERS
+ALAS_EMBED_DENIED_MESSAGE_KEYS = {
+    "missing binding": "alas.denied.reason.missing_binding",
+    "missing_binding": "alas.denied.reason.missing_binding",
+    "missing request config": "alas.denied.reason.missing_request_config",
+    "missing_request_config": "alas.denied.reason.missing_request_config",
+    "invalid body": "alas.denied.reason.invalid_body",
+    "invalid_body": "alas.denied.reason.invalid_body",
+    "config mismatch": "alas.denied.reason.config_mismatch",
+    "config path mismatch": "alas.denied.reason.config_mismatch",
+    "management path denied": "alas.denied.reason.management_path_denied",
+    "restricted user entry denied": "alas.denied.reason.restricted_user_entry_denied",
+    "alas settings denied": "alas.denied.reason.alas_settings_denied",
+    "run permission denied": "alas.denied.reason.run_permission_denied",
+    "edit permission denied": "alas.denied.reason.edit_permission_denied",
+}
+ALAS_EMBED_DENIED_DEFAULT_MESSAGE_KEY = "alas.denied.reason.default"
 
 
 class SelectiveGZipMiddleware(GZipMiddleware):
@@ -102,6 +118,11 @@ app = FastAPI(
 app.add_middleware(SelectiveGZipMiddleware, minimum_size=500)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+templates.env.globals.update(
+    t=i18n.translate,
+    i18n_payload=i18n.browser_payload,
+    default_locale=i18n.DEFAULT_LOCALE,
+)
 
 
 def auto_stop_minutes() -> int:
@@ -234,26 +255,11 @@ def alas_embed_route_class(path: str) -> str:
 
 def alas_embed_denied_message(reason: str) -> str:
     """将 ALAS 嵌入代理拒绝原因转换为用户可见中文文案。"""
-    reason_text = str(reason or "")
-    if reason_text in ("missing binding", "missing_binding"):
-        return "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置"
-    if reason_text in ("missing request config", "missing_request_config"):
-        return "业务请求必须显式指定绑定的 ALAS 配置"
-    if reason_text in ("invalid body", "invalid_body"):
-        return "ALAS 请求正文无法安全解析"
-    if reason_text in ("config mismatch", "config path mismatch"):
-        return "无权访问其它 ALAS 配置"
-    if reason_text == "management path denied":
-        return "无权访问 ALAS 管理入口"
-    if reason_text == "restricted user entry denied":
-        return "无权访问 ALAS 受限入口"
-    if reason_text == "alas settings denied":
-        return "无权访问 ALAS 设置页"
-    if reason_text == "run permission denied":
-        return "无权执行 ALAS 运行类操作"
-    if reason_text == "edit permission denied":
-        return "无权修改 ALAS 绑定配置设置"
-    return "ALAS 嵌入访问被拒绝"
+    message_key = ALAS_EMBED_DENIED_MESSAGE_KEYS.get(
+        str(reason or ""),
+        ALAS_EMBED_DENIED_DEFAULT_MESSAGE_KEY,
+    )
+    return i18n.translate(message_key)
 
 
 def alas_embed_return_url(binding: dict | None) -> str:
@@ -763,7 +769,7 @@ async def login(request: Request):
         response = templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "登录尝试次数过多，请稍后再试。", "username": username},
+            {"error": i18n.translate("login.error.rate_limited"), "username": username},
             status_code=429,
         )
         response.headers["Retry-After"] = str(rate["retry_after"])
@@ -777,7 +783,7 @@ async def login(request: Request):
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "用户名或密码错误。", "username": username},
+            {"error": i18n.translate("login.error.invalid_credentials"), "username": username},
             status_code=401,
         )
     try:
@@ -788,7 +794,7 @@ async def login(request: Request):
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "用户名或密码错误。", "username": username},
+            {"error": i18n.translate("login.error.invalid_credentials"), "username": username},
             status_code=401,
         )
     security.record_login_success(request, username)
@@ -1129,14 +1135,20 @@ async def alas_embed_page(request: Request):
         config_name = alas.sanitize_config_name(binding.get("config_name"))
         iframe_src = f"/alas/embed/proxy/?{urlencode({'config': config_name})}" if requested else "/alas/embed/proxy/"
         storage.audit(user["username"], "alas_embed_open", f"admin:{config_name}" if requested else "admin")
-        return HTMLResponse(alas_embed.embed_shell_html("ALAS 原页面", iframe_src, "管理员完整访问"))
+        return HTMLResponse(
+            alas_embed.embed_shell_html(
+                i18n.translate("alas.shell.admin_title"),
+                iframe_src,
+                i18n.translate("alas.shell.admin_message"),
+            )
+        )
     config_name = alas.sanitize_config_name(binding.get("config_name"))
     storage.audit(user["username"], "alas_embed_open", config_name)
     return HTMLResponse(
         alas_embed.embed_shell_html(
-            f"ALAS - {config_name}",
+            i18n.translate("alas.shell.user_title", config=config_name),
             f"/alas/embed/proxy/?{urlencode({'config': config_name})}",
-            f"当前仅允许访问绑定配置：{config_name}",
+            i18n.translate("alas.shell.bound_message", config=config_name),
         )
     )
 

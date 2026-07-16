@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "language_name": "简体中文"
+  },
+  "common": {
+    "theme": {
+      "label": "界面主题",
+      "dark": "深色",
+      "light": "浅色",
+      "system": "跟随系统",
+      "current": "界面主题：{theme}"
+    },
+    "actions": {
+      "refresh": "刷新",
+      "retry": "重试",
+      "back": "返回",
+      "cancel": "取消",
+      "open_new_window": "新窗口打开",
+      "return_scrcpygate": "返回 ScrcpyGate",
+      "close_notification": "关闭通知"
+    },
+    "feedback": {
+      "completed": "操作已完成"
+    }
+  },
+  "login": {
+    "page_title": "ScrcpyGate 登录",
+    "kicker": "设备投屏工作台",
+    "intro": "登录后选择设备投屏并获取控制权。",
+    "username": "用户名",
+    "password": "密码",
+    "show_password": "显示密码",
+    "hide_password": "隐藏密码",
+    "submit": "登录",
+    "submitting": "正在登录…",
+    "submitting_short": "正在登录",
+    "verifying": "正在验证登录信息，请稍候。",
+    "error": {
+      "invalid_credentials": "用户名或密码错误。",
+      "rate_limited": "登录尝试次数过多，请稍后再试。"
+    }
+  },
+  "alas": {
+    "shell": {
+      "toolbar_label": "ALAS 页面操作",
+      "connecting": "正在连接",
+      "connected": "已连接",
+      "connection_failed": "连接失败",
+      "load_timeout_status": "加载超时",
+      "loading_title": "正在加载 ALAS",
+      "loading_detail": "正在连接 ALAS Runtime，请稍候。",
+      "timeout_title": "ALAS 加载超时",
+      "timeout_detail": "Runtime 仍未响应。你可以重试，或确认 ALAS 服务与网络连接是否正常。",
+      "unreachable_title": "ALAS Runtime 不可达",
+      "unreachable_load_detail": "无法载入上游页面。请确认 Runtime 已启动、地址配置正确，然后重试。",
+      "unreachable_read_detail": "无法读取上游页面。请确认 Runtime 已启动、地址配置正确，然后重试。",
+      "unreachable_browser_detail": "浏览器无法载入上游页面，请检查服务状态后重试。",
+      "noscript_title": "无法显示加载状态",
+      "noscript_detail": "请启用 JavaScript，或在新窗口中打开 ALAS 页面。",
+      "admin_title": "ALAS 原页面",
+      "admin_message": "管理员完整访问",
+      "user_title": "ALAS - {config}",
+      "bound_message": "当前仅允许访问绑定配置：{config}"
+    },
+    "denied": {
+      "default_message": "ALAS 访问被限制",
+      "page_title": "ALAS 访问受限",
+      "heading": "此入口不可访问",
+      "return_alas": "返回我的 ALAS 页面",
+      "auto_return": "{seconds} 秒后自动返回。",
+      "reason": {
+        "missing_binding": "未绑定 ALAS 配置，请联系管理员绑定 ALAS 配置",
+        "missing_request_config": "业务请求必须显式指定绑定的 ALAS 配置",
+        "invalid_body": "ALAS 请求正文无法安全解析",
+        "config_mismatch": "无权访问其它 ALAS 配置",
+        "management_path_denied": "无权访问 ALAS 管理入口",
+        "restricted_user_entry_denied": "无权访问 ALAS 受限入口",
+        "alas_settings_denied": "无权访问 ALAS 设置页",
+        "run_permission_denied": "无权执行 ALAS 运行类操作",
+        "edit_permission_denied": "无权修改 ALAS 绑定配置设置",
+        "default": "ALAS 嵌入访问被拒绝"
+      }
+    }
+  }
+}

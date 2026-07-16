@@ -330,13 +330,16 @@ class AlasEmbedTests(unittest.TestCase):
         self.assertIn('id="loadStatus"', result)
         self.assertIn('id="refreshFrame"', result)
         self.assertIn('id="retryFrame"', result)
-        self.assertIn("ALAS 加载超时", script)
-        self.assertIn("ALAS Runtime 不可达", script)
+        self.assertIn('t("alas.shell.timeout_title")', script)
+        self.assertIn('t("alas.shell.unreachable_title")', script)
         self.assertIn("新窗口打开", result)
+        self.assertIn('id="scrcpygate-i18n"', result)
+        self.assertEqual(result.count('id="scrcpygate-i18n"'), 1)
+        self.assertLess(result.index('/static/js/i18n.js?'), result.index('/static/js/alas-shell.js?'))
         self.assertIn('rel="noopener noreferrer"', result)
         self.assertIn('aria-live="polite"', result)
         self.assertNotIn("<style", result.lower())
-        self.assertNotRegex(result, r"<script(?![^>]+src=)")
+        self.assertNotRegex(result, r'<script(?![^>]+(?:src=|type="application/json"))')
 
     def test_embed_shell_static_assets_are_content_versioned(self):
         result = embed_shell_html("ALAS", "/alas/embed/proxy/")
@@ -345,6 +348,7 @@ class AlasEmbedTests(unittest.TestCase):
             "static/js/theme-init.js",
             "static/css/ui-tokens.css",
             "static/css/alas-shell.css",
+            "static/js/i18n.js",
             "static/js/alas-shell.js",
         ):
             digest = hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest()[:12]
@@ -881,6 +885,9 @@ class AlasEmbedPolicyTests(unittest.TestCase):
         self.assertIn("无权访问 ALAS 管理入口", result)
         self.assertIn('content="3;url=/alas/embed/proxy/?config=3256475495"', result)
         self.assertIn("window.location.replace", result)
+        self.assertIn('id="countdown"', result)
+        self.assertIn('data-template="{seconds} 秒后自动返回。"', result)
+        self.assertIn("3 秒后自动返回。", result)
 
     def test_filter_user_html_masks_adb_endpoint(self):
         result = filter_user_html("<main>Serial 192.0.2.10:30100</main>", "挂机-云")

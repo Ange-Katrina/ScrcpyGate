@@ -23,6 +23,8 @@ from fastapi import HTTPException, Request as FastAPIRequest
 from fastapi.responses import Response
 from websockets import connect as websocket_connect
 
+from . import i18n
+
 log = logging.getLogger("webscrcpy.alas_embed")
 
 ALAS_EMBED_PREFIX = "/alas/embed"
@@ -316,8 +318,20 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     safe_title = escape(title)
     safe_src = escape(iframe_src, quote=True)
     safe_message = escape(message)
+    safe_toolbar_label = escape(i18n.translate("alas.shell.toolbar_label"), quote=True)
+    safe_connecting = escape(i18n.translate("alas.shell.connecting"))
+    safe_refresh = escape(i18n.translate("common.actions.refresh"))
+    safe_open_new_window = escape(i18n.translate("common.actions.open_new_window"))
+    safe_back = escape(i18n.translate("common.actions.back"))
+    safe_loading_title = escape(i18n.translate("alas.shell.loading_title"))
+    safe_loading_detail = escape(i18n.translate("alas.shell.loading_detail"))
+    safe_retry = escape(i18n.translate("common.actions.retry"))
+    safe_return_scrcpygate = escape(i18n.translate("common.actions.return_scrcpygate"))
+    safe_noscript_title = escape(i18n.translate("alas.shell.noscript_title"))
+    safe_noscript_detail = escape(i18n.translate("alas.shell.noscript_detail"))
+    locale_payload = i18n.browser_payload_json()
     return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="{i18n.DEFAULT_LOCALE}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -326,7 +340,9 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/alas-shell.css?v=8310dfe3dbdc">
-  <script src="/static/js/alas-shell.js?v=3941af81f7e0" defer></script>
+  <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
+  <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
+  <script src="/static/js/alas-shell.js?v=14b8b1af378a" defer></script>
 </head>
 <body>
   <header class="alas-shell-bar">
@@ -337,11 +353,11 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
         <span class="alas-shell-message">{safe_message}</span>
       </div>
     </div>
-    <div class="alas-shell-toolbar" aria-label="ALAS 页面操作">
-      <span id="loadStatus" class="alas-shell-status" data-state="loading" role="status" aria-live="polite">正在连接</span>
-      <button id="refreshFrame" class="alas-shell-button" type="button">刷新</button>
-      <a class="alas-shell-button" href="{safe_src}" target="_blank" rel="noopener noreferrer">新窗口打开</a>
-      <a class="alas-shell-button" href="/">返回</a>
+    <div class="alas-shell-toolbar" aria-label="{safe_toolbar_label}">
+      <span id="loadStatus" class="alas-shell-status" data-state="loading" role="status" aria-live="polite">{safe_connecting}</span>
+      <button id="refreshFrame" class="alas-shell-button" type="button">{safe_refresh}</button>
+      <a class="alas-shell-button" href="{safe_src}" target="_blank" rel="noopener noreferrer">{safe_open_new_window}</a>
+      <a class="alas-shell-button" href="/">{safe_back}</a>
     </div>
   </header>
   <main class="alas-shell-stage">
@@ -363,22 +379,22 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     >
       <div class="alas-shell-state-card">
         <div class="alas-shell-spinner" aria-hidden="true"></div>
-        <h1 id="stateTitle">正在加载 ALAS</h1>
-        <p id="stateDetail">正在连接 ALAS Runtime，请稍候。</p>
+        <h1 id="stateTitle">{safe_loading_title}</h1>
+        <p id="stateDetail">{safe_loading_detail}</p>
         <div id="stateActions" class="alas-shell-state-actions" hidden>
-          <button id="retryFrame" class="alas-shell-button primary" type="button">重试</button>
-          <a class="alas-shell-button" href="/">返回 ScrcpyGate</a>
+          <button id="retryFrame" class="alas-shell-button primary" type="button">{safe_retry}</button>
+          <a class="alas-shell-button" href="/">{safe_return_scrcpygate}</a>
         </div>
       </div>
     </section>
     <noscript>
       <section class="alas-shell-state is-visible" role="alert">
         <div class="alas-shell-state-card">
-          <h1>无法显示加载状态</h1>
-          <p>请启用 JavaScript，或在新窗口中打开 ALAS 页面。</p>
+          <h1>{safe_noscript_title}</h1>
+          <p>{safe_noscript_detail}</p>
           <div class="alas-shell-state-actions">
-            <a class="alas-shell-button primary" href="{safe_src}" target="_blank" rel="noopener noreferrer">新窗口打开</a>
-            <a class="alas-shell-button" href="/">返回 ScrcpyGate</a>
+            <a class="alas-shell-button primary" href="{safe_src}" target="_blank" rel="noopener noreferrer">{safe_open_new_window}</a>
+            <a class="alas-shell-button" href="/">{safe_return_scrcpygate}</a>
           </div>
         </div>
       </section>
@@ -390,16 +406,23 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
 
 def denied_page_html(message: str, redirect_url: str = "/alas/embed/", seconds: int = 3) -> str:
     """Render a friendly ALAS embed denial page inside the iframe."""
-    safe_message = escape(message or "ALAS 访问被限制")
+    safe_message = escape(message or i18n.translate("alas.denied.default_message"))
     safe_url = escape(redirect_url or "/alas/embed/", quote=True)
     safe_seconds = max(1, min(30, int(seconds or 3)))
+    safe_page_title = escape(i18n.translate("alas.denied.page_title"))
+    safe_heading = escape(i18n.translate("alas.denied.heading"))
+    safe_return_alas = escape(i18n.translate("alas.denied.return_alas"))
+    safe_return_scrcpygate = escape(i18n.translate("common.actions.return_scrcpygate"))
+    auto_return_template = i18n.translate("alas.denied.auto_return")
+    safe_auto_return_template = escape(auto_return_template, quote=True)
+    safe_auto_return = escape(i18n.translate("alas.denied.auto_return", seconds=safe_seconds))
     return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="{i18n.DEFAULT_LOCALE}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="{safe_seconds};url={safe_url}">
-  <title>ALAS 访问受限</title>
+  <title>{safe_page_title}</title>
   <style>
     :root {{ color-scheme: dark; }}
     html, body {{ margin:0; min-height:100%; background:#0f131a; color:#eef3fb; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
@@ -417,22 +440,23 @@ def denied_page_html(message: str, redirect_url: str = "/alas/embed/", seconds: 
 <body>
   <main class="panel">
     <span class="badge">ScrcpyGate ALAS</span>
-    <h1>此入口不可访问</h1>
+    <h1>{safe_heading}</h1>
     <p>{safe_message}</p>
     <div class="actions">
-      <a href="{safe_url}">返回我的 ALAS 页面</a>
-      <a class="secondary" href="/" target="_top">返回 ScrcpyGate</a>
+      <a href="{safe_url}">{safe_return_alas}</a>
+      <a class="secondary" href="/" target="_top">{safe_return_scrcpygate}</a>
     </div>
-    <div class="count"><span id="seconds">{safe_seconds}</span> 秒后自动返回。</div>
+    <div id="countdown" class="count" data-template="{safe_auto_return_template}">{safe_auto_return}</div>
   </main>
   <script>
     (function() {{
       var left = {safe_seconds};
       var target = {json.dumps(redirect_url or "/alas/embed/")};
-      var node = document.getElementById("seconds");
+      var node = document.getElementById("countdown");
+      var template = node ? node.getAttribute("data-template") : "{{seconds}}";
       window.setInterval(function() {{
         left -= 1;
-        if (node) node.textContent = String(Math.max(left, 0));
+        if (node) node.textContent = template.replace("{{seconds}}", String(Math.max(left, 0)));
         if (left <= 0) window.location.replace(target);
       }}, 1000);
     }})();

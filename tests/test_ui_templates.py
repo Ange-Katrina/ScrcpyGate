@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app import i18n
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -80,7 +82,7 @@ class UiTemplateContractTests(unittest.TestCase):
                         self.assertTrue(script["src"].startswith("/static/"))
                     else:
                         self.assertEqual(script.get("type"), "application/json")
-                        self.assertEqual(script.get("id"), "scrcpygate-bootstrap")
+                        self.assertIn(script.get("id"), {"scrcpygate-bootstrap", "scrcpygate-i18n"})
                 for asset_url in parser.static_assets:
                     self.assert_content_version(asset_url)
 
@@ -95,6 +97,7 @@ class UiTemplateContractTests(unittest.TestCase):
             "login.html": {
                 "loginTitle", "loginError", "loginForm", "username", "password",
                 "passwordToggle", "loginSubmit", "loginSubmitLabel", "loginSubmitStatus",
+                "scrcpygate-i18n",
             },
             "index.html": {
                 "sidebar", "roleChip", "adminLink", "toolBtn", "alasBtn", "accountBtn",
@@ -107,7 +110,7 @@ class UiTemplateContractTests(unittest.TestCase):
                 "statusDetails", "controlOwnership", "notice", "stage", "screenArea", "videoWrap",
                 "phoneVideo", "empty", "emptyTitle", "emptyDescription", "backBtn", "homeBtn",
                 "recentBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
-                "toolDrawerCloseBtn", "scrcpygate-bootstrap",
+                "toolDrawerCloseBtn", "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
             "admin.html": {
                 "notice", "summaryMirror", "summaryAlas", "overview", "overviewDevices",
@@ -134,7 +137,7 @@ class UiTemplateContractTests(unittest.TestCase):
                 "alasAssignmentSummary", "alasAssignmentUserName", "alasAssignmentUserMeta",
                 "alasAssignmentConfigSummary", "alasAssignmentConfigName", "alasAssignmentConfigMeta",
                 "loadConfig", "configEditor", "saveConfig", "logs", "runtimeLogs", "logRows",
-                "scrcpygate-bootstrap",
+                "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
         }
         for name, expected in required.items():
@@ -160,6 +163,11 @@ class UiTemplateContractTests(unittest.TestCase):
             loader=FileSystemLoader(TEMPLATES),
             autoescape=select_autoescape(["html"]),
         )
+        environment.globals.update(
+            t=i18n.translate,
+            i18n_payload=i18n.browser_payload,
+            default_locale=i18n.DEFAULT_LOCALE,
+        )
         malicious = '</script><script>alert("owned")</script>'
         user = {"username": malicious, "role": "admin", "password_hash": "must-not-leak"}
         pattern = re.compile(
@@ -176,6 +184,25 @@ class UiTemplateContractTests(unittest.TestCase):
                 self.assertEqual(payload["csrf_token"], malicious)
                 self.assertNotIn(malicious, match.group(1))
                 self.assertNotIn("password_hash", match.group(1))
+
+    def test_pages_load_one_i18n_catalog_before_shared_ui_runtime(self):
+        for name in ("login.html", "index.html", "admin.html"):
+            with self.subTest(name=name):
+                source = self.read(f"templates/{name}")
+                parser = self.parse_template(name)
+                self.assertEqual(parser.ids.count("scrcpygate-i18n"), 1)
+                self.assertIn('/static/js/i18n.js?', source)
+                self.assertLess(source.index('/static/js/i18n.js?'), source.index('/static/js/ui-core.js?'))
+                self.assertIn('{{ i18n_payload() | tojson }}', source)
+
+    def test_i18n_catalog_is_valid_and_runtime_has_key_fallback(self):
+        catalog = json.loads(self.read("static/i18n/zh-CN.json"))
+        runtime = self.read("static/js/i18n.js")
+        self.assertEqual(catalog["meta"]["language_name"], "简体中文")
+        self.assertEqual(catalog["login"]["submit"], "登录")
+        self.assertIn("function resolve(key)", runtime)
+        self.assertIn('return String(key || "")', runtime)
+        self.assertIn("Object.prototype.hasOwnProperty.call(values, name)", runtime)
 
     def test_theme_runtime_and_accessibility_tokens_are_present(self):
         init = self.read("static/js/theme-init.js")
@@ -225,7 +252,7 @@ class UiTemplateContractTests(unittest.TestCase):
         self.assertIn(".compact-theme-picker { width: 44px; }", components)
 
     def test_scripts_avoid_template_code_and_unsafe_html_sinks(self):
-        for name in ("mirror.js", "admin.js", "login.js", "ui-core.js", "theme-init.js"):
+        for name in ("mirror.js", "admin.js", "login.js", "ui-core.js", "theme-init.js", "i18n.js", "alas-shell.js"):
             with self.subTest(name=name):
                 source = self.read(f"static/js/{name}")
                 self.assertNotIn("{{", source)

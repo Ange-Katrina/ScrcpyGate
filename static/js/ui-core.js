@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  const i18n = window.ScrcpyGateI18n;
+  const t = (key, values) => (
+    i18n && typeof i18n.t === "function" ? i18n.t(key, values) : String(key || "")
+  );
   const THEME_KEY = "scrcpygate:theme";
   const THEMES = new Set(["system", "dark", "light"]);
   const root = document.documentElement;
@@ -99,7 +103,7 @@
     menu.id = menuId;
     menu.className = "ui-theme-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "界面主题");
+    menu.setAttribute("aria-label", t("common.theme.label"));
     menu.hidden = true;
 
     const items = Array.from(select.options).map((option) => {
@@ -135,9 +139,9 @@
       sync(theme) {
         if (select.value !== theme) select.value = theme;
         const selectedOption = Array.from(select.options).find((option) => option.value === theme) || select.options[0];
-        const label = selectedOption ? selectedOption.textContent : "深色";
+        const label = selectedOption ? selectedOption.textContent : t("common.theme.dark");
         triggerLabel.textContent = label;
-        trigger.setAttribute("aria-label", `界面主题：${label}`);
+        trigger.setAttribute("aria-label", t("common.theme.current", { theme: label }));
         items.forEach((item) => item.setAttribute("aria-checked", String(item.dataset.themeValue === theme)));
       },
       isOpen() {
@@ -254,10 +258,10 @@
     toastNode.className = `ui-toast ui-toast--${type}`;
     toastNode.setAttribute("role", type === "danger" ? "alert" : "status");
     messageNode.className = "ui-toast__message";
-    messageNode.textContent = String(message || "操作已完成");
+    messageNode.textContent = String(message || t("common.feedback.completed"));
     closeButton.className = "ui-toast__close";
     closeButton.type = "button";
-    closeButton.setAttribute("aria-label", "关闭通知");
+    closeButton.setAttribute("aria-label", t("common.actions.close_notification"));
     closeButton.appendChild(icon("x"));
     toastNode.append(icon(iconName), messageNode, closeButton);
 

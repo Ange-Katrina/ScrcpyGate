@@ -1,58 +1,60 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{ default_locale }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111315">
-  <title>ScrcpyGate 登录</title>
+  <title>{{ t("login.page_title") }}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
   <link rel="stylesheet" href="/static/css/login.css?v=eed0489be317">
-  <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
-  <script src="/static/js/login.js?v=815e2fe34b57" defer></script>
+  <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
+  <script src="/static/js/ui-core.js?v=da189b55e2cd" defer></script>
+  <script src="/static/js/login.js?v=4b3c037d5995" defer></script>
 </head>
 <body data-ui-page="login">
   <div class="login-shell">
     <div class="login-toolbar">
       <div class="ui-theme-picker">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
-        <span class="ui-sr-only">界面主题</span>
-        <select data-ui-theme-select aria-label="界面主题">
-          <option value="dark">深色</option>
-          <option value="light">浅色</option>
-          <option value="system">跟随系统</option>
+        <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
+        <select data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
+          <option value="dark">{{ t("common.theme.dark") }}</option>
+          <option value="light">{{ t("common.theme.light") }}</option>
+          <option value="system">{{ t("common.theme.system") }}</option>
         </select>
       </div>
     </div>
     <main class="login-panel" aria-labelledby="loginTitle">
       <header class="login-heading">
-        <p class="login-kicker">设备投屏工作台</p>
+        <p class="login-kicker">{{ t("login.kicker") }}</p>
         <h1 id="loginTitle">ScrcpyGate</h1>
-        <p class="login-intro">登录后选择设备投屏并获取控制权。</p>
+        <p class="login-intro">{{ t("login.intro") }}</p>
       </header>
       {% if error %}<div id="loginError" class="login-error" role="alert">{{ error }}</div>{% endif %}
       <form id="loginForm" class="login-form" method="post" action="/login">
         <div class="ui-field">
-          <label for="username">用户名</label>
+          <label for="username">{{ t("login.username") }}</label>
           <input class="ui-input" id="username" name="username" value="{{ username | default('', true) }}" autocomplete="username" autocapitalize="none" spellcheck="false"{% if not error %} autofocus{% endif %} required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
         </div>
         <div class="ui-field">
-          <label for="password">密码</label>
+          <label for="password">{{ t("login.password") }}</label>
           <div class="login-password-field">
             <input class="ui-input" id="password" name="password" type="password" autocomplete="current-password"{% if error %} autofocus{% endif %} required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
-            <button id="passwordToggle" class="login-password-toggle" type="button" aria-label="显示密码" aria-controls="password" aria-pressed="false" title="显示密码">
+            <button id="passwordToggle" class="login-password-toggle" type="button" aria-label="{{ t('login.show_password') }}" aria-controls="password" aria-pressed="false" title="{{ t('login.show_password') }}">
               <svg class="ui-icon password-icon-show" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#eye"></use></svg>
               <svg class="ui-icon password-icon-hide" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#eye-off"></use></svg>
             </button>
           </div>
         </div>
         <button id="loginSubmit" class="ui-button ui-button--primary login-submit" type="submit">
-          <span id="loginSubmitLabel">登录</span>
+          <span id="loginSubmitLabel">{{ t("login.submit") }}</span>
         </button>
         <span id="loginSubmitStatus" class="ui-sr-only" aria-live="polite"></span>
       </form>
     </main>
   </div>
+  <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 </body>
 </html>

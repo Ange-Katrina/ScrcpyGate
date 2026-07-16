@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  const i18n = window.ScrcpyGateI18n;
+  const t = (key, values) => (
+    i18n && typeof i18n.t === "function" ? i18n.t(key, values) : String(key || "")
+  );
   const THEME_KEY = "scrcpygate:theme";
   const THEMES = new Set(["system", "dark", "light"]);
   const frame = document.getElementById("alasFrame");
@@ -40,7 +44,9 @@
     stateDetail.textContent = detail;
     stateActions.hidden = kind === "loading";
     loadStatus.dataset.state = kind === "loading" ? "loading" : "error";
-    loadStatus.textContent = kind === "loading" ? "正在连接" : (kind === "timeout" ? "加载超时" : "连接失败");
+    loadStatus.textContent = kind === "loading"
+      ? t("alas.shell.connecting")
+      : t(kind === "timeout" ? "alas.shell.load_timeout_status" : "alas.shell.connection_failed");
     frame.setAttribute("aria-busy", "true");
   }
 
@@ -48,7 +54,7 @@
     state.classList.remove("is-visible");
     state.setAttribute("role", "status");
     loadStatus.dataset.state = "ready";
-    loadStatus.textContent = "已连接";
+    loadStatus.textContent = t("alas.shell.connected");
     frame.setAttribute("aria-busy", "false");
   }
 
@@ -64,8 +70,8 @@
       timeoutId = 0;
       showState(
         "timeout",
-        "ALAS 加载超时",
-        "Runtime 仍未响应。你可以重试，或确认 ALAS 服务与网络连接是否正常。"
+        t("alas.shell.timeout_title"),
+        t("alas.shell.timeout_detail")
       );
     }, LOAD_TIMEOUT_MS);
   }
@@ -77,7 +83,7 @@
   }
 
   function startLoad(forceReload) {
-    showState("loading", "正在加载 ALAS", "正在连接 ALAS Runtime，请稍候。");
+    showState("loading", t("alas.shell.loading_title"), t("alas.shell.loading_detail"));
     scheduleLoadTimeout();
     if (forceReload) frame.src = retryUrl();
   }
@@ -96,16 +102,16 @@
       if (responseLooksUnavailable(frame.contentDocument)) {
         showState(
           "unreachable",
-          "ALAS Runtime 不可达",
-          "无法载入上游页面。请确认 Runtime 已启动、地址配置正确，然后重试。"
+          t("alas.shell.unreachable_title"),
+          t("alas.shell.unreachable_load_detail")
         );
         return;
       }
     } catch (_) {
       showState(
         "unreachable",
-        "ALAS Runtime 不可达",
-        "无法读取上游页面。请确认 Runtime 已启动、地址配置正确，然后重试。"
+        t("alas.shell.unreachable_title"),
+        t("alas.shell.unreachable_read_detail")
       );
       return;
     }
@@ -115,7 +121,11 @@
   frame.addEventListener("load", inspectLoadedFrame);
   frame.addEventListener("error", () => {
     clearLoadTimeout();
-    showState("unreachable", "ALAS Runtime 不可达", "浏览器无法载入上游页面，请检查服务状态后重试。");
+    showState(
+      "unreachable",
+      t("alas.shell.unreachable_title"),
+      t("alas.shell.unreachable_browser_detail")
+    );
   });
   refreshButton.addEventListener("click", () => startLoad(true));
   retryButton.addEventListener("click", () => startLoad(true));
