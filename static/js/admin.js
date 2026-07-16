@@ -27,7 +27,8 @@ const ALAS_CONFIG_KEY = 'scrcpygate:admin:alas:config';
 const USER_PAGE_SIZE = 20;
 const USER_EXPIRY_REFRESH_INTERVAL = 30000;
 const DEVICE_STATUS_POLL_INTERVAL = 5000;
-const STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
+const OVERVIEW_REFRESH_INTERVAL = 60000;
+const STATUS_LABELS = {running:'运行中', healthy:'正常', starting:'启动中', stopped:'已停止', idle:'空闲', error:'异常', disabled:'未启用', disconnected:'未连接', unknown:'未知', unbound:'未绑定配置'};
 const ADB_STATUS_META = Object.freeze({
   online:{label:'ADB 在线',tone:'ok'},
   offline:{label:'ADB 离线',tone:'danger'},
@@ -43,7 +44,7 @@ const resourceSequences = new Map();
 const loadedResources = new Set();
 const deviceProbeRequests = new Set();
 const TAB_RESOURCES = {
-  overview:['overview'],
+  overview:['overview','overviewAlas'],
   devices:['devices'],
   users:['users','permissions'],
   video:['video'],
@@ -81,6 +82,8 @@ let adminNavReturnFocus = null;
 let pendingConfirmation = null;
 let deviceStatusPollTimer = null;
 let deviceStatusPollGeneration = 0;
+let overviewRefreshTimer = null;
+let overviewRefreshGeneration = 0;
 const EDITOR_DRAWERS = ['device','user','alasConnection','alasAssignment','alasConfig'];
 
 function managedLayerOpen(){
@@ -354,47 +357,143 @@ function ts(value){ return value ? new Date(value * 1000).toLocaleString() : '';
 function relativeTs(value){ const timestamp=Number(value); if(!Number.isFinite(timestamp) || timestamp<=0) return ''; const seconds=Math.max(0,Math.round(Date.now()/1000-timestamp)); if(seconds<10) return '刚刚'; if(seconds<60) return `${seconds} 秒前`; if(seconds<3600) return `${Math.floor(seconds/60)} 分钟前`; if(seconds<86400) return `${Math.floor(seconds/3600)} 小时前`; return new Date(timestamp*1000).toLocaleString([], {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function actionText(action){ return ({login_success:'登录成功', login_failed:'登录失败', logout:'退出登录', password_change:'修改密码', page_index:'进入投屏页', page_admin:'进入后台', mirror_start:'开始投屏', mirror_stop:'停止投屏', mirror_settings:'画质设置', user_upsert:'保存用户', user_delete:'删除用户', permission_set:'设备权限', device_upsert:'保存设备', device_delete:'删除设备', alas_toggle:'ALAS 操作', alas_admin_toggle:'后台 ALAS 操作', alas_settings:'ALAS 设置', alas_binding_set:'ALAS 绑定', alas_binding_delete:'取消 ALAS 绑定', alas_embed_open:'打开 ALAS 页面', alas_embed_denied:'ALAS 嵌入拒绝', alas_embed_proxy_failed:'ALAS 页面代理失败', alas_embed_ws_denied:'ALAS WebSocket 拒绝'})[action] || action; }
 function activeSessions(){ return state.devices.filter(d => d.session && d.session.running).length; }
-function renderOverview(){
-  const sessionCount=activeSessions();
-  $('summaryMirror').textContent=`投屏 ${sessionCount}`;
-  $('summaryMirror').className='chip ' + (sessionCount?'ok':'');
-  const alasStatus=(state.alas && state.alas.status && state.alas.status.status) || (state.overview && state.overview.alas && state.overview.alas.status) || 'unknown';
-  $('summaryAlas').textContent=`ALAS ${statusLabel(alasStatus)}`;
-  $('summaryAlas').className='chip ' + (alasStatus==='running'?'ok':alasStatus==='error'?'warn':'');
-
-  const devices=$('overviewDevices');
-  clear(devices);
-  state.devices.forEach(device=>devices.appendChild(chip(`${device.name || getDeviceId(device)}: ${device.enabled ? '启用' : '禁用'}`, device.enabled?'ok':'warn')));
-  if(!state.devices.length) devices.appendChild(chip('暂无设备','warn'));
-
-  const mirrors=$('overviewMirror');
-  clear(mirrors);
-  state.devices.forEach(device=>{
-    const running=!!(device.session && device.session.running);
-    mirrors.appendChild(chip(`${device.name || getDeviceId(device)}: ${running?'投屏中':'未投屏'}`, running?'ok':''));
-  });
-  if(!state.devices.length) mirrors.appendChild(chip('暂无投屏'));
-
-  const controls=$('overviewControl');
-  clear(controls);
-  const lockedDevices=state.devices.filter(device=>device.session && device.session.control_lock);
-  lockedDevices.forEach(device=>{
-    const lock=device.session.control_lock || {};
-    const owner=lock.username || lock.owner || '已占用';
-    controls.appendChild(chip(`${device.name || getDeviceId(device)}: ${owner}`, 'warn'));
-  });
-  if(!lockedDevices.length) controls.appendChild(chip('暂无控制占用','ok'));
-
-  const alas=$('overviewAlas');
-  clear(alas);
-  const overviewAlas=state.overview && state.overview.alas;
-  if(overviewAlas){
-    alas.appendChild(chip(overviewAlas.enabled?'已启用':'未启用', overviewAlas.enabled?'ok':'warn'));
-    alas.appendChild(chip(statusLabel(overviewAlas.status), overviewAlas.status==='running'?'ok':overviewAlas.status==='error'?'warn':''));
-    if(overviewAlas.config) alas.appendChild(chip(`配置 ${overviewAlas.config}`));
-  } else {
-    alas.appendChild(chip('状态未知','warn'));
+function overviewDevices(){ return state.overview && Array.isArray(state.overview.devices) ? state.overview.devices : []; }
+function overviewUsers(){ return state.overview && Array.isArray(state.overview.users) ? state.overview.users : []; }
+function updateText(element,value){ const text=String(value == null ? '' : value); if(element.textContent!==text) element.textContent=text; }
+function alasOverviewErrorText(value){
+  const text=String(value || '');
+  const normalized=text.toLowerCase();
+  if(normalized.includes('control is disabled')) return 'ALAS 控制未启用';
+  if(normalized.includes('token is not configured')) return 'ALAS API 令牌未配置';
+  if(normalized.includes('unreachable') || normalized.includes('connection refused')) return 'ALAS Runtime 不可达';
+  if(normalized.includes('timed out') || normalized.includes('timeout')) return 'ALAS Runtime 响应超时';
+  if(normalized.includes('invalid config catalog')) return 'ALAS 配置目录格式无效';
+  return text;
+}
+function updateOverviewRows(container,items,emptyMessage){
+  const existing=new Map([...container.querySelectorAll('.overview-row[data-overview-key]')].map(row=>[row.dataset.overviewKey,row]));
+  const empty=container.querySelector('.overview-empty');
+  if(!items.length){
+    existing.forEach(row=>row.remove());
+    const placeholder=empty || document.createElement('p');
+    placeholder.className='overview-empty';
+    updateText(placeholder,emptyMessage);
+    if(!placeholder.parentNode) container.appendChild(placeholder);
+    return;
   }
+  if(empty) empty.remove();
+  let nextNode=container.firstElementChild;
+  items.forEach(item=>{
+    const key=String(item.key);
+    let row=existing.get(key);
+    if(!row){
+      row=document.createElement('div');
+      row.className='overview-row';
+      row.dataset.overviewKey=key;
+      const identity=document.createElement('div');
+      identity.className='overview-row__identity';
+      const name=document.createElement('strong');
+      const meta=document.createElement('small');
+      identity.append(name,meta);
+      const badge=document.createElement('span');
+      const detail=document.createElement('div');
+      detail.className='overview-row__detail';
+      row.append(identity,badge,detail);
+    }
+    const identity=row.querySelector('.overview-row__identity');
+    updateText(identity.querySelector('strong'),item.title);
+    updateText(identity.querySelector('small'),item.subtitle);
+    const badge=row.querySelector('span');
+    badge.className=`chip ${item.tone || ''}`.trim();
+    updateText(badge,item.badge);
+    const detail=row.querySelector('.overview-row__detail');
+    updateText(detail,item.detail || '');
+    detail.hidden=!item.detail;
+    if(row!==nextNode) container.insertBefore(row,nextNode);
+    nextNode=row.nextElementSibling;
+    existing.delete(key);
+  });
+  existing.forEach(row=>row.remove());
+}
+function renderOverviewHeader(){
+  const devices=overviewDevices();
+  const sessionCount=devices.filter(device=>device.session&&device.session.running).length;
+  const viewerCount=devices.reduce((total,device)=>total+Number(device.session&&device.session.running&&device.session.clients || 0),0);
+  $('summaryMirror').textContent=`投屏 ${sessionCount} · 观看 ${viewerCount}`;
+  $('summaryMirror').className='chip ' + (sessionCount?'ok':'');
+  const overviewAlas=state.overview && state.overview.alas;
+  const alasStatus=(overviewAlas && overviewAlas.status) || (state.alas && state.alas.status && state.alas.status.status) || 'unknown';
+  const alasConfigCount=Number(overviewAlas&&overviewAlas.config_count || 0);
+  const alasRunningCount=Number(overviewAlas&&overviewAlas.running_count || 0);
+  $('summaryAlas').textContent=overviewAlas&&overviewAlas.enabled ? `ALAS ${alasRunningCount}/${alasConfigCount}` : `ALAS ${statusLabel(alasStatus)}`;
+  $('summaryAlas').className='chip ' + (alasStatus==='running'?'ok':alasStatus==='error'?'warn':'');
+}
+function renderOverviewDevices(){
+  const devices=overviewDevices();
+  const onlineDevices=devices.filter(device=>deviceAdbMeta(device).state==='online').length;
+  updateText($('overviewDevicesMeta'),`${onlineDevices} / ${devices.length} 在线`);
+  const priority={offline:0,network_unreachable:0,unauthorized:1,checking:2,reconnecting:2,unknown:3,disabled:4,online:5};
+  const rows=[...devices].sort((a,b)=>(priority[deviceAdbMeta(a).state]??9)-(priority[deviceAdbMeta(b).state]??9)||String(a.name||getDeviceId(a)).localeCompare(String(b.name||getDeviceId(b)))).map(device=>{
+    const heartbeat=deviceAdbMeta(device);
+    const hasLatency=device.latency_ms!==null&&device.latency_ms!==undefined&&Number.isFinite(Number(device.latency_ms));
+    const checked=relativeTs(device.last_checked_at) || '尚未检测';
+    const seen=relativeTs(device.last_seen_at) || '尚未在线';
+    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${hasLatency?`${Math.round(Number(device.latency_ms))} ms`:'无延迟数据'} · ${checked}`,badge:heartbeat.label,tone:heartbeat.tone,detail:`最后在线：${seen}`};
+  });
+  updateOverviewRows($('overviewDevices'),rows,'暂无设备');
+}
+function renderOverviewUsers(){
+  const users=overviewUsers();
+  const expirationOrder={expired:0,expiring:1,active:2,permanent:3};
+  const sorted=[...users].sort((a,b)=>(expirationOrder[userExpirationState(a)]??9)-(expirationOrder[userExpirationState(b)]??9)||a.username.localeCompare(b.username));
+  const expiredUsers=sorted.filter(user=>userExpirationState(user)==='expired').length;
+  updateText($('overviewUsersMeta'),`${sorted.length} 位 · ${expiredUsers} 到期`);
+  const rows=sorted.map(user=>{
+    const expiryState=userExpirationState(user);
+    const label=expiryState==='permanent'?'永久有效':expiryState==='expired'?'已到期':expiryState==='expiring'?'即将到期':'有效';
+    const tone=expiryState==='expired'?'danger':expiryState==='expiring'?'warn':'ok';
+    const remaining=user.expires_at==null ? '' : formatRemainingSeconds(Number(user.expires_at)-Math.floor(Date.now()/1000));
+    const detail=user.expires_at==null ? '无到期时间' : expiryState==='expired' ? `到期时间：${formatUserExpiryDate(user.expires_at)}` : `有效至 ${formatUserExpiryDate(user.expires_at)} · 剩余 ${remaining}`;
+    return {key:user.username,title:user.username,subtitle:accessRoleLabel(user.role),badge:label,tone,detail};
+  });
+  updateOverviewRows($('overviewUsers'),rows,'暂无用户');
+}
+function renderOverviewMirrors(){
+  const running=overviewDevices().filter(device=>device.session&&device.session.running);
+  const viewerCount=running.reduce((total,device)=>total+Math.max(0,Number(device.session.clients)||0),0);
+  updateText($('overviewMirrorMeta'),`${running.length} 路 · ${viewerCount} 人`);
+  const rows=running.map(device=>{
+    const session=device.session;
+    const viewers=Math.max(0,Number(session.clients)||0);
+    const lock=session.control_lock;
+    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${statusLabel(session.stream_health||'running')} · ${session.stream_mode||'raw'}`,badge:`${viewers} 人观看`,tone:viewers?'ok':'',detail:lock?`控制权：${lock.username||lock.owner||'已占用'}`:'控制权：空闲'};
+  });
+  updateOverviewRows($('overviewMirror'),rows,'当前没有运行中的投屏');
+}
+function renderOverviewAlas(){
+  const overviewAlas=state.overview&&state.overview.alas;
+  const alasConfigCount=Number(overviewAlas&&overviewAlas.config_count || 0);
+  const alasRunningCount=Number(overviewAlas&&overviewAlas.running_count || 0);
+  updateText($('overviewAlasMeta'),`${alasRunningCount} / ${alasConfigCount} 运行`);
+  const legacyConfigs=Array.isArray(overviewAlas&&overviewAlas.configs)&&overviewAlas.configs.every(item=>item&&typeof item==='object') ? overviewAlas.configs : [];
+  const configs=Array.isArray(overviewAlas&&overviewAlas.config_statuses) ? overviewAlas.config_statuses : legacyConfigs;
+  const priority={running:0,starting:1,error:2,disconnected:3,stopped:4,idle:5,disabled:6,unknown:7};
+  const rows=[...configs].sort((a,b)=>(priority[String(a.status||'unknown')]??9)-(priority[String(b.status||'unknown')]??9)||String(a.config||'').localeCompare(String(b.config||''))).map(config=>{
+    const status=String(config.status || 'unknown');
+    const tone=status==='running'?'ok':status==='error'||!config.ok?'danger':status==='disabled'||status==='disconnected'?'warn':'';
+    const owner=config.username ? `归属 ${config.username}` : '未分配用户';
+    const detail=config.task ? `当前任务：${config.task}` : alasOverviewErrorText(config.error) || '暂无运行任务';
+    return {key:config.config||'unnamed',title:config.config||'未命名配置',subtitle:owner,badge:statusLabel(status),tone,detail};
+  });
+  const emptyMessage=overviewAlas&&overviewAlas.error&&overviewAlas.enabled ? `状态读取失败：${alasOverviewErrorText(overviewAlas.error)}` : overviewAlas&&overviewAlas.enabled ? '正在读取 Runtime 配置' : 'ALAS 未启用';
+  updateOverviewRows($('overviewAlas'),rows,emptyMessage);
+}
+function renderOverview(){
+  renderOverviewHeader();
+  renderOverviewDevices();
+  renderOverviewUsers();
+  renderOverviewMirrors();
+  renderOverviewAlas();
 }
 function renderDevices(){
   const box=$('deviceCards');
@@ -480,7 +579,6 @@ function updateDeviceCardHeartbeat(device){
 function applyDeviceStatuses(data){
   const statuses=data && data.devices || {};
   Object.entries(statuses).forEach(([id,status])=>applyDeviceAdbResult(id,status || {}));
-  renderOverview();
 }
 function bitrateBpsToMbps(value){ const bps=Number(value); return Number.isFinite(bps) ? bps / 1000000 : ''; }
 function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFinite(mbps) ? Math.round(mbps * 1000000) : 0; }
@@ -706,6 +804,7 @@ function refreshUserExpirationStatuses(){
     });
   }
   if($('userDrawer').classList.contains('is-open')) updateUserExpiryPreview();
+  if(loadedResources.has('overview')) renderOverviewUsers();
 }
 function updateUserExpiryPreview(){
   const preview=$('userExpiryPreview');
@@ -1502,7 +1601,7 @@ async function removeAlasBinding(binding){
   await mutateAlasPermissions({username:binding.username, config_name:binding.config_name, enabled:false, is_default:false});
   focusAlasUserChoice(binding.username);
   show('配置归属已移除');
-  await refreshDomains('overview');
+  await refreshDomains('overview','overviewAlas');
 }
 function renderAlas(){
   const alas=state.alas || {};
@@ -1708,17 +1807,22 @@ function renderAuditLogs(){
 function renderLogs(){ renderRuntimeLogs(); renderAuditLogs(); }
 function render(){ renderOverview(); renderDevices(); renderVideo(); renderUsers(); renderPermissions(); renderAlas(); renderLogs(); }
 function applyOverview(data){
-  state.overview=data;
-  if(!loadedResources.has('users')) state.users=data.users || [];
-  if(!loadedResources.has('devices')) state.devices=data.devices || [];
-  if(!loadedResources.has('alas')) state.alas={settings:{}, status:data.alas || {}};
+  const next=data || {};
+  const previous=state.overview || {};
+  const keepDevices=loadedResources.has('overviewDevices') && Array.isArray(previous.devices);
+  const keepAlas=loadedResources.has('overviewAlas') && previous.alas;
+  state.overview={
+    ...previous,
+    ...next,
+    devices:keepDevices ? previous.devices : next.devices || [],
+    sessions:keepDevices ? previous.sessions || {} : next.sessions || {},
+    alas:keepAlas ? previous.alas : next.alas || {}
+  };
   renderOverview();
-  if(loadedResources.has('devices')) renderDevices();
-  if(loadedResources.has('users')) renderUsers();
-  if(loadedResources.has('permissions')) renderPermissions();
-  if(loadedResources.has('alas')) renderAlas();
 }
-function applyDevices(data){ state.devices=data.devices || []; renderDevices(); renderOverview(); if(loadedResources.has('permissions')) renderPermissions(); }
+function applyOverviewAlas(data){ state.overview={...(state.overview || {}),alas:data || {}}; renderOverviewHeader(); renderOverviewAlas(); }
+function applyOverviewDevices(data){ state.overview={...(state.overview || {}),devices:data.devices || [],sessions:data.sessions || {}}; renderOverviewHeader(); renderOverviewDevices(); renderOverviewMirrors(); }
+function applyDevices(data){ state.devices=data.devices || []; renderDevices(); if(loadedResources.has('permissions')) renderPermissions(); }
 function applyUsers(data){ state.users=data.users || []; renderUsers(); if(loadedResources.has('permissions')) renderPermissions(); if(loadedResources.has('alas')) renderAlas(); }
 function applyPermissions(data,epoch=permissionsEpoch){
   if(epoch!==permissionsEpoch) return false;
@@ -1729,7 +1833,6 @@ function applyPermissions(data,epoch=permissionsEpoch){
   renderPermissions();
   if(loadedResources.has('users')) renderUsers();
   if(loadedResources.has('devices')) renderDevices();
-  renderOverview();
   return true;
 }
 function applyVideo(data){ state.video=data; renderVideo(); }
@@ -1743,7 +1846,6 @@ function applyAlas(data){
     alasStatusLoadingConfig='';
   }
   renderAlas();
-  renderOverview();
 }
 function applyAlasDetails(data, statusSequence){
   const payload={...(data || {})};
@@ -1764,7 +1866,6 @@ function applyAlasPermissions(data, epoch=alasPermissionsEpoch){
   if(data && Array.isArray(data.users)) state.users=data.users;
   loadedResources.add('alas');
   renderAlas();
-  renderOverview();
   return true;
 }
 function applyAlasCatalog(data){
@@ -1781,14 +1882,28 @@ function applyRuntimeLogs(data){
   renderRuntimeLogs();
   setLogLoadState('runtimeLogs','ready',logReadyMessage('运行日志', state.runtimeLogs.length));
 }
-function loadOverview(options={}){ return requestResource('overview', signal=>api('/api/admin/overview',{signal}), applyOverview, options); }
+function overviewRequestPromises(){ return ['overview','overviewAlas'].map(name=>resourceRequests.get(name)).filter(Boolean).map(record=>record.promise); }
+function trackOverviewRequest(promise){
+  const generation=overviewRefreshGeneration;
+  void promise.finally(()=>{
+    if(generation===overviewRefreshGeneration && overviewPollingAllowed() && !overviewRequestPromises().length) scheduleOverviewRefresh();
+  }).catch(()=>{});
+  return promise;
+}
+function loadOverview(options={}){ return trackOverviewRequest(requestResource('overview', signal=>api('/api/admin/overview',{signal}), applyOverview, options)); }
+function loadOverviewAlas(options={}){ return trackOverviewRequest(requestResource('overviewAlas', signal=>api('/api/admin/overview/alas',{signal}), applyOverviewAlas, options)); }
+function loadOverviewDevices(options={}){ return requestResource('overviewDevices', signal=>api('/api/admin/devices',{signal}), applyOverviewDevices, options); }
 function loadDevices(options={}){ return requestResource('devices', signal=>api('/api/admin/devices',{signal}), applyDevices, options); }
 function loadDeviceStatuses(options={}){ return requestResource('deviceStatuses', signal=>api('/api/admin/adb/status',{signal}), applyDeviceStatuses, options); }
-function deviceStatusPollingAllowed(){ return activeTab==='devices' && !document.hidden; }
+function deviceStatusPollingAllowed(){ return (activeTab==='devices' || activeTab==='overview') && !document.hidden; }
 function stopDeviceStatusPolling(abort=false){
   clearTimeout(deviceStatusPollTimer);
   deviceStatusPollTimer=null;
-  if(abort){ deviceStatusPollGeneration+=1; markResourceStale('deviceStatuses'); }
+  if(abort){
+    deviceStatusPollGeneration+=1;
+    markResourceStale('deviceStatuses');
+    markResourceStale('overviewDevices');
+  }
 }
 function scheduleDeviceStatusPoll(){
   stopDeviceStatusPolling(false);
@@ -1798,13 +1913,56 @@ function scheduleDeviceStatusPoll(){
 async function refreshDeviceStatuses(){
   if(!deviceStatusPollingAllowed()) return stopDeviceStatusPolling(true);
   const generation=deviceStatusPollGeneration;
-  try{ await loadDeviceStatuses({force:true}); }
+  try{
+    if(activeTab==='overview') await loadOverviewDevices({force:true});
+    else await loadDeviceStatuses({force:true});
+  }
   catch(error){ if(!isAbortError(error)) console.warn('设备心跳状态刷新失败',error); }
   finally{ if(generation===deviceStatusPollGeneration) scheduleDeviceStatusPoll(); }
 }
 function syncDeviceStatusPolling(){
   stopDeviceStatusPolling(true);
-  if(deviceStatusPollingAllowed()) refreshDeviceStatuses();
+  if(!deviceStatusPollingAllowed()) return;
+  if(activeTab==='devices') refreshDeviceStatuses();
+  else scheduleDeviceStatusPoll();
+}
+function overviewPollingAllowed(){ return activeTab==='overview' && !document.hidden; }
+function stopOverviewPolling(abort=false){
+  clearTimeout(overviewRefreshTimer);
+  overviewRefreshTimer=null;
+  if(abort){
+    overviewRefreshGeneration+=1;
+    markResourceStale('overview');
+    markResourceStale('overviewAlas');
+  }
+}
+function scheduleOverviewRefresh(){
+  stopOverviewPolling(false);
+  if(!overviewPollingAllowed()) return;
+  overviewRefreshTimer=setTimeout(refreshOverviewStatus,OVERVIEW_REFRESH_INTERVAL);
+}
+async function refreshOverviewStatus(){
+  if(!overviewPollingAllowed()) return stopOverviewPolling(true);
+  const generation=overviewRefreshGeneration;
+  try{
+    const pending=overviewRequestPromises();
+    const results=await Promise.allSettled(pending.length ? pending : [loadOverview({force:true}),loadOverviewAlas({force:true})]);
+    results.forEach(result=>{ if(result.status==='rejected'&&!isAbortError(result.reason)) console.warn('总览状态刷新失败',result.reason); });
+  }
+  finally{ if(generation===overviewRefreshGeneration) scheduleOverviewRefresh(); }
+}
+function syncOverviewPolling(){
+  if(!overviewPollingAllowed()) return stopOverviewPolling(true);
+  stopOverviewPolling(false);
+  const pending=overviewRequestPromises();
+  if(pending.length){
+    const generation=overviewRefreshGeneration;
+    Promise.allSettled(pending).then(()=>{
+      if(generation===overviewRefreshGeneration && overviewPollingAllowed()) scheduleOverviewRefresh();
+    });
+    return;
+  }
+  refreshOverviewStatus();
 }
 function loadUsers(options={}){ return requestResource('users', signal=>api('/api/admin/users',{signal}), applyUsers, options); }
 function loadPermissions(options={}){
@@ -1941,7 +2099,7 @@ function loadRuntimeLogs(options={}){
     throw error;
   });
 }
-const RESOURCE_LOADERS = {overview:loadOverview, devices:loadDevices, users:loadUsers, permissions:loadPermissions, video:loadVideo, alas:loadAlas, logs:loadLogs, runtimeLogs:loadRuntimeLogs};
+const RESOURCE_LOADERS = {overview:loadOverview, overviewAlas:loadOverviewAlas, devices:loadDevices, users:loadUsers, permissions:loadPermissions, video:loadVideo, alas:loadAlas, logs:loadLogs, runtimeLogs:loadRuntimeLogs};
 async function loadTab(tabId, options={}){
   const names=TAB_RESOURCES[tabId] || TAB_RESOURCES.overview;
   const force=!!options.force;
@@ -1980,7 +2138,7 @@ async function saveUser(){
     window.location.assign('/login');
     return;
   }
-  await refreshDomains('overview','users','permissions','alas');
+  await refreshDomains('overview','overviewAlas','users','permissions','alas');
 }
 async function deleteUser(username){
   const confirmed=await confirmDanger({
@@ -1991,7 +2149,7 @@ async function deleteUser(username){
   if(!confirmed) return;
   await api(`/api/admin/users/${encodeURIComponent(username)}`,{method:'DELETE'});
   show('用户已删除');
-  await refreshDomains('overview','users','permissions','alas');
+  await refreshDomains('overview','overviewAlas','users','permissions','alas');
 }
 async function saveDevice(){
   stopDeviceStatusPolling(true);
@@ -2047,7 +2205,6 @@ async function testDevice(id){
     deviceProbeRequests.delete(id);
     const device=state.devices.find(item=>getDeviceId(item)===id);
     if(device) updateDeviceCardHeartbeat(device);
-    renderOverview();
     scheduleDeviceStatusPoll();
   }
 }
@@ -2078,7 +2235,7 @@ async function savePermission(){
 function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; let value=input.value; if(field==='video_bit_rate') value=bitrateMbpsToBps(value); else if(field==='max_size' && value===CUSTOM_OUTPUT_SIZE){ const control=input.closest('.preset-size-control'); const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); if(!width.checkValidity() || !height.checkValidity()){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); throw new Error('自定义宽度或高度超出允许范围'); } value=Math.max(Number(width.value),Number(height.value)); } else value=Number(value); presets[name]=presets[name] || {}; presets[name][field]=value; }); return presets; }
 function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(NORMAL_PROFILE_NAMES.concat(['custom','auto']).includes(id) || id.startsWith('alas_')) return show('这个 ID 是保留名称'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); if($('customProfileSizeSelect').value===CUSTOM_OUTPUT_SIZE && (!width.checkValidity() || !height.checkValidity())){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); return show('自定义宽度或高度超出允许范围'); } customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:customProfileSizeValue(), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); show('自定义档位已加入，确认后点保存'); }
 async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const payload={profile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
-async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','alas'); }
+async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','overviewAlas','alas'); }
 async function reloadAlas(){
   const requests=[loadAlas({force:true})];
   if(activeAlasView==='configs') requests.push(loadAlasCatalog({force:true}));
@@ -2095,7 +2252,7 @@ async function toggleAlas(){
   const current=selectedAlasConfig();
   show(configKey(current)===configKey(config) ? `${config} 状态已更新` : `${config} 操作已完成；当前查看 ${current || '其他配置'}`);
   const statusRefresh=configKey(current)===configKey(config) ? loadAlasStatusForConfig(config) : Promise.resolve();
-  await Promise.allSettled([statusRefresh,refreshDomains('overview')]);
+  await Promise.allSettled([statusRefresh,refreshDomains('overview','overviewAlas')]);
   return result;
 }
 async function loadConfig(){
@@ -2153,7 +2310,7 @@ async function saveAlasBinding(){
   closeEditorDrawer('alasAssignment');
   if(wasEditing) focusAlasUserChoice(username);
   show(`已保存 ${username} → ${configName} 的归属与权限`);
-  await refreshDomains('overview');
+  await refreshDomains('overview','overviewAlas');
 }
 function activateTab(tabId, save=true, focusPanel=false){
   const target=$(tabId) ? tabId : 'overview';
@@ -2174,6 +2331,7 @@ function activateTab(tabId, save=true, focusPanel=false){
   if(save) localStorage.setItem(ADMIN_TAB_KEY, target);
   loadTab(target).catch(error=>reportRequestError(error));
   syncDeviceStatusPolling();
+  syncOverviewPolling();
   if(focusPanel) requestAnimationFrame(()=>$(target).focus({preventScroll:true}));
 }
 function initializeTabs(){
@@ -2372,6 +2530,7 @@ initializeTabs();
 initializeAccessWorkspace();
 initializeAlasWorkspace();
 document.addEventListener('visibilitychange',syncDeviceStatusPolling);
+document.addEventListener('visibilitychange',syncOverviewPolling);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshUserExpirationStatuses(); });
 setInterval(refreshUserExpirationStatuses,USER_EXPIRY_REFRESH_INTERVAL);
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';

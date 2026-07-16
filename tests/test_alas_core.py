@@ -87,6 +87,42 @@ class AlasCoreTests(unittest.TestCase):
         self.assertEqual(result["config"], "Alice")
         self.assertIn(("restart", "POST", {"config": "Alice"}), calls)
 
+    def test_list_configs_does_not_query_any_config_status(self):
+        _, alas = load_modules(self.tmp)
+        calls = []
+
+        def fake_request_api(path, method="GET", params=None, body=None, timeout=3.0):
+            calls.append((path, timeout))
+            return {"configs": ["Alpha", "Beta"]}, 200, ""
+
+        alas.request_api = fake_request_api
+        result = alas.list_configs()
+
+        self.assertEqual(result, {"ok": True, "configs": ["Alpha", "Beta"]})
+        self.assertEqual(calls, [("configs", 2.0)])
+
+    def test_list_configs_rejects_invalid_catalog_payload(self):
+        _, alas = load_modules(self.tmp)
+        alas.request_api = lambda *args, **kwargs: ({"configs": "Alpha"}, 200, "")
+
+        result = alas.list_configs()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["configs"], [])
+        self.assertIn("invalid", result["error"])
+
+    def test_list_configs_filters_non_strings_blanks_and_duplicates(self):
+        _, alas = load_modules(self.tmp)
+        alas.request_api = lambda *args, **kwargs: (
+            {"configs": [None, False, 123, "", "   ", " Alpha ", "Alpha", "Beta"]},
+            200,
+            "",
+        )
+
+        result = alas.list_configs()
+
+        self.assertEqual(result, {"ok": True, "configs": ["Alpha", "Beta"]})
+
     def test_user_save_does_not_update_global_current_config(self):
         storage, alas = load_modules(self.tmp)
         storage.set_setting("alas_current_config", "Global")

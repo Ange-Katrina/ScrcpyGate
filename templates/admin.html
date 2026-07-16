@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/admin.css?v=084bd326a927">
+  <link rel="stylesheet" href="/static/css/admin.css?v=817f03c5eab3">
   <script src="/static/js/ui-core.js?v=1e10666ec5f2" defer></script>
 </head>
 <body data-ui-page="admin">
@@ -82,10 +82,22 @@
           <div><p class="eyebrow">Overview</p><h2>运行总览</h2><p>优先查看设备、投屏、控制权与 ALAS 的关键状态。</p></div>
         </div>
         <div class="overview-summary">
-          <section class="overview-summary__item" aria-labelledby="overviewDevicesTitle"><h3 id="overviewDevicesTitle">设备</h3><div id="overviewDevices" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
-          <section class="overview-summary__item" aria-labelledby="overviewMirrorTitle"><h3 id="overviewMirrorTitle">投屏</h3><div id="overviewMirror" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
-          <section class="overview-summary__item" aria-labelledby="overviewControlTitle"><h3 id="overviewControlTitle">控制锁</h3><div id="overviewControl" class="chips" aria-live="polite"><span class="chip">等待状态</span></div></section>
-          <section class="overview-summary__item" aria-labelledby="overviewAlasTitle"><h3 id="overviewAlasTitle">ALAS</h3><div id="overviewAlas" class="chips" aria-live="polite"><span class="chip">加载中</span></div></section>
+          <section class="overview-summary__item" aria-labelledby="overviewDevicesTitle">
+            <div class="overview-summary__heading"><h3 id="overviewDevicesTitle">设备心跳</h3><strong id="overviewDevicesMeta" aria-live="polite">0 / 0 在线</strong></div>
+            <div id="overviewDevices" class="overview-list" role="region" aria-labelledby="overviewDevicesTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+          </section>
+          <section class="overview-summary__item" aria-labelledby="overviewUsersTitle">
+            <div class="overview-summary__heading"><h3 id="overviewUsersTitle">用户时间</h3><strong id="overviewUsersMeta" aria-live="polite">0 位用户</strong></div>
+            <div id="overviewUsers" class="overview-list" role="region" aria-labelledby="overviewUsersTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+          </section>
+          <section class="overview-summary__item" aria-labelledby="overviewMirrorTitle">
+            <div class="overview-summary__heading"><h3 id="overviewMirrorTitle">投屏与观看</h3><strong id="overviewMirrorMeta" aria-live="polite">0 路 · 0 人</strong></div>
+            <div id="overviewMirror" class="overview-list" role="region" aria-labelledby="overviewMirrorTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+          </section>
+          <section class="overview-summary__item" aria-labelledby="overviewAlasTitle">
+            <div class="overview-summary__heading"><h3 id="overviewAlasTitle">ALAS 配置</h3><strong id="overviewAlasMeta" aria-live="polite">0 / 0 运行</strong></div>
+            <div id="overviewAlas" class="overview-list" role="region" aria-labelledby="overviewAlasTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+          </section>
         </div>
         <section class="workspace-section" aria-labelledby="quickActionsTitle">
           <div class="section-heading"><div><h3 id="quickActionsTitle">快速操作</h3><p>刷新当前已加载的数据，或返回投屏工作台。</p></div></div>
@@ -427,6 +439,6 @@
 </dialog>
 
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=903a384a7ede" defer></script>
+<script src="/static/js/admin.js?v=01a13f171df4" defer></script>
 </body>
 </html>

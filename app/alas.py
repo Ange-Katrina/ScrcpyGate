@@ -105,6 +105,23 @@ def status(include_configs: bool = False) -> dict:
     return status_for_config(_settings(True).get("current_config") or "alas", include_configs=include_configs)
 
 
+def list_configs() -> dict:
+    """Return the Runtime config catalog without also querying a config status."""
+    payload, _, err = request_api("configs", timeout=2.0)
+    if err:
+        return {"ok": False, "configs": [], "error": err}
+    if not isinstance(payload, dict) or not isinstance(payload.get("configs"), list):
+        return {"ok": False, "configs": [], "error": "ALAS API returned an invalid config catalog"}
+    configs: list[str] = []
+    for item in payload["configs"]:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if name and name not in configs:
+            configs.append(name)
+    return {"ok": True, "configs": configs}
+
+
 def status_for_config(config_name: str, include_configs: bool = False) -> dict:
     settings = _settings(True)
     config_name = sanitize_config_name(config_name or settings.get("current_config") or "alas")

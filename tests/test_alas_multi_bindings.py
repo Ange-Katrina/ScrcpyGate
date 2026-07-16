@@ -4,6 +4,8 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -325,9 +327,8 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_token", "secret")
         self.storage.upsert_user_alas_binding("admin", "BoundConfig", True, True)
-        self.main.alas.status_for_config = lambda config_name, include_configs=False: {
+        self.main.alas.list_configs = lambda: {
             "ok": True,
-            "config": config_name,
             "configs": ["BoundConfig", "UnassignedConfig"],
         }
 
@@ -336,6 +337,170 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["runtime_configs"], ["BoundConfig", "UnassignedConfig"])
         self.assertEqual(response.json()["configs"], ["BoundConfig", "UnassignedConfig"])
+
+    def test_admin_overview_lists_every_runtime_and_bound_config_status(self):
+        self.login("admin", "admin")
+        self.storage.upsert_user("alice", "AlicePassword123", "user")
+        self.bind("admin", "RuntimeA", True, True)
+        self.bind("alice", "BoundOnly", True, False)
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        self.main.alas.list_configs = lambda: {"ok": True, "configs": ["RuntimeA", "RuntimeB"]}
+
+        def status_for_config(config_name, include_configs=False):
+            self.assertFalse(include_configs)
+            values = {
+                "RuntimeA": ("running", "MainTask"),
+                "RuntimeB": ("stopped", ""),
+                "BoundOnly": ("idle", "Waiting"),
+            }
+            status, task = values[config_name]
+            return {"ok": True, "config": config_name, "status": status, "task": task, "configs": [config_name]}
+
+        self.main.alas.status_for_config = status_for_config
+        response = self.client.get("/api/admin/overview/alas")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["configs"], ["RuntimeA", "RuntimeB", "BoundOnly"])
+        self.assertTrue(all(isinstance(item, str) for item in payload["configs"]))
+        statuses = {item["config"]: item for item in payload["config_statuses"]}
+        self.assertEqual(statuses["RuntimeA"]["username"], "admin")
+        self.assertEqual(statuses["RuntimeA"]["status"], "running")
+        self.assertEqual(statuses["RuntimeA"]["task"], "MainTask")
+        self.assertEqual(statuses["RuntimeB"]["username"], "")
+        self.assertEqual(statuses["BoundOnly"]["username"], "alice")
+        self.assertEqual(payload["config_count"], 3)
+        self.assertEqual(payload["running_count"], 1)
+        self.assertEqual(payload["status"], "running")
+        for legacy_field in ("ok", "settings", "token_set", "task", "config", "error"):
+            self.assertIn(legacy_field, payload)
+
+    def test_admin_overview_alas_disabled_and_missing_token_do_not_call_runtime(self):
+        self.login("admin", "admin")
+        self.bind("admin", "BoundConfig", True, True)
+        calls = []
+        self.main.alas.list_configs = lambda: calls.append("catalog") or {"ok": True, "configs": []}
+        self.main.alas.status_for_config = lambda *args: calls.append("status") or {}
+
+        disabled = self.client.get("/api/admin/overview/alas").json()
+        self.assertEqual(disabled["status"], "disabled")
+        self.assertTrue(disabled["ok"])
+        self.assertEqual(disabled["config_statuses"][0]["config"], "BoundConfig")
+
+        self.storage.set_setting("alas_enabled", "true")
+        missing_token = self.client.get("/api/admin/overview/alas").json()
+        self.assertEqual(missing_token["status"], "error")
+        self.assertFalse(missing_token["ok"])
+        self.assertIn("token", missing_token["error"].lower())
+        self.assertEqual(calls, [])
+
+    def test_admin_overview_runtime_outage_does_not_fan_out_per_config(self):
+        self.login("admin", "admin")
+        self.storage.upsert_user("alice", "AlicePassword123", "user")
+        self.storage.upsert_user("bob", "BobPassword123", "user")
+        self.bind("admin", "RuntimeA", True, True)
+        self.bind("alice", "RuntimeB", True, False)
+        self.bind("bob", "RuntimeC", True, False)
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        self.main.alas.list_configs = lambda: {"ok": False, "configs": [], "error": "ALAS API unreachable: refused"}
+        calls = []
+
+        def status_for_config(config_name, include_configs=False):
+            calls.append(config_name)
+            return {"ok": False, "config": config_name, "status": "disconnected", "task": "", "error": "ALAS API unreachable: refused"}
+
+        self.main.alas.status_for_config = status_for_config
+        response = self.client.get("/api/admin/overview/alas")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(calls, ["RuntimeA"])
+        self.assertEqual(payload["config_count"], 3)
+        self.assertEqual(payload["status"], "error")
+        self.assertTrue(all(not item["ok"] for item in payload["config_statuses"]))
+
+    def test_admin_overview_does_not_invent_legacy_config_for_empty_catalog(self):
+        self.login("admin", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        self.storage.set_setting("alas_current_config", "LegacyOnly")
+        self.main.alas.list_configs = lambda: {"ok": True, "configs": []}
+        self.main.alas.status_for_config = lambda config_name, include_configs=False: {
+            "ok": True,
+            "config": config_name,
+            "status": "idle",
+            "task": "",
+        }
+
+        payload = self.client.get("/api/admin/overview/alas").json()
+
+        self.assertEqual(payload["configs"], [])
+        self.assertEqual(payload["config_statuses"], [])
+        self.assertEqual(payload["config_count"], 0)
+        self.assertEqual(payload["config"], "")
+        self.assertEqual(payload["status"], "unknown")
+
+        calls = []
+        self.main.alas.list_configs = lambda: {"ok": False, "configs": [], "error": "ALAS API unreachable: refused"}
+        self.main.alas.status_for_config = lambda *args: calls.append(args) or {}
+        unavailable = self.client.get("/api/admin/overview/alas").json()
+        self.assertEqual(unavailable["configs"], [])
+        self.assertEqual(unavailable["config_statuses"], [])
+        self.assertEqual(unavailable["status"], "error")
+        self.assertEqual(calls, [])
+
+    def test_admin_overview_alas_status_concurrency_is_bounded(self):
+        self.login("admin", "admin")
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        runtime_configs = [f"Runtime{index}" for index in range(12)]
+        self.main.alas.list_configs = lambda: {"ok": True, "configs": runtime_configs}
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def status_for_config(config_name, include_configs=False):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return {"ok": True, "config": config_name, "status": "idle", "task": ""}
+
+        self.main.alas.status_for_config = status_for_config
+        response = self.client.get("/api/admin/overview/alas")
+        repeated = self.client.get("/api/admin/overview/alas")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertTrue(repeated.json()["ok"])
+        self.assertFalse(any(item["error"] for item in repeated.json()["config_statuses"]))
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+
+    def test_base_admin_overview_never_waits_for_runtime_status(self):
+        self.login("admin", "admin")
+        self.bind("admin", "RuntimeA", True, True)
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        self.main.alas.list_configs = lambda: (_ for _ in ()).throw(AssertionError("catalog must not be queried"))
+        self.main.alas.status_for_config = lambda *args: (_ for _ in ()).throw(AssertionError("status must not be queried"))
+
+        response = self.client.get("/api/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["alas"]
+        self.assertEqual(payload["status"], "unknown")
+        self.assertEqual(payload["configs"], ["RuntimeA"])
+        self.assertEqual(payload["config_statuses"], [])
+        for field in ("ok", "settings", "enabled", "token_set", "configured", "status", "task", "config", "configs", "error"):
+            self.assertIn(field, payload)
+        self.assertTrue(all(isinstance(item, str) for item in payload["configs"]))
 
     def test_case_distinct_configs_survive_admin_catalog_and_authorization(self):
         self.login("alice")

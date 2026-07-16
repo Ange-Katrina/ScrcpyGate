@@ -111,7 +111,8 @@ class UiTemplateContractTests(unittest.TestCase):
             },
             "admin.html": {
                 "notice", "summaryMirror", "summaryAlas", "overview", "overviewDevices",
-                "overviewMirror", "overviewAlas", "reloadAll", "devices", "deviceCards",
+                "overviewUsers", "overviewMirror", "overviewAlas", "overviewDevicesMeta",
+                "overviewUsersMeta", "overviewMirrorMeta", "overviewAlasMeta", "reloadAll", "devices", "deviceCards",
                 "deviceId", "deviceName", "deviceAddress", "deviceEnabled", "saveDevice",
                 "clearDeviceForm", "video", "videoProfile", "videoStreamMode", "videoAutoStop",
                 "saveVideo", "streamModeToggles", "bandwidthPresetActions", "videoPresetRows",

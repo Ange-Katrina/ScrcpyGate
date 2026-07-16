@@ -111,6 +111,7 @@ class AuthRouteTests(unittest.TestCase):
             "/api/alas/status": {401},
             "/api/alas/configs": {401},
             "/api/admin/overview": {401},
+            "/api/admin/overview/alas": {401},
             "/api/admin/users": {401},
             "/api/admin/devices": {401},
             "/api/admin/adb/status": {401},
@@ -180,6 +181,7 @@ class AuthRouteTests(unittest.TestCase):
 
         self.assertEqual(self.client.get("/admin", follow_redirects=False).status_code, 403)
         self.assertEqual(self.client.get("/api/admin/overview").status_code, 403)
+        self.assertEqual(self.client.get("/api/admin/overview/alas").status_code, 403)
         self.assertEqual(self.client.get("/api/admin/users").status_code, 403)
         self.assertEqual(self.client.get("/api/admin/devices").status_code, 403)
         self.assertEqual(self.client.get("/api/admin/logs").status_code, 403)

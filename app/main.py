@@ -42,6 +42,7 @@ from .video_options import (
     signature,
     stream_mode_or_default,
 )
+from .workers import ALAS_OVERVIEW_MAX_WORKERS, alas_overview_executor
 
 setup_logging()
 log = logging.getLogger("webscrcpy.main")
@@ -49,6 +50,7 @@ api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
 mirror_autostop_task: asyncio.Task | None = None
 account_expiration_task: asyncio.Task | None = None
 STATIC_ASSET_VERSION_RE = re.compile(r"[a-f0-9]{12}")
+ADMIN_ALAS_OVERVIEW_CONCURRENCY = ALAS_OVERVIEW_MAX_WORKERS
 
 
 class SelectiveGZipMiddleware(GZipMiddleware):
@@ -491,6 +493,184 @@ def admin_alas_status_for_config(config_name: str | None = None, bindings: list[
     return result
 
 
+def _alas_overview_owners(assignments: list[dict]) -> dict[str, str]:
+    owners: dict[str, str] = {}
+    for binding in assignments:
+        try:
+            name = alas.sanitize_config_name(binding.get("config_name"))
+        except ValueError:
+            continue
+        owners[name] = str(binding.get("username") or "").strip()
+    return owners
+
+
+def admin_alas_overview_local(bindings: list[dict] | None = None) -> dict:
+    """Build a network-free ALAS summary while preserving the legacy fields."""
+    settings = alas.public_settings()
+    assignments = bindings if bindings is not None else storage.list_user_alas_bindings()
+    config_names = bound_alas_config_names(assignments)
+    owners = _alas_overview_owners(assignments)
+    enabled = bool(settings.get("enabled"))
+    token_set = bool(settings.get("token_set"))
+    configured = bool(enabled and token_set)
+    selected = config_names[0] if config_names else ""
+    status = "unknown" if configured else "disabled" if not enabled else "error"
+    error = "" if configured else "ALAS control is disabled" if not enabled else "ALAS API token is not configured"
+    config_statuses = [
+        {
+            "config": name,
+            "username": owners.get(name, ""),
+            "status": status,
+            "task": "",
+            "ok": not enabled,
+            "error": error,
+        }
+        for name in config_names
+    ] if not configured else []
+    return {
+        "ok": not enabled or configured,
+        "settings": settings,
+        "enabled": enabled,
+        "token_set": token_set,
+        "configured": configured,
+        "status": status,
+        "task": "",
+        "config": selected,
+        "configs": config_names,
+        "config_statuses": config_statuses,
+        "config_count": len(config_names),
+        "running_count": 0,
+        "error": error,
+        "catalog_error": "",
+    }
+
+
+def _alas_runtime_unreachable(error: object) -> bool:
+    value = str(error or "").lower()
+    return any(token in value for token in ("unreachable", "timed out", "timeout", "connection refused"))
+
+
+async def _admin_alas_call(func, *args) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(alas_overview_executor, func, *args)
+
+
+async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
+    """Load every discoverable ALAS config without delaying the base overview."""
+    assignments = bindings if bindings is not None else await asyncio.to_thread(storage.list_user_alas_bindings)
+    summary = await asyncio.to_thread(admin_alas_overview_local, assignments)
+    if not summary["configured"]:
+        return summary
+
+    bound_configs = list(summary["configs"])
+    owners = _alas_overview_owners(assignments)
+
+    async def load_catalog() -> dict:
+        try:
+            return await _admin_alas_call(alas.list_configs)
+        except Exception as exc:
+            log.warning("ALAS_OVERVIEW_CATALOG_FAILED error=%s", exc)
+            return {"ok": False, "configs": [], "error": str(exc)}
+
+    async def load_status(name: str) -> tuple[str, dict]:
+        try:
+            return name, await _admin_alas_call(alas.status_for_config, name, False)
+        except Exception as exc:
+            log.warning("ALAS_OVERVIEW_STATUS_FAILED config=%s error=%s", name, exc)
+            return name, {"ok": False, "status": "error", "task": "", "config": name, "error": str(exc)}
+
+    def runtime_config_names(catalog: dict) -> list[str]:
+        names: list[str] = []
+        for raw in catalog.get("configs") or []:
+            try:
+                name = alas.sanitize_config_name(raw)
+            except ValueError:
+                continue
+            if name not in names:
+                names.append(name)
+        return names
+
+    if bound_configs:
+        selected = bound_configs[0]
+        catalog, selected_status_pair = await asyncio.gather(load_catalog(), load_status(selected))
+        runtime_configs = runtime_config_names(catalog)
+    else:
+        catalog = await load_catalog()
+        runtime_configs = runtime_config_names(catalog)
+        catalog_error = str(catalog.get("error") or "")
+        if not catalog.get("ok") or not runtime_configs:
+            has_error = bool(catalog_error)
+            return {
+                **summary,
+                "ok": not has_error,
+                "status": "error" if has_error else "unknown",
+                "configs": [],
+                "config_statuses": [],
+                "config_count": 0,
+                "running_count": 0,
+                "error": catalog_error,
+                "catalog_error": catalog_error,
+            }
+        selected = runtime_configs[0]
+        selected_status_pair = await load_status(selected)
+
+    selected_name, selected_status = selected_status_pair
+    config_names = list(runtime_configs)
+    for name in bound_configs:
+        if name and name not in config_names:
+            config_names.append(name)
+
+    status_by_config: dict[str, dict] = {selected_name: selected_status}
+    pending = [name for name in config_names if name not in status_by_config]
+    selected_error = str(selected_status.get("error") or "")
+    if pending and _alas_runtime_unreachable(selected_error):
+        for name in pending:
+            status_by_config[name] = {
+                "ok": False,
+                "status": str(selected_status.get("status") or "disconnected"),
+                "task": "",
+                "config": name,
+                "error": selected_error,
+            }
+    elif pending:
+        for name, result in await asyncio.gather(*(load_status(name) for name in pending)):
+            status_by_config[name] = result
+
+    config_statuses = []
+    errors = [str(catalog.get("error") or "")]
+    for name in config_names:
+        result = status_by_config.get(name) or {}
+        item = {
+            "config": name,
+            "username": owners.get(name, ""),
+            "status": str(result.get("status") or "unknown"),
+            "task": str(result.get("task") or ""),
+            "ok": bool(result.get("ok", not result.get("error"))),
+            "error": str(result.get("error") or ""),
+        }
+        config_statuses.append(item)
+        errors.append(item["error"])
+    running_count = sum(item["status"] == "running" for item in config_statuses)
+    has_error = bool(catalog.get("error")) or any(not item["ok"] or item["status"] == "error" for item in config_statuses)
+    overall_status = "error" if has_error else "running" if running_count else "stopped" if config_statuses else "unknown"
+    first_error = next((error for error in errors if error), "")
+    primary_name = bound_configs[0] if bound_configs else config_names[0] if config_names else ""
+    primary_status = status_by_config.get(primary_name) or {}
+    return {
+        **summary,
+        "ok": not has_error,
+        "status": overall_status,
+        "task": str(primary_status.get("task") or ""),
+        "config": primary_name,
+        "configs": config_names,
+        "config_statuses": config_statuses,
+        "config_count": len(config_statuses),
+        "running_count": running_count,
+        "error": first_error,
+        "catalog_error": str(catalog.get("error") or ""),
+    }
+
+
 def admin_alas_payload(config_name: str | None = None) -> dict:
     bindings = storage.list_user_alas_configs()
     assignments = storage.list_user_alas_bindings()
@@ -509,6 +689,16 @@ def admin_alas_permissions_payload() -> dict:
         "assignments": storage.list_user_alas_bindings(),
         "users": storage.list_users(),
     }
+
+
+def admin_overview_storage_payload() -> tuple[list[dict], list[dict], list[dict], dict]:
+    alas_bindings = storage.list_user_alas_bindings()
+    return (
+        storage.list_all_devices(),
+        storage.list_users(),
+        alas_bindings,
+        admin_alas_overview_local(alas_bindings),
+    )
 
 
 def resolve_device_or_404(device_ref: str) -> str:
@@ -1082,20 +1272,23 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
 @app.get("/api/admin/overview")
 async def admin_overview(request: Request):
     user = security.require_admin(request)
-    devices = storage.list_all_devices()
-    alas_bindings = storage.list_user_alas_bindings()
-    sessions, alas_status = await asyncio.gather(
-        manager.snapshot(),
-        asyncio.to_thread(admin_alas_status_for_config, None, alas_bindings)
-    )
+    devices, users, _alas_bindings, alas_status = await asyncio.to_thread(admin_overview_storage_payload)
+    sessions = await manager.snapshot()
     statuses = adb_monitor.snapshot()
     return {
         "user": user_payload(user),
         "devices": devices_payload(devices, sessions, statuses),
         "sessions": sessions,
-        "users": storage.list_users(),
+        "users": users,
         "alas": alas_status,
     }
+
+
+@app.get("/api/admin/overview/alas")
+async def admin_overview_alas(request: Request):
+    security.require_admin(request)
+    alas_bindings = await asyncio.to_thread(storage.list_user_alas_bindings)
+    return await admin_alas_overview(alas_bindings)
 
 
 @app.get("/api/admin/users")
@@ -1406,10 +1599,8 @@ async def admin_alas_configs(request: Request):
     runtime_configs: list[str] = []
     error = ""
     if settings.get("enabled") and settings.get("token_set"):
-        selected = str(request.query_params.get("config") or "").strip() or (bound_configs[0] if bound_configs else alas.legacy_config_name())
         try:
-            selected = alas.sanitize_config_name(selected)
-            result = await asyncio.to_thread(alas.status_for_config, selected, True)
+            result = await asyncio.to_thread(alas.list_configs)
             error = str(result.get("error") or "")
             for raw in result.get("configs") or []:
                 try:
@@ -1418,8 +1609,9 @@ async def admin_alas_configs(request: Request):
                     continue
                 if name not in runtime_configs:
                     runtime_configs.append(name)
-        except ValueError:
-            error = "invalid ALAS config name"
+        except Exception as exc:
+            log.warning("ALAS_CONFIG_CATALOG_FAILED error=%s", exc)
+            error = str(exc)
     configs = list(bound_configs)
     for name in runtime_configs:
         if name not in configs:

@@ -176,7 +176,82 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertEqual(len(worker_threads), 1)
         self.assertNotEqual(worker_threads[0], loop_thread)
 
+    def test_alas_overview_pool_stays_bounded_after_cancellation_across_loops(self):
+        lock = threading.Lock()
+        first_batch_started = threading.Event()
+        release = threading.Event()
+        active = 0
+        peak = 0
+        started = 0
+        errors = []
+
+        def blocking_status(name):
+            nonlocal active, peak, started
+            with lock:
+                active += 1
+                started += 1
+                peak = max(peak, active)
+                if started >= self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY:
+                    first_batch_started.set()
+            if not release.wait(timeout=3):
+                raise TimeoutError(f"worker {name} was not released")
+            with lock:
+                active -= 1
+            return {"ok": True, "config": name}
+
+        async def cancel_first_batch():
+            tasks = [
+                asyncio.create_task(self.main._admin_alas_call(blocking_status, f"first-{index}"))
+                for index in range(self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+            ]
+            while not first_batch_started.is_set():
+                await asyncio.sleep(0.001)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        def run(coro):
+            try:
+                asyncio.run(coro)
+            except Exception as exc:
+                errors.append(exc)
+
+        first_loop = threading.Thread(target=run, args=(cancel_first_batch(),))
+        second_loop = None
+        try:
+            first_loop.start()
+            self.assertTrue(first_batch_started.wait(timeout=1))
+            first_loop.join(timeout=1)
+            self.assertFalse(first_loop.is_alive())
+
+            async def run_second_batch():
+                return await asyncio.gather(*(
+                    self.main._admin_alas_call(blocking_status, f"second-{index}")
+                    for index in range(self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+                ))
+
+            second_loop = threading.Thread(target=run, args=(run_second_batch(),))
+            second_loop.start()
+            threading.Event().wait(0.1)
+            with lock:
+                self.assertEqual(started, self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+                self.assertEqual(peak, self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+        finally:
+            release.set()
+            first_loop.join(timeout=2)
+            if second_loop is not None:
+                second_loop.join(timeout=2)
+
+        self.assertFalse(errors)
+        self.assertIsNotNone(second_loop)
+        self.assertFalse(second_loop.is_alive())
+        self.assertEqual(started, self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY * 2)
+        self.assertLessEqual(peak, self.main.ADMIN_ALAS_OVERVIEW_CONCURRENCY)
+
     def test_all_alas_network_routes_offload_blocking_helpers(self):
+        self.storage.set_setting("alas_enabled", "true")
+        self.storage.set_setting("alas_token", "secret")
+        self.storage.set_setting("alas_current_config", "Alpha")
         request_threads = []
         worker_calls = []
         original_require_user = self.main.security.require_user
@@ -220,18 +295,18 @@ class HttpPerformanceTests(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(
                     self.main.alas,
+                    "list_configs",
+                    side_effect=worker_result("list_configs", {"ok": True, "configs": ["Alpha"]}),
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    self.main.alas,
                     "control_for_config",
                     side_effect=worker_result(
                         "control",
                         {"ok": True, "action": "restart", "config": "Alpha", "alas": dict(status_payload)},
                     ),
-                )
-            )
-            stack.enter_context(
-                mock.patch.object(
-                    self.main,
-                    "admin_alas_status_for_config",
-                    side_effect=worker_result("admin_status", dict(status_payload)),
                 )
             )
             stack.enter_context(
@@ -267,6 +342,7 @@ class HttpPerformanceTests(unittest.TestCase):
                 self.client.get("/api/alas/status"),
                 self.client.post("/api/alas/toggle", headers=csrf_headers),
                 self.client.get("/api/admin/overview"),
+                self.client.get("/api/admin/overview/alas"),
                 self.client.get("/api/admin/alas?config=Alpha"),
                 self.client.put("/api/admin/alas", headers=csrf_headers, json={"enabled": True}),
                 self.client.post(
@@ -286,7 +362,7 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertTrue(request_threads)
         self.assertEqual(
             {name for name, _ in worker_calls},
-            {"status", "control", "admin_status", "admin_payload", "get_config", "save_config", "save_settings"},
+            {"status", "list_configs", "control", "admin_payload", "get_config", "save_config", "save_settings"},
         )
         self.assertTrue(all(thread_id not in request_threads for _, thread_id in worker_calls))
 

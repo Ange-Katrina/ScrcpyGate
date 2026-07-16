@@ -17,7 +17,11 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             'id="adminNav"',
             'class="admin-workspace"',
             'class="admin-content"',
-            'id="overviewControl"',
+            'id="overviewUsers"',
+            'id="overviewDevicesMeta"',
+            'id="overviewUsersMeta"',
+            'id="overviewMirrorMeta"',
+            'id="overviewAlasMeta"',
             'id="runtimeLogsStatus"',
             'id="auditLogsStatus"',
         ):
@@ -87,8 +91,10 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "last_seen_at",
             "latency_ms",
             "function syncDeviceStatusPolling()",
-            "activeTab==='devices' && !document.hidden",
+            "(activeTab==='devices' || activeTab==='overview') && !document.hidden",
             "api('/api/admin/adb/status'",
+            "api('/api/admin/devices'",
+            "function applyOverviewDevices(data)",
         ):
             self.assertIn(token, self.script)
         self.assertIn('id="deviceId" type="hidden"', self.template)
@@ -100,7 +106,27 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn(".device-heartbeat", self.styles)
         self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", self.styles)
         self.assertIn("Object.entries(statuses).forEach", self.script)
-        self.assertIn("Object.entries(statuses).forEach(([id,status])=>applyDeviceAdbResult(id,status || {}));\n  renderOverview();", self.script)
+        self.assertNotIn("Object.entries(statuses).forEach(([id,status])=>applyDeviceAdbResult(id,status || {}));\n  renderOverview();", self.script)
+
+    def test_overview_uses_independent_keyed_status_lists(self):
+        for token in (
+            "function updateOverviewRows(container,items,emptyMessage)",
+            "function renderOverviewDevices()",
+            "function renderOverviewUsers()",
+            "function renderOverviewMirrors()",
+            "function renderOverviewAlas()",
+            "function alasOverviewErrorText(value)",
+            "ALAS Runtime 不可达",
+            "config_statuses",
+            "session.clients",
+            "state.overview && Array.isArray(state.overview.users)",
+            "loadOverviewAlas",
+            "loadOverviewDevices",
+        ):
+            self.assertIn(token, self.script)
+        self.assertIn('role="region" aria-labelledby="overviewDevicesTitle" tabindex="0"', self.template)
+        self.assertIn(".overview-list:focus-visible", self.styles)
+        self.assertIn("overflow-wrap: anywhere", self.styles)
 
 
 if __name__ == "__main__":

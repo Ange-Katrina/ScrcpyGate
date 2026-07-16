@@ -63,8 +63,8 @@ class AlasAdminUiContractTests(unittest.TestCase):
         save_binding = self.script.split("async function saveAlasBinding", 1)[1].split("function activateTab", 1)[0]
         self.assertNotIn("refreshDomains('overview','alas')", remove_binding)
         self.assertNotIn("refreshDomains('overview','alas')", save_binding)
-        self.assertIn("refreshDomains('overview')", remove_binding)
-        self.assertIn("refreshDomains('overview')", save_binding)
+        self.assertIn("refreshDomains('overview','overviewAlas')", remove_binding)
+        self.assertIn("refreshDomains('overview','overviewAlas')", save_binding)
 
     def test_config_catalog_and_status_are_loaded_without_batch_status_requests(self):
         self.assertIn("api('/api/admin/alas/configs',{signal})", self.script)
@@ -362,7 +362,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
               toggleA.resolve({ok: true});
               await pendingToggle;
               assert.deepStrictEqual(globalThis.__statusCalls, []);
-              assert.deepStrictEqual(globalThis.__refreshCalls, [['overview']]);
+              assert.deepStrictEqual(globalThis.__refreshCalls, [['overview', 'overviewAlas']]);
               assert(globalThis.__messages.some(message => message.includes('Foo') && message.includes('foo')));
 
               globalThis.__messages.length = 0;
