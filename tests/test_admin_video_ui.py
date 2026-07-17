@@ -13,6 +13,7 @@ class AdminVideoUiContractTests(unittest.TestCase):
         cls.template = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
         cls.styles = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
         cls.script = (ROOT / "static" / "js" / "admin.js").read_text(encoding="utf-8")
+        cls.catalog = (ROOT / "static" / "i18n" / "zh-CN.json").read_text(encoding="utf-8")
 
     @classmethod
     def function_source(cls, name):
@@ -98,12 +99,13 @@ const STANDARD_OUTPUT_SIZES=[
             "1280 × 720（720p）",
             "1600 × 900（900p）",
             "1920 × 1080（1080p）",
-            "自定义尺寸…",
         ):
-            self.assertIn(label, self.template if label != "自定义尺寸…" else self.template + self.script)
+            self.assertIn(label, self.template)
+        self.assertIn("t('admin.video.custom_output_size')", self.template)
+        self.assertIn('"custom_output_size": "自定义输出尺寸"', self.catalog)
         self.assertIn('id="customProfileWidth" type="number" min="854" max="1920"', self.template)
         self.assertIn('id="customProfileHeight" type="number" min="480" max="1080"', self.template)
-        self.assertIn('aria-label="自定义输出尺寸"', self.template)
+        self.assertIn('aria-label="{{ t(\'admin.video.custom_output_size\') }}"', self.template)
         self.assertIn("const STANDARD_OUTPUT_SIZES = Object.freeze([", self.script)
         self.assertIn("function presetSizeControl(profile,value)", self.script)
         self.assertIn("function syncPresetSizeControl(control,value,forceCustom=false)", self.script)
@@ -156,12 +158,14 @@ global.document={querySelectorAll:()=>inputs};
         self.assertNotIn("video_mode", self.script)
         self.assertNotIn("ALAS 专属", self.template)
         self.assertNotIn("画质类型", self.template)
-        self.assertIn("所有用户共用流畅、稳定、高清和低延迟四档", self.template)
+        self.assertIn("t('admin.ui.video.presets_description')", self.template)
+        self.assertIn("所有用户共用流畅、稳定、高清和低延迟四档", self.catalog)
 
     def test_fullscreen_quality_uses_only_720p_or_higher_profiles(self):
         self.assertIn('id="videoFullscreenProfile"', self.template)
         self.assertIn('id="videoFullscreenHint"', self.template)
-        self.assertIn("仅显示 720p 或更高的档位", self.template)
+        self.assertIn("t('admin.ui.video.fullscreen_hint')", self.template)
+        self.assertIn("仅显示 720p 或更高的档位", self.catalog)
         self.assertIn("function renderFullscreenProfiles(data,selected)", self.script)
         self.assertIn("Number(profiles[name].max_size)>=minimum", self.script)
         self.assertIn("fullscreen_profile:fullscreenProfile", self.script)
@@ -172,7 +176,8 @@ global.document={querySelectorAll:()=>inputs};
             "[450000,900000,5500000].map(value=>bitrateMbpsToBps(bitrateBpsToMbps(value)))",
         )
         self.assertEqual(result, [450000, 900000, 5500000])
-        self.assertGreaterEqual(self.template.count("码率 Mbps"), 3)
+        self.assertGreaterEqual(self.template.count("admin.ui.video.bitrate_mbps"), 3)
+        self.assertIn('"bitrate_mbps": "码率 Mbps"', self.catalog)
         self.assertNotIn("码率 bps", self.template)
         self.assertIn('content: "码率 Mbps"', self.styles)
 

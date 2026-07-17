@@ -14,6 +14,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
         cls.template = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
         cls.script = (ROOT / "static" / "js" / "admin.js").read_text(encoding="utf-8")
         cls.styles = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+        cls.catalog = (ROOT / "static" / "i18n" / "zh-CN.json").read_text(encoding="utf-8")
 
     def test_workspace_separates_user_authorization_and_config_library(self):
         for token in (
@@ -30,8 +31,10 @@ class AlasAdminUiContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.template)
         self.assertNotIn('>操作配置<', self.template)
-        self.assertIn('当前配置', self.template)
-        self.assertIn('配置库', self.template)
+        self.assertIn("t('admin.ui.drawers.config.current')", self.template)
+        self.assertIn("t('admin.ui.alas.config_library')", self.template)
+        self.assertIn('"current": "当前配置"', self.catalog)
+        self.assertIn('"config_library": "配置库"', self.catalog)
 
     def test_summary_and_primary_actions_are_explicit(self):
         for token in (
@@ -170,7 +173,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
 
     def test_assignment_identity_has_clear_visual_hierarchy(self):
         for token in (
-            'id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="配置归属摘要"',
+            'id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t(\'admin.ui.drawers.assignment.summary\') }}"',
             'id="alasAssignmentUserName"',
             'id="alasAssignmentUserMeta"',
             'id="alasAssignmentConfigName"',

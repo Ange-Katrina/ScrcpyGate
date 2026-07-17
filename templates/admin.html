@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111315">
-  <title>ScrcpyGate 后台</title>
+  <title>{{ t('admin.ui.page_title') }}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
@@ -14,33 +14,33 @@
 </head>
 <body data-ui-page="admin">
 <div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true"></div>
-<button id="adminNavBackdrop" class="admin-nav-backdrop" type="button" aria-label="关闭后台导航" aria-controls="adminNav" hidden></button>
+<button id="adminNavBackdrop" class="admin-nav-backdrop" type="button" aria-label="{{ t('admin.ui.nav.close') }}" aria-controls="adminNav" hidden></button>
 
 <div class="admin-app">
-  <aside id="adminNav" class="admin-nav" aria-label="后台导航">
+  <aside id="adminNav" class="admin-nav" aria-label="{{ t('admin.ui.nav.label') }}">
     <div class="admin-nav__header">
-      <a class="admin-brand" href="/" aria-label="ScrcpyGate 投屏工作台">
+      <a class="admin-brand" href="/" aria-label="{{ t('admin.ui.nav.mirror_workspace') }}">
         <span class="admin-brand__mark" aria-hidden="true">S</span>
-        <span><strong>ScrcpyGate</strong><small>管理工作台</small></span>
+        <span><strong>ScrcpyGate</strong><small>{{ t('admin.ui.nav.management_workspace') }}</small></span>
       </a>
-      <button id="adminNavClose" class="ui-icon-button admin-nav__close" type="button" aria-label="关闭后台导航" aria-controls="adminNav">
+      <button id="adminNavClose" class="ui-icon-button admin-nav__close" type="button" aria-label="{{ t('admin.ui.nav.close') }}" aria-controls="adminNav">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg>
       </button>
     </div>
 
-    <nav class="tabs" aria-label="管理区域">
-      <button id="adminTabOverview" data-tab="overview" class="active" type="button" aria-controls="overview" aria-current="page"><span aria-hidden="true">01</span>总览</button>
-      <button id="adminTabDevices" data-tab="devices" type="button" aria-controls="devices"><span aria-hidden="true">02</span>设备</button>
-      <button id="adminTabUsers" data-tab="users" type="button" aria-controls="users"><span aria-hidden="true">03</span>用户权限</button>
-      <button id="adminTabVideo" data-tab="video" type="button" aria-controls="video"><span aria-hidden="true">04</span>画质</button>
+    <nav class="tabs" aria-label="{{ t('admin.ui.nav.sections') }}">
+      <button id="adminTabOverview" data-tab="overview" class="active" type="button" aria-controls="overview" aria-current="page"><span aria-hidden="true">01</span>{{ t('admin.ui.nav.overview') }}</button>
+      <button id="adminTabDevices" data-tab="devices" type="button" aria-controls="devices"><span aria-hidden="true">02</span>{{ t('admin.ui.nav.devices') }}</button>
+      <button id="adminTabUsers" data-tab="users" type="button" aria-controls="users"><span aria-hidden="true">03</span>{{ t('admin.ui.nav.access') }}</button>
+      <button id="adminTabVideo" data-tab="video" type="button" aria-controls="video"><span aria-hidden="true">04</span>{{ t('admin.ui.nav.video') }}</button>
       <button id="adminTabAlas" data-tab="alas" type="button" aria-controls="alas"><span aria-hidden="true">05</span>ALAS</button>
-      <button id="adminTabLogs" data-tab="logs" type="button" aria-controls="logs"><span aria-hidden="true">06</span>安全日志</button>
+      <button id="adminTabLogs" data-tab="logs" type="button" aria-controls="logs"><span aria-hidden="true">06</span>{{ t('admin.ui.nav.security_logs') }}</button>
     </nav>
 
     <div class="admin-nav__footer">
       <div class="admin-user">
         <span class="admin-user__avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
-        <span><strong>{{ user.username }}</strong><small>管理员</small></span>
+        <span><strong>{{ user.username }}</strong><small>{{ t('common.roles.admin') }}</small></span>
       </div>
       <div class="ui-theme-picker" data-ui-theme-placement="top">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
@@ -51,10 +51,10 @@
           <option value="system">{{ t("common.theme.system") }}</option>
         </select>
       </div>
-      <a class="admin-nav__link" href="/">返回投屏页</a>
+      <a class="admin-nav__link" href="/">{{ t('admin.ui.nav.return_mirror') }}</a>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="logout admin-nav__link" type="submit">退出登录</button>
+        <button class="logout admin-nav__link" type="submit">{{ t('admin.ui.nav.logout') }}</button>
       </form>
     </div>
   </aside>
@@ -62,17 +62,17 @@
   <div class="admin-workspace">
     <header class="admin-topbar">
       <div class="admin-topbar__title">
-        <button id="adminNavToggle" class="ui-icon-button admin-nav__toggle" type="button" aria-label="打开后台导航" aria-controls="adminNav" aria-expanded="false">
+        <button id="adminNavToggle" class="ui-icon-button admin-nav__toggle" type="button" aria-label="{{ t('admin.ui.nav.open') }}" aria-controls="adminNav" aria-expanded="false">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#menu"></use></svg>
         </button>
         <div>
           <p>ScrcpyGate</p>
-          <h1>后台管理</h1>
+          <h1>{{ t('admin.ui.heading') }}</h1>
         </div>
       </div>
-      <div class="top-status" aria-label="系统摘要">
+      <div class="top-status" aria-label="{{ t('admin.ui.system_summary') }}">
         <span class="chip ok">{{ user.username }}</span>
-        <span id="summaryMirror" class="chip">投屏 0</span>
+        <span id="summaryMirror" class="chip">{{ t('admin.ui.overview.mirror_initial') }}</span>
         <span id="summaryAlas" class="chip">ALAS</span>
       </div>
     </header>
@@ -80,135 +80,135 @@
     <main id="adminContent" class="admin-content">
       <section id="overview" class="panel active" aria-labelledby="adminTabOverview" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Overview</p><h2>运行总览</h2><p>优先查看设备、投屏、控制权与 ALAS 的关键状态。</p></div>
+          <div><p class="eyebrow">Overview</p><h2>{{ t('admin.ui.overview.title') }}</h2><p>{{ t('admin.ui.overview.description') }}</p></div>
         </div>
         <div class="overview-summary">
           <section class="overview-summary__item" aria-labelledby="overviewDevicesTitle">
-            <div class="overview-summary__heading"><h3 id="overviewDevicesTitle">设备心跳</h3><strong id="overviewDevicesMeta" aria-live="polite">0 / 0 在线</strong></div>
-            <div id="overviewDevices" class="overview-list" role="region" aria-labelledby="overviewDevicesTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+            <div class="overview-summary__heading"><h3 id="overviewDevicesTitle">{{ t('admin.ui.overview.device_heartbeat') }}</h3><strong id="overviewDevicesMeta" aria-live="polite">{{ t('admin.ui.overview.devices_initial') }}</strong></div>
+            <div id="overviewDevices" class="overview-list" role="region" aria-labelledby="overviewDevicesTitle" tabindex="0"><p class="overview-empty">{{ t('common.feedback.loading') }}</p></div>
           </section>
           <section class="overview-summary__item" aria-labelledby="overviewUsersTitle">
-            <div class="overview-summary__heading"><h3 id="overviewUsersTitle">用户时间</h3><strong id="overviewUsersMeta" aria-live="polite">0 位用户</strong></div>
-            <div id="overviewUsers" class="overview-list" role="region" aria-labelledby="overviewUsersTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+            <div class="overview-summary__heading"><h3 id="overviewUsersTitle">{{ t('admin.ui.overview.user_time') }}</h3><strong id="overviewUsersMeta" aria-live="polite">{{ t('admin.ui.overview.users_initial') }}</strong></div>
+            <div id="overviewUsers" class="overview-list" role="region" aria-labelledby="overviewUsersTitle" tabindex="0"><p class="overview-empty">{{ t('common.feedback.loading') }}</p></div>
           </section>
           <section class="overview-summary__item" aria-labelledby="overviewMirrorTitle">
-            <div class="overview-summary__heading"><h3 id="overviewMirrorTitle">投屏与观看</h3><strong id="overviewMirrorMeta" aria-live="polite">0 路 · 0 人</strong></div>
-            <div id="overviewMirror" class="overview-list" role="region" aria-labelledby="overviewMirrorTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+            <div class="overview-summary__heading"><h3 id="overviewMirrorTitle">{{ t('admin.ui.overview.mirror_viewers') }}</h3><strong id="overviewMirrorMeta" aria-live="polite">{{ t('admin.ui.overview.mirror_viewers_initial') }}</strong></div>
+            <div id="overviewMirror" class="overview-list" role="region" aria-labelledby="overviewMirrorTitle" tabindex="0"><p class="overview-empty">{{ t('common.feedback.loading') }}</p></div>
           </section>
           <section class="overview-summary__item" aria-labelledby="overviewAlasTitle">
-            <div class="overview-summary__heading"><h3 id="overviewAlasTitle">ALAS 配置</h3><strong id="overviewAlasMeta" aria-live="polite">0 / 0 运行</strong></div>
-            <div id="overviewAlas" class="overview-list" role="region" aria-labelledby="overviewAlasTitle" tabindex="0"><p class="overview-empty">加载中</p></div>
+            <div class="overview-summary__heading"><h3 id="overviewAlasTitle">{{ t('admin.ui.overview.alas_configs') }}</h3><strong id="overviewAlasMeta" aria-live="polite">{{ t('admin.ui.overview.alas_initial') }}</strong></div>
+            <div id="overviewAlas" class="overview-list" role="region" aria-labelledby="overviewAlasTitle" tabindex="0"><p class="overview-empty">{{ t('common.feedback.loading') }}</p></div>
           </section>
         </div>
         <section class="workspace-section" aria-labelledby="quickActionsTitle">
-          <div class="section-heading"><div><h3 id="quickActionsTitle">快速操作</h3><p>刷新当前已加载的数据，或返回投屏工作台。</p></div></div>
-          <div class="quick-actions"><button id="reloadAll" class="btn primary" type="button">刷新数据</button><a class="btn" href="/">打开投屏页</a></div>
+          <div class="section-heading"><div><h3 id="quickActionsTitle">{{ t('admin.ui.overview.quick_actions') }}</h3><p>{{ t('admin.ui.overview.quick_actions_description') }}</p></div></div>
+          <div class="quick-actions"><button id="reloadAll" class="btn primary" type="button">{{ t('admin.ui.overview.refresh_data') }}</button><a class="btn" href="/">{{ t('admin.ui.overview.open_mirror') }}</a></div>
         </section>
       </section>
 
       <section id="devices" class="panel" aria-labelledby="adminTabDevices" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Devices</p><h2>设备管理</h2><p>管理 ADB 连接、投屏状态和设备可用性。</p></div>
-          <button id="openDeviceDrawer" class="btn primary" type="button">新建设备</button>
+          <div><p class="eyebrow">Devices</p><h2>{{ t('admin.ui.devices.title') }}</h2><p>{{ t('admin.ui.devices.description') }}</p></div>
+          <button id="openDeviceDrawer" class="btn primary" type="button">{{ t('admin.ui.devices.create') }}</button>
         </div>
         <section class="workspace-section" aria-labelledby="deviceListTitle">
-          <div class="section-heading"><div><h3 id="deviceListTitle">设备列表</h3><p>设备操作保持在同一行，状态变化不会打断浏览位置。</p></div></div>
+          <div class="section-heading"><div><h3 id="deviceListTitle">{{ t('admin.ui.devices.list_title') }}</h3><p>{{ t('admin.ui.devices.list_description') }}</p></div></div>
           <div id="deviceCards" class="device-grid"></div>
         </section>
       </section>
 
       <section id="video" class="panel" aria-labelledby="adminTabVideo" tabindex="-1">
-        <div class="panel-heading"><div><p class="eyebrow">Video</p><h2>画质管理</h2><p>统一默认画质、流模式与自定义档位。</p></div></div>
+        <div class="panel-heading"><div><p class="eyebrow">Video</p><h2>{{ t('admin.ui.video.title') }}</h2><p>{{ t('admin.ui.video.description') }}</p></div></div>
         <section class="workspace-section" aria-labelledby="videoDefaultsTitle">
-          <div class="section-heading"><div><h3 id="videoDefaultsTitle">画质默认值</h3><p>页面失焦或没有观看端超过设定时间会自动停流，0 表示关闭。</p></div></div>
+          <div class="section-heading"><div><h3 id="videoDefaultsTitle">{{ t('admin.ui.video.defaults_title') }}</h3><p>{{ t('admin.ui.video.defaults_description') }}</p></div></div>
           <div class="form-grid">
-            <div class="col-3"><label for="videoProfile">默认预设</label><select id="videoProfile"><option value="smooth">流畅</option><option value="balanced">稳定</option><option value="sharp">高清</option><option value="low_latency">低延迟</option></select></div>
-            <div class="col-3"><label for="videoFullscreenProfile">全屏画质</label><select id="videoFullscreenProfile" aria-describedby="videoFullscreenHint"><option value="sharp">高清</option></select></div>
-            <div class="col-3"><label for="videoStreamMode">默认流模式</label><select id="videoStreamMode"><option value="raw">raw</option><option value="protocol">protocol</option><option value="legacy">legacy 诊断</option></select></div>
-            <div class="col-3"><label for="videoAutoStop">自动停止分钟</label><input id="videoAutoStop" type="number" min="0" max="1440" step="1" placeholder="15"></div>
-            <div class="col-12 form-action"><button id="saveVideo" class="btn primary" type="button">保存画质设置</button></div>
-            <fieldset class="col-12 field-group"><legend>启用 scrcpy 流模式</legend><div id="streamModeToggles" class="actions"></div></fieldset>
+            <div class="col-3"><label for="videoProfile">{{ t('admin.ui.video.default_profile') }}</label><select id="videoProfile"><option value="smooth">{{ t('mirror.profile.smooth') }}</option><option value="balanced">{{ t('mirror.profile.balanced') }}</option><option value="sharp">{{ t('mirror.profile.sharp') }}</option><option value="low_latency">{{ t('mirror.profile.low_latency') }}</option></select></div>
+            <div class="col-3"><label for="videoFullscreenProfile">{{ t('admin.ui.video.fullscreen_profile') }}</label><select id="videoFullscreenProfile" aria-describedby="videoFullscreenHint"><option value="sharp">{{ t('mirror.profile.sharp') }}</option></select></div>
+            <div class="col-3"><label for="videoStreamMode">{{ t('admin.ui.video.default_stream_mode') }}</label><select id="videoStreamMode"><option value="raw">raw</option><option value="protocol">protocol</option><option value="legacy">legacy {{ t('admin.ui.video.diagnostic') }}</option></select></div>
+            <div class="col-3"><label for="videoAutoStop">{{ t('admin.ui.video.auto_stop_minutes') }}</label><input id="videoAutoStop" type="number" min="0" max="1440" step="1" placeholder="15"></div>
+            <div class="col-12 form-action"><button id="saveVideo" class="btn primary" type="button">{{ t('admin.ui.video.save') }}</button></div>
+            <fieldset class="col-12 field-group"><legend>{{ t('admin.ui.video.enabled_stream_modes') }}</legend><div id="streamModeToggles" class="actions"></div></fieldset>
           </div>
-          <p id="videoFullscreenHint" class="muted">进入全屏会自动使用此档位并重启投屏流；仅显示 720p 或更高的档位。</p>
-          <p class="muted">网页画质只调整 scrcpy 输出流，不修改设备真实分辨率。</p>
+          <p id="videoFullscreenHint" class="muted">{{ t('admin.ui.video.fullscreen_hint') }}</p>
+          <p class="muted">{{ t('admin.ui.video.stream_scope_hint') }}</p>
         </section>
         <section class="workspace-section" aria-labelledby="presetParamsTitle">
-          <div class="section-heading"><div><h3 id="presetParamsTitle">四档画质参数</h3><p>所有用户共用流畅、稳定、高清和低延迟四档；上行有限时优先调低码率。</p></div></div>
+          <div class="section-heading"><div><h3 id="presetParamsTitle">{{ t('admin.ui.video.presets_title') }}</h3><p>{{ t('admin.ui.video.presets_description') }}</p></div></div>
           <div class="actions spaced-bottom-12" id="bandwidthPresetActions"></div>
-          <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">预设</th><th scope="col">码率 Mbps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">建议</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
-          <p class="muted">scrcpy 实际使用最长边上限并保持设备原始比例；竖屏、非 16:9 设备的另一边会自动换算，不会拉伸画面。2/5/10/20 Mbps 按钮会填入四档推荐值。</p>
-          <p class="muted">H.264 24–30fps 参考：480p 最低约 0.6M、推荐约 1.4M；540p 最低约 0.9M、推荐约 1.8M；720p 最低约 1.2M、推荐 2.4–4M；900p 最低约 2.5M、推荐约 5M；1080p 最低约 3M、推荐 6–8.5M。游戏等高动态画面应优先采用推荐值。</p>
+          <div class="table-wrap"><table class="responsive-table" data-table="video-presets"><thead><tr><th scope="col">{{ t('admin.ui.video.preset') }}</th><th scope="col">{{ t('admin.ui.video.bitrate_mbps') }}</th><th scope="col">{{ t('admin.video.output_size') }}</th><th scope="col">{{ t('admin.ui.video.fps') }}</th><th scope="col">{{ t('admin.ui.video.recommendation') }}</th></tr></thead><tbody id="videoPresetRows"></tbody></table></div>
+          <p class="muted">{{ t('admin.ui.video.dimension_hint') }}</p>
+          <p class="muted">{{ t('admin.ui.video.bitrate_reference') }}</p>
         </section>
         <section class="workspace-section" aria-labelledby="customProfilesTitle">
-          <div class="section-heading"><div><h3 id="customProfilesTitle">自定义画质档位</h3><p>添加适合特定网络或设备的额外画质档位。</p></div></div>
+          <div class="section-heading"><div><h3 id="customProfilesTitle">{{ t('admin.ui.video.custom_profiles_title') }}</h3><p>{{ t('admin.ui.video.custom_profiles_description') }}</p></div></div>
           <div class="form-grid">
-            <div class="col-2"><label for="customProfileId">档位 ID</label><input id="customProfileId" placeholder="my_profile"></div>
-            <div class="col-3"><label for="customProfileLabel">显示名称</label><input id="customProfileLabel" placeholder="我的画质"></div>
-            <div class="col-2"><label for="customProfileBitrate">码率 Mbps</label><input id="customProfileBitrate" type="number" min="0.1" max="100" step="0.05" inputmode="decimal" value="0.9"></div>
-            <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">输出尺寸</label><select id="customProfileSizeSelect"><option value="854">854 × 480（480p）</option><option value="960" selected>960 × 540（540p）</option><option value="1280">1280 × 720（720p）</option><option value="1600">1600 × 900（900p）</option><option value="1920">1920 × 1080（1080p）</option><option value="custom">自定义尺寸…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><div class="custom-size-pair" role="group" aria-label="自定义输出尺寸"><label class="custom-size-field" for="customProfileWidth"><span>宽度 px</span><input id="customProfileWidth" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric" required></label><span class="custom-size-separator" aria-hidden="true">×</span><label class="custom-size-field" for="customProfileHeight"><span>高度 px</span><input id="customProfileHeight" type="number" min="480" max="1080" step="1" value="540" inputmode="numeric" required></label></div><output id="customProfileSizeReference" for="customProfileWidth customProfileHeight">将使用最长边 960px</output></div></div>
-            <div class="col-2"><label for="customProfileFps">帧率</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
-            <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">添加自定义档位</button></div>
+            <div class="col-2"><label for="customProfileId">{{ t('admin.ui.video.profile_id') }}</label><input id="customProfileId" placeholder="my_profile"></div>
+            <div class="col-3"><label for="customProfileLabel">{{ t('admin.ui.video.display_name') }}</label><input id="customProfileLabel" placeholder="{{ t('admin.ui.video.custom_profile_placeholder') }}"></div>
+            <div class="col-2"><label for="customProfileBitrate">{{ t('admin.ui.video.bitrate_mbps') }}</label><input id="customProfileBitrate" type="number" min="0.1" max="100" step="0.05" inputmode="decimal" value="0.9"></div>
+            <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">{{ t('admin.video.output_size') }}</label><select id="customProfileSizeSelect"><option value="854">854 × 480（480p）</option><option value="960" selected>960 × 540（540p）</option><option value="1280">1280 × 720（720p）</option><option value="1600">1600 × 900（900p）</option><option value="1920">1920 × 1080（1080p）</option><option value="custom">{{ t('admin.video.custom_output_size') }}…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><div class="custom-size-pair" role="group" aria-label="{{ t('admin.video.custom_output_size') }}"><label class="custom-size-field" for="customProfileWidth"><span>{{ t('admin.video.width_px') }}</span><input id="customProfileWidth" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric" required></label><span class="custom-size-separator" aria-hidden="true">×</span><label class="custom-size-field" for="customProfileHeight"><span>{{ t('admin.video.height_px') }}</span><input id="customProfileHeight" type="number" min="480" max="1080" step="1" value="540" inputmode="numeric" required></label></div><output id="customProfileSizeReference" for="customProfileWidth customProfileHeight">{{ t('admin.ui.video.long_edge_initial') }}</output></div></div>
+            <div class="col-2"><label for="customProfileFps">{{ t('admin.ui.video.fps') }}</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
+            <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">{{ t('admin.ui.video.add_custom_profile') }}</button></div>
           </div>
-          <div class="table-wrap spaced-top-12"><table class="responsive-table" data-table="custom-profiles"><thead><tr><th scope="col">ID</th><th scope="col">名称</th><th scope="col">码率 Mbps</th><th scope="col">输出尺寸</th><th scope="col">帧率</th><th scope="col">操作</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
+          <div class="table-wrap spaced-top-12"><table class="responsive-table" data-table="custom-profiles"><thead><tr><th scope="col">ID</th><th scope="col">{{ t('admin.ui.video.name') }}</th><th scope="col">{{ t('admin.ui.video.bitrate_mbps') }}</th><th scope="col">{{ t('admin.video.output_size') }}</th><th scope="col">{{ t('admin.ui.video.fps') }}</th><th scope="col">{{ t('admin.ui.video.action') }}</th></tr></thead><tbody id="customProfileRows"></tbody></table></div>
         </section>
       </section>
 
       <section id="users" class="panel" aria-labelledby="adminTabUsers" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Access</p><h2>用户与权限</h2><p>集中管理用户角色和设备访问权限。</p></div>
-          <button id="openUserDrawer" class="btn primary" type="button">新建用户</button>
+          <div><p class="eyebrow">Access</p><h2>{{ t('admin.ui.access.title') }}</h2><p>{{ t('admin.ui.access.description') }}</p></div>
+          <button id="openUserDrawer" class="btn primary" type="button">{{ t('admin.ui.access.create_user') }}</button>
         </div>
-        <div class="access-view-tabs" role="tablist" aria-label="用户与权限视图">
-          <button id="accessAccountsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="accessAccountsView">用户账户 <small>账户与角色</small></button>
-          <button id="accessPermissionsTab" type="button" role="tab" aria-selected="false" aria-controls="accessPermissionsView" tabindex="-1">设备权限 <small id="accessPermissionDraftSummary">按用户配置</small></button>
+        <div class="access-view-tabs" role="tablist" aria-label="{{ t('admin.ui.access.views') }}">
+          <button id="accessAccountsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="accessAccountsView">{{ t('admin.ui.access.accounts') }} <small>{{ t('admin.ui.access.accounts_hint') }}</small></button>
+          <button id="accessPermissionsTab" type="button" role="tab" aria-selected="false" aria-controls="accessPermissionsView" tabindex="-1">{{ t('admin.ui.access.device_permissions') }} <small id="accessPermissionDraftSummary">{{ t('admin.ui.access.by_user') }}</small></button>
         </div>
 
         <section id="accessAccountsView" class="access-view" role="tabpanel" aria-labelledby="accessAccountsTab">
-          <div class="access-view-heading"><div><h3>用户账户</h3><p>每页最多显示 20 位用户，可按用户名、角色和有效期快速定位。</p></div><span id="userResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
+          <div class="access-view-heading"><div><h3>{{ t('admin.ui.access.accounts') }}</h3><p>{{ t('admin.ui.access.accounts_description') }}</p></div><span id="userResultCount" class="chip" role="status" aria-live="polite">{{ t('admin.ui.access.zero_users') }}</span></div>
           <div class="access-toolbar">
-            <div><label for="userSearch">搜索用户名</label><input id="userSearch" type="search" placeholder="输入用户名" autocomplete="off"></div>
-            <div><label for="userRoleFilter">角色筛选</label><select id="userRoleFilter"><option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option></select></div>
-            <div><label for="userExpiryFilter">有效期筛选</label><select id="userExpiryFilter"><option value="all">全部状态</option><option value="permanent">永久有效</option><option value="active">有效</option><option value="expiring">即将到期</option><option value="expired">已到期</option></select></div>
+            <div><label for="userSearch">{{ t('admin.ui.access.search_username') }}</label><input id="userSearch" type="search" placeholder="{{ t('admin.ui.access.username_placeholder') }}" autocomplete="off"></div>
+            <div><label for="userRoleFilter">{{ t('admin.ui.access.role_filter') }}</label><select id="userRoleFilter"><option value="all">{{ t('admin.ui.access.all_roles') }}</option><option value="admin">{{ t('common.roles.admin') }}</option><option value="user">{{ t('common.roles.user') }}</option></select></div>
+            <div><label for="userExpiryFilter">{{ t('admin.ui.access.expiry_filter') }}</label><select id="userExpiryFilter"><option value="all">{{ t('admin.ui.access.all_statuses') }}</option><option value="permanent">{{ t('admin.time.permanent') }}</option><option value="active">{{ t('admin.time.active') }}</option><option value="expiring">{{ t('admin.time.expiring') }}</option><option value="expired">{{ t('admin.time.expired') }}</option></select></div>
           </div>
-          <div class="table-wrap access-account-table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">有效期</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="userRows"></tbody></table></div>
-          <nav class="access-pagination" aria-label="用户账户分页">
-            <button id="userPagePrevious" class="btn" type="button">上一页</button>
-            <span id="userPageStatus" role="status" aria-live="polite">第 1 / 1 页</span>
-            <button id="userPageNext" class="btn" type="button">下一页</button>
+          <div class="table-wrap access-account-table-wrap"><table class="responsive-table" data-table="users"><thead><tr><th scope="col">{{ t('admin.ui.access.username') }}</th><th scope="col">{{ t('admin.ui.access.role') }}</th><th scope="col">{{ t('admin.ui.access.expiry') }}</th><th scope="col">{{ t('admin.ui.access.created_at') }}</th><th scope="col">{{ t('admin.ui.access.action') }}</th></tr></thead><tbody id="userRows"></tbody></table></div>
+          <nav class="access-pagination" aria-label="{{ t('admin.ui.access.pagination') }}">
+            <button id="userPagePrevious" class="btn" type="button">{{ t('admin.ui.access.previous_page') }}</button>
+            <span id="userPageStatus" role="status" aria-live="polite">{{ t('admin.ui.access.first_page') }}</span>
+            <button id="userPageNext" class="btn" type="button">{{ t('admin.ui.access.next_page') }}</button>
           </nav>
         </section>
 
         <section id="accessPermissionsView" class="access-view" role="tabpanel" aria-labelledby="accessPermissionsTab" hidden>
           <div class="permission-workspace">
             <aside class="permission-user-pane" aria-labelledby="permissionUserListTitle">
-              <div class="permission-pane-heading"><h3 id="permissionUserListTitle">选择用户</h3><span id="permissionUserResultCount" class="chip" role="status" aria-live="polite">0 位</span></div>
+              <div class="permission-pane-heading"><h3 id="permissionUserListTitle">{{ t('admin.ui.access.select_user') }}</h3><span id="permissionUserResultCount" class="chip" role="status" aria-live="polite">{{ t('admin.ui.access.zero_users') }}</span></div>
               <div class="permission-user-pane__desktop">
-                <label for="permissionUserSearch">搜索用户名</label>
-                <input id="permissionUserSearch" type="search" placeholder="输入用户名" autocomplete="off">
-                <div id="permissionUserList" class="permission-user-list" role="listbox" aria-label="设备权限用户" aria-orientation="vertical"></div>
+                <label for="permissionUserSearch">{{ t('admin.ui.access.search_username') }}</label>
+                <input id="permissionUserSearch" type="search" placeholder="{{ t('admin.ui.access.username_placeholder') }}" autocomplete="off">
+                <div id="permissionUserList" class="permission-user-list" role="listbox" aria-label="{{ t('admin.ui.access.permission_users') }}" aria-orientation="vertical"></div>
               </div>
               <div class="permission-user-pane__mobile">
-                <label for="permUser">用户</label>
+                <label for="permUser">{{ t('admin.ui.access.user') }}</label>
                 <select id="permUser" aria-controls="permissionRows"></select>
               </div>
             </aside>
 
             <section class="permission-detail" aria-labelledby="permissionSelectedUser">
               <div class="permission-detail-heading">
-                <div><p class="eyebrow">设备权限</p><h3 id="permissionSelectedUser">请选择用户</h3><p id="permissionSelectedUserMeta">选择用户后，仅显示该用户的设备访问权限。</p></div>
-                <div class="permission-detail-summary"><span id="permissionUserRole" class="chip">未选择</span><span id="permissionDirtyCount" class="chip">0 项待保存</span></div>
+                <div><p class="eyebrow">{{ t('admin.ui.access.device_permissions') }}</p><h3 id="permissionSelectedUser">{{ t('admin.ui.access.select_user_prompt') }}</h3><p id="permissionSelectedUserMeta">{{ t('admin.ui.access.select_user_description') }}</p></div>
+                <div class="permission-detail-summary"><span id="permissionUserRole" class="chip">{{ t('admin.ui.access.not_selected') }}</span><span id="permissionDirtyCount" class="chip">{{ t('admin.ui.access.no_pending') }}</span></div>
               </div>
-              <div class="permission-load-state" data-state="idle"><p id="permissionLoadState" role="status" aria-live="polite">等待加载设备权限。</p><button id="permissionRetry" class="btn" type="button" hidden>重新加载</button></div>
-              <p id="permissionAdminNotice" class="permission-admin-notice" role="status" hidden>管理员始终拥有全部设备的查看和控制权限，无需逐设备配置。</p>
+              <div class="permission-load-state" data-state="idle"><p id="permissionLoadState" role="status" aria-live="polite">{{ t('admin.ui.access.waiting_permissions') }}</p><button id="permissionRetry" class="btn" type="button" hidden>{{ t('admin.ui.access.reload') }}</button></div>
+              <p id="permissionAdminNotice" class="permission-admin-notice" role="status" hidden>{{ t('admin.ui.access.admin_notice') }}</p>
               <div class="permission-toolbar">
-                <div><label for="permissionDeviceSearch">搜索设备</label><input id="permissionDeviceSearch" type="search" placeholder="设备名称或 ID" autocomplete="off"></div>
-                <div><label for="permissionDeviceFilter">权限筛选</label><select id="permissionDeviceFilter"><option value="all">全部设备</option><option value="view">可查看</option><option value="control">可控制</option><option value="none">无权限</option></select></div>
-                <span id="permissionDeviceResultCount" class="chip" role="status" aria-live="polite">0 台</span>
+                <div><label for="permissionDeviceSearch">{{ t('admin.ui.access.search_device') }}</label><input id="permissionDeviceSearch" type="search" placeholder="{{ t('admin.ui.access.device_placeholder') }}" autocomplete="off"></div>
+                <div><label for="permissionDeviceFilter">{{ t('admin.ui.access.permission_filter') }}</label><select id="permissionDeviceFilter"><option value="all">{{ t('admin.ui.access.all_devices') }}</option><option value="view">{{ t('admin.ui.access.can_view') }}</option><option value="control">{{ t('admin.ui.access.can_control') }}</option><option value="none">{{ t('admin.ui.access.no_permission') }}</option></select></div>
+                <span id="permissionDeviceResultCount" class="chip" role="status" aria-live="polite">{{ t('admin.ui.access.zero_devices') }}</span>
               </div>
-              <div class="table-wrap permission-device-table-wrap"><table class="responsive-table" data-table="permissions"><thead><tr><th scope="col">设备</th><th scope="col">查看权限</th><th scope="col">控制权限</th></tr></thead><tbody id="permissionRows"></tbody></table></div>
+              <div class="table-wrap permission-device-table-wrap"><table class="responsive-table" data-table="permissions"><thead><tr><th scope="col">{{ t('admin.ui.access.device') }}</th><th scope="col">{{ t('admin.ui.access.view_permission') }}</th><th scope="col">{{ t('admin.ui.access.control_permission') }}</th></tr></thead><tbody id="permissionRows"></tbody></table></div>
               <div class="permission-save-bar">
-                <p id="permissionSaveStatus" role="status" aria-live="polite">修改设备权限后统一保存。</p>
-                <button id="savePermission" class="btn primary" type="button" disabled>保存权限</button>
+                <p id="permissionSaveStatus" role="status" aria-live="polite">{{ t('admin.ui.access.save_hint') }}</p>
+                <button id="savePermission" class="btn primary" type="button" disabled>{{ t('admin.ui.access.save_permissions') }}</button>
               </div>
             </section>
           </div>
@@ -217,69 +217,69 @@
 
       <section id="alas" class="panel" aria-labelledby="adminTabAlas" tabindex="-1">
         <div class="panel-heading alas-page-heading">
-          <div><p class="eyebrow">Automation</p><h2>ALAS 管理</h2><p>每个 Runtime 配置独占归属一个用户；用户可以拥有并控制一个或多个配置。</p></div>
-          <div class="alas-heading-actions" aria-label="ALAS 页面操作">
-            <button id="reloadAlas" class="btn" type="button">刷新</button>
-            <a id="alasOpenCurrent" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开完整 ALAS 页面</a>
-            <button id="openAlasConnection" class="btn" type="button">连接设置</button>
+          <div><p class="eyebrow">Automation</p><h2>{{ t('admin.ui.alas.title') }}</h2><p>{{ t('admin.ui.alas.description') }}</p></div>
+          <div class="alas-heading-actions" aria-label="{{ t('admin.ui.alas.page_actions') }}">
+            <button id="reloadAlas" class="btn" type="button">{{ t('common.actions.refresh') }}</button>
+            <a id="alasOpenCurrent" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">{{ t('admin.ui.alas.open_full_page') }}</a>
+            <button id="openAlasConnection" class="btn" type="button">{{ t('admin.ui.alas.connection_settings') }}</button>
           </div>
         </div>
 
-        <section class="alas-summary" aria-label="ALAS 授权摘要">
-          <div class="alas-summary__item"><span>Runtime</span><strong id="alasRuntimeSummary">加载中</strong><small id="alasRuntimeMeta">正在读取连接状态</small></div>
-          <div class="alas-summary__item"><span>配置总数</span><strong id="alasConfigCount">0</strong><small>Runtime 配置与归属记录</small></div>
-          <div class="alas-summary__item"><span>已分配用户</span><strong id="alasUserCount">0</strong><small>至少拥有一个配置</small></div>
-          <div class="alas-summary__item"><span>已归属配置</span><strong id="alasAssignmentCount">0</strong><small>独占归属到用户的配置</small></div>
+        <section class="alas-summary" aria-label="{{ t('admin.ui.alas.authorization_summary') }}">
+          <div class="alas-summary__item"><span>Runtime</span><strong id="alasRuntimeSummary">{{ t('common.feedback.loading') }}</strong><small id="alasRuntimeMeta">{{ t('admin.ui.alas.reading_connection') }}</small></div>
+          <div class="alas-summary__item"><span>{{ t('admin.ui.alas.config_count') }}</span><strong id="alasConfigCount">0</strong><small>{{ t('admin.ui.alas.config_ownership_records') }}</small></div>
+          <div class="alas-summary__item"><span>{{ t('admin.ui.alas.assigned_users') }}</span><strong id="alasUserCount">0</strong><small>{{ t('admin.ui.alas.assigned_users_hint') }}</small></div>
+          <div class="alas-summary__item"><span>{{ t('admin.ui.alas.owned_configs') }}</span><strong id="alasAssignmentCount">0</strong><small>{{ t('admin.ui.alas.owned_configs_hint') }}</small></div>
         </section>
 
         <section class="alas-scope-guide" aria-labelledby="alasScopeGuideTitle">
           <div class="alas-scope-guide__heading">
-            <p class="eyebrow">操作范围</p>
-            <h3 id="alasScopeGuideTitle">先分配配置归属，再操作 Runtime 配置</h3>
+            <p class="eyebrow">{{ t('admin.ui.alas.operation_scope') }}</p>
+            <h3 id="alasScopeGuideTitle">{{ t('admin.ui.alas.scope_guide_title') }}</h3>
           </div>
           <div class="alas-scope-guide__grid">
             <article class="alas-scope-card">
               <span class="alas-scope-card__index" aria-hidden="true">A</span>
               <div>
-                <span class="alas-scope-card__type">访问范围</span>
-                <h4>用户归属：管理谁拥有</h4>
-                <p>一个用户可以拥有多个配置，但每个配置只能独占归属一个用户，并设置运行、编辑与默认入口权限。</p>
-                <small>调整归属不会复制或修改 Runtime 中的配置内容。</small>
+                <span class="alas-scope-card__type">{{ t('admin.ui.alas.access_scope') }}</span>
+                <h4>{{ t('admin.ui.alas.ownership_title') }}</h4>
+                <p>{{ t('admin.ui.alas.ownership_description') }}</p>
+                <small>{{ t('admin.ui.alas.ownership_note') }}</small>
               </div>
             </article>
             <article class="alas-scope-card alas-scope-card--runtime">
               <span class="alas-scope-card__index" aria-hidden="true">B</span>
               <div>
-                <span class="alas-scope-card__type">运行范围</span>
-                <h4>配置库：管理运行实例</h4>
-                <p>状态、启停和 JSON 编辑都会发送给 Runtime 中当前选中的同名配置，并显示它的唯一归属用户。</p>
-                <small>未分配配置仍可维护；已有归属时需先解除，才能分配给另一用户。</small>
+                <span class="alas-scope-card__type">{{ t('admin.ui.alas.runtime_scope') }}</span>
+                <h4>{{ t('admin.ui.alas.library_title') }}</h4>
+                <p>{{ t('admin.ui.alas.library_description') }}</p>
+                <small>{{ t('admin.ui.alas.library_note') }}</small>
               </div>
             </article>
           </div>
         </section>
 
-        <div class="alas-view-tabs" role="tablist" aria-label="ALAS 管理视图">
-          <button id="alasUsersTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="alasUsersView">用户与归属 <small>谁拥有</small></button>
-          <button id="alasConfigsTab" type="button" role="tab" aria-selected="false" aria-controls="alasConfigsView" tabindex="-1">配置库 <small>操作哪项</small></button>
+        <div class="alas-view-tabs" role="tablist" aria-label="{{ t('admin.ui.alas.views') }}">
+          <button id="alasUsersTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="alasUsersView">{{ t('admin.ui.alas.users_and_ownership') }} <small>{{ t('admin.ui.alas.who_owns') }}</small></button>
+          <button id="alasConfigsTab" type="button" role="tab" aria-selected="false" aria-controls="alasConfigsView" tabindex="-1">{{ t('admin.ui.alas.config_library') }} <small>{{ t('admin.ui.alas.which_config') }}</small></button>
         </div>
 
         <section id="alasUsersView" class="alas-view" role="tabpanel" aria-labelledby="alasUsersTab">
-          <p class="alas-view-explainer"><strong>这里管理配置的独占归属与权限。</strong>每个用户可拥有一项或多项配置；已有归属的配置不能直接分配给另一用户。</p>
+          <p class="alas-view-explainer"><strong>{{ t('admin.ui.alas.ownership_explainer_title') }}</strong>{{ t('admin.ui.alas.ownership_explainer') }}</p>
           <div class="alas-toolbar">
-            <div class="alas-search-field"><label for="alasUserSearch">搜索用户</label><input id="alasUserSearch" type="search" placeholder="用户名" autocomplete="off"></div>
-            <div><label for="alasUserFilter">分配状态</label><select id="alasUserFilter"><option value="all">全部用户</option><option value="assigned">已分配</option><option value="unassigned">未分配</option></select></div>
-            <button id="openAlasAssignment" class="btn primary" type="button">分配配置</button>
+            <div class="alas-search-field"><label for="alasUserSearch">{{ t('admin.ui.alas.search_users') }}</label><input id="alasUserSearch" type="search" placeholder="{{ t('admin.ui.access.username') }}" autocomplete="off"></div>
+            <div><label for="alasUserFilter">{{ t('admin.ui.alas.assignment_status') }}</label><select id="alasUserFilter"><option value="all">{{ t('admin.ui.alas.all_users') }}</option><option value="assigned">{{ t('admin.ui.alas.assigned') }}</option><option value="unassigned">{{ t('admin.ui.alas.unassigned') }}</option></select></div>
+            <button id="openAlasAssignment" class="btn primary" type="button">{{ t('admin.ui.alas.assign_config') }}</button>
           </div>
           <div class="alas-master-detail">
             <div class="alas-master-pane" aria-labelledby="alasUserListTitle">
-              <div class="alas-pane-heading"><h3 id="alasUserListTitle">用户</h3><span id="alasUserResultCount" class="chip">0 位</span></div>
-              <div id="alasUserList" class="alas-choice-list" role="listbox" aria-label="选择用户" aria-orientation="vertical"></div>
+              <div class="alas-pane-heading"><h3 id="alasUserListTitle">{{ t('admin.ui.access.user') }}</h3><span id="alasUserResultCount" class="chip">{{ t('admin.ui.access.zero_users') }}</span></div>
+              <div id="alasUserList" class="alas-choice-list" role="listbox" aria-label="{{ t('admin.ui.access.select_user') }}" aria-orientation="vertical"></div>
             </div>
             <section class="alas-detail-pane" aria-labelledby="alasSelectedUser">
               <div class="alas-detail-heading">
-                <div><p class="eyebrow">归属用户</p><h3 id="alasSelectedUser">请选择用户</h3><p id="alasSelectedUserMeta">选择左侧用户后，管理他拥有的配置与操作权限。</p></div>
-                <button id="openAlasAssignmentDetail" class="btn primary" type="button">分配配置</button>
+                <div><p class="eyebrow">{{ t('admin.ui.alas.owner_user') }}</p><h3 id="alasSelectedUser">{{ t('admin.ui.access.select_user_prompt') }}</h3><p id="alasSelectedUserMeta">{{ t('admin.ui.alas.selected_user_description') }}</p></div>
+                <button id="openAlasAssignmentDetail" class="btn primary" type="button">{{ t('admin.ui.alas.assign_config') }}</button>
               </div>
               <div id="alasBindRows" class="alas-assignment-list" aria-live="polite"></div>
             </section>
@@ -287,28 +287,28 @@
         </section>
 
         <section id="alasConfigsView" class="alas-view" role="tabpanel" aria-labelledby="alasConfigsTab" hidden>
-          <p class="alas-view-explainer alas-view-explainer--runtime"><strong>这里操作 Runtime 配置。</strong>选择后读取状态并显示唯一归属用户；未分配配置也可由管理员维护。</p>
+          <p class="alas-view-explainer alas-view-explainer--runtime"><strong>{{ t('admin.ui.alas.runtime_explainer_title') }}</strong>{{ t('admin.ui.alas.runtime_explainer') }}</p>
           <div class="alas-toolbar alas-toolbar--configs">
-            <div class="alas-search-field"><label for="alasConfigSearch">搜索配置</label><input id="alasConfigSearch" type="search" placeholder="配置名称" autocomplete="off"></div>
-            <p id="alasCatalogState" class="load-status" role="status" aria-live="polite">打开配置库后显示 Runtime 配置。</p>
+            <div class="alas-search-field"><label for="alasConfigSearch">{{ t('admin.ui.alas.search_configs') }}</label><input id="alasConfigSearch" type="search" placeholder="{{ t('admin.ui.alas.config_name') }}" autocomplete="off"></div>
+            <p id="alasCatalogState" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.alas.open_library_hint') }}</p>
           </div>
           <div class="alas-master-detail alas-master-detail--configs">
             <div class="alas-master-pane" aria-labelledby="alasConfigLibraryTitle">
-              <div class="alas-pane-heading"><h3 id="alasConfigLibraryTitle">Runtime 配置</h3><span id="alasConfigResultCount" class="chip">0 个</span></div>
-              <div id="alasConfigLibrary" class="alas-choice-list" role="listbox" aria-label="选择 ALAS 配置" aria-orientation="vertical"></div>
+              <div class="alas-pane-heading"><h3 id="alasConfigLibraryTitle">{{ t('admin.ui.alas.runtime_configs') }}</h3><span id="alasConfigResultCount" class="chip">{{ t('admin.ui.alas.zero_configs') }}</span></div>
+              <div id="alasConfigLibrary" class="alas-choice-list" role="listbox" aria-label="{{ t('admin.ui.alas.select_config') }}" aria-orientation="vertical"></div>
             </div>
             <section class="alas-detail-pane" aria-labelledby="alasCurrentConfigName">
               <div class="alas-detail-heading">
-                <div><p class="eyebrow">当前操作目标</p><h3 id="alasCurrentConfigName">请选择配置</h3><p id="alasCurrentConfigMeta">从左侧选择要检查、启停或编辑的 Runtime 配置。</p></div>
+                <div><p class="eyebrow">{{ t('admin.ui.alas.current_target') }}</p><h3 id="alasCurrentConfigName">{{ t('admin.ui.alas.select_config_prompt') }}</h3><p id="alasCurrentConfigMeta">{{ t('admin.ui.alas.select_config_description') }}</p></div>
                 <div id="alasStatus" class="chips" aria-live="polite"></div>
               </div>
-              <p id="alasImpactNote" class="alas-impact-note">状态、启停和编辑只针对当前配置；归属区会显示唯一归属用户或未分配状态。</p>
+              <p id="alasImpactNote" class="alas-impact-note">{{ t('admin.ui.alas.impact_note') }}</p>
               <div class="alas-config-actions">
-                <button id="toggleAlas" class="btn warn" type="button">启动 ALAS</button>
-                <button id="openConfigEditor" class="btn" type="button">编辑配置 JSON</button>
+                <button id="toggleAlas" class="btn warn" type="button">{{ t('admin.ui.alas.start') }}</button>
+                <button id="openConfigEditor" class="btn" type="button">{{ t('admin.ui.alas.edit_json') }}</button>
               </div>
               <div class="alas-config-users">
-                <div class="alas-pane-heading"><h4>配置归属</h4><span id="alasCurrentUserCount" class="chip">未分配</span></div>
+                <div class="alas-pane-heading"><h4>{{ t('admin.ui.alas.config_ownership') }}</h4><span id="alasCurrentUserCount" class="chip">{{ t('admin.ui.alas.unassigned') }}</span></div>
                 <div id="alasCurrentUsers" class="alas-user-pills" aria-live="polite"></div>
               </div>
             </section>
@@ -316,30 +316,30 @@
           <select id="alasOperateConfig" hidden aria-hidden="true" tabindex="-1"></select>
         </section>
         <details class="help-details">
-          <summary>ALAS 使用帮助</summary>
+          <summary>{{ t('admin.ui.alas.help_title') }}</summary>
           <div class="help-details__content">
             <ol class="guide-list">
-              <li>必须先安装并启动 <strong>Alas-Gyre 的 Overlay Runtime</strong>。只有 Overlay 正常运行后，ScrcpyGate 才能使用 ALAS 的启动、停止、重启功能。</li>
-              <li>ScrcpyGate 只是代理控制入口，不会直接运行 ALAS，也不会替代 Overlay。普通用户前台只调用自己绑定配置的启动/停止/重启。</li>
-              <li>在“连接设置”里填写 Overlay 的 <code>Runtime URL</code> 和访问 <code>Token</code>，然后在“用户授权”中为每个用户分配一个或多个配置。</li>
-              <li>如果状态显示 token 未配置、连接失败或 ALAS control is disabled，先检查 Overlay 是否已启动、URL 是否能从服务器访问、Token 是否一致。</li>
-              <li>用户只能看到已授权给自己的配置；配置内容、其他用户关系与 Runtime Token 不会暴露到普通用户前台。</li>
+              <li>{{ t('admin.ui.alas.help_runtime_prefix') }} <strong>Alas-Gyre Overlay Runtime</strong>{{ t('admin.ui.alas.help_runtime_suffix') }}</li>
+              <li>{{ t('admin.ui.alas.help_proxy') }}</li>
+              <li>{{ t('admin.ui.alas.help_connection_prefix') }} <code>Runtime URL</code> {{ t('admin.ui.alas.help_connection_and') }} <code>Token</code>{{ t('admin.ui.alas.help_connection_suffix') }}</li>
+              <li>{{ t('admin.ui.alas.help_troubleshooting') }}</li>
+              <li>{{ t('admin.ui.alas.help_isolation') }}</li>
             </ol>
-            <div class="guide-links"><a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">ALAS 官方仓库</a><a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">Alas-Gyre Overlay 仓库</a></div>
-            <p class="muted">默认 Runtime 地址通常类似 <code>http://127.0.0.1:22267</code>。如果 ScrcpyGate 在 Docker 或另一台服务器上，需填写容器/服务器可访问的 Overlay 地址。</p>
+            <div class="guide-links"><a class="btn" href="https://github.com/LmeSzinc/AzurLaneAutoScript" target="_blank" rel="noopener noreferrer">{{ t('admin.ui.alas.official_repository') }}</a><a class="btn" href="https://github.com/Ange-Katrina/Alas-Gyre" target="_blank" rel="noopener noreferrer">{{ t('admin.ui.alas.overlay_repository') }}</a></div>
+            <p class="muted">{{ t('admin.ui.alas.default_runtime_prefix') }} <code>http://127.0.0.1:22267</code>{{ t('admin.ui.alas.default_runtime_suffix') }}</p>
           </div>
         </details>
       </section>
 
       <section id="logs" class="panel" aria-labelledby="adminTabLogs" tabindex="-1">
-        <div class="panel-heading"><div><p class="eyebrow">Audit</p><h2>日志与审计</h2><p>运行日志和安全审计独立加载，单项失败不会阻塞另一项。</p></div></div>
+        <div class="panel-heading"><div><p class="eyebrow">Audit</p><h2>{{ t('admin.ui.logs.title') }}</h2><p>{{ t('admin.ui.logs.description') }}</p></div></div>
         <section class="workspace-section log-section" aria-labelledby="runtimeLogsTitle">
-          <div class="section-heading"><div><h3 id="runtimeLogsTitle">运行日志</h3><p id="runtimeLogsStatus" class="load-status" role="status" aria-live="polite">打开此区域后加载</p></div><button id="reloadRuntimeLogs" class="btn" type="button">刷新运行日志</button></div>
-          <pre id="runtimeLogs" class="runtime-logs" tabindex="0" aria-label="ScrcpyGate 运行日志"></pre>
+          <div class="section-heading"><div><h3 id="runtimeLogsTitle">{{ t('admin.logs.runtime') }}</h3><p id="runtimeLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div><button id="reloadRuntimeLogs" class="btn" type="button">{{ t('admin.ui.logs.refresh_runtime') }}</button></div>
+          <pre id="runtimeLogs" class="runtime-logs" tabindex="0" aria-label="{{ t('admin.ui.logs.runtime_label') }}"></pre>
         </section>
         <section class="workspace-section log-section" aria-labelledby="auditLogsTitle">
-          <div class="section-heading"><div><h3 id="auditLogsTitle">最近审计日志</h3><p id="auditLogsStatus" class="load-status" role="status" aria-live="polite">打开此区域后加载</p></div><button id="reloadAuditLogs" class="btn" type="button">刷新审计日志</button></div>
-          <div class="table-wrap audit-log-table"><table class="responsive-table" data-table="audit-logs"><thead><tr><th scope="col">时间</th><th scope="col">用户</th><th scope="col">动作</th><th scope="col">详情</th></tr></thead><tbody id="logRows"></tbody></table></div>
+          <div class="section-heading"><div><h3 id="auditLogsTitle">{{ t('admin.ui.logs.recent_audit') }}</h3><p id="auditLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div><button id="reloadAuditLogs" class="btn" type="button">{{ t('admin.ui.logs.refresh_audit') }}</button></div>
+          <div class="table-wrap audit-log-table"><table class="responsive-table" data-table="audit-logs"><thead><tr><th scope="col">{{ t('admin.ui.logs.time') }}</th><th scope="col">{{ t('admin.ui.logs.user') }}</th><th scope="col">{{ t('admin.ui.logs.action') }}</th><th scope="col">{{ t('admin.ui.logs.detail') }}</th></tr></thead><tbody id="logRows"></tbody></table></div>
         </section>
       </section>
     </main>
@@ -348,97 +348,97 @@
 
 <div id="deviceDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Device</p><h2 id="deviceDrawerTitle">保存设备</h2><p id="deviceDrawerContext" class="drawer-context">新建设备</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="关闭设备编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+  <div class="drawer-heading"><div><p class="eyebrow">Device</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <input id="deviceId" type="hidden">
-    <div class="col-12"><label for="deviceName">名称（可选）</label><input id="deviceName" placeholder="例如：模拟器 1" autocomplete="off"></div>
-    <div class="col-8"><label for="deviceAddress">ADB 地址</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
-    <div class="col-4"><label for="deviceEnabled">状态</label><select id="deviceEnabled"><option value="true">启用</option><option value="false">禁用</option></select></div>
+    <div class="col-12"><label for="deviceName">{{ t('admin.ui.drawers.device.name_optional') }}</label><input id="deviceName" placeholder="{{ t('admin.ui.drawers.device.name_placeholder') }}" autocomplete="off"></div>
+    <div class="col-8"><label for="deviceAddress">{{ t('admin.ui.drawers.device.adb_address') }}</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
+    <div class="col-4"><label for="deviceEnabled">{{ t('admin.ui.drawers.device.status') }}</label><select id="deviceEnabled"><option value="true">{{ t('admin.ui.drawers.device.enabled') }}</option><option value="false">{{ t('admin.ui.drawers.device.disabled') }}</option></select></div>
   </div>
-  <p class="muted drawer-note">设备标识由系统自动生成。ADB 地址填写实际连接地址；修改地址不会影响已分配的用户权限。</p>
-  <div class="drawer-actions"><button id="clearDeviceForm" class="btn" type="button">清空</button><button id="cancelDeviceForm" class="btn" type="button">取消</button><button id="saveDevice" class="btn primary" type="button">保存设备</button></div>
+  <p class="muted drawer-note">{{ t('admin.ui.drawers.device.note') }}</p>
+  <div class="drawer-actions"><button id="clearDeviceForm" class="btn" type="button">{{ t('admin.ui.drawers.clear') }}</button><button id="cancelDeviceForm" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveDevice" class="btn primary" type="button">{{ t('admin.ui.drawers.device.save') }}</button></div>
 </aside>
 
 <div id="userDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="userDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="userDrawerTitle" aria-describedby="userDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">User</p><h2 id="userDrawerTitle">保存用户</h2><p id="userDrawerContext" class="drawer-context">新建用户</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="关闭用户编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+  <div class="drawer-heading"><div><p class="eyebrow">User</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
-    <div class="col-12"><label for="newUsername">用户名</label><input id="newUsername" autocomplete="username"></div>
-    <div class="col-12"><label for="newPassword">密码</label><input id="newPassword" type="password" placeholder="至少12位" autocomplete="new-password"></div>
-    <div class="col-12"><label for="newRole">角色</label><select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div>
-    <div class="col-12"><label for="userExpiryMode">账户有效期</label><select id="userExpiryMode"><option value="permanent">永久有效</option><option value="scheduled">指定到期时间</option></select></div>
+    <div class="col-12"><label for="newUsername">{{ t('admin.ui.access.username') }}</label><input id="newUsername" autocomplete="username"></div>
+    <div class="col-12"><label for="newPassword">{{ t('admin.ui.drawers.user.password') }}</label><input id="newPassword" type="password" placeholder="{{ t('admin.ui.drawers.user.password_placeholder') }}" autocomplete="new-password"></div>
+    <div class="col-12"><label for="newRole">{{ t('admin.ui.access.role') }}</label><select id="newRole"><option value="user">{{ t('common.roles.user') }}</option><option value="admin">{{ t('common.roles.admin') }}</option></select></div>
+    <div class="col-12"><label for="userExpiryMode">{{ t('admin.ui.drawers.user.account_expiry') }}</label><select id="userExpiryMode"><option value="permanent">{{ t('admin.time.permanent') }}</option><option value="scheduled">{{ t('admin.ui.drawers.user.scheduled_expiry') }}</option></select></div>
     <div id="userExpiresAtField" class="col-12 user-expiry-field" hidden>
-      <label for="userExpiresAt">到期时间</label>
+      <label for="userExpiresAt">{{ t('admin.ui.drawers.user.expires_at') }}</label>
       <input id="userExpiresAt" type="datetime-local" step="60">
-      <div id="userExpiryShortcuts" class="user-expiry-shortcuts" aria-label="快捷延长账户有效期">
-        <button class="btn" type="button" data-days="1">+1 天</button>
-        <button class="btn" type="button" data-days="7">+7 天</button>
-        <button class="btn" type="button" data-days="30">+30 天</button>
-        <button class="btn" type="button" data-days="90">+90 天</button>
+      <div id="userExpiryShortcuts" class="user-expiry-shortcuts" aria-label="{{ t('admin.ui.drawers.user.extend_shortcuts') }}">
+        <button class="btn" type="button" data-days="1">{{ t('admin.ui.drawers.user.add_one_day') }}</button>
+        <button class="btn" type="button" data-days="7">{{ t('admin.ui.drawers.user.add_seven_days') }}</button>
+        <button class="btn" type="button" data-days="30">{{ t('admin.ui.drawers.user.add_thirty_days') }}</button>
+        <button class="btn" type="button" data-days="90">{{ t('admin.ui.drawers.user.add_ninety_days') }}</button>
       </div>
     </div>
   </div>
-  <p id="userExpiryPreview" class="user-expiry-preview" role="status" aria-live="polite">账户永久有效</p>
-  <p class="muted drawer-note">编辑用户时留空密码即可保留原密码。</p>
-  <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">取消</button><button id="saveUser" class="btn primary" type="button">保存用户</button></div>
+  <p id="userExpiryPreview" class="user-expiry-preview" role="status" aria-live="polite">{{ t('admin.ui.drawers.user.permanent_preview') }}</p>
+  <p class="muted drawer-note">{{ t('admin.ui.drawers.user.note') }}</p>
+  <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveUser" class="btn primary" type="button">{{ t('admin.ui.drawers.user.save') }}</button></div>
 </aside>
 
 <div id="alasConnectionDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConnectionDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasConnectionDrawerTitle" aria-describedby="alasConnectionDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Runtime</p><h2 id="alasConnectionDrawerTitle">连接设置</h2><p id="alasConnectionDrawerContext" class="drawer-context">连接 Alas-Gyre Overlay Runtime</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="关闭 ALAS 连接设置"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+  <div class="drawer-heading"><div><p class="eyebrow">Runtime</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
-    <div class="col-12"><label for="alasToken">访问 Token</label><input id="alasToken" type="password" placeholder="留空则保留现有 Token" autocomplete="new-password"></div>
+    <div class="col-12"><label for="alasToken">{{ t('admin.ui.drawers.alas_connection.token') }}</label><input id="alasToken" type="password" placeholder="{{ t('admin.ui.drawers.alas_connection.token_placeholder') }}" autocomplete="new-password"></div>
   </div>
-  <p class="muted drawer-note">Runtime URL 可填写 IP、域名或完整 URL；未填写端口时会自动尝试 22267。Token 只保存在服务端，不会显示给普通用户。</p>
-  <div class="drawer-actions"><button id="cancelAlasConnection" class="btn" type="button">取消</button><button id="saveAlas" class="btn primary" type="button">保存 ALAS 设置</button></div>
+  <p class="muted drawer-note">{{ t('admin.ui.drawers.alas_connection.note') }}</p>
+  <div class="drawer-actions"><button id="cancelAlasConnection" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveAlas" class="btn primary" type="button">{{ t('admin.ui.drawers.alas_connection.save') }}</button></div>
 </aside>
 
 <div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Config Ownership</p><h2 id="alasAssignmentDrawerTitle">分配配置归属</h2><p id="alasAssignmentDrawerContext" class="drawer-context">为用户分配一个 Runtime 配置</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="关闭配置归属"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
-  <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="配置归属摘要">
+  <div class="drawer-heading"><div><p class="eyebrow">Config Ownership</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+  <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t('admin.ui.drawers.assignment.summary') }}">
     <div class="alas-assignment-summary__item">
-      <span>归属用户</span>
-      <strong id="alasAssignmentUserName">待选择用户</strong>
-      <small id="alasAssignmentUserMeta">选择接收配置的用户</small>
+      <span>{{ t('admin.ui.alas.owner_user') }}</span>
+      <strong id="alasAssignmentUserName">{{ t('admin.ui.drawers.assignment.pending_user') }}</strong>
+      <small id="alasAssignmentUserMeta">{{ t('admin.ui.drawers.assignment.select_recipient') }}</small>
     </div>
     <span class="alas-assignment-summary__arrow" aria-hidden="true">→</span>
     <div id="alasAssignmentConfigSummary" class="alas-assignment-summary__item alas-assignment-summary__item--config" data-state="idle">
-      <span>Runtime 配置</span>
-      <strong id="alasAssignmentConfigName">待选择配置</strong>
-      <small id="alasAssignmentConfigMeta">输入或选择一个配置名称</small>
+      <span>{{ t('admin.ui.alas.runtime_configs') }}</span>
+      <strong id="alasAssignmentConfigName">{{ t('admin.ui.drawers.assignment.pending_config') }}</strong>
+      <small id="alasAssignmentConfigMeta">{{ t('admin.ui.drawers.assignment.select_or_enter') }}</small>
     </div>
   </div>
   <div class="form-grid drawer-form">
-    <div class="col-12"><label for="alasBindUser">用户</label><select id="alasBindUser"></select></div>
-    <div class="col-12"><label for="alasBindConfig">归属配置</label><select id="alasBindConfig" aria-controls="alasBindConfigCustomField" aria-describedby="alasAssignmentOwnerHint"><option value="" disabled selected>请选择 Runtime 配置</option></select></div>
-    <div id="alasBindConfigCustomField" class="col-12" hidden><label for="alasBindConfigCustom">手动输入配置名称</label><input id="alasBindConfigCustom" placeholder="输入 Runtime 中的准确配置名称" autocomplete="off" spellcheck="false" aria-describedby="alasAssignmentOwnerHint"></div>
-    <div class="col-6"><label for="alasBindRun">运行权限</label><select id="alasBindRun"><option value="true">允许启动与停止</option><option value="false">仅查看状态</option></select></div>
-    <div class="col-6"><label for="alasBindEdit">编辑权限</label><select id="alasBindEdit"><option value="false">不允许编辑</option><option value="true">允许编辑配置</option></select></div>
-    <div class="col-12"><label for="alasBindDefault">该用户的默认入口</label><select id="alasBindDefault"><option value="keep">保持当前默认</option><option value="true">设为默认配置</option></select></div>
+    <div class="col-12"><label for="alasBindUser">{{ t('admin.ui.access.user') }}</label><select id="alasBindUser"></select></div>
+    <div class="col-12"><label for="alasBindConfig">{{ t('admin.ui.drawers.assignment.owned_config') }}</label><select id="alasBindConfig" aria-controls="alasBindConfigCustomField" aria-describedby="alasAssignmentOwnerHint"><option value="" disabled selected>{{ t('admin.ui.alas.select_config_prompt') }}</option></select></div>
+    <div id="alasBindConfigCustomField" class="col-12" hidden><label for="alasBindConfigCustom">{{ t('admin.ui.drawers.assignment.manual_name') }}</label><input id="alasBindConfigCustom" placeholder="{{ t('admin.ui.drawers.assignment.manual_name_placeholder') }}" autocomplete="off" spellcheck="false" aria-describedby="alasAssignmentOwnerHint"></div>
+    <div class="col-6"><label for="alasBindRun">{{ t('admin.ui.drawers.assignment.run_permission') }}</label><select id="alasBindRun"><option value="true">{{ t('admin.ui.drawers.assignment.allow_run') }}</option><option value="false">{{ t('admin.ui.drawers.assignment.status_only') }}</option></select></div>
+    <div class="col-6"><label for="alasBindEdit">{{ t('admin.ui.drawers.assignment.edit_permission') }}</label><select id="alasBindEdit"><option value="false">{{ t('admin.ui.drawers.assignment.deny_edit') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.allow_edit') }}</option></select></div>
+    <div class="col-12"><label for="alasBindDefault">{{ t('admin.ui.drawers.assignment.default_entry') }}</label><select id="alasBindDefault"><option value="keep">{{ t('admin.ui.drawers.assignment.keep_default') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.set_default') }}</option></select></div>
     <input id="alasBindEnabled" type="hidden" value="true">
   </div>
-  <p id="alasAssignmentOwnerHint" class="muted drawer-note alas-owner-note" data-state="idle" role="status">每个配置只能独占归属一个用户；一个用户仍可拥有多个配置。</p>
-  <div class="drawer-actions"><button id="cancelAlasAssignment" class="btn" type="button">取消</button><button id="saveAlasBinding" class="btn primary" type="button">保存归属与权限</button></div>
+  <p id="alasAssignmentOwnerHint" class="muted drawer-note alas-owner-note" data-state="idle" role="status">{{ t('admin.ui.drawers.assignment.note') }}</p>
+  <div class="drawer-actions"><button id="cancelAlasAssignment" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveAlasBinding" class="btn primary" type="button">{{ t('admin.ui.drawers.assignment.save') }}</button></div>
 </aside>
 
 <div id="alasConfigDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConfigDrawer" class="ui-drawer admin-editor-drawer admin-editor-drawer--wide" role="dialog" aria-modal="true" aria-labelledby="alasConfigDrawerTitle" aria-describedby="alasConfigDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Runtime Config</p><h2 id="alasConfigDrawerTitle">编辑配置</h2><p id="alasConfigDrawerContext" class="drawer-context">先从配置库选择一个 Runtime 配置</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="关闭配置编辑"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+  <div class="drawer-heading"><div><p class="eyebrow">Runtime Config</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
-    <div class="col-6"><label for="configSource">读取来源</label><input id="configSource" readonly placeholder="当前配置"></div>
-    <div class="col-6"><label for="configTarget">保存目标</label><input id="configTarget" readonly placeholder="与当前配置相同"></div>
-    <div class="col-12"><label for="configEditor">配置 JSON</label><textarea id="configEditor" spellcheck="false" placeholder="读取后在此编辑 JSON"></textarea></div>
+    <div class="col-6"><label for="configSource">{{ t('admin.ui.drawers.config.source') }}</label><input id="configSource" readonly placeholder="{{ t('admin.ui.drawers.config.current') }}"></div>
+    <div class="col-6"><label for="configTarget">{{ t('admin.ui.drawers.config.target') }}</label><input id="configTarget" readonly placeholder="{{ t('admin.ui.drawers.config.same_target') }}"></div>
+    <div class="col-12"><label for="configEditor">{{ t('admin.ui.drawers.config.json') }}</label><textarea id="configEditor" spellcheck="false" placeholder="{{ t('admin.ui.drawers.config.editor_placeholder') }}"></textarea></div>
   </div>
-  <p id="alasConfigDrawerImpact" class="muted drawer-note">保存会直接写回 Runtime 中的当前配置，并影响它的唯一归属用户。</p>
-  <div class="drawer-actions"><button id="cancelAlasConfig" class="btn" type="button">取消</button><button id="loadConfig" class="btn" type="button">重新读取</button><button id="saveConfig" class="btn primary" type="button">保存当前配置</button></div>
+  <p id="alasConfigDrawerImpact" class="muted drawer-note">{{ t('admin.ui.drawers.config.impact') }}</p>
+  <div class="drawer-actions"><button id="cancelAlasConfig" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="loadConfig" class="btn" type="button">{{ t('admin.ui.drawers.config.reload') }}</button><button id="saveConfig" class="btn primary" type="button">{{ t('admin.ui.drawers.config.save') }}</button></div>
 </aside>
 
 <dialog id="confirmDialog" class="ui-dialog confirm-dialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
   <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=da1ff202eea5#triangle-alert"></use></svg></div>
-  <div><p class="eyebrow">需要确认</p><h2 id="confirmDialogTitle">确认危险操作</h2><p id="confirmDialogMessage">此操作可能无法撤销，请确认后继续。</p></div>
-  <div class="confirm-dialog__actions"><button id="confirmDialogCancel" class="btn" type="button">取消</button><button id="confirmDialogConfirm" class="btn danger" type="button">确认操作</button></div>
+  <div><p class="eyebrow">{{ t('admin.ui.confirm.required') }}</p><h2 id="confirmDialogTitle">{{ t('admin.actions.confirm_danger') }}</h2><p id="confirmDialogMessage">{{ t('admin.actions.irreversible') }}</p></div>
+  <div class="confirm-dialog__actions"><button id="confirmDialogCancel" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="confirmDialogConfirm" class="btn danger" type="button">{{ t('admin.actions.confirm') }}</button></div>
 </dialog>
 
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
