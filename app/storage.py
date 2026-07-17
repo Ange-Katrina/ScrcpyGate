@@ -45,6 +45,7 @@ DEFAULT_SETTINGS = {
     "video_preset_low_latency_max_size": "960",
     "video_preset_low_latency_max_fps": "30",
     "video_custom_profiles": "{}",
+    "video_fullscreen_profile": "sharp",
     "auto_stop_time": "15",
     "auto_stop_minutes": "15",
     "alas_enabled": "false",
@@ -739,6 +740,35 @@ def set_setting(key: str, value: str) -> None:
     with db_connect() as conn:
         conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, str(value)))
         conn.commit()
+
+
+def set_settings(values: dict[str, object]) -> None:
+    if not values:
+        return
+    with db_connect() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+            [(str(key), str(value)) for key, value in values.items()],
+        )
+        conn.commit()
+
+
+def update_settings(mutator) -> dict[str, str]:
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute("SELECT key,value FROM settings").fetchall()
+        settings = dict(DEFAULT_SETTINGS)
+        settings.update({row["key"]: row["value"] for row in rows})
+        values = mutator(dict(settings)) or {}
+        normalized = {str(key): str(value) for key, value in values.items()}
+        if normalized:
+            conn.executemany(
+                "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+                list(normalized.items()),
+            )
+            settings.update(normalized)
+        conn.commit()
+        return settings
 
 
 def get_or_create_public_salt() -> str:

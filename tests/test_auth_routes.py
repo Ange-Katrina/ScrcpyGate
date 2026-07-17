@@ -1,9 +1,11 @@
 import asyncio
 import importlib
+import json
 import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -448,6 +450,83 @@ class AuthRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_size", response.json()["detail"])
+
+    def test_admin_fullscreen_quality_rejects_profiles_below_720p(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+        custom_profile = {
+            "office": {"label": "Office", "video_bit_rate": 1800000, "max_size": 960, "max_fps": 24}
+        }
+        self.storage.set_settings(
+            {
+                "video_custom_profiles": json.dumps(custom_profile),
+                "video_preset_smooth_video_bit_rate": "1777000",
+                "max_fps": "17",
+            }
+        )
+
+        settings = self.client.get("/api/admin/video")
+        self.assertEqual(settings.status_code, 200)
+        self.assertEqual(settings.json()["fullscreen_profile"], "sharp")
+        self.assertEqual(settings.json()["fullscreen_min_max_size"], 1280)
+
+        invalid = self.client.put(
+            "/api/admin/video",
+            headers={"x-csrf-token": session["csrf_token"]},
+            json={"fullscreen_profile": "smooth"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("at least 1280", invalid.json()["detail"])
+        self.assertEqual(self.storage.get_setting("video_fullscreen_profile"), "sharp")
+
+        valid = self.client.put(
+            "/api/admin/video",
+            headers={"x-csrf-token": session["csrf_token"]},
+            json={"fullscreen_profile": "balanced"},
+        )
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.json()["fullscreen_profile"], "balanced")
+        self.assertEqual(self.storage.get_setting("video_fullscreen_profile"), "balanced")
+        self.assertEqual(json.loads(self.storage.get_setting("video_custom_profiles")), custom_profile)
+        self.assertEqual(self.storage.get_setting("video_preset_smooth_video_bit_rate"), "1777000")
+        self.assertEqual(self.storage.get_setting("max_fps"), "17")
+
+        preferences = self.client.get("/api/video/preferences")
+        self.assertEqual(preferences.status_code, 200)
+        self.assertEqual(preferences.json()["fullscreen_profile"], "balanced")
+        self.assertEqual(preferences.json()["fullscreen_min_max_size"], 1280)
+
+    def test_concurrent_video_updates_preserve_fullscreen_quality_constraint(self):
+        session = self.storage.create_session("admin")
+        barrier = threading.Barrier(2)
+        statuses = []
+
+        def save(payload):
+            client = TestClient(self.main.app)
+            client.cookies.set("wsid", session["sid"])
+            barrier.wait(timeout=5)
+            response = client.put(
+                "/api/admin/video",
+                headers={"x-csrf-token": session["csrf_token"]},
+                json=payload,
+            )
+            statuses.append(response.status_code)
+
+        threads = [
+            threading.Thread(target=save, args=({"fullscreen_profile": "balanced"},)),
+            threading.Thread(target=save, args=({"presets": {"balanced": {"max_size": 960}}},)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertCountEqual(statuses, [200, 400])
+        settings = self.storage.get_settings()
+        profiles = self.main.profile_payloads(settings)
+        fullscreen = settings["video_fullscreen_profile"]
+        self.assertGreaterEqual(profiles[fullscreen]["max_size"], 1280)
 
     def test_mirror_settings_restarts_only_when_effective_quality_changes(self):
         self.storage.upsert_device("dev_1", "Device", "192.0.2.10:5555")

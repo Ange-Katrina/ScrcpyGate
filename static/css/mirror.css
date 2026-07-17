@@ -742,6 +742,10 @@ button {
   flex: 0 0 auto;
 }
 
+.fullscreen-btn {
+  flex: 0 0 auto;
+}
+
 .status-details summary {
   min-height: 36px;
   display: flex;
@@ -918,6 +922,16 @@ video {
   background: var(--ui-color-surface);
 }
 
+.immersive-rail,
+.immersive-controls {
+  display: contents;
+}
+
+.immersive-rail-toggle,
+.immersive-actions {
+  display: none;
+}
+
 .nav-btn {
   width: 64px;
   height: 44px;
@@ -985,6 +999,150 @@ video {
 .nav-label {
   font-size: 11px;
   line-height: 1;
+}
+
+.app.is-immersive {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--mirror-video);
+}
+
+.app.is-immersive .sidebar,
+.app.is-immersive .viewer-top {
+  display: none;
+}
+
+.app.is-immersive .viewer {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.app.is-immersive .stage {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "screen";
+  gap: 0;
+  padding: 0;
+}
+
+.app.is-immersive .screen-area,
+.app.is-immersive .video-wrap {
+  width: 100%;
+  height: 100%;
+}
+
+.app.is-immersive .video-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+.app.is-immersive .notice {
+  top: max(var(--ui-space-3), env(safe-area-inset-top));
+}
+
+.app.is-immersive .immersive-rail {
+  position: fixed;
+  z-index: 45;
+  top: 50%;
+  right: env(safe-area-inset-right);
+  width: 0;
+  height: 0;
+  display: block;
+}
+
+.app.is-immersive .immersive-rail-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  width: 32px;
+  min-height: 56px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--ui-color-border-strong) 76%, transparent);
+  border-right: 0;
+  border-radius: var(--ui-radius-md) 0 0 var(--ui-radius-md);
+  background: color-mix(in srgb, var(--ui-color-surface) 88%, transparent);
+  color: var(--ui-color-text);
+  box-shadow: var(--ui-shadow-raised);
+  transform: translateY(-50%);
+  transition: right var(--ui-duration-normal) var(--ui-ease-standard), background var(--ui-duration-fast) var(--ui-ease-standard);
+  backdrop-filter: blur(12px);
+}
+
+.app.is-immersive .immersive-rail-toggle:hover,
+.app.is-immersive .immersive-rail-toggle:focus-visible {
+  background: var(--ui-color-surface-raised);
+}
+
+.app.is-immersive .immersive-rail-toggle .ui-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--ui-duration-normal) var(--ui-ease-standard);
+}
+
+.app.is-immersive .immersive-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 76px;
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-2);
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--ui-color-border-strong) 76%, transparent);
+  border-right: 0;
+  border-radius: var(--ui-radius-lg) 0 0 var(--ui-radius-lg);
+  background: color-mix(in srgb, var(--ui-color-surface) 90%, transparent);
+  box-shadow: var(--ui-shadow-raised);
+  transform: translate(100%, -50%);
+  transition: transform var(--ui-duration-normal) var(--ui-ease-standard);
+  backdrop-filter: blur(14px);
+}
+
+.app.is-immersive .immersive-rail[data-open="true"] .immersive-controls {
+  transform: translate(0, -50%);
+}
+
+.app.is-immersive .immersive-rail[data-open="true"] .immersive-rail-toggle {
+  right: 76px;
+}
+
+.app.is-immersive .immersive-rail[data-open="true"] .immersive-rail-toggle .ui-icon {
+  transform: rotate(180deg);
+}
+
+.app.is-immersive .dock {
+  width: 60px;
+  height: auto;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-1);
+  border: 0;
+  background: transparent;
+}
+
+.app.is-immersive .nav-btn {
+  width: 52px;
+  flex-basis: 44px;
+}
+
+.app.is-immersive .immersive-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-space-1);
+  padding-top: var(--ui-space-2);
+  border-top: 1px solid var(--ui-color-border);
+}
+
+.app.is-immersive .immersive-action .ui-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.app.is-immersive .immersive-action.danger {
+  color: var(--ui-color-danger);
 }
 
 .sidebar-backdrop,
@@ -1757,6 +1915,11 @@ video {
     min-height: 44px;
   }
 
+  .app.is-immersive .immersive-rail-toggle {
+    width: 44px;
+    min-height: 56px;
+  }
+
   .device-search {
     height: 44px;
   }
@@ -1771,7 +1934,9 @@ video {
   .sidebar-backdrop,
   .tool-drawer-backdrop,
   .workspace-drawer,
-  .btn {
+  .btn,
+  .immersive-rail-toggle,
+  .immersive-controls {
     transition: none;
   }
 }

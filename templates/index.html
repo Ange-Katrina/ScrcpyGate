@@ -8,14 +8,14 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=64efb7ab007f">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=3279b12d040b">
   <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
-  <script src="/static/js/ui-core.js?v=b5b0b5fb1f3e" defer></script>
+  <script src="/static/js/ui-core.js?v=dc260871e988" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=82b95837d0bb"></script>
 </head>
 <body data-ui-page="mirror">
-<div class="app">
+<div id="mirrorApp" class="app">
   <aside id="sidebar" class="sidebar" aria-label="设备与投屏操作">
     <header class="sidebar-header">
       <div class="brand-row">
@@ -23,7 +23,7 @@
           <div class="brand">ScrcpyGate</div>
         </div>
         <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="收起设备栏" aria-label="收起设备栏" aria-controls="sidebar" aria-expanded="true">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#panel-left-close"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#panel-left-close"></use></svg>
         </button>
       </div>
       <div class="sidebar-account-row">
@@ -36,10 +36,10 @@
         </div>
         <div class="sidebar-account-actions" aria-label="账户与界面">
           <a id="adminLink" class="ui-icon-button sidebar-utility-btn" href="/admin" title="后台管理" aria-label="后台管理" hidden>
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#settings"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#settings"></use></svg>
           </a>
           <div class="ui-theme-picker compact-theme-picker">
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#sun-moon"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
             <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
             <select data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
               <option value="dark">{{ t("common.theme.dark") }}</option>
@@ -50,7 +50,7 @@
           <form method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="logout ui-icon-button sidebar-utility-btn" type="submit" title="退出登录" aria-label="退出登录">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#log-out"></use></svg>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#log-out"></use></svg>
             </button>
           </form>
         </div>
@@ -59,15 +59,15 @@
 
     <nav class="sidebar-menu" aria-label="工作区工具">
       <button id="toolBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#sliders-horizontal"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sliders-horizontal"></use></svg>
         <span class="menu-label">画面</span>
       </button>
       <button id="alasBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#bot"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#bot"></use></svg>
         <span class="menu-label">ALAS</span>
       </button>
       <button id="accountBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#user-round"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#user-round"></use></svg>
         <span class="menu-label">账户</span>
       </button>
     </nav>
@@ -79,11 +79,11 @@
           <span id="deviceSummary" class="device-summary" aria-live="polite">加载中</span>
         </div>
         <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="刷新设备" aria-label="刷新设备">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#refresh-cw"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
         </button>
       </div>
       <label class="device-search" for="deviceSearch">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#search"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#search"></use></svg>
         <span class="ui-sr-only">搜索设备</span>
         <input id="deviceSearch" type="search" inputmode="search" autocomplete="off" placeholder="搜索设备名称">
       </label>
@@ -96,15 +96,15 @@
 
     <div class="side-actions" aria-label="投屏操作">
       <button id="startBtn" class="btn primary wide" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#play"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#play"></use></svg>
         <span class="action-label">开始投屏</span>
       </button>
       <button id="controlBtn" class="btn" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#monitor"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
         <span class="action-label">获取控制</span>
       </button>
       <button id="stopBtn" class="btn danger" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#square"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg>
         <span class="action-label">停止投屏</span>
       </button>
     </div>
@@ -114,7 +114,7 @@
     <header class="viewer-top">
       <div class="top-left">
         <button id="menuBtn" class="ui-icon-button top-menu-btn" type="button" title="打开设备栏" aria-label="打开设备栏" aria-controls="sidebar" aria-expanded="false">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#menu"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#menu"></use></svg>
         </button>
         <div class="top-copy">
           <div id="selectedTitle" class="selected-title">未选择设备</div>
@@ -126,9 +126,12 @@
           <span class="control-label">控制权</span>
           <span id="controlOwnership" class="control-ownership">未获取</span>
         </div>
+        <button id="fullscreenBtn" class="ui-icon-button fullscreen-btn" type="button" title="进入全屏" aria-label="进入全屏" aria-pressed="false">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#maximize-2"></use></svg>
+        </button>
         <details id="statusDetails" class="status-details">
           <summary>
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#info"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#info"></use></svg>
             <span class="status-details-label">状态详情</span>
           </summary>
           <div id="topStatus" class="top-status" aria-label="设备连接状态"></div>
@@ -140,25 +143,40 @@
       <div id="screenArea" class="screen-area">
         <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
         <div id="empty" class="empty ui-empty">
-          <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#monitor"></use></svg>
+          <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
           <strong id="emptyTitle">尚未选择设备</strong>
           <span id="emptyDescription">从左侧设备栏选择设备后开始投屏</span>
         </div>
       </div>
-      <nav class="dock" aria-label="安卓导航">
-        <button id="backBtn" class="nav-btn" type="button" title="返回" aria-label="返回">
-          <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">返回</span>
+      <div id="immersiveRail" class="immersive-rail" data-open="false">
+        <button id="immersiveRailToggle" class="immersive-rail-toggle" type="button" title="显示侧边控制" aria-label="显示侧边控制" aria-controls="immersiveControls" aria-expanded="false" aria-hidden="true">
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#chevron-left"></use></svg>
         </button>
-        <button id="homeBtn" class="nav-btn" type="button" title="主页" aria-label="主页">
-          <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">主页</span>
-        </button>
-        <button id="recentBtn" class="nav-btn" type="button" title="菜单" aria-label="菜单">
-          <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">菜单</span>
-        </button>
-        <button id="keyboardBtn" class="nav-btn" type="button" title="打开键盘" aria-label="打开键盘" data-active="false" disabled>
-          <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#keyboard"></use></svg><span class="nav-label">键盘</span>
-        </button>
-      </nav>
+        <div id="immersiveControls" class="immersive-controls" aria-hidden="false">
+          <nav class="dock" aria-label="安卓导航">
+            <button id="backBtn" class="nav-btn" type="button" title="返回" aria-label="返回">
+              <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">返回</span>
+            </button>
+            <button id="homeBtn" class="nav-btn" type="button" title="主页" aria-label="主页">
+              <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">主页</span>
+            </button>
+            <button id="recentBtn" class="nav-btn" type="button" title="菜单" aria-label="菜单">
+              <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">菜单</span>
+            </button>
+            <button id="keyboardBtn" class="nav-btn" type="button" title="打开键盘" aria-label="打开键盘" data-active="false" disabled>
+              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#keyboard"></use></svg><span class="nav-label">键盘</span>
+            </button>
+          </nav>
+          <div class="immersive-actions" aria-label="全屏操作">
+            <button id="immersiveStopBtn" class="nav-btn immersive-action danger" type="button" title="停止投屏" aria-label="停止投屏">
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg><span class="nav-label">停止</span>
+            </button>
+            <button id="exitFullscreenBtn" class="nav-btn immersive-action" type="button" title="退出全屏" aria-label="退出全屏">
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#minimize-2"></use></svg><span class="nav-label">退出</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -171,7 +189,7 @@
       <p>调整当前投屏和账户设置</p>
     </div>
     <button id="toolDrawerCloseBtn" class="ui-icon-button" type="button" title="关闭工具面板" aria-label="关闭工具面板">
-      <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#x"></use></svg>
+      <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg>
     </button>
   </header>
 
@@ -223,11 +241,11 @@
     <div class="actions panel-actions">
       <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
       <button id="alasReload" class="btn" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#refresh-cw"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
         <span>刷新</span>
       </button>
       <a id="alasOpenLink" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#external-link"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#external-link"></use></svg>
         <span>打开 ALAS 页面</span>
       </a>
     </div>
@@ -260,6 +278,6 @@
 </aside>
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=6991ada44a99" defer></script>
+<script src="/static/js/mirror.js?v=0a44e3c7ae8f" defer></script>
 </body>
 </html>

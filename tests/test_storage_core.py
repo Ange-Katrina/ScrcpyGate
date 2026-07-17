@@ -43,6 +43,34 @@ class StorageCoreTests(unittest.TestCase):
         self.assertEqual(user["role"], "admin")
         self.assertTrue(str(user["password_hash"]).startswith("pbkdf2_sha256$"))
 
+    def test_settings_batch_is_committed_together(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+
+        storage.set_settings({"video_fullscreen_profile": "balanced", "max_size": 1280, "max_fps": 30})
+
+        settings = storage.get_settings(["video_fullscreen_profile", "max_size", "max_fps"])
+        self.assertEqual(settings["video_fullscreen_profile"], "balanced")
+        self.assertEqual(settings["max_size"], "1280")
+        self.assertEqual(settings["max_fps"], "30")
+
+    def test_settings_update_uses_a_locked_snapshot(self):
+        storage = load_storage(self.tmp)
+        storage.init_db()
+        storage.set_settings({"video_fullscreen_profile": "sharp", "max_fps": 24})
+
+        observed = {}
+
+        def update(current):
+            observed.update(current)
+            return {"video_fullscreen_profile": "balanced", "max_fps": 30}
+
+        saved = storage.update_settings(update)
+
+        self.assertEqual(observed["video_fullscreen_profile"], "sharp")
+        self.assertEqual(saved["video_fullscreen_profile"], "balanced")
+        self.assertEqual(saved["max_fps"], "30")
+
     def test_initial_admin_password_env_is_used_and_displayed(self):
         os.environ["INITIAL_ADMIN_PASSWORD"] = "StrongInitialPwd123"
         storage = load_storage(self.tmp)

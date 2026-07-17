@@ -158,6 +158,14 @@ global.document={querySelectorAll:()=>inputs};
         self.assertNotIn("画质类型", self.template)
         self.assertIn("所有用户共用流畅、稳定、高清和低延迟四档", self.template)
 
+    def test_fullscreen_quality_uses_only_720p_or_higher_profiles(self):
+        self.assertIn('id="videoFullscreenProfile"', self.template)
+        self.assertIn('id="videoFullscreenHint"', self.template)
+        self.assertIn("仅显示 720p 或更高的档位", self.template)
+        self.assertIn("function renderFullscreenProfiles(data,selected)", self.script)
+        self.assertIn("Number(profiles[name].max_size)>=minimum", self.script)
+        self.assertIn("fullscreen_profile:fullscreenProfile", self.script)
+
     def test_bitrate_inputs_display_mbps_and_save_bps(self):
         result = self.run_node(
             ("bitrateBpsToMbps", "bitrateMbpsToBps"),

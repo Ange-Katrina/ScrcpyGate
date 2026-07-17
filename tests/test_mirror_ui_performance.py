@@ -171,7 +171,7 @@ console.log(JSON.stringify({{result,sps:Array.from(annexBNalUnit(spsA,7)),spsAft
         self.assertIn("video.onresize = () => updateInputSize();", self.script)
         self.assertIn("if(metadataW>0 && metadataH>0) state.videoReconfiguring=false;", self.script)
         self.assertIn("if (state.videoReconfiguring && isTouch) return;", self.script)
-        quality_start = self.script.index("async function saveOrApplyQuality()")
+        quality_start = self.script.index("function saveOrApplyQuality(options={})")
         quality_end = self.script.index("function closeVideoSocket()", quality_start)
         self.assertNotIn("reconnectSockets(", self.script[quality_start:quality_end])
 
@@ -200,6 +200,51 @@ console.log(JSON.stringify({{screen:state.screen,reconfiguring:state.videoReconf
         self.assertEqual(layout_result["screen"], {"w": 1280, "h": 720})
         self.assertFalse(layout_result["reconfiguring"])
         self.assertEqual(layout_result["resizeCalls"], [[1280, 720], "layout"])
+
+    def test_stale_fullscreen_quality_is_skipped_without_changing_profile(self):
+        start = self.script.index("function queueQualityApply(payload, options={})")
+        end = self.script.index("function saveOrApplyQuality(options={})", start)
+        queue_source = self.script[start:end]
+        program = f"""
+const state={{pendingQualityPayload:null,qualityPromise:null,qualityApplying:false,qualityProfile:'balanced'}};
+const applied=[];
+let releaseFirst;
+let started=0;
+const gate=new Promise(resolve=>{{ releaseFirst=resolve; }});
+async function performQualityApply(payload){{
+  applied.push(payload.profile);
+  if(payload.profile==='balanced') await gate;
+}}
+function render(){{}}
+{queue_source}
+(async()=>{{
+  let current=true;
+  const first=queueQualityApply({{profile:'balanced'}});
+  await Promise.resolve();
+  const fullscreen=queueQualityApply({{profile:'sharp'}},{{
+    isCurrent:()=>current,
+    onStart:()=>{{ state.qualityProfile='sharp'; started+=1; }},
+  }});
+  current=false;
+  releaseFirst();
+  await Promise.all([first,fullscreen]);
+  console.log(JSON.stringify({{applied,started,profile:state.qualityProfile,pending:state.pendingQualityPayload}}));
+}})();
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["applied"], ["balanced"])
+        self.assertEqual(result["started"], 0)
+        self.assertEqual(result["profile"], "balanced")
+        self.assertIsNone(result["pending"])
 
     def test_video_and_control_reconnects_are_bounded(self):
         self.assertIn("const RECONNECT_DELAYS=[500, 1000, 2000, 4000, 8000]", self.script)

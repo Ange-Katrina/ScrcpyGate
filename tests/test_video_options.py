@@ -8,11 +8,14 @@ if str(ROOT) not in sys.path:
 
 from app.video_options import (
     BANDWIDTH_RECOMMENDATIONS,
+    DEFAULT_FULLSCREEN_PROFILE,
+    FULLSCREEN_MIN_MAX_SIZE,
     MAX_PRESET_MAX_SIZE,
     MIN_PRESET_MAX_SIZE,
     NORMAL_PROFILE_NAMES,
     VideoOptionError,
     enabled_stream_modes_value,
+    fullscreen_profile_value,
     normalize_custom_profile_payloads,
     normalize_profile_payloads,
     normalize_video_options,
@@ -89,6 +92,23 @@ class VideoOptionsTests(unittest.TestCase):
         self.assertEqual(options["video_bit_rate"], 1100000)
         self.assertEqual(options["max_size"], 854)
         self.assertEqual(options["max_fps"], 30)
+
+    def test_fullscreen_profile_requires_720p_or_higher(self):
+        profiles = profile_payloads()
+        self.assertEqual(FULLSCREEN_MIN_MAX_SIZE, 1280)
+        self.assertEqual(fullscreen_profile_value(None, profiles), DEFAULT_FULLSCREEN_PROFILE)
+        self.assertEqual(fullscreen_profile_value("balanced", profiles, strict=True), "balanced")
+        with self.assertRaises(VideoOptionError):
+            fullscreen_profile_value("smooth", profiles, strict=True)
+        with self.assertRaises(VideoOptionError):
+            fullscreen_profile_value("missing", profiles, strict=True)
+
+    def test_fullscreen_profile_accepts_720p_custom_profile(self):
+        custom = normalize_custom_profile_payloads(
+            {"mobile_hd": {"label": "移动高清", "video_bit_rate": 3000000, "max_size": 1280, "max_fps": 30}}
+        )
+        profiles = profile_payloads({"video_custom_profiles": serialize_custom_profiles(custom)})
+        self.assertEqual(fullscreen_profile_value("mobile_hd", profiles, strict=True), "mobile_hd")
 
     def test_profile_presets_reject_sizes_outside_management_range(self):
         with self.assertRaises(VideoOptionError):

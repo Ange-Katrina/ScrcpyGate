@@ -4,16 +4,18 @@ const SELECTED_KEY = 'scrcpygate:selectedDeviceId';
 const SIDEBAR_COLLAPSED_KEY = 'scrcpygate:mirror:sidebar-collapsed';
 const ALAS_CONFIG_KEY_PREFIX = 'scrcpygate:alas:selected-config:';
 const MOBILE_SIDEBAR_QUERY = '(max-width: 960px)';
+const FULLSCREEN_MIN_MAX_SIZE = 1280;
 const state = {
   user:bootstrap.user || null, devices:[], sessions:{}, selectedDeviceId:localStorage.getItem(SELECTED_KEY) || '', activeDeviceId:'',
   videoWs:null, controlWs:null, eventWs:null, jmuxer:null, input:null, hasControl:false, fit:'contain', screen:{w:1280,h:720}, alas:null,
   alasConfigs:[], alasConfigsLoaded:false, alasConfigsLoading:false, alasConfigsError:'', alasCatalogRevision:0, selectedAlasConfig:'', alasStatusLoading:false, alasStatusError:'', alasSwitching:false, alasStatusRefreshPending:false, alasStatusEpoch:0, alasOperationSeq:0,
   videoConnected:false, controlConnected:false, videoPrefs:null, eventConnected:false, eventSeq:0, eventReconnectTimer:null, calibrationTimer:null, recoveryTimer:null,
   playerResetTimer:null, playerSeq:0, streamGeneration:0, videoReconnectTimer:null, videoReconnectAttempts:0, controlReconnectTimer:null, controlReconnectAttempts:0, controlKeepaliveTimer:null, lastPlayerResetAt:0, lastKeyframeRequestAt:0, lastDelayTrimAt:0, videoSpsSignature:'', videoReconfiguring:false, layoutFrame:null, renderFrame:null,
-  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, pageLeaving:false, resumeDeviceId:'',
+  idleStopTimer:null, idleStopReason:'', starting:false, lastStartAt:0, videoSeq:0, controlSeq:0, qualityProfile:'balanced', qualityApplying:false, qualityPromise:null, pendingQualityPayload:null, pageLeaving:false, resumeDeviceId:'',
   deviceNodes:new Map(), qualityNodes:new Map(), sessionRevision:0, sessionRevisions:new Map(),
   devicesLoaded:false, deviceLoading:true, deviceLoadError:'', deviceQuery:'', deviceFilter:'all', connectionPhase:'idle', mirrorError:'',
-  sidebarTrigger:null, toolTrigger:null, sidebarCollapsed:false, controlRequest:null
+  sidebarTrigger:null, toolTrigger:null, sidebarCollapsed:false, controlRequest:null,
+  immersive:false, systemFullscreen:false, immersiveRailOpen:false, immersiveTrigger:null, immersiveEpoch:0, fullscreenQualityEpoch:0, fullscreenQualityPromise:null
 };
 const resourceRequests = Object.create(null);
 const actionRequests = new Map();
@@ -559,8 +561,11 @@ function renderStatus(){
     setButtonLabel(controlBtn, actionBusy('control') ? '处理中...' : state.hasControl ? '释放控制' : '获取控制');
     controlBtn.disabled = actionBusy('control') || state.starting || !deviceSelectable(device) || !device.can_control;
   }
+  const stopDisabled=mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
   const stopBtn=$('stopBtn');
-  if (stopBtn) stopBtn.disabled = mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
+  if (stopBtn) stopBtn.disabled = stopDisabled;
+  const immersiveStopBtn=$('immersiveStopBtn');
+  if (immersiveStopBtn) immersiveStopBtn.disabled = stopDisabled;
   renderKeyboardControl();
   renderAlasPanel();
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
@@ -1067,13 +1072,10 @@ async function stopMirror(){
   state.mirrorError='';
   render();
 }
-async function saveOrApplyQuality(){
-  if (state.qualityApplying) return show('画质正在应用，请稍等');
+async function performQualityApply(payload){
   const id=state.selectedDeviceId;
-  const payload = qualityPayload();
   const running = !!(selectedSession() && selectedSession().running);
   invalidateResource('video');
-  state.qualityApplying = true;
   setQualityStatus(running ? '正在切换画质，投屏流会短暂重启...' : '正在保存画质偏好...');
   render();
   try {
@@ -1106,11 +1108,30 @@ async function saveOrApplyQuality(){
   } catch (error) {
     setQualityStatus('画质应用失败');
     throw error;
-  } finally {
-    state.qualityApplying = false;
-    render();
   }
 }
+function queueQualityApply(payload, options={}){
+  state.pendingQualityPayload={payload, isCurrent:options.isCurrent || null, onStart:options.onStart || null};
+  if (state.qualityPromise) return state.qualityPromise;
+  state.qualityApplying=true;
+  state.qualityPromise=(async()=>{
+    while(state.pendingQualityPayload){
+      const next=state.pendingQualityPayload;
+      state.pendingQualityPayload=null;
+      if (next.isCurrent && !next.isCurrent()) continue;
+      if (next.onStart) next.onStart();
+      await performQualityApply(next.payload);
+    }
+  })().finally(()=>{
+    state.pendingQualityPayload=null;
+    state.qualityApplying=false;
+    state.qualityPromise=null;
+    render();
+  });
+  render();
+  return state.qualityPromise;
+}
+function saveOrApplyQuality(options={}){ return queueQualityApply(qualityPayload(), options); }
 function closeVideoSocket(){
   if (state.videoReconnectTimer) { clearTimeout(state.videoReconnectTimer); state.videoReconnectTimer=null; }
   state.videoReconnectAttempts=0;
@@ -1828,6 +1849,147 @@ function closeSidebar(options={}){
   syncSidebarAccessibility();
   if (options.restoreFocus !== false && trigger && trigger.isConnected) requestAnimationFrame(()=>trigger.focus({preventScroll:true}));
 }
+function fullscreenElement(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
+function fullscreenQualitySelection(){
+  const prefs=state.videoPrefs || {};
+  const profiles=prefs.profiles || {};
+  const minimum=Math.max(FULLSCREEN_MIN_MAX_SIZE, Number(prefs.fullscreen_min_max_size || FULLSCREEN_MIN_MAX_SIZE));
+  const configured=String(prefs.fullscreen_profile || 'sharp');
+  if (profiles[configured] && Number(profiles[configured].max_size)>=minimum) return {name:configured, values:profiles[configured], minimum};
+  const eligible=Object.keys(profiles).filter(name=>Number(profiles[name] && profiles[name].max_size)>=minimum);
+  if (!eligible.length) return null;
+  eligible.sort((left,right)=>Number(profiles[right].max_size)-Number(profiles[left].max_size));
+  const name=eligible.includes('sharp') ? 'sharp' : eligible[0];
+  return {name, values:profiles[name], minimum};
+}
+function qualityMatches(left,right){
+  if (!left || !right) return false;
+  return ['profile','video_bit_rate','max_size','max_fps'].every(key=>String(left[key])===String(right[key]));
+}
+async function ensureFullscreenQuality(epoch=state.immersiveEpoch){
+  if (state.fullscreenQualityPromise) {
+    if (state.fullscreenQualityEpoch===epoch) return state.fullscreenQualityPromise;
+    try { await state.fullscreenQualityPromise; } catch (_) {}
+    if (!state.immersive || epoch!==state.immersiveEpoch) return;
+  }
+  const promise=(async()=>{
+    if (!state.videoPrefs) await loadVideoPreferences();
+    if (!state.immersive || epoch!==state.immersiveEpoch) return;
+    const selection=fullscreenQualitySelection();
+    if (!selection) {
+      show('后台未配置可用的 720p 或更高全屏画质', 5200);
+      return;
+    }
+    const target={...qualityPayload(), profile:selection.name, ...selection.values};
+    if (!state.qualityPromise && qualityMatches((state.videoPrefs || {}).effective, target)) {
+      state.qualityProfile=selection.name;
+      render();
+      return;
+    }
+    await queueQualityApply(target, {
+      isCurrent:()=>state.immersive && epoch===state.immersiveEpoch,
+      onStart:()=>{ state.qualityProfile=selection.name; renderQualityButtons(); },
+    });
+  })();
+  state.fullscreenQualityEpoch=epoch;
+  state.fullscreenQualityPromise=promise;
+  try {
+    return await promise;
+  } finally {
+    if (state.fullscreenQualityPromise===promise) state.fullscreenQualityPromise=null;
+  }
+}
+function syncImmersiveRail(open=state.immersiveRailOpen){
+  const rail=$('immersiveRail');
+  const toggle=$('immersiveRailToggle');
+  const controls=$('immersiveControls');
+  state.immersiveRailOpen=!!(state.immersive && open);
+  if (rail) rail.dataset.open=state.immersiveRailOpen ? 'true' : 'false';
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', state.immersiveRailOpen ? 'true' : 'false');
+    toggle.setAttribute('aria-hidden', state.immersive ? 'false' : 'true');
+    toggle.setAttribute('aria-label', state.immersiveRailOpen ? '隐藏侧边控制' : '显示侧边控制');
+    toggle.title=state.immersiveRailOpen ? '隐藏侧边控制' : '显示侧边控制';
+  }
+  if (controls) {
+    const hidden=state.immersive && !state.immersiveRailOpen;
+    controls.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    controls.toggleAttribute('inert', hidden);
+  }
+}
+function syncFullscreenButton(){
+  const button=$('fullscreenBtn');
+  if (!button) return;
+  button.setAttribute('aria-pressed', state.immersive ? 'true' : 'false');
+  button.setAttribute('aria-label', state.immersive ? '退出全屏' : '进入全屏');
+  button.title=state.immersive ? '退出全屏' : '进入全屏';
+  const use=button.querySelector('use');
+  if (use) use.setAttribute('href', String(use.getAttribute('href') || '').replace(/#[^#]+$/, state.immersive ? '#minimize-2' : '#maximize-2'));
+}
+function setImmersiveMode(enabled, options={}){
+  const wasImmersive=state.immersive;
+  const trigger=state.immersiveTrigger;
+  if (wasImmersive!==!!enabled) state.immersiveEpoch+=1;
+  if (enabled && !wasImmersive) state.immersiveTrigger=options.trigger || document.activeElement;
+  state.immersive=!!enabled;
+  const app=$('mirrorApp');
+  if (app) app.classList.toggle('is-immersive', state.immersive);
+  if (state.immersive) {
+    if (state.input && typeof state.input.closeKeyboard === 'function') state.input.closeKeyboard();
+    closeStatusDetails();
+    closeToolDrawer();
+    closeSidebar({restoreFocus:false});
+  }
+  syncFullscreenButton();
+  syncImmersiveRail(false);
+  scheduleLayout();
+  if (state.immersive && !wasImmersive) {
+    const toggle=$('immersiveRailToggle');
+    if (toggle) requestAnimationFrame(()=>toggle.focus({preventScroll:true}));
+  } else if (!state.immersive && wasImmersive) {
+    state.immersiveTrigger=null;
+    const target=(trigger && trigger.isConnected ? trigger : $('fullscreenBtn'));
+    if (target) requestAnimationFrame(()=>target.focus({preventScroll:true}));
+  }
+}
+async function enterImmersiveMode(trigger){
+  if (state.immersive) return;
+  const app=$('mirrorApp');
+  setImmersiveMode(true, {trigger});
+  const epoch=state.immersiveEpoch;
+  const request=app && (app.requestFullscreen || app.webkitRequestFullscreen);
+  if (request) {
+    try {
+      await request.call(app, {navigationUI:'hide'});
+    } catch (_) {
+      show('浏览器未开放系统全屏，已使用沉浸布局');
+    }
+  }
+  if (!state.immersive || epoch!==state.immersiveEpoch) {
+    if (fullscreenElement()===app) {
+      const exit=document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) Promise.resolve(exit.call(document)).catch(()=>{});
+    }
+    return;
+  }
+  ensureFullscreenQuality(epoch).catch(error=>show(error.message || '全屏画质应用失败', 5200));
+}
+async function exitImmersiveMode(){
+  state.immersiveEpoch+=1;
+  const exit=document.exitFullscreen || document.webkitExitFullscreen;
+  let exitError=null;
+  if (exit) {
+    try { await exit.call(document); } catch (error) { exitError=error; }
+  }
+  if (fullscreenElement()) {
+    if (exitError) show('浏览器未能退出系统全屏，请再次按 Esc');
+    return false;
+  }
+  state.systemFullscreen=false;
+  setImmersiveMode(false);
+  return true;
+}
+function toggleImmersiveMode(trigger){ return state.immersive ? exitImmersiveMode() : enterImmersiveMode(trigger); }
 function bindClick(id, handler){
   const element=$(id);
   if (element) element.onclick=(event)=>handler(event, element);
@@ -1881,6 +2043,10 @@ function initializeWorkspaceInteractions(){
   bindClick('homeBtn', ()=>sendKey(3));
   bindClick('recentBtn', ()=>sendKey(187));
   bindClick('keyboardBtn', openMobileKeyboard);
+  bindClick('fullscreenBtn', (_, button)=>toggleImmersiveMode(button));
+  bindClick('immersiveRailToggle', ()=>syncImmersiveRail(!state.immersiveRailOpen));
+  bindClick('immersiveStopBtn', (_, button)=>runBusyAction('mirror', button, '正在停止投屏', stopMirror).catch(e=>show(e.message)));
+  bindClick('exitFullscreenBtn', ()=>exitImmersiveMode());
   bindClick('alasBtn', (_, button)=>{
     toggleToolPanel('alasTools', button);
     const panel=$('alasTools');
@@ -1921,6 +2087,11 @@ function initializeWorkspaceInteractions(){
       closeSidebar();
       return;
     }
+    if (state.immersive) {
+      event.preventDefault();
+      exitImmersiveMode();
+      return;
+    }
     const details=$('statusDetails');
     if (details && details.open) { event.preventDefault(); details.open=false; }
   });
@@ -1940,6 +2111,22 @@ if (window.ResizeObserver) {
 }
 if (mobileSidebarMedia.addEventListener) mobileSidebarMedia.addEventListener('change', syncSidebarAccessibility);
 else if (mobileSidebarMedia.addListener) mobileSidebarMedia.addListener(syncSidebarAccessibility);
+['fullscreenchange','webkitfullscreenchange'].forEach(name=>document.addEventListener(name,()=>{
+  const active=fullscreenElement() === $('mirrorApp');
+  if (active) {
+    if (!state.immersive) {
+      const exit=document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) Promise.resolve(exit.call(document)).catch(()=>{});
+      return;
+    }
+    state.systemFullscreen=true;
+    return;
+  }
+  if (state.systemFullscreen) {
+    state.systemFullscreen=false;
+    setImmersiveMode(false);
+  }
+}));
 window.addEventListener('blur', ()=>scheduleInactiveStop('window_blur'));
 window.addEventListener('focus', ()=>cancelInactiveStop());
 document.addEventListener('visibilitychange', ()=>{

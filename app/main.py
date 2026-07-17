@@ -21,6 +21,7 @@ from .logging_config import setup_logging, tail_log
 from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
     BANDWIDTH_RECOMMENDATIONS,
+    FULLSCREEN_MIN_MAX_SIZE,
     MAX_PRESET_MAX_SIZE,
     MIN_PRESET_MAX_SIZE,
     PROFILE_FIELDS,
@@ -29,6 +30,7 @@ from .video_options import (
     VideoOptionError,
     custom_profile_payloads,
     enabled_stream_modes_value,
+    fullscreen_profile_value,
     normalize_video_options,
     normalize_custom_profile_payloads,
     normalize_profile_payloads,
@@ -870,6 +872,7 @@ async def api_video_preferences(request: Request):
     profiles = video_profiles(settings)
     labels = profile_label_payloads(settings)
     labels = {name: labels[name] for name in profiles if name in labels}
+    fullscreen_profile = fullscreen_profile_value(settings.get("video_fullscreen_profile"), profiles)
     return {
         "defaults": public_video_options(defaults),
         "preferences": public_video_options(stored or defaults),
@@ -877,6 +880,8 @@ async def api_video_preferences(request: Request):
         "effective": public_video_options(effective),
         "profiles": profiles,
         "profile_labels": labels,
+        "fullscreen_profile": fullscreen_profile,
+        "fullscreen_min_max_size": FULLSCREEN_MIN_MAX_SIZE,
         "video_mode": "normal",
         "limits": VIDEO_LIMITS,
         "stream_modes": ["raw", "protocol", "legacy"],
@@ -1473,7 +1478,7 @@ async def admin_set_permission(request: Request):
 @app.get("/api/admin/video")
 async def admin_video_settings(request: Request):
     security.require_admin(request)
-    keys = ["video_profile", "video_adaptive", "video_bit_rate", "max_size", "max_fps", "auto_stop_minutes", "scrcpy_stream_mode", "scrcpy_enabled_stream_modes", "video_custom_profiles"] + profile_setting_keys()
+    keys = ["video_profile", "video_adaptive", "video_bit_rate", "max_size", "max_fps", "auto_stop_minutes", "scrcpy_stream_mode", "scrcpy_enabled_stream_modes", "video_custom_profiles", "video_fullscreen_profile"] + profile_setting_keys()
     settings = storage.get_settings(keys)
     enabled_modes = enabled_stream_modes_value(settings.get("scrcpy_enabled_stream_modes", "raw"))
     stream_mode = str(settings.get("scrcpy_stream_mode") or "raw").strip().lower()
@@ -1482,10 +1487,13 @@ async def admin_video_settings(request: Request):
     stream_mode = stream_mode_or_default(stream_mode, enabled_modes)
     settings["scrcpy_stream_mode"] = stream_mode
     settings["scrcpy_enabled_stream_modes"] = ",".join(enabled_modes)
+    profiles = profile_payloads(settings)
+    fullscreen_profile = fullscreen_profile_value(settings.get("video_fullscreen_profile"), profiles)
+    settings["video_fullscreen_profile"] = fullscreen_profile
     return {
         "settings": settings,
         "defaults": public_video_options(settings_to_video_options(settings)),
-        "profiles": profile_payloads(settings),
+        "profiles": profiles,
         "profile_labels": profile_label_payloads(settings),
         "custom_profiles": custom_profile_payloads(settings),
         "bandwidth_recommendations": BANDWIDTH_RECOMMENDATIONS,
@@ -1497,6 +1505,8 @@ async def admin_video_settings(request: Request):
         "profile_fields": list(PROFILE_FIELDS),
         "min_preset_max_size": MIN_PRESET_MAX_SIZE,
         "max_preset_max_size": MAX_PRESET_MAX_SIZE,
+        "fullscreen_profile": fullscreen_profile,
+        "fullscreen_min_max_size": FULLSCREEN_MIN_MAX_SIZE,
     }
 
 
@@ -1505,55 +1515,107 @@ async def admin_save_video_settings(request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
     payload = await parse_body(request)
-    raw_enabled_modes = payload.get("scrcpy_enabled_stream_modes", payload.get("enabled_stream_modes", storage.get_setting("scrcpy_enabled_stream_modes", "raw")))
-    enabled_modes = enabled_stream_modes_value(raw_enabled_modes)
-    storage.set_setting("scrcpy_enabled_stream_modes", ",".join(enabled_modes))
-    current_profile_settings = storage.get_settings(profile_setting_keys())
-    current_profiles = profile_payloads(current_profile_settings)
+    keys = ["video_profile", "video_adaptive", "video_bit_rate", "max_size", "max_fps", "auto_stop_minutes", "scrcpy_stream_mode", "scrcpy_enabled_stream_modes", "video_custom_profiles", "video_fullscreen_profile"] + profile_setting_keys()
+
+    def build_video_updates(current_settings):
+        enabled_modes_submitted = "scrcpy_enabled_stream_modes" in payload or "enabled_stream_modes" in payload
+        raw_enabled_modes = payload.get("scrcpy_enabled_stream_modes", payload.get("enabled_stream_modes", current_settings.get("scrcpy_enabled_stream_modes", "raw")))
+        enabled_modes = enabled_stream_modes_value(raw_enabled_modes)
+        current_profiles = profile_payloads(current_settings)
+        raw_presets = payload.get("presets") if "presets" in payload else None
+        if raw_presets is not None and not isinstance(raw_presets, dict):
+            raise VideoOptionError("presets must be an object")
+        presets = normalize_profile_payloads(raw_presets, current_profiles)
+        custom_profiles = (
+            normalize_custom_profile_payloads(payload.get("custom_profiles"))
+            if "custom_profiles" in payload
+            else custom_profile_payloads(current_settings)
+        )
+        profile_settings = dict(current_settings)
+        for profile, values in presets.items():
+            for field, value in values.items():
+                profile_settings[profile_setting_key(profile, field)] = str(value)
+        serialized_custom_profiles = serialize_custom_profiles(custom_profiles)
+        profile_settings["video_custom_profiles"] = serialized_custom_profiles
+        profiles = profile_payloads(profile_settings)
+        fullscreen_profile = fullscreen_profile_value(
+            payload.get("fullscreen_profile", current_settings.get("video_fullscreen_profile", "sharp")),
+            profiles,
+            strict=True,
+        )
+        options = normalize_video_options(
+            payload,
+            settings_to_video_options(current_settings),
+            profiles=profiles,
+            enabled_stream_modes=enabled_modes,
+        )
+        auto_stop_submitted = "auto_stop_minutes" in payload or "auto_stop_time" in payload
+        raw_auto_stop = payload.get("auto_stop_minutes", payload.get("auto_stop_time", current_settings.get("auto_stop_minutes", "15")))
+        try:
+            auto_stop = int(raw_auto_stop)
+        except Exception as exc:
+            raise VideoOptionError("auto_stop_minutes must be integer") from exc
+        if auto_stop < 0 or auto_stop > 1440:
+            raise VideoOptionError("auto_stop_minutes out of range")
+        stream_mode_submitted = "scrcpy_stream_mode" in payload or "stream_mode" in payload
+        stream_mode = str(payload.get("scrcpy_stream_mode", payload.get("stream_mode", current_settings.get("scrcpy_stream_mode", "raw")))).strip().lower()
+        if stream_mode not in ("raw", "protocol", "legacy"):
+            raise VideoOptionError("scrcpy_stream_mode must be raw, protocol, or legacy")
+        stream_mode = stream_mode_or_default(stream_mode, enabled_modes)
+        settings_updates = {}
+        if enabled_modes_submitted:
+            settings_updates["scrcpy_enabled_stream_modes"] = ",".join(enabled_modes)
+        if "custom_profiles" in payload:
+            settings_updates["video_custom_profiles"] = serialized_custom_profiles
+        if "fullscreen_profile" in payload:
+            settings_updates["video_fullscreen_profile"] = fullscreen_profile
+        if auto_stop_submitted:
+            settings_updates["auto_stop_minutes"] = str(auto_stop)
+            settings_updates["auto_stop_time"] = str(auto_stop)
+        if raw_presets is not None:
+            for profile, values in raw_presets.items():
+                if profile not in presets or not isinstance(values, dict):
+                    continue
+                for field in PROFILE_FIELDS:
+                    if field in values:
+                        settings_updates[profile_setting_key(profile, field)] = str(presets[profile][field])
+        public_options = public_video_options(options)
+        quality_fields = ("video_bit_rate", "max_size", "max_fps")
+        if "profile" in payload:
+            for key in ("profile", "adaptive", *quality_fields):
+                value = public_options[key]
+                settings_updates[{"profile": "video_profile", "adaptive": "video_adaptive"}.get(key, key)] = "true" if value is True else "false" if value is False else str(value)
+        else:
+            if any(key in payload for key in quality_fields):
+                settings_updates["video_profile"] = str(public_options["profile"])
+            for key in ("adaptive", *quality_fields):
+                if key in payload:
+                    value = public_options[key]
+                    settings_updates[{"adaptive": "video_adaptive"}.get(key, key)] = "true" if value is True else "false" if value is False else str(value)
+        if stream_mode_submitted or enabled_modes_submitted:
+            settings_updates["scrcpy_stream_mode"] = stream_mode
+        return settings_updates
+
     try:
-        presets = normalize_profile_payloads(payload.get("presets"), current_profiles)
-        custom_profiles = normalize_custom_profile_payloads(payload.get("custom_profiles"))
+        storage.update_settings(build_video_updates)
     except VideoOptionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    for profile, values in presets.items():
-        for field, value in values.items():
-            storage.set_setting(profile_setting_key(profile, field), str(value))
-    storage.set_setting("video_custom_profiles", serialize_custom_profiles(custom_profiles))
-    profile_settings = storage.get_settings(profile_setting_keys())
-    profile_settings["video_custom_profiles"] = serialize_custom_profiles(custom_profiles)
-    try:
-        options = normalize_video_options(payload, default_video_options(), profiles=profile_payloads(profile_settings), enabled_stream_modes=enabled_modes)
-    except VideoOptionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    setting_keys = {"profile": "video_profile", "adaptive": "video_adaptive"}
-    for key, value in public_video_options(options).items():
-        storage.set_setting(setting_keys.get(key, key), "true" if value is True else "false" if value is False else str(value))
-    raw_auto_stop = payload.get("auto_stop_minutes", payload.get("auto_stop_time", storage.get_setting("auto_stop_minutes", "15")))
-    try:
-        auto_stop = int(raw_auto_stop)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="auto_stop_minutes must be integer") from exc
-    if auto_stop < 0 or auto_stop > 1440:
-        raise HTTPException(status_code=400, detail="auto_stop_minutes out of range")
-    storage.set_setting("auto_stop_minutes", str(auto_stop))
-    storage.set_setting("auto_stop_time", str(auto_stop))
-    stream_mode = str(payload.get("scrcpy_stream_mode", payload.get("stream_mode", storage.get_setting("scrcpy_stream_mode", "raw")))).strip().lower()
-    if stream_mode not in ("raw", "protocol", "legacy"):
-        raise HTTPException(status_code=400, detail="scrcpy_stream_mode must be raw, protocol, or legacy")
-    stream_mode = stream_mode_or_default(stream_mode, enabled_modes)
-    storage.set_setting("scrcpy_stream_mode", stream_mode)
     storage.audit(admin["username"], "video_settings", json.dumps(payload, ensure_ascii=False)[:400])
-    keys = ["video_profile", "video_adaptive", "video_bit_rate", "max_size", "max_fps", "auto_stop_minutes", "scrcpy_stream_mode", "scrcpy_enabled_stream_modes", "video_custom_profiles"] + profile_setting_keys()
     settings = storage.get_settings(keys)
+    saved_profiles = profile_payloads(settings)
+    saved_fullscreen_profile = fullscreen_profile_value(settings.get("video_fullscreen_profile"), saved_profiles)
+    saved_enabled_modes = enabled_stream_modes_value(settings.get("scrcpy_enabled_stream_modes", "raw"))
     return {
         "ok": True,
         "settings": settings,
         "defaults": public_video_options(settings_to_video_options(settings)),
-        "profiles": profile_payloads(settings),
+        "profiles": saved_profiles,
         "profile_labels": profile_label_payloads(settings),
         "custom_profiles": custom_profile_payloads(settings),
         "bandwidth_recommendations": BANDWIDTH_RECOMMENDATIONS,
-        "enabled_stream_modes": list(enabled_modes),
+        "enabled_stream_modes": list(saved_enabled_modes),
+        "fullscreen_profile": saved_fullscreen_profile,
+        "fullscreen_min_max_size": FULLSCREEN_MIN_MAX_SIZE,
     }
 
 

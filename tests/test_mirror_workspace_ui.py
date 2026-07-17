@@ -70,6 +70,45 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn(".sidebar-menu .sidebar-menu-btn {\n  justify-content: flex-start", self.styles)
         self.assertIn(".app.sidebar-collapsed .sidebar-menu .sidebar-menu-btn {\n  justify-content: center", self.styles)
 
+    def test_immersive_fullscreen_moves_controls_to_a_collapsible_side_rail(self):
+        for token in (
+            'id="fullscreenBtn"',
+            'id="immersiveRail"',
+            'id="immersiveRailToggle"',
+            'id="immersiveControls"',
+            'id="immersiveStopBtn"',
+            'id="exitFullscreenBtn"',
+            'aria-controls="immersiveControls"',
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, self.template)
+        for token in (
+            ".app.is-immersive .sidebar",
+            ".app.is-immersive .viewer-top",
+            '.immersive-rail[data-open="true"]',
+            "function ensureFullscreenQuality(epoch=state.immersiveEpoch)",
+            "function setImmersiveMode(enabled, options={})",
+            "function toggleImmersiveMode(trigger)",
+            "FULLSCREEN_MIN_MAX_SIZE = 1280",
+            "fullscreen_profile",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, self.styles + self.script)
+        self.assertIn("controls.toggleAttribute('inert', hidden)", self.script)
+        self.assertIn("request.call(app, {navigationUI:'hide'})", self.script)
+        self.assertIn("function queueQualityApply(payload, options={})", self.script)
+        self.assertIn("while(state.pendingQualityPayload)", self.script)
+        self.assertIn("if (next.isCurrent && !next.isCurrent()) continue", self.script)
+        self.assertIn("if (next.onStart) next.onStart()", self.script)
+        self.assertIn("isCurrent:()=>state.immersive && epoch===state.immersiveEpoch", self.script)
+        self.assertIn("!state.qualityPromise && qualityMatches", self.script)
+        self.assertIn("if (!state.immersive || epoch!==state.immersiveEpoch) return", self.script)
+        self.assertIn("if (wasImmersive!==!!enabled) state.immersiveEpoch+=1", self.script)
+        self.assertIn("if (!state.immersive) {", self.script)
+        self.assertIn("requestAnimationFrame(()=>toggle.focus({preventScroll:true}))", self.script)
+        self.assertIn("requestAnimationFrame(()=>target.focus({preventScroll:true}))", self.script)
+        self.assertIn("right: env(safe-area-inset-right)", self.styles)
+
     def test_sidebar_identity_and_device_rows_use_compact_information_hierarchy(self):
         for token in (
             'class="sidebar-user"',

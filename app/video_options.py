@@ -21,6 +21,8 @@ PROFILE_NAMES = NORMAL_PROFILE_NAMES
 PROFILE_FIELDS = ("video_bit_rate", "max_size", "max_fps")
 MIN_PRESET_MAX_SIZE = 854
 MAX_PRESET_MAX_SIZE = 1920
+FULLSCREEN_MIN_MAX_SIZE = 1280
+DEFAULT_FULLSCREEN_PROFILE = "sharp"
 MAX_CUSTOM_PROFILES = 12
 CUSTOM_PROFILE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{1,31}$")
 
@@ -250,6 +252,35 @@ def profile_label_payloads(settings: dict[str, Any] | None = None) -> dict[str, 
     for name, values in custom_profile_payloads(settings).items():
         labels[name] = label_for_profile(name, values)
     return labels
+
+
+def fullscreen_profile_value(
+    value: Any,
+    profiles: dict[str, dict[str, int]] | None = None,
+    *,
+    strict: bool = False,
+) -> str:
+    profiles = profiles or profile_payloads()
+    requested = str(value or DEFAULT_FULLSCREEN_PROFILE).strip()
+    selected = profiles.get(requested)
+    if selected and int(selected.get("max_size") or 0) >= FULLSCREEN_MIN_MAX_SIZE:
+        return requested
+    if strict:
+        if requested not in profiles:
+            raise VideoOptionError("fullscreen profile is invalid")
+        raise VideoOptionError(f"fullscreen profile max_size must be at least {FULLSCREEN_MIN_MAX_SIZE}")
+    for candidate in (DEFAULT_FULLSCREEN_PROFILE, "balanced"):
+        values = profiles.get(candidate)
+        if values and int(values.get("max_size") or 0) >= FULLSCREEN_MIN_MAX_SIZE:
+            return candidate
+    eligible = [
+        name
+        for name, values in profiles.items()
+        if int(values.get("max_size") or 0) >= FULLSCREEN_MIN_MAX_SIZE
+    ]
+    if eligible:
+        return max(eligible, key=lambda name: int(profiles[name].get("max_size") or 0))
+    raise VideoOptionError(f"at least one fullscreen profile must use max_size {FULLSCREEN_MIN_MAX_SIZE} or higher")
 
 
 def normalize_video_options(
