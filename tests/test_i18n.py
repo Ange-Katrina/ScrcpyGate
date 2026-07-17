@@ -13,6 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class I18nCatalogTests(unittest.TestCase):
+    def test_default_catalog_has_no_duplicate_object_keys(self):
+        duplicates = []
+
+        def collect_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    duplicates.append(key)
+                result[key] = value
+            return result
+
+        catalog_path = ROOT / "static" / "i18n" / "zh-CN.json"
+        json.loads(catalog_path.read_text(encoding="utf-8"), object_pairs_hook=collect_pairs)
+
+        self.assertEqual(duplicates, [])
+
     def test_default_catalog_resolves_nested_messages(self):
         self.assertEqual(i18n.DEFAULT_LOCALE, "zh-CN")
         self.assertEqual(i18n.translate("login.username"), "用户名")
@@ -98,18 +114,20 @@ class I18nCatalogTests(unittest.TestCase):
             "app/alas_embed.py",
             "app/main.py",
             "static/js/alas-shell.js",
+            "static/js/admin.js",
             "static/js/login.js",
+            "static/js/mirror.js",
             "static/js/ui-core.js",
             "templates/admin.html",
             "templates/index.html",
             "templates/login.html",
         )
         direct_call_pattern = re.compile(
-            r"(?:i18n\.translate|t)\(\s*[\"']((?:common|login|alas)(?:\.[a-z0-9_]+)+)[\"']",
+            r"(?:i18n\.translate|t)\(\s*[\"']((?:common|login|alas|mirror|admin)(?:\.[a-z0-9_]+)+)[\"']",
             re.IGNORECASE,
         )
         quoted_key_pattern = re.compile(
-            r"[\"']((?:common|login|alas)(?:\.[a-z0-9_]+)+)[\"']",
+            r"[\"']((?:common|login|alas|mirror|admin)(?:\.[a-z0-9_]+)+)[\"']",
             re.IGNORECASE,
         )
         references = set()
@@ -120,6 +138,7 @@ class I18nCatalogTests(unittest.TestCase):
         missing = sorted(key for key in references if i18n.resolve_message(key) is None)
 
         self.assertGreater(len(references), 20)
+        self.maxDiff = None
         self.assertEqual(missing, [])
 
     def test_dynamic_alas_denial_message_keys_exist(self):
@@ -156,6 +175,8 @@ process.stdout.write(JSON.stringify({{
   locale: window.ScrcpyGateI18n.locale,
   resolved: window.ScrcpyGateI18n.resolve("nested.message"),
   interpolated: window.ScrcpyGateI18n.t("nested.message", {{ name: "测试" }}),
+  hasMessage: window.ScrcpyGateI18n.has("nested.message"),
+  hasMissing: window.ScrcpyGateI18n.has("nested.missing"),
   missing: window.ScrcpyGateI18n.t("nested.missing"),
   object: window.ScrcpyGateI18n.resolve("object.not_a_message")
 }}));
@@ -173,6 +194,8 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual(result["locale"], "zh-CN")
         self.assertEqual(result["resolved"], "你好，{name}")
         self.assertEqual(result["interpolated"], "你好，测试")
+        self.assertTrue(result["hasMessage"])
+        self.assertFalse(result["hasMissing"])
         self.assertEqual(result["missing"], "nested.missing")
         self.assertIsNone(result["object"])
 

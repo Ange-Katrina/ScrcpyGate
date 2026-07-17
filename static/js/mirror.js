@@ -1,5 +1,9 @@
 const bootstrap = JSON.parse(document.getElementById("scrcpygate-bootstrap").textContent);
 const csrfToken = bootstrap.csrf_token;
+const mirrorI18n = window.ScrcpyGateI18n;
+const mirrorT = (key, values) => (
+  mirrorI18n && typeof mirrorI18n.t === 'function' ? mirrorI18n.t(key, values) : String(key || '')
+);
 const SELECTED_KEY = 'scrcpygate:selectedDeviceId';
 const SIDEBAR_COLLAPSED_KEY = 'scrcpygate:mirror:sidebar-collapsed';
 const ALAS_CONFIG_KEY_PREFIX = 'scrcpygate:alas:selected-config:';
@@ -42,7 +46,7 @@ function wsUrl(path){ return `${location.protocol === 'https:' ? 'wss' : 'ws'}:/
 function getDeviceId(device){ return String((device && (device.device_id || device.id)) || '').trim(); }
 function currentDevice(){ return state.devices.find(d => getDeviceId(d) === state.selectedDeviceId) || null; }
 function selectedSession(){ const id=state.selectedDeviceId; const device=currentDevice(); return id ? (state.sessions[id] || (device && device.session) || null) : null; }
-function deviceLabel(device){ return device ? (device.display_name || device.name || '设备') : '未选择设备'; }
+function deviceLabel(device){ return device ? (device.display_name || device.name || mirrorT('mirror.device.fallback')) : mirrorT('mirror.device.not_selected'); }
 function deviceIdentifier(device){
   if (!device) return '';
   const primary=String(deviceLabel(device) || '').trim();
@@ -53,7 +57,7 @@ function deviceIdentifier(device){
 function deviceSelectable(device){
   return !!(device && getDeviceId(device) && device.enabled !== false && device.can_view !== false && device.adb_state !== 'unauthorized');
 }
-function show(message, ms=3200){ const n=$('notice'); n.textContent=message || '操作失败'; n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),ms); }
+function show(message, ms=3200){ const n=$('notice'); n.textContent=message || mirrorT('common.feedback.failed'); n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),ms); }
 function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
 function actionBusy(key){ return actionRequests.has(key); }
 function setActionBusy(element, busy, label){
@@ -75,7 +79,7 @@ async function runBusyAction(key, element, label, action){
   try {
     return await request;
   } catch (error) {
-    if (key === 'mirror') state.mirrorError=(error && error.message) || '投屏操作失败';
+    if (key === 'mirror') state.mirrorError=(error && error.message) || mirrorT('mirror.actions.mirror_failed');
     scheduleRender();
     throw error;
   } finally {
@@ -201,24 +205,24 @@ function socketLive(ws){
   return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
 }
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
-const BUILTIN_PROFILE_LABELS = {smooth:'流畅', balanced:'稳定', sharp:'高清', low_latency:'低延迟'};
-const ADB_STATE_LABELS = {online:'在线', offline:'离线', unauthorized:'未授权', reconnecting:'重连中', unknown:'未知'};
-const STREAM_HEALTH_LABELS = {healthy:'正常', idle:'空闲', starting:'启动中', config:'等待配置', invalid_h264:'视频异常', adb_failed:'ADB 失败', failed:'失败', stopped:'已停止', unknown:'未知'};
-const ALAS_STATUS_LABELS = {running:'运行中', stopped:'已停止', idle:'空闲', disabled:'服务未启用', disconnected:'未连接', error:'异常', unavailable:'不可达', unbound:'未授权', invalid_config:'配置无效', unknown:'未知'};
+const BUILTIN_PROFILE_LABELS = {smooth:'mirror.profile.smooth', balanced:'mirror.profile.balanced', sharp:'mirror.profile.sharp', low_latency:'mirror.profile.low_latency'};
+const ADB_STATE_LABELS = {online:'mirror.adb_state.online', offline:'mirror.adb_state.offline', unauthorized:'mirror.adb_state.unauthorized', reconnecting:'mirror.adb_state.reconnecting', unknown:'mirror.adb_state.unknown'};
+const STREAM_HEALTH_LABELS = {healthy:'mirror.stream_health.healthy', idle:'mirror.stream_health.idle', starting:'mirror.stream_health.starting', config:'mirror.stream_health.config', invalid_h264:'mirror.stream_health.invalid_h264', adb_failed:'mirror.stream_health.adb_failed', failed:'mirror.stream_health.failed', stopped:'mirror.stream_health.stopped', unknown:'mirror.stream_health.unknown'};
+const ALAS_STATUS_LABELS = {running:'mirror.alas_status.running', stopped:'mirror.alas_status.stopped', idle:'mirror.alas_status.idle', disabled:'mirror.alas_status.disabled', disconnected:'mirror.alas_status.disconnected', error:'mirror.alas_status.error', unavailable:'mirror.alas_status.unavailable', unbound:'mirror.alas_status.unbound', invalid_config:'mirror.alas_status.invalid_config', unknown:'mirror.alas_status.unknown'};
 function labelFrom(map, value, fallback){
   const key = String(value || '').trim();
-  return map[key] || fallback || key || '未知';
+  return mirrorT(map[key] || fallback || 'common.status.unknown');
 }
-function adbStateLabel(value){ return labelFrom(ADB_STATE_LABELS, value, '未知'); }
-function streamModeLabel(mode){ return ({raw:'原始流 raw', protocol:'协议流 protocol', legacy:'诊断 legacy'}[mode]) || mode; }
-function streamModeShortLabel(mode){ return ({raw:'原始流', protocol:'协议流', legacy:'诊断流', none:'无'}[mode]) || mode || '未知'; }
-function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const height=Math.round(size*9/16); const labels={854:'480p',960:'540p',1280:'720p',1600:'900p',1920:'1080p'}; return `${size} × ${height}${labels[size] ? `（${labels[size]}）` : ''}`; }
-function streamHealthLabel(value){ return labelFrom(STREAM_HEALTH_LABELS, value, '未知'); }
-function alasStatusLabel(value){ return labelFrom(ALAS_STATUS_LABELS, value, '未知'); }
+function adbStateLabel(value){ return labelFrom(ADB_STATE_LABELS, value); }
+function streamModeLabel(mode){ return mirrorT(({raw:'mirror.stream_mode.raw', protocol:'mirror.stream_mode.protocol', legacy:'mirror.stream_mode.legacy'}[mode]) || 'common.status.unknown'); }
+function streamModeShortLabel(mode){ return mirrorT(({raw:'mirror.stream_mode.raw_short', protocol:'mirror.stream_mode.protocol_short', legacy:'mirror.stream_mode.legacy_short', none:'mirror.stream_mode.none'}[mode]) || 'common.status.unknown'); }
+function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return mirrorT('mirror.quality.raw_size'); const height=Math.round(size*9/16); const labels={854:'480p',960:'540p',1280:'720p',1600:'900p',1920:'1080p'}; return labels[size] ? mirrorT('mirror.quality.size_label',{size,height,quality:labels[size]}) : mirrorT('mirror.quality.size_label_custom',{size,height}); }
+function streamHealthLabel(value){ return labelFrom(STREAM_HEALTH_LABELS, value); }
+function alasStatusLabel(value){ return labelFrom(ALAS_STATUS_LABELS, value); }
 function qualitySummary(){
   const q = qualityPayload();
-  const fps = q.max_fps > 0 ? q.max_fps : '不限';
-  return `上限 ${maxSizeQualityLabel(q.max_size)} / ${Math.round(q.video_bit_rate / 100000) / 10}Mbps / ${fps}fps / ${streamModeShortLabel(q.scrcpy_stream_mode || 'raw')}`;
+  const fps = q.max_fps > 0 ? q.max_fps : mirrorT('common.units.unlimited');
+  return mirrorT('mirror.quality.summary',{size:maxSizeQualityLabel(q.max_size),bitrate:Math.round(q.video_bit_rate / 100000) / 10,fps,mode:streamModeShortLabel(q.scrcpy_stream_mode || 'raw')});
 }
 function enabledStreamModes(){
   const modes = state.videoPrefs && state.videoPrefs.enabled_stream_modes;
@@ -267,7 +271,7 @@ function qualityProfileOrder(){
 }
 function qualityProfileLabel(profile){
   const labels = (state.videoPrefs && state.videoPrefs.profile_labels) || {};
-  return BUILTIN_PROFILE_LABELS[profile] || labels[profile] || profile;
+  return BUILTIN_PROFILE_LABELS[profile] ? mirrorT(BUILTIN_PROFILE_LABELS[profile]) : labels[profile] || profile;
 }
 function setQualityStatus(text){
   const el = $('qualityStatus');
@@ -298,7 +302,7 @@ function ensureQualityButtons(){
       button.type='button';
       state.qualityNodes.set(profile, button);
     }
-    button.onclick=()=>runBusyAction('quality', button, '正在应用画质', ()=>chooseQualityProfile(profile)).catch(e=>show(e.message));
+    button.onclick=()=>runBusyAction('quality', button, mirrorT('mirror.actions.apply_quality'), ()=>chooseQualityProfile(profile)).catch(e=>show(e.message));
     button.textContent=qualityProfileLabel(profile);
     grid.insertBefore(button, label);
   });
@@ -312,13 +316,13 @@ function renderQualityButtons(){
   document.querySelectorAll('[data-profile]').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.profile === state.qualityProfile);
     btn.disabled = !ready || !!state.qualityApplying || actionBusy('quality');
-    btn.title = !ready ? '正在加载画质档位' : state.qualityApplying || actionBusy('quality') ? '画质正在应用，请稍等' : '点击切换投屏画质';
+    btn.title = !ready ? mirrorT('mirror.actions.quality_loading_title') : state.qualityApplying || actionBusy('quality') ? mirrorT('mirror.actions.quality_title') : mirrorT('mirror.actions.quality_switch');
   });
   const select = $('qualityStreamMode');
   if (select) select.disabled = !ready || !!state.qualityApplying || actionBusy('quality');
 }
 async function chooseQualityProfile(profile){
-  if (state.qualityApplying) return show('画质正在应用，请稍等');
+  if (state.qualityApplying) return show(mirrorT('mirror.actions.quality_title'));
   state.qualityProfile = profile;
   renderQualityButtons();
   await saveOrApplyQuality();
@@ -365,15 +369,15 @@ function renderDeviceEmpty(empty, visibleCount){
   let title='';
   let description='';
   if (!state.devicesLoaded && !state.devices.length) {
-    mode='loading'; title='正在加载设备'; description='正在获取可访问设备和连接状态';
+    mode='loading'; title=mirrorT('mirror.device.loading'); description=mirrorT('mirror.device.loading_detail');
   } else if (state.deviceLoadError && !state.devices.length) {
-    mode='error'; title='设备加载失败'; description=state.deviceLoadError;
+    mode='error'; title=mirrorT('mirror.device.load_failed'); description=state.deviceLoadError;
   } else if (!state.devices.length) {
     mode=state.user && !state.user.is_admin ? 'no-permission' : 'no-devices';
-    title=mode === 'no-permission' ? '没有可访问的设备' : '暂无设备';
-    description=mode === 'no-permission' ? '请联系管理员分配观看权限' : '请先在后台添加并启用设备';
+    title=mode === 'no-permission' ? mirrorT('mirror.device.no_permission') : mirrorT('mirror.device.empty');
+    description=mode === 'no-permission' ? mirrorT('mirror.device.no_permission_detail') : mirrorT('mirror.device.empty_detail');
   } else if (!visibleCount) {
-    mode='filtered-empty'; title='没有匹配的设备'; description='请调整搜索词或在线状态筛选';
+    mode='filtered-empty'; title=mirrorT('mirror.device.filtered_empty'); description=mirrorT('mirror.device.filtered_empty_detail');
   }
   empty.dataset.emptyState=mode || 'available';
   const titleNode=empty.querySelector('[data-device-empty-title]');
@@ -438,7 +442,7 @@ function renderDevices(){
     const identifier=deviceIdentifier(device);
     parts.identifier.textContent=identifier;
     parts.identifier.hidden=!identifier;
-    const statusText=mirrorVisible ? '投屏中' : (device.enabled === false ? '已禁用' : adbStateLabel(adbState));
+    const statusText=mirrorVisible ? mirrorT('mirror.status.mirror_running') : (device.enabled === false ? mirrorT('mirror.device.disabled') : adbStateLabel(adbState));
     const statusTone=mirrorVisible ? 'ok' : device.enabled === false ? 'muted' : adbState === 'online' ? 'ok' : adbBlocked ? 'danger' : 'warn';
     parts.status.textContent=statusText;
     parts.status.dataset.tone=statusTone;
@@ -446,9 +450,9 @@ function renderDevices(){
     btn.dataset.status=statusTone;
     const viewers=Number((session && session.clients) || 0);
     const summaryParts=[
-      device.enabled === false ? '设备已停用' : adbState === 'unauthorized' ? '等待设备端授权' : device.can_control ? '可控制' : '仅观看'
+      device.enabled === false ? mirrorT('mirror.device.disabled') : adbState === 'unauthorized' ? mirrorT('mirror.device.unauthorized_wait') : device.can_control ? mirrorT('mirror.device.can_control') : mirrorT('mirror.device.view_only')
     ];
-    if (viewers > 0) summaryParts.push(`${viewers} 个观看端`);
+    if (viewers > 0) summaryParts.push(mirrorT('mirror.device.viewers',{count:viewers}));
     parts.summary.textContent=summaryParts.join(' · ');
     btn.setAttribute('aria-label', `${deviceLabel(device)}，${statusText}，${parts.summary.textContent}`);
     btn.onclick=()=>selectDevice(id);
@@ -458,7 +462,7 @@ function renderDevices(){
   const summary=$('deviceSummary');
   if (summary) {
     const total=state.devices.length;
-    const summaryText=!state.devicesLoaded && !total ? '加载中' : (visibleCount === total ? `${total} 台` : `${visibleCount}/${total} 台`);
+    const summaryText=!state.devicesLoaded && !total ? mirrorT('common.feedback.loading') : (visibleCount === total ? mirrorT('mirror.device.count',{count:total}) : mirrorT('mirror.device.count_fraction',{visible:visibleCount,total}));
     if (summary.textContent !== summaryText) summary.textContent=summaryText;
   }
   renderDeviceEmpty(empty, visibleCount);
@@ -466,12 +470,12 @@ function renderDevices(){
 function controlOwnershipState(device, session){
   const lock=session && session.control_lock;
   const username=state.user && state.user.username;
-  if (!device) return {text:'未选择设备', tone:'neutral'};
-  if (!device.can_control) return {text:'仅可观看', tone:'neutral'};
-  if (state.hasControl || (lock && lock.username === username)) return {text:'你正在控制', tone:'owned'};
-  if (lock && lock.username) return {text:`${lock.username} 正在控制`, tone:'occupied'};
-  if (actionBusy('control') || (state.controlWs && state.controlWs.readyState === WebSocket.CONNECTING)) return {text:'正在连接控制通道', tone:'pending'};
-  return {text:'控制权空闲', tone:'available'};
+  if (!device) return {text:mirrorT('mirror.control.not_selected'), tone:'neutral'};
+  if (!device.can_control) return {text:mirrorT('mirror.control.view_only'), tone:'neutral'};
+  if (state.hasControl || (lock && lock.username === username)) return {text:mirrorT('mirror.control.owned'), tone:'owned'};
+  if (lock && lock.username) return {text:mirrorT('mirror.control.occupied',{username:lock.username}), tone:'occupied'};
+  if (actionBusy('control') || (state.controlWs && state.controlWs.readyState === WebSocket.CONNECTING)) return {text:mirrorT('mirror.control.pending'), tone:'pending'};
+  return {text:mirrorT('mirror.control.available'), tone:'available'};
 }
 function renderControlOwnership(device, session){
   const target=$('controlOwnership');
@@ -481,31 +485,31 @@ function renderControlOwnership(device, session){
   target.dataset.state=ownership.tone;
   target.classList.toggle('ok', ownership.tone === 'owned' || ownership.tone === 'available');
   target.classList.toggle('warn', ownership.tone === 'occupied' || ownership.tone === 'pending');
-  target.setAttribute('aria-label', `控制权：${ownership.text}`);
+  target.setAttribute('aria-label', mirrorT('mirror.control.label',{text:ownership.text}));
   return ownership;
 }
 function stageEmptyState(device, session){
   const running=!!(session && session.running);
   const health=String((session && session.stream_health) || '').toLowerCase();
-  if (!state.devicesLoaded && !state.devices.length) return {type:'loading', title:'正在加载工作台', description:'正在获取设备和投屏状态'};
-  if (state.deviceLoadError && !state.devices.length) return {type:'error', title:'设备加载失败', description:state.deviceLoadError};
+  if (!state.devicesLoaded && !state.devices.length) return {type:'loading', title:mirrorT('mirror.stage.workspace_loading'), description:mirrorT('mirror.stage.workspace_loading_detail')};
+  if (state.deviceLoadError && !state.devices.length) return {type:'error', title:mirrorT('mirror.device.load_failed'), description:state.deviceLoadError};
   if (!device) {
-    if (!state.devices.length && state.user && !state.user.is_admin) return {type:'no-permission', title:'没有可访问的设备', description:'请联系管理员分配观看权限'};
-    if (!state.devices.length) return {type:'no-devices', title:'暂无设备', description:'请先在后台添加并启用设备'};
-    return {type:'idle', title:'选择一台设备', description:'从左侧设备列表选择后开始投屏'};
+    if (!state.devices.length && state.user && !state.user.is_admin) return {type:'no-permission', title:mirrorT('mirror.device.no_permission'), description:mirrorT('mirror.device.no_permission_detail')};
+    if (!state.devices.length) return {type:'no-devices', title:mirrorT('mirror.device.empty'), description:mirrorT('mirror.device.empty_detail')};
+    return {type:'idle', title:mirrorT('mirror.stage.select_device'), description:mirrorT('mirror.stage.select_device_detail')};
   }
   if (state.mirrorError || ['failed','adb_failed','invalid_h264'].includes(health)) {
-    return {type:'error', title:'投屏出现问题', description:state.mirrorError || `当前状态：${streamHealthLabel(health)}`};
+    return {type:'error', title:mirrorT('mirror.stage.problem'), description:state.mirrorError || mirrorT('mirror.stage.current_state',{status:streamHealthLabel(health)})};
   }
-  if (state.starting || health === 'starting') return {type:'starting', title:'正在启动投屏', description:'正在连接设备并准备视频流'};
+  if (state.starting || health === 'starting') return {type:'starting', title:mirrorT('mirror.stage.starting'), description:mirrorT('mirror.stage.starting_detail')};
   if (state.qualityApplying || state.connectionPhase === 'reconnecting' || device.adb_state === 'reconnecting') {
-    return {type:'reconnecting', title:'正在重新连接', description:'画面会在连接恢复后自动显示'};
+    return {type:'reconnecting', title:mirrorT('mirror.stage.reconnecting'), description:mirrorT('mirror.stage.reconnecting_detail')};
   }
   if (state.connectionPhase === 'connecting' || (!state.videoConnected && socketLive(state.videoWs))) {
-    return {type:'connecting', title:'正在连接画面', description:'正在建立视频通道'};
+    return {type:'connecting', title:mirrorT('mirror.stage.connecting'), description:mirrorT('mirror.stage.connecting_detail')};
   }
-  if (running) return {type:'disconnected', title:'画面尚未连接', description:'投屏正在运行，点击“连接画面”继续'};
-  return {type:'idle', title:'尚未开始投屏', description:'确认设备在线后点击“开始投屏”'};
+  if (running) return {type:'disconnected', title:mirrorT('mirror.stage.disconnected'), description:mirrorT('mirror.stage.disconnected_detail')};
+  return {type:'idle', title:mirrorT('mirror.stage.idle'), description:mirrorT('mirror.stage.idle_detail')};
 }
 function ensureStageEmptyNodes(empty){
   let title=$('emptyTitle');
@@ -538,27 +542,27 @@ function renderStatus(){
   const running=!!(session && session.running);
   const localConnected=!!(state.videoConnected || state.controlConnected || socketLive(state.videoWs) || socketLive(state.controlWs));
   const selectedTitle=$('selectedTitle'); if (selectedTitle) selectedTitle.textContent = deviceLabel(device);
-  const selectedMeta=$('selectedMeta'); if (selectedMeta) selectedMeta.textContent = device ? qualitySummary() : '从设备列表选择一个设备后开始投屏';
+  const selectedMeta=$('selectedMeta'); if (selectedMeta) selectedMeta.textContent = device ? qualitySummary() : mirrorT('mirror.stage.select_device_detail');
   const ownership=renderControlOwnership(device, session);
   const topStatus=$('topStatus'); if (topStatus) topStatus.textContent='';
   const items=[];
-  items.push(chip(running ? '投屏中' : '未投屏', running ? 'ok' : 'warn'));
-  items.push(chip(state.videoConnected ? '视频已连接' : socketLive(state.videoWs) ? '视频连接中' : '视频未连接', state.videoConnected ? 'ok' : 'warn'));
+  items.push(chip(running ? mirrorT('mirror.status.mirror_running') : mirrorT('mirror.status.mirror_stopped'), running ? 'ok' : 'warn'));
+  items.push(chip(state.videoConnected ? mirrorT('mirror.status.video_connected') : socketLive(state.videoWs) ? mirrorT('mirror.status.video_connecting') : mirrorT('mirror.status.video_disconnected'), state.videoConnected ? 'ok' : 'warn'));
   if (!$('controlOwnership')) items.push(chip(ownership.text, ownership.tone === 'owned' || ownership.tone === 'available' ? 'ok' : 'warn'));
-  if (session && session.video) items.push(chip(`流: ${maxSizeQualityLabel(session.video.max_size)} / ${session.video.max_fps || '不限'}fps`));
-  if (session && session.stream_mode) items.push(chip(`流模式: ${streamModeShortLabel(session.stream_mode)}/${streamHealthLabel(session.stream_health)}`, session.stream_health === 'healthy' ? 'ok' : 'warn'));
-  if (device && device.adb_state) items.push(chip(`ADB: ${adbStateLabel(device.adb_state)}`, device.adb_state === 'online' ? 'ok' : 'warn'));
-  if (state.alas) items.push(chip(`ALAS: ${alasStatusLabel(state.alas.status)}`, state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
+  if (session && session.video) items.push(chip(mirrorT('mirror.status.stream',{value:`${maxSizeQualityLabel(session.video.max_size)} / ${session.video.max_fps || mirrorT('common.units.unlimited')}fps`})));
+  if (session && session.stream_mode) items.push(chip(mirrorT('mirror.status.stream_mode',{mode:streamModeShortLabel(session.stream_mode),health:streamHealthLabel(session.stream_health)}), session.stream_health === 'healthy' ? 'ok' : 'warn'));
+  if (device && device.adb_state) items.push(chip(mirrorT('mirror.status.adb',{value:adbStateLabel(device.adb_state)}), device.adb_state === 'online' ? 'ok' : 'warn'));
+  if (state.alas) items.push(chip(mirrorT('mirror.status.alas',{value:alasStatusLabel(state.alas.status)}), state.alas.status === 'running' ? 'ok' : state.alas.status === 'error' ? 'warn' : ''));
   if (topStatus) items.forEach(item=>topStatus.appendChild(item));
   const mirrorBusy=actionBusy('mirror');
   const startBtn=$('startBtn');
   if (startBtn) {
-    setButtonLabel(startBtn, !device ? '开始投屏' : state.starting ? '启动中...' : running ? (state.videoConnected ? '刷新画面' : '连接画面') : '开始投屏');
+    setButtonLabel(startBtn, !device ? mirrorT('mirror.actions.start_mirror') : state.starting ? mirrorT('mirror.actions.starting_mirror') : running ? (state.videoConnected ? mirrorT('mirror.actions.refresh_video') : mirrorT('mirror.actions.connect_video')) : mirrorT('mirror.actions.start_mirror'));
     startBtn.disabled = mirrorBusy || state.starting || state.qualityApplying || !deviceSelectable(device);
   }
   const controlBtn=$('controlBtn');
   if (controlBtn) {
-    setButtonLabel(controlBtn, actionBusy('control') ? '处理中...' : state.hasControl ? '释放控制' : '获取控制');
+    setButtonLabel(controlBtn, actionBusy('control') ? mirrorT('mirror.actions.busy') : state.hasControl ? mirrorT('mirror.actions.release_control') : mirrorT('mirror.actions.acquire_control'));
     controlBtn.disabled = actionBusy('control') || state.starting || !deviceSelectable(device) || !device.can_control;
   }
   const stopDisabled=mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
@@ -583,7 +587,7 @@ function render(){
   renderDevices();
   renderStatus();
   renderAccountPanel();
-  const roleChip=$('roleChip'); if (roleChip) roleChip.textContent = state.user && state.user.is_admin ? '管理员' : '普通用户';
+  const roleChip=$('roleChip'); if (roleChip) roleChip.textContent = mirrorT(state.user && state.user.is_admin ? 'common.roles.admin' : 'common.roles.user');
   const adminLink=$('adminLink'); if (adminLink) adminLink.hidden = !(state.user && state.user.is_admin);
 }
 function currentAlasBinding(){
@@ -603,7 +607,7 @@ function syncAlasConfigSelect(){
         option=document.createElement('option');
         option.value=binding.config_name;
       }
-      option.textContent=`${binding.config_name}${binding.is_default ? '（默认）' : ''}`;
+      option.textContent=`${binding.config_name}${binding.is_default ? mirrorT('mirror.alas_panel.default_suffix') : ''}`;
       select.appendChild(option);
     });
     select.dataset.catalogRevision=revision;
@@ -635,7 +639,7 @@ function renderAlasConfigSummary(element, configName){
   copy.className='alas-config-state__copy';
   const label=document.createElement('span');
   label.className='alas-config-state__label';
-  label.textContent='当前配置';
+  label.textContent=mirrorT('mirror.alas_panel.current_config');
   const name=document.createElement('strong');
   name.className='alas-config-state__name';
   name.textContent=configName;
@@ -656,37 +660,37 @@ function renderAlasPanel(){
   syncAlasConfigSelect();
   if (configState) {
     configState.hidden=showPicker;
-    if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(configState, '正在读取可用配置…');
-    else if (state.alasConfigsError) setAlasPanelMessage(configState, '暂时无法读取授权配置', 'danger');
-    else if (!state.alasConfigsLoaded) setAlasPanelMessage(configState, '打开面板后加载你的 ALAS 配置');
-    else if (!configCount) setAlasPanelMessage(configState, '未授权任何 ALAS 配置', 'warn');
+    if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(configState, mirrorT('mirror.alas_panel.loading_configs'));
+    else if (state.alasConfigsError) setAlasPanelMessage(configState, mirrorT('mirror.alas_panel.config_load_unavailable'), 'danger');
+    else if (!state.alasConfigsLoaded) setAlasPanelMessage(configState, mirrorT('mirror.alas_panel.load_when_opened'));
+    else if (!configCount) setAlasPanelMessage(configState, mirrorT('mirror.alas_panel.no_authorized_config'), 'warn');
     else renderAlasConfigSummary(configState,state.selectedAlasConfig);
   }
 
   box.textContent='';
   if (binding) {
-    box.appendChild(chip(binding.is_default ? '默认配置' : '已授权'));
-    box.appendChild(chip(binding.can_run ? '可启停' : '仅查看运行状态', binding.can_run ? 'ok' : 'warn'));
-    box.appendChild(chip(binding.can_edit ? '可编辑配置' : '不可编辑配置', binding.can_edit ? 'ok' : ''));
+    box.appendChild(chip(mirrorT(binding.is_default ? 'mirror.alas_panel.default_config' : 'mirror.alas_panel.authorized')));
+    box.appendChild(chip(mirrorT(binding.can_run ? 'mirror.alas_panel.can_run' : 'mirror.alas_panel.view_status_only'), binding.can_run ? 'ok' : 'warn'));
+    box.appendChild(chip(mirrorT(binding.can_edit ? 'mirror.alas_panel.can_edit' : 'mirror.alas_panel.cannot_edit'), binding.can_edit ? 'ok' : ''));
   }
   if (a.status) box.appendChild(chip(alasStatusLabel(a.status), a.status === 'running' ? 'ok' : a.status === 'error' ? 'danger' : ''));
 
-  if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(runtimeState, '正在加载配置权限…');
-  else if (state.alasConfigsError) setAlasPanelMessage(runtimeState, `配置列表加载失败：${state.alasConfigsError}`, 'danger');
-  else if (state.alasConfigsLoaded && !configCount) setAlasPanelMessage(runtimeState, '请联系管理员分配一个或多个 ALAS 配置。', 'warn');
-  else if (state.alasStatusRefreshPending) setAlasPanelMessage(runtimeState, `当前操作完成后将刷新 ${state.selectedAlasConfig} 的运行状态…`);
-  else if (state.alasStatusLoading) setAlasPanelMessage(runtimeState, state.alasSwitching ? `正在切换到 ${state.selectedAlasConfig}…` : `正在读取 ${state.selectedAlasConfig} 的运行状态…`);
-  else if (state.alasStatusError) setAlasPanelMessage(runtimeState, `ALAS Runtime 暂时不可达：${state.alasStatusError}`, 'danger');
-  else if (a.error) setAlasPanelMessage(runtimeState, `ALAS Runtime 返回异常：${a.error}`, 'danger');
-  else if (binding && a.status) setAlasPanelMessage(runtimeState, `${state.selectedAlasConfig} 的运行状态已同步`, 'ok');
-  else if (binding) setAlasPanelMessage(runtimeState, '尚未读取运行状态');
+  if (state.alasConfigsLoading && !state.alasConfigsLoaded) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.loading_permissions'));
+  else if (state.alasConfigsError) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.config_list_failed',{error:state.alasConfigsError}), 'danger');
+  else if (state.alasConfigsLoaded && !configCount) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.contact_admin'), 'warn');
+  else if (state.alasStatusRefreshPending) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.refresh_pending',{config:state.selectedAlasConfig}));
+  else if (state.alasStatusLoading) setAlasPanelMessage(runtimeState, mirrorT(state.alasSwitching ? 'mirror.alas_panel.switching' : 'mirror.alas_panel.loading_status',{config:state.selectedAlasConfig}));
+  else if (state.alasStatusError) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.runtime_unavailable',{error:state.alasStatusError}), 'danger');
+  else if (a.error) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.runtime_error',{error:a.error}), 'danger');
+  else if (binding && a.status) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.status_synced',{config:state.selectedAlasConfig}), 'ok');
+  else if (binding) setAlasPanelMessage(runtimeState, mirrorT('mirror.alas_panel.status_not_loaded'));
   else setAlasPanelMessage(runtimeState, '');
 
   const toggle=$('alasToggleRun');
   if (toggle) {
-    toggle.textContent = a.status === 'error' ? '重启 ALAS' : a.status === 'running' ? '停止 ALAS' : '启动 ALAS';
+    toggle.textContent = mirrorT(a.status === 'error' ? 'mirror.alas_panel.restart' : a.status === 'running' ? 'mirror.alas_panel.stop' : 'mirror.alas_panel.start');
     toggle.disabled = !binding || !binding.can_run || state.alasStatusLoading || actionBusy('alas');
-    toggle.title = binding && !binding.can_run ? '管理员未授予此配置的启停权限' : '';
+    toggle.title = binding && !binding.can_run ? mirrorT('mirror.alas_panel.run_denied') : '';
   }
   const reload=$('alasReload');
   if (reload) reload.disabled=state.alasConfigsLoading || actionBusy('alas');
@@ -706,8 +710,8 @@ function renderAlasPanel(){
 function renderAccountPanel(){
   const box=$('accountInfo'); if(!box) return; box.textContent='';
   const user=state.user || {};
-  box.appendChild(chip(user.username || '未登录', 'ok'));
-  box.appendChild(chip(user.is_admin ? '管理员' : '普通用户'));
+  box.appendChild(chip(user.username || mirrorT('mirror.account.not_logged_in'), 'ok'));
+  box.appendChild(chip(mirrorT(user.is_admin ? 'common.roles.admin' : 'common.roles.user')));
 }
 function setToolPanelActive(panel, active){
   if (!panel) return;
@@ -762,7 +766,7 @@ function openToolDrawer(id, trigger){
   syncToolTriggerState(id);
   closeStatusDetails();
   const title=$('workspaceDrawerTitle');
-  if (title) title.textContent=({tools:'画面设置', alasTools:'ALAS', accountTools:'账户设置'}[id]) || '工作区工具';
+  if (title) title.textContent=mirrorT(({tools:'mirror.tools.display', alasTools:'mirror.tools.alas', accountTools:'mirror.tools.account'}[id]) || 'mirror.tools.workspace');
   closeToolPanels(id);
   setToolPanelActive(el, true);
   if (!drawer) return;
@@ -803,11 +807,11 @@ async function changePassword(){
     new_password:$('newPassword').value,
     confirm_password:$('confirmPassword').value
   };
-  if (!payload.current_password || !payload.new_password || !payload.confirm_password) return show('请完整填写密码');
-  if (payload.new_password !== payload.confirm_password) return show('两次输入的新密码不一致');
+  if (!payload.current_password || !payload.new_password || !payload.confirm_password) return show(mirrorT('mirror.account.fill_all_passwords'));
+  if (payload.new_password !== payload.confirm_password) return show(mirrorT('mirror.account.password_mismatch'));
   const result = await fetchJson('/api/account/password', {method:'PUT', body:payload});
   clearPasswordForm();
-  show(result.other_sessions_removed ? `密码已修改，已清理 ${result.other_sessions_removed} 个其它会话` : '密码已修改');
+  show(result.other_sessions_removed ? mirrorT('mirror.account.password_changed_sessions',{count:result.other_sessions_removed}) : mirrorT('mirror.account.password_changed'));
 }
 function loadUser(force=false){
   return requestResource('user', '/api/me', data=>{
@@ -831,7 +835,7 @@ function loadDevices(force=false){
   return request.catch(error=>{
     state.devicesLoaded=true;
     state.deviceLoading=false;
-    state.deviceLoadError=(error && error.message) || '无法获取设备列表';
+    state.deviceLoadError=(error && error.message) || mirrorT('mirror.errors.device_list');
     scheduleRender();
     throw error;
   });
@@ -930,7 +934,7 @@ function handleAlasCatalogFailure(error){
   replaceAlasConfigCatalog([]);
   state.alasConfigsLoaded=true;
   state.alasConfigsLoading=false;
-  state.alasConfigsError=(error && error.message) || '无法读取配置权限';
+  state.alasConfigsError=(error && error.message) || mirrorT('mirror.errors.config_permissions');
   state.selectedAlasConfig='';
   state.alas=null;
   state.alasStatusLoading=false;
@@ -988,7 +992,7 @@ function loadAlasStatus(force=false, options={}){
     if (isAlasStatusResponseCurrent(requestEpoch, state.alasStatusEpoch, configName, state.selectedAlasConfig)) {
       state.alas=null;
       state.alasStatusLoading=false;
-      state.alasStatusError=(error && error.message) || '无法获取运行状态';
+      state.alasStatusError=(error && error.message) || mirrorT('mirror.errors.runtime_status');
       state.alasSwitching=false;
       scheduleRender();
     }
@@ -1033,11 +1037,11 @@ async function loadAll(options={}){
 }
 async function startMirror(){
   const id=state.selectedDeviceId;
-  if (!id) return show('请先选择设备');
-  if (state.starting) return show('投屏正在启动，请稍等');
-  if (state.qualityApplying) return show('画质正在应用，请稍等');
+  if (!id) return show(mirrorT('mirror.actions.select_device'));
+  if (state.starting) return show(mirrorT('mirror.actions.starting_wait'));
+  if (state.qualityApplying) return show(mirrorT('mirror.actions.quality_wait'));
   const now = Date.now();
-  if (now - state.lastStartAt < 1200) return show('操作过快，请稍等');
+  if (now - state.lastStartAt < 1200) return show(mirrorT('mirror.actions.too_fast'));
   state.lastStartAt = now;
   state.starting = true;
   render();
@@ -1045,14 +1049,14 @@ async function startMirror(){
     const data = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/start`, {method:'POST', body:qualityPayload()});
     replaceMutationSessions(data.sessions);
     if (data.ok === false) {
-      state.mirrorError=data.detail || data.error || '投屏启动失败，请检查 ADB 连接';
+      state.mirrorError=data.detail || data.error || mirrorT('mirror.actions.start_failed');
       render();
       return show(state.mirrorError, 5200);
     }
     if (state.activeDeviceId === id && socketLive(state.videoWs)) {
       schedulePlayerReset();
       if (!socketLive(state.controlWs)) openControl(id);
-      show('投屏已在运行，已刷新播放器');
+      show(mirrorT('mirror.actions.already_running'));
       return;
     }
     reconnectSockets(id, 'connecting');
@@ -1063,8 +1067,8 @@ async function startMirror(){
 }
 async function stopMirror(){
   const id=state.selectedDeviceId;
-  if (!id) return show('请先选择设备');
-  if (state.starting) return show('投屏正在启动，请稍等');
+  if (!id) return show(mirrorT('mirror.actions.select_device'));
+  if (state.starting) return show(mirrorT('mirror.actions.starting_wait'));
   const result=await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
   replaceMutationSessions(result.sessions);
   closeVideo();
@@ -1076,37 +1080,37 @@ async function performQualityApply(payload){
   const id=state.selectedDeviceId;
   const running = !!(selectedSession() && selectedSession().running);
   invalidateResource('video');
-  setQualityStatus(running ? '正在切换画质，投屏流会短暂重启...' : '正在保存画质偏好...');
+  setQualityStatus(mirrorT(running ? 'mirror.actions.quality_switching' : 'mirror.actions.quality_saving'));
   render();
   try {
     if (!id) {
       const saved = await fetchJson('/api/video/preferences', {method:'PUT', body:payload});
       state.videoPrefs = Object.assign({}, state.videoPrefs || {}, saved);
       setQualityStatus('');
-      show('画质偏好已保存');
+      show(mirrorT('mirror.actions.quality_saved'));
       return;
     }
     const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/settings`, {method:'PUT', body:payload});
     if (result.ok === false) {
       replaceMutationSessions(result.sessions);
-      setQualityStatus('画质应用失败');
-      show(result.detail || result.error || '画质应用失败，投屏未恢复', 5200);
+      setQualityStatus(mirrorT('mirror.actions.quality_failed'));
+      show(result.detail || result.error || mirrorT('mirror.actions.quality_recovery_failed'), 5200);
       return;
     }
     state.videoPrefs = Object.assign({}, state.videoPrefs || {}, {effective:result.preferences, preferences:result.preferences});
     replaceMutationSessions(result.sessions);
     if (result.restarted) {
-      setQualityStatus('画质已应用，投屏流已重启');
-      show('画质已应用，投屏已按新参数重启');
+      setQualityStatus(mirrorT('mirror.actions.quality_restarted'));
+      show(mirrorT('mirror.actions.quality_restarted_notice'));
     } else if (running) {
       setQualityStatus('');
-      show('画质设置已确认，当前投屏参数未变化');
+      show(mirrorT('mirror.actions.quality_unchanged'));
     } else {
       setQualityStatus('');
-      show('画质偏好已保存，下次启动投屏生效');
+      show(mirrorT('mirror.actions.quality_saved_next'));
     }
   } catch (error) {
-    setQualityStatus('画质应用失败');
+    setQualityStatus(mirrorT('mirror.actions.quality_failed'));
     throw error;
   }
 }
@@ -1198,7 +1202,7 @@ function closeControlSocket(){
   setControlOwnership(false);
   destroyInput();
   if (ws) { try { ws.close(); } catch(_){} }
-  settleControlRequest(new Error('控制通道已关闭'));
+  settleControlRequest(new Error(mirrorT('mirror.control.channel_closed')));
 }
 function closeVideo(){
   cancelInactiveStop();
@@ -1222,7 +1226,7 @@ function scheduleInactiveStop(reason){
   if (delay <= 0 || !socketLive(state.videoWs)) return;
   state.idleStopReason = reason || 'inactive';
   const minutes = Math.round(delay / 60000);
-  show(`页面未聚焦，${minutes} 分钟后自动停止本浏览器观看以节省上行`, 4200);
+  show(mirrorT('mirror.idle_stop.scheduled',{minutes}), 4200);
   state.idleStopTimer = setTimeout(()=>idleStopMirror(state.idleStopReason).catch(()=>{}), delay);
 }
 async function idleStopMirror(reason){
@@ -1235,7 +1239,7 @@ async function idleStopMirror(reason){
   await new Promise(resolve=>setTimeout(resolve, 300));
   const result = await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/idle-stop`, {method:'POST', body:{reason:reason || 'inactive'}});
   replaceMutationSessions(result.sessions);
-  show(result.stopped ? '页面长时间未聚焦，投屏已自动停止' : '页面长时间未聚焦，已停止本浏览器观看');
+  show(result.stopped ? mirrorT('mirror.idle_stop.mirror_stopped') : mirrorT('mirror.idle_stop.viewer_stopped'));
   render();
 }
 function reconnectSockets(id, phase='connecting'){
@@ -1369,7 +1373,7 @@ function scheduleVideoReconnect(id){
   const attempt=state.videoReconnectAttempts;
   if (attempt >= RECONNECT_DELAYS.length) {
     state.connectionPhase='error';
-    state.mirrorError='视频通道多次重连失败，请重新开始投屏';
+    state.mirrorError=mirrorT('mirror.errors.video_reconnect_failed');
     render();
     return;
   }
@@ -1457,7 +1461,7 @@ function openVideo(id, options={}){
     trimPlaybackDelay(video);
     if (video.paused) video.play().catch(()=>{});
   };
-  ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) { state.connectionPhase='error'; state.mirrorError='视频通道连接失败'; show(state.mirrorError); render(); } };
+  ws.onerror=()=>{ if (state.videoSeq === token && state.videoWs === ws) { state.connectionPhase='error'; state.mirrorError=mirrorT('mirror.errors.video_channel_failed'); show(state.mirrorError); render(); } };
   ws.onclose = () => { if (state.videoSeq !== token || state.videoWs !== ws) return; state.videoConnected=false; state.videoWs=null; state.playerSeq+=1; if (state.jmuxer) { try { state.jmuxer.destroy(); } catch(_){} state.jmuxer=null; } state.streamGeneration=0; state.videoSpsSignature=''; state.videoReconfiguring=false; resetVideoElement(); state.connectionPhase=selectedSession() && selectedSession().running ? 'disconnected' : 'idle'; render(); scheduleVideoReconnect(id); };
   video.onloadedmetadata = () => updateInputSize();
   video.onresize = () => updateInputSize();
@@ -1498,26 +1502,26 @@ function openControl(id, options={}){
       if (msg.ok !== undefined) {
         if (state.controlRequest && state.controlRequest.ws === ws && state.controlRequest.kind === 'acquire') {
           if (msg.ok) settleControlRequest();
-          else settleControlRequest(new Error(msg.owner ? `控制权正由 ${msg.owner} 使用` : '暂时无法获取控制权'));
+          else settleControlRequest(new Error(msg.owner ? mirrorT('mirror.control.owner',{username:msg.owner}) : mirrorT('mirror.control.acquire_failed')));
         }
       }
     }
     if (msg.type === 'control_released') {
       setControlOwnership(false);
       if (state.controlRequest && state.controlRequest.ws === ws && state.controlRequest.kind === 'release') {
-        if (msg.ok === false) settleControlRequest(new Error('释放控制权失败'));
+        if (msg.ok === false) settleControlRequest(new Error(mirrorT('mirror.control.release_failed')));
         else settleControlRequest();
       }
     }
     if (msg.type === 'control_error') {
-      const error=new Error(msg.error || '控制失败');
+      const error=new Error(msg.error || mirrorT('mirror.control.failed'));
       settleControlRequest(error);
       show(error.message);
     }
     render();
   };
-  ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) { settleControlRequest(new Error('控制通道连接失败')); show('控制通道连接失败'); } };
-  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); settleControlRequest(new Error('控制通道已关闭')); scheduleControlReconnect(id); };
+  ws.onerror=()=>{ if (state.controlSeq === token && state.controlWs === ws) { settleControlRequest(new Error(mirrorT('mirror.control.channel_failed'))); show(mirrorT('mirror.control.channel_failed')); } };
+  ws.onclose = () => { if (state.controlSeq !== token || state.controlWs !== ws) return; state.controlConnected=false; state.controlWs=null; setControlOwnership(false); destroyInput(); render(); settleControlRequest(new Error(mirrorT('mirror.control.channel_closed'))); scheduleControlReconnect(id); };
   return ws;
 }
 function updateInputSize(){
@@ -1576,10 +1580,10 @@ function setupInput(){
   }, video, state.screen.w, state.screen.h, false, renderKeyboardControl);
 }
 async function toggleControl(){
-  const id=state.selectedDeviceId; if (!id) return show('请先选择设备');
+  const id=state.selectedDeviceId; if (!id) return show(mirrorT('mirror.actions.select_device'));
   const ws = openControl(id);
   await waitForSocketOpen(ws);
-  if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) throw new Error('控制通道未连接');
+  if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) throw new Error(mirrorT('mirror.control.channel_not_connected'));
   const releasing=state.hasControl;
   if (releasing) setControlOwnership(false);
   const response=waitForControlResponse(ws, releasing ? 'release' : 'acquire');
@@ -1592,7 +1596,7 @@ async function toggleControl(){
 }
 function waitForSocketOpen(ws, timeoutMs=8000){
   if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
-  if (ws.readyState !== WebSocket.CONNECTING) return Promise.reject(new Error('控制通道未连接'));
+  if (ws.readyState !== WebSocket.CONNECTING) return Promise.reject(new Error(mirrorT('mirror.control.channel_not_connected')));
   return new Promise((resolve, reject)=>{
     let timer=null;
     const cleanup=()=>{
@@ -1602,9 +1606,9 @@ function waitForSocketOpen(ws, timeoutMs=8000){
       ws.removeEventListener('close', onClose);
     };
     const onOpen=()=>{ cleanup(); resolve(); };
-    const onError=()=>{ cleanup(); reject(new Error('控制通道连接失败')); };
-    const onClose=()=>{ cleanup(); reject(new Error('控制通道已关闭')); };
-    timer=setTimeout(()=>{ cleanup(); reject(new Error('控制通道连接超时')); }, timeoutMs);
+    const onError=()=>{ cleanup(); reject(new Error(mirrorT('mirror.control.channel_failed'))); };
+    const onClose=()=>{ cleanup(); reject(new Error(mirrorT('mirror.control.channel_closed'))); };
+    timer=setTimeout(()=>{ cleanup(); reject(new Error(mirrorT('mirror.control.channel_timeout'))); }, timeoutMs);
     ws.addEventListener('open', onOpen, {once:true});
     ws.addEventListener('error', onError, {once:true});
     ws.addEventListener('close', onClose, {once:true});
@@ -1613,12 +1617,12 @@ function waitForSocketOpen(ws, timeoutMs=8000){
 function waitForControlResponse(ws, kind){
   return new Promise((resolve, reject)=>{
     const timer=setTimeout(()=>{
-      if (state.controlRequest && state.controlRequest.ws === ws) settleControlRequest(new Error('控制权操作超时'));
+      if (state.controlRequest && state.controlRequest.ws === ws) settleControlRequest(new Error(mirrorT('mirror.control.operation_timeout')));
     }, 8000);
     state.controlRequest={ws, kind, resolve, reject, timer};
   });
 }
-function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
+function sendKey(code){ if (!state.hasControl || !state.input) return show(mirrorT('mirror.control.acquire_first')); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
 function renderKeyboardControl(){
   const button=$('keyboardBtn');
   if (!button) return;
@@ -1626,14 +1630,14 @@ function renderKeyboardControl(){
   const active=!!(ready && state.input.keyboardActive);
   button.disabled=!ready;
   button.dataset.active=String(active);
-  button.title='打开键盘';
+  button.title=mirrorT('mirror.control.open_keyboard');
   button.setAttribute('aria-label', button.title);
 }
 function openMobileKeyboard(){
   const input=state.input;
-  if (!state.hasControl || !input) return show('请先获取控制');
+  if (!state.hasControl || !input) return show(mirrorT('mirror.control.acquire_first'));
   if (!input.openKeyboard()) {
-    show('浏览器未允许打开键盘，请再次点击键盘按钮');
+    show(mirrorT('mirror.control.keyboard_blocked'));
   }
   renderKeyboardControl();
 }
@@ -1642,7 +1646,7 @@ async function toggleAlas(){
   const binding=currentAlasBinding();
   if (!binding) return;
   if (!binding.can_run) {
-    state.alasStatusError='管理员未授予此配置的启停权限';
+    state.alasStatusError=mirrorT('mirror.alas_panel.run_denied');
     scheduleRender();
     return;
   }
@@ -1655,15 +1659,15 @@ async function toggleAlas(){
   scheduleRender();
   try {
     const result=await fetchJson('/api/alas/toggle', {method:'POST', body:{config_name:configName}});
-    if(result.ok === false) throw new Error(result.error || 'ALAS 操作失败');
+    if(result.ok === false) throw new Error(result.error || mirrorT('mirror.errors.alas_operation'));
     if (!isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) return;
     invalidateAlasStatusRequest();
     const status=result.alas || result;
     state.alas=Object.assign({}, status, {config:(status && status.config) || configName});
     state.alasStatusError='';
-    show(state.alas.status === 'running' ? `${configName} 已启动` : `${configName} 状态已更新`);
+    show(mirrorT(state.alas.status === 'running' ? 'mirror.alas_action.started' : 'mirror.alas_action.updated',{config:configName}));
   } catch (error) {
-    if (isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) state.alasStatusError=(error && error.message) || 'ALAS 操作失败';
+  if (isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) state.alasStatusError=(error && error.message) || mirrorT('mirror.errors.alas_operation');
     throw error;
   } finally {
     if (isAlasOperationCurrent(operationSeq, state.alasOperationSeq, configName, state.selectedAlasConfig)) state.alasStatusLoading=false;
@@ -1771,8 +1775,8 @@ function setSidebarCollapsed(collapsed, persist=true){
   const button=$('sidebarCollapseBtn');
   if (button) {
     button.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
-    button.setAttribute('aria-label', state.sidebarCollapsed ? '展开设备栏' : '收起设备栏');
-    button.title=state.sidebarCollapsed ? '展开设备栏' : '收起设备栏';
+    button.setAttribute('aria-label', state.sidebarCollapsed ? mirrorT('mirror.ui.expand_sidebar') : mirrorT('mirror.ui.collapse_sidebar'));
+    button.title=state.sidebarCollapsed ? mirrorT('mirror.ui.expand_sidebar') : mirrorT('mirror.ui.collapse_sidebar');
   }
   if (persist) persistSidebarCollapsed();
   scheduleLayout();
@@ -1812,8 +1816,8 @@ function syncSidebarAccessibility(){
   const collapseButton=$('sidebarCollapseBtn');
   if (collapseButton) {
     collapseButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-    collapseButton.setAttribute('aria-label','关闭设备栏');
-    collapseButton.title='关闭设备栏';
+    collapseButton.setAttribute('aria-label',mirrorT('mirror.ui.close_sidebar'));
+    collapseButton.title=mirrorT('mirror.ui.close_sidebar');
   }
 }
 function openSidebar(trigger){
@@ -1877,7 +1881,7 @@ async function ensureFullscreenQuality(epoch=state.immersiveEpoch){
     if (!state.immersive || epoch!==state.immersiveEpoch) return;
     const selection=fullscreenQualitySelection();
     if (!selection) {
-      show('后台未配置可用的 720p 或更高全屏画质', 5200);
+      show(mirrorT('mirror.actions.fullscreen_quality_unavailable'), 5200);
       return;
     }
     const target={...qualityPayload(), profile:selection.name, ...selection.values};
@@ -1908,8 +1912,8 @@ function syncImmersiveRail(open=state.immersiveRailOpen){
   if (toggle) {
     toggle.setAttribute('aria-expanded', state.immersiveRailOpen ? 'true' : 'false');
     toggle.setAttribute('aria-hidden', state.immersive ? 'false' : 'true');
-    toggle.setAttribute('aria-label', state.immersiveRailOpen ? '隐藏侧边控制' : '显示侧边控制');
-    toggle.title=state.immersiveRailOpen ? '隐藏侧边控制' : '显示侧边控制';
+    toggle.setAttribute('aria-label', state.immersiveRailOpen ? mirrorT('mirror.actions.hide_rail') : mirrorT('mirror.actions.show_rail'));
+    toggle.title=state.immersiveRailOpen ? mirrorT('mirror.actions.hide_rail') : mirrorT('mirror.actions.show_rail');
   }
   if (controls) {
     const hidden=state.immersive && !state.immersiveRailOpen;
@@ -1921,8 +1925,8 @@ function syncFullscreenButton(){
   const button=$('fullscreenBtn');
   if (!button) return;
   button.setAttribute('aria-pressed', state.immersive ? 'true' : 'false');
-  button.setAttribute('aria-label', state.immersive ? '退出全屏' : '进入全屏');
-  button.title=state.immersive ? '退出全屏' : '进入全屏';
+  button.setAttribute('aria-label', state.immersive ? mirrorT('mirror.fullscreen.exit') : mirrorT('mirror.fullscreen.enter'));
+  button.title=state.immersive ? mirrorT('mirror.fullscreen.exit') : mirrorT('mirror.fullscreen.enter');
   const use=button.querySelector('use');
   if (use) use.setAttribute('href', String(use.getAttribute('href') || '').replace(/#[^#]+$/, state.immersive ? '#minimize-2' : '#maximize-2'));
 }
@@ -1962,7 +1966,7 @@ async function enterImmersiveMode(trigger){
     try {
       await request.call(app, {navigationUI:'hide'});
     } catch (_) {
-      show('浏览器未开放系统全屏，已使用沉浸布局');
+      show(mirrorT('mirror.fullscreen.fallback'));
     }
   }
   if (!state.immersive || epoch!==state.immersiveEpoch) {
@@ -1972,7 +1976,7 @@ async function enterImmersiveMode(trigger){
     }
     return;
   }
-  ensureFullscreenQuality(epoch).catch(error=>show(error.message || '全屏画质应用失败', 5200));
+  ensureFullscreenQuality(epoch).catch(error=>show(error.message || mirrorT('mirror.fullscreen.quality_failed'), 5200));
 }
 async function exitImmersiveMode(){
   state.immersiveEpoch+=1;
@@ -1982,7 +1986,7 @@ async function exitImmersiveMode(){
     try { await exit.call(document); } catch (error) { exitError=error; }
   }
   if (fullscreenElement()) {
-    if (exitError) show('浏览器未能退出系统全屏，请再次按 Esc');
+    if (exitError) show(mirrorT('mirror.fullscreen.exit_failed'));
     return false;
   }
   state.systemFullscreen=false;
@@ -2031,10 +2035,10 @@ function initializeWorkspaceInteractions(){
   try { state.sidebarCollapsed=localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch (_) { state.sidebarCollapsed=false; }
   syncSidebarAccessibility();
   closeToolDrawer();
-  bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, '正在启动投屏', startMirror).catch(e=>show(e.message)));
-  bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, '正在停止投屏', stopMirror).catch(e=>show(e.message)));
-  bindClick('controlBtn', (_, button)=>runBusyAction('control', button, '正在更新控制权', toggleControl).catch(e=>show(e.message)));
-  bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, '正在刷新', ()=>loadAll({force:true, refreshAlasCatalog:true})).catch(e=>show(e.message)));
+  bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.starting'), startMirror).catch(e=>show(e.message)));
+  bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).catch(e=>show(e.message)));
+  bindClick('controlBtn', (_, button)=>runBusyAction('control', button, mirrorT('mirror.busy.control'), toggleControl).catch(e=>show(e.message)));
+  bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, mirrorT('mirror.busy.refresh'), ()=>loadAll({force:true, refreshAlasCatalog:true})).catch(e=>show(e.message)));
   bindClick('menuBtn', (_, button)=>openSidebar(button));
   bindClick('sidebarCollapseBtn', ()=>{ if (mobileSidebarMedia.matches) closeSidebar(); else setSidebarCollapsed(!state.sidebarCollapsed); });
   bindClick('sidebarBackdrop', ()=>closeSidebar());
@@ -2045,7 +2049,7 @@ function initializeWorkspaceInteractions(){
   bindClick('keyboardBtn', openMobileKeyboard);
   bindClick('fullscreenBtn', (_, button)=>toggleImmersiveMode(button));
   bindClick('immersiveRailToggle', ()=>syncImmersiveRail(!state.immersiveRailOpen));
-  bindClick('immersiveStopBtn', (_, button)=>runBusyAction('mirror', button, '正在停止投屏', stopMirror).catch(e=>show(e.message)));
+  bindClick('immersiveStopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).catch(e=>show(e.message)));
   bindClick('exitFullscreenBtn', ()=>exitImmersiveMode());
   bindClick('alasBtn', (_, button)=>{
     toggleToolPanel('alasTools', button);
@@ -2055,13 +2059,13 @@ function initializeWorkspaceInteractions(){
   bindClick('accountBtn', (_, button)=>toggleToolPanel('accountTools', button));
   bindClick('toolDrawerCloseBtn', ()=>closeToolDrawer());
   bindClick('toolDrawerBackdrop', ()=>closeToolDrawer());
-  bindClick('changePasswordBtn', (_, button)=>runBusyAction('password', button, '正在修改密码', changePassword).catch(e=>show(e.message)));
-  bindClick('alasToggleRun', (_, button)=>runBusyAction('alas', button, '正在更新 ALAS', toggleAlas).catch(()=>{}));
-  bindClick('alasReload', (_, button)=>runBusyAction('alas', button, '正在刷新 ALAS', reloadAlas).catch(()=>{}));
+  bindClick('changePasswordBtn', (_, button)=>runBusyAction('password', button, mirrorT('mirror.busy.password'), changePassword).catch(e=>show(e.message)));
+  bindClick('alasToggleRun', (_, button)=>runBusyAction('alas', button, mirrorT('mirror.busy.alas_update'), toggleAlas).catch(()=>{}));
+  bindClick('alasReload', (_, button)=>runBusyAction('alas', button, mirrorT('mirror.busy.alas_refresh'), reloadAlas).catch(()=>{}));
   const alasConfigSelect=$('alasConfigSelect');
   if (alasConfigSelect) alasConfigSelect.onchange=event=>selectAlasConfig(event.currentTarget.value).catch(()=>{});
   const qualityStreamMode=$('qualityStreamMode');
-  if (qualityStreamMode) qualityStreamMode.onchange=()=>runBusyAction('quality', qualityStreamMode, '正在应用画质', saveOrApplyQuality).catch(e=>show(e.message));
+  if (qualityStreamMode) qualityStreamMode.onchange=()=>runBusyAction('quality', qualityStreamMode, mirrorT('mirror.actions.apply_quality'), saveOrApplyQuality).catch(e=>show(e.message));
   const search=$('deviceSearch');
   if (search) search.addEventListener('input', event=>{ state.deviceQuery=event.currentTarget.value || ''; scheduleRender(); });
   bindClick('deviceFilterAll', ()=>{ state.deviceFilter='all'; scheduleRender(); });

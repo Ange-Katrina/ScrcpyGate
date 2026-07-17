@@ -154,7 +154,7 @@ class UiTemplateContractTests(unittest.TestCase):
             self.assertRegex(source, r'<form\s+method="post"\s+action="/logout"')
             self.assertIn('name="csrf_token"', source)
         self.assertIn('href="/alas/embed/"', index)
-        self.assertIn("打开 ALAS 页面", index)
+        self.assertIn("t('mirror.ui.open_alas')", index)
         self.assertIn('href="/alas/embed/"', admin)
         self.assertIn("打开完整 ALAS 页面", admin)
         self.assertIn("Runtime URL 可填写 IP、域名或完整 URL", admin)

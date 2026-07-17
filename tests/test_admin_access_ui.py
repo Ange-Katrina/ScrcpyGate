@@ -128,7 +128,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
             "let editingUsername = ''",
             "$('newUsername').readOnly=true",
             "expires_at:expiresAt",
-            "last_permanent_admin_required:'系统必须保留至少一个永久有效的管理员'",
+            "last_permanent_admin_required:'admin.api_error.last_permanent_admin_required'",
         ):
             self.assertIn(token, self.script)
         render_permissions = self.script.split("function renderPermissions", 1)[1].split("function alasBindings", 1)[0]

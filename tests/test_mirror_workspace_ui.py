@@ -11,6 +11,7 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         cls.template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
         cls.styles = (ROOT / "static/css/mirror.css").read_text(encoding="utf-8")
         cls.script = (ROOT / "static/js/mirror.js").read_text(encoding="utf-8")
+        cls.catalog = (ROOT / "static/i18n/zh-CN.json").read_text(encoding="utf-8")
 
     def test_workspace_exposes_search_filters_and_primary_control_state(self):
         for token in (
@@ -125,7 +126,8 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
                 self.assertIn(token, self.template + self.styles + self.script)
         self.assertNotIn("ADB 地址已隐藏", self.script)
         self.assertIn("!/^dev_[a-f0-9]+$/i.test(value)", self.script)
-        self.assertIn("adbState === 'unauthorized' ? '等待设备端授权'", self.script)
+        self.assertIn("mirrorT('mirror.device.unauthorized_wait')", self.script)
+        self.assertIn('"unauthorized_wait": "等待设备端授权"', self.catalog)
         self.assertIn("visibleCount === total", self.script)
         self.assertIn("if (summary.textContent !== summaryText)", self.script)
 
@@ -161,9 +163,9 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
     def test_quality_summary_distinguishes_scrcpy_long_edge_from_720p(self):
         self.assertIn("function maxSizeQualityLabel(value)", self.script)
         self.assertIn("1280:'720p'", self.script)
-        self.assertIn("上限 ${maxSizeQualityLabel(q.max_size)}", self.script)
-        self.assertIn("1280 × 720", self.template)
-        self.assertIn("`${size} × ${height}", self.script)
+        self.assertIn("mirrorT('mirror.quality.summary'", self.script)
+        self.assertIn("1280 × 720", self.catalog)
+        self.assertIn('"size_label": "{size} × {height}', self.catalog)
         self.assertNotIn("return `输出 ${size}", self.script)
 
     def test_workspace_renders_the_shared_four_quality_profiles(self):

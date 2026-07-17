@@ -13,6 +13,7 @@ class AlasMirrorUiContractTests(unittest.TestCase):
         cls.template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
         cls.script = (ROOT / "static/js/mirror.js").read_text(encoding="utf-8")
         cls.styles = (ROOT / "static/css/mirror.css").read_text(encoding="utf-8")
+        cls.catalog = (ROOT / "static/i18n/zh-CN.json").read_text(encoding="utf-8")
 
     @classmethod
     def function_source(cls, name):
@@ -118,15 +119,19 @@ class AlasMirrorUiContractTests(unittest.TestCase):
         self.assertIn("`/api/alas/status?config=${encodeURIComponent(configName)}`", self.script)
         self.assertIn("body:{config_name:configName}", self.script)
         self.assertIn("`/alas/embed/?config=${encodeURIComponent(binding.config_name)}`", self.script)
-        self.assertIn("binding.can_run ? '可启停' : '仅查看运行状态'", self.script)
-        self.assertIn("binding.can_edit ? '可编辑配置' : '不可编辑配置'", self.script)
-        self.assertIn("管理员未授予此配置的启停权限", self.script)
+        self.assertIn("binding.can_run ? 'mirror.alas_panel.can_run' : 'mirror.alas_panel.view_status_only'", self.script)
+        self.assertIn("binding.can_edit ? 'mirror.alas_panel.can_edit' : 'mirror.alas_panel.cannot_edit'", self.script)
+        self.assertIn("mirrorT('mirror.alas_panel.run_denied')", self.script)
+        for message in ("可启停", "仅查看运行状态", "可编辑配置", "不可编辑配置", "管理员未授予此配置的启停权限"):
+            with self.subTest(message=message):
+                self.assertIn(message, self.catalog)
 
     def test_switching_aborts_stale_status_and_old_responses_cannot_render(self):
         self.assertIn("invalidateAlasStatusRequest()", self.script)
         self.assertIn("isAlasStatusResponseCurrent(requestEpoch", self.script)
         self.assertIn("state.alasSwitching=true", self.script)
-        self.assertIn("正在切换到 ${state.selectedAlasConfig}", self.script)
+        self.assertIn("state.alasSwitching ? 'mirror.alas_panel.switching' : 'mirror.alas_panel.loading_status'", self.script)
+        self.assertIn('"switching": "正在切换到 {config}…"', self.catalog)
         self.assertIn("if (document.hidden || !state.eventConnected || state.pageLeaving) return", self.script)
 
     def test_loading_empty_error_and_stable_layout_states_are_present(self):
@@ -137,7 +142,15 @@ class AlasMirrorUiContractTests(unittest.TestCase):
             "ALAS Runtime 暂时不可达",
         ):
             with self.subTest(message=message):
-                self.assertIn(message, self.template + self.script)
+                self.assertIn(message, self.catalog)
+        for key in (
+            "mirror.alas_panel.loading_configs",
+            "mirror.alas_panel.no_authorized_config",
+            "mirror.alas_panel.config_list_failed",
+            "mirror.alas_panel.runtime_unavailable",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, self.template + self.script)
         self.assertIn(".alas-config-region", self.styles)
         self.assertIn("min-height: 52px", self.styles)
         self.assertIn("overflow-wrap: anywhere", self.styles)

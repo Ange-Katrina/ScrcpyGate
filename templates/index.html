@@ -9,20 +9,20 @@
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
   <link rel="stylesheet" href="/static/css/mirror.css?v=3279b12d040b">
-  <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
+  <script src="/static/js/i18n.js?v=dea74e2b3295" defer></script>
   <script src="/static/js/ui-core.js?v=dc260871e988" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=82b95837d0bb"></script>
 </head>
 <body data-ui-page="mirror">
 <div id="mirrorApp" class="app">
-  <aside id="sidebar" class="sidebar" aria-label="设备与投屏操作">
+  <aside id="sidebar" class="sidebar" aria-label="{{ t('mirror.ui.sidebar_label') }}">
     <header class="sidebar-header">
       <div class="brand-row">
         <div class="brand-copy">
           <div class="brand">ScrcpyGate</div>
         </div>
-        <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="收起设备栏" aria-label="收起设备栏" aria-controls="sidebar" aria-expanded="true">
+        <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="{{ t('mirror.ui.collapse_sidebar') }}" aria-label="{{ t('mirror.ui.collapse_sidebar') }}" aria-controls="sidebar" aria-expanded="true">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#panel-left-close"></use></svg>
         </button>
       </div>
@@ -34,8 +34,8 @@
             <span id="roleChip" class="sidebar-user-role"></span>
           </span>
         </div>
-        <div class="sidebar-account-actions" aria-label="账户与界面">
-          <a id="adminLink" class="ui-icon-button sidebar-utility-btn" href="/admin" title="后台管理" aria-label="后台管理" hidden>
+        <div class="sidebar-account-actions" aria-label="{{ t('mirror.ui.account_and_theme') }}">
+          <a id="adminLink" class="ui-icon-button sidebar-utility-btn" href="/admin" title="{{ t('mirror.ui.admin') }}" aria-label="{{ t('mirror.ui.admin') }}" hidden>
             <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#settings"></use></svg>
           </a>
           <div class="ui-theme-picker compact-theme-picker">
@@ -49,7 +49,7 @@
           </div>
           <form method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="logout ui-icon-button sidebar-utility-btn" type="submit" title="退出登录" aria-label="退出登录">
+            <button class="logout ui-icon-button sidebar-utility-btn" type="submit" title="{{ t('mirror.ui.logout') }}" aria-label="{{ t('mirror.ui.logout') }}">
               <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#log-out"></use></svg>
             </button>
           </form>
@@ -57,10 +57,10 @@
       </div>
     </header>
 
-    <nav class="sidebar-menu" aria-label="工作区工具">
+    <nav class="sidebar-menu" aria-label="{{ t('mirror.ui.workspace_tools') }}">
       <button id="toolBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sliders-horizontal"></use></svg>
-        <span class="menu-label">画面</span>
+        <span class="menu-label">{{ t('mirror.ui.visual') }}</span>
       </button>
       <button id="alasBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#bot"></use></svg>
@@ -68,44 +68,44 @@
       </button>
       <button id="accountBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#user-round"></use></svg>
-        <span class="menu-label">账户</span>
+        <span class="menu-label">{{ t('mirror.ui.account') }}</span>
       </button>
     </nav>
 
     <section class="device-browser" aria-labelledby="deviceBrowserTitle">
       <div class="section-head">
         <div class="section-heading">
-          <h2 id="deviceBrowserTitle" class="section-title">设备</h2>
-          <span id="deviceSummary" class="device-summary" aria-live="polite">加载中</span>
+          <h2 id="deviceBrowserTitle" class="section-title">{{ t('mirror.ui.device') }}</h2>
+          <span id="deviceSummary" class="device-summary" aria-live="polite">{{ t('mirror.ui.loading') }}</span>
         </div>
-        <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="刷新设备" aria-label="刷新设备">
+        <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="{{ t('mirror.ui.refresh_devices') }}" aria-label="{{ t('mirror.ui.refresh_devices') }}">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
         </button>
       </div>
       <label class="device-search" for="deviceSearch">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#search"></use></svg>
-        <span class="ui-sr-only">搜索设备</span>
-        <input id="deviceSearch" type="search" inputmode="search" autocomplete="off" placeholder="搜索设备名称">
+        <span class="ui-sr-only">{{ t('mirror.ui.search_devices') }}</span>
+        <input id="deviceSearch" type="search" inputmode="search" autocomplete="off" placeholder="{{ t('mirror.ui.search_device_name') }}">
       </label>
-      <div class="device-filters" role="group" aria-label="设备状态筛选">
-        <button id="deviceFilterAll" class="device-filter active" type="button" aria-pressed="true">全部</button>
-        <button id="deviceFilterOnline" class="device-filter" type="button" aria-pressed="false">在线</button>
+      <div class="device-filters" role="group" aria-label="{{ t('mirror.ui.device_filters') }}">
+        <button id="deviceFilterAll" class="device-filter active" type="button" aria-pressed="true">{{ t('mirror.ui.all') }}</button>
+        <button id="deviceFilterOnline" class="device-filter" type="button" aria-pressed="false">{{ t('mirror.ui.online') }}</button>
       </div>
       <div id="devices" class="device-list" aria-live="polite" aria-busy="true"></div>
     </section>
 
-    <div class="side-actions" aria-label="投屏操作">
+    <div class="side-actions" aria-label="{{ t('mirror.ui.mirror_actions') }}">
       <button id="startBtn" class="btn primary wide" type="button">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#play"></use></svg>
-        <span class="action-label">开始投屏</span>
+        <span class="action-label">{{ t('mirror.ui.start_mirror') }}</span>
       </button>
       <button id="controlBtn" class="btn" type="button">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
-        <span class="action-label">获取控制</span>
+        <span class="action-label">{{ t('mirror.ui.get_control') }}</span>
       </button>
       <button id="stopBtn" class="btn danger" type="button">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg>
-        <span class="action-label">停止投屏</span>
+        <span class="action-label">{{ t('mirror.ui.stop_mirror') }}</span>
       </button>
     </div>
   </aside>
@@ -113,28 +113,28 @@
   <main class="viewer">
     <header class="viewer-top">
       <div class="top-left">
-        <button id="menuBtn" class="ui-icon-button top-menu-btn" type="button" title="打开设备栏" aria-label="打开设备栏" aria-controls="sidebar" aria-expanded="false">
+        <button id="menuBtn" class="ui-icon-button top-menu-btn" type="button" title="{{ t('mirror.ui.open_sidebar') }}" aria-label="{{ t('mirror.ui.open_sidebar') }}" aria-controls="sidebar" aria-expanded="false">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#menu"></use></svg>
         </button>
         <div class="top-copy">
-          <div id="selectedTitle" class="selected-title">未选择设备</div>
-          <div id="selectedMeta" class="selected-meta">从设备列表选择一个设备后开始投屏</div>
+          <div id="selectedTitle" class="selected-title">{{ t('mirror.ui.not_selected') }}</div>
+          <div id="selectedMeta" class="selected-meta">{{ t('mirror.ui.select_device_hint') }}</div>
         </div>
       </div>
       <div class="control-overview">
         <div class="control-primary" aria-live="polite">
-          <span class="control-label">控制权</span>
-          <span id="controlOwnership" class="control-ownership">未获取</span>
+          <span class="control-label">{{ t('mirror.ui.control') }}</span>
+          <span id="controlOwnership" class="control-ownership">{{ t('mirror.ui.not_acquired') }}</span>
         </div>
-        <button id="fullscreenBtn" class="ui-icon-button fullscreen-btn" type="button" title="进入全屏" aria-label="进入全屏" aria-pressed="false">
+        <button id="fullscreenBtn" class="ui-icon-button fullscreen-btn" type="button" title="{{ t('mirror.ui.enter_fullscreen') }}" aria-label="{{ t('mirror.ui.enter_fullscreen') }}" aria-pressed="false">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#maximize-2"></use></svg>
         </button>
         <details id="statusDetails" class="status-details">
           <summary>
             <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#info"></use></svg>
-            <span class="status-details-label">状态详情</span>
+            <span class="status-details-label">{{ t('mirror.ui.status_details') }}</span>
           </summary>
-          <div id="topStatus" class="top-status" aria-label="设备连接状态"></div>
+          <div id="topStatus" class="top-status" aria-label="{{ t('mirror.ui.connection_status') }}"></div>
         </details>
       </div>
     </header>
@@ -144,35 +144,35 @@
         <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
         <div id="empty" class="empty ui-empty">
           <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
-          <strong id="emptyTitle">尚未选择设备</strong>
-          <span id="emptyDescription">从左侧设备栏选择设备后开始投屏</span>
+          <strong id="emptyTitle">{{ t('mirror.ui.no_device_selected') }}</strong>
+          <span id="emptyDescription">{{ t('mirror.ui.choose_device_hint') }}</span>
         </div>
       </div>
       <div id="immersiveRail" class="immersive-rail" data-open="false">
-        <button id="immersiveRailToggle" class="immersive-rail-toggle" type="button" title="显示侧边控制" aria-label="显示侧边控制" aria-controls="immersiveControls" aria-expanded="false" aria-hidden="true">
+        <button id="immersiveRailToggle" class="immersive-rail-toggle" type="button" title="{{ t('mirror.ui.show_rail') }}" aria-label="{{ t('mirror.ui.show_rail') }}" aria-controls="immersiveControls" aria-expanded="false" aria-hidden="true">
           <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#chevron-left"></use></svg>
         </button>
         <div id="immersiveControls" class="immersive-controls" aria-hidden="false">
-          <nav class="dock" aria-label="安卓导航">
-            <button id="backBtn" class="nav-btn" type="button" title="返回" aria-label="返回">
-              <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">返回</span>
+          <nav class="dock" aria-label="{{ t('mirror.ui.android_navigation') }}">
+            <button id="backBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.back') }}" aria-label="{{ t('mirror.ui.back') }}">
+              <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.back') }}</span>
             </button>
-            <button id="homeBtn" class="nav-btn" type="button" title="主页" aria-label="主页">
-              <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">主页</span>
+            <button id="homeBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.home') }}" aria-label="{{ t('mirror.ui.home') }}">
+              <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.home') }}</span>
             </button>
-            <button id="recentBtn" class="nav-btn" type="button" title="菜单" aria-label="菜单">
-              <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">菜单</span>
+            <button id="recentBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.recent') }}" aria-label="{{ t('mirror.ui.recent') }}">
+              <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.recent') }}</span>
             </button>
-            <button id="keyboardBtn" class="nav-btn" type="button" title="打开键盘" aria-label="打开键盘" data-active="false" disabled>
-              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#keyboard"></use></svg><span class="nav-label">键盘</span>
+            <button id="keyboardBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.open_keyboard') }}" aria-label="{{ t('mirror.ui.open_keyboard') }}" data-active="false" disabled>
+              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#keyboard"></use></svg><span class="nav-label">{{ t('mirror.ui.keyboard') }}</span>
             </button>
           </nav>
-          <div class="immersive-actions" aria-label="全屏操作">
-            <button id="immersiveStopBtn" class="nav-btn immersive-action danger" type="button" title="停止投屏" aria-label="停止投屏">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg><span class="nav-label">停止</span>
+          <div class="immersive-actions" aria-label="{{ t('mirror.ui.fullscreen_actions') }}">
+            <button id="immersiveStopBtn" class="nav-btn immersive-action danger" type="button" title="{{ t('mirror.ui.stop_mirror') }}" aria-label="{{ t('mirror.ui.stop_mirror') }}">
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg><span class="nav-label">{{ t('mirror.ui.stop') }}</span>
             </button>
-            <button id="exitFullscreenBtn" class="nav-btn immersive-action" type="button" title="退出全屏" aria-label="退出全屏">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#minimize-2"></use></svg><span class="nav-label">退出</span>
+            <button id="exitFullscreenBtn" class="nav-btn immersive-action" type="button" title="{{ t('mirror.ui.exit_fullscreen') }}" aria-label="{{ t('mirror.ui.exit_fullscreen') }}">
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#minimize-2"></use></svg><span class="nav-label">{{ t('mirror.ui.exit') }}</span>
             </button>
           </div>
         </div>
@@ -182,102 +182,102 @@
 </div>
 
 <div id="toolDrawerBackdrop" class="tool-drawer-backdrop" aria-hidden="true"></div>
-<aside id="workspaceDrawer" class="workspace-drawer" role="dialog" aria-modal="true" aria-label="工作区工具" aria-hidden="true" inert>
+<aside id="workspaceDrawer" class="workspace-drawer" role="dialog" aria-modal="true" aria-label="{{ t('mirror.ui.workspace_tools') }}" aria-hidden="true" inert>
   <header class="drawer-header">
     <div>
-      <h2 id="workspaceDrawerTitle">工作区工具</h2>
-      <p>调整当前投屏和账户设置</p>
+      <h2 id="workspaceDrawerTitle">{{ t('mirror.ui.drawer_title') }}</h2>
+      <p>{{ t('mirror.ui.drawer_description') }}</p>
     </div>
-    <button id="toolDrawerCloseBtn" class="ui-icon-button" type="button" title="关闭工具面板" aria-label="关闭工具面板">
+    <button id="toolDrawerCloseBtn" class="ui-icon-button" type="button" title="{{ t('mirror.ui.close_tools') }}" aria-label="{{ t('mirror.ui.close_tools') }}">
       <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg>
     </button>
   </header>
 
   <section id="tools" class="tools drawer-panel" aria-labelledby="toolsTitle">
-    <h3 id="toolsTitle" class="tools-title">画面设置</h3>
+    <h3 id="toolsTitle" class="tools-title">{{ t('mirror.ui.display_settings') }}</h3>
     <div class="setting-group">
       <div class="setting-group-title">
-        <span>画面大小</span>
-        <span class="setting-group-help">只影响网页显示</span>
+        <span>{{ t('mirror.ui.display_size') }}</span>
+        <span class="setting-group-help">{{ t('mirror.ui.browser_only') }}</span>
       </div>
       <div class="tool-row">
-        <button class="btn" data-fit="contain" type="button">适应窗口</button>
-        <button class="btn" data-fit="original" type="button">原始大小</button>
+        <button class="btn" data-fit="contain" type="button">{{ t('mirror.ui.fit_window') }}</button>
+        <button class="btn" data-fit="original" type="button">{{ t('mirror.ui.original_size') }}</button>
       </div>
     </div>
     <div class="setting-group">
       <div class="setting-group-title">
-        <span>投屏画质</span>
-        <span class="setting-group-help">应用后会重启投屏流</span>
+        <span>{{ t('mirror.ui.quality') }}</span>
+        <span class="setting-group-help">{{ t('mirror.ui.restart_stream') }}</span>
       </div>
       <div class="quality-grid" id="qualityProfiles" aria-busy="true">
-        <label class="wide" for="qualityStreamMode">scrcpy 流模式
+        <label class="wide" for="qualityStreamMode">{{ t('mirror.ui.stream_mode') }}
           <select id="qualityStreamMode">
             <option value="raw">raw</option>
             <option value="protocol">protocol</option>
-            <option value="legacy">legacy 诊断</option>
+            <option value="legacy">legacy {{ t('mirror.ui.diagnostic') }}</option>
           </select>
         </label>
       </div>
       <div id="qualityStatus" class="quality-status" role="status" aria-live="polite"></div>
     </div>
-    <p class="quality-note">投屏中点击预设会自动重启投屏流；清晰度显示完整的 16:9 参考尺寸（例如 1280 × 720），只调整 scrcpy 输出上限，不修改设备真实分辨率。</p>
+    <p class="quality-note">{{ t('mirror.ui.quality_note') }}</p>
   </section>
 
   <section id="alasTools" class="tools drawer-panel alas-panel" aria-labelledby="alasToolsTitle">
     <h3 id="alasToolsTitle" class="tools-title">ALAS</h3>
     <div class="alas-config-region">
       <label id="alasConfigPicker" class="alas-config-picker" for="alasConfigSelect" hidden>
-        <span class="alas-config-label">操作配置</span>
+        <span class="alas-config-label">{{ t('mirror.ui.alas_config') }}</span>
         <span class="alas-select-wrap">
           <select id="alasConfigSelect" aria-describedby="alasConfigHint"></select>
         </span>
-        <span id="alasConfigHint" class="alas-config-hint">这里只显示管理员授权给你的配置</span>
+        <span id="alasConfigHint" class="alas-config-hint">{{ t('mirror.ui.alas_hint') }}</span>
       </label>
-      <div id="alasConfigState" class="alas-config-state is-message" role="status" aria-live="polite">正在读取可用配置…</div>
+      <div id="alasConfigState" class="alas-config-state is-message" role="status" aria-live="polite">{{ t('mirror.ui.loading_configs') }}</div>
     </div>
     <div id="alasPanelStatus" class="chips" aria-live="polite"></div>
     <div id="alasRuntimeState" class="alas-runtime-state" role="status" aria-live="polite"></div>
     <div class="actions panel-actions">
-      <button id="alasToggleRun" class="btn warn" type="button">启动 ALAS</button>
+      <button id="alasToggleRun" class="btn warn" type="button">{{ t('mirror.ui.start_alas') }}</button>
       <button id="alasReload" class="btn" type="button">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
-        <span>刷新</span>
+        <span>{{ t('mirror.ui.refresh') }}</span>
       </button>
       <a id="alasOpenLink" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#external-link"></use></svg>
-        <span>打开 ALAS 页面</span>
+        <span>{{ t('mirror.ui.open_alas') }}</span>
       </a>
     </div>
-    <p class="quality-note">每项配置的权限由管理员单独分配。切换后，运行状态、启停操作和打开页面都只针对当前配置。</p>
+    <p class="quality-note">{{ t('mirror.ui.alas_note') }}</p>
   </section>
 
   <section id="accountTools" class="tools drawer-panel" aria-labelledby="accountToolsTitle">
-    <h3 id="accountToolsTitle" class="tools-title">账户设置</h3>
+    <h3 id="accountToolsTitle" class="tools-title">{{ t('mirror.ui.account_settings') }}</h3>
     <div id="accountInfo" class="chips" aria-live="polite"></div>
     <div class="setting-group">
       <div class="setting-group-title">
-        <span>修改密码</span>
-        <span class="setting-group-help">至少 12 位</span>
+        <span>{{ t('mirror.ui.change_password') }}</span>
+        <span class="setting-group-help">{{ t('mirror.ui.minimum_password') }}</span>
       </div>
       <div class="account-grid">
-        <label for="currentPassword">当前密码
+        <label for="currentPassword">{{ t('mirror.ui.current_password') }}
           <input id="currentPassword" type="password" autocomplete="current-password">
         </label>
-        <label for="newPassword">新密码
+        <label for="newPassword">{{ t('mirror.ui.new_password') }}
           <input id="newPassword" type="password" autocomplete="new-password">
         </label>
-        <label for="confirmPassword">确认新密码
+        <label for="confirmPassword">{{ t('mirror.ui.confirm_password') }}
           <input id="confirmPassword" type="password" autocomplete="new-password">
         </label>
-        <button id="changePasswordBtn" class="btn primary" type="button">保存新密码</button>
+        <button id="changePasswordBtn" class="btn primary" type="button">{{ t('mirror.ui.save_password') }}</button>
       </div>
     </div>
-    <p class="quality-note">修改成功后会保留当前登录，并让同账号其它浏览器会话失效。</p>
+    <p class="quality-note">{{ t('mirror.ui.password_note') }}</p>
   </section>
 </aside>
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=0a44e3c7ae8f" defer></script>
+<script src="/static/js/mirror.js?v=a16d5d6f82b7" defer></script>
 </body>
 </html>

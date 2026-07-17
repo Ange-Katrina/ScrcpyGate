@@ -32,6 +32,10 @@
     ));
   }
 
+  function has(key) {
+    return resolve(key) != null;
+  }
+
   document.documentElement.lang = locale;
-  window.ScrcpyGateI18n = Object.freeze({ locale, messages, resolve, t });
+  window.ScrcpyGateI18n = Object.freeze({ locale, messages, resolve, has, t });
 })();
