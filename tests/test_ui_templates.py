@@ -109,7 +109,7 @@ class UiTemplateContractTests(unittest.TestCase):
                 "sidebarBackdrop", "menuBtn", "selectedTitle", "selectedMeta", "topStatus",
                 "statusDetails", "controlOwnership", "notice", "stage", "screenArea", "videoWrap",
                 "phoneVideo", "empty", "emptyTitle", "emptyDescription", "backBtn", "homeBtn",
-                "recentBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
+                "recentBtn", "keyboardBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
                 "toolDrawerCloseBtn", "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
             "admin.html": {

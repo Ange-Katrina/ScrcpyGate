@@ -12,7 +12,7 @@
   const layerTriggers = new WeakMap();
   const activeLayers = [];
   const themeControls = [];
-  const iconUrl = "/static/icons/lucide.svg?v=fe5209f7a3ec#";
+  const iconUrl = "/static/icons/lucide.svg?v=b32a80c7785c#";
 
   function readTheme() {
     try {

@@ -10,14 +10,14 @@
   <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
   <link rel="stylesheet" href="/static/css/login.css?v=eed0489be317">
   <script src="/static/js/i18n.js?v=61cb732ecd66" defer></script>
-  <script src="/static/js/ui-core.js?v=da189b55e2cd" defer></script>
+  <script src="/static/js/ui-core.js?v=b5b0b5fb1f3e" defer></script>
   <script src="/static/js/login.js?v=4b3c037d5995" defer></script>
 </head>
 <body data-ui-page="login">
   <div class="login-shell">
     <div class="login-toolbar">
       <div class="ui-theme-picker">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#sun-moon"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#sun-moon"></use></svg>
         <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
         <select data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
           <option value="dark">{{ t("common.theme.dark") }}</option>
@@ -43,8 +43,8 @@
           <div class="login-password-field">
             <input class="ui-input" id="password" name="password" type="password" autocomplete="current-password"{% if error %} autofocus{% endif %} required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
             <button id="passwordToggle" class="login-password-toggle" type="button" aria-label="{{ t('login.show_password') }}" aria-controls="password" aria-pressed="false" title="{{ t('login.show_password') }}">
-              <svg class="ui-icon password-icon-show" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#eye"></use></svg>
-              <svg class="ui-icon password-icon-hide" aria-hidden="true"><use href="/static/icons/lucide.svg?v=fe5209f7a3ec#eye-off"></use></svg>
+              <svg class="ui-icon password-icon-show" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#eye"></use></svg>
+              <svg class="ui-icon password-icon-hide" aria-hidden="true"><use href="/static/icons/lucide.svg?v=b32a80c7785c#eye-off"></use></svg>
             </button>
           </div>
         </div>

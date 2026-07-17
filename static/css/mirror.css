@@ -940,6 +940,16 @@ video {
   color: var(--ui-color-text);
 }
 
+.nav-btn[data-active="true"] {
+  background: var(--ui-color-primary-soft);
+  color: var(--ui-color-primary);
+}
+
+.nav-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .nav-icon {
   display: block;
   color: currentColor;
@@ -965,6 +975,11 @@ video {
   height: 15px;
   border: 2px solid currentColor;
   border-radius: var(--ui-radius-sm);
+}
+
+.nav-keyboard {
+  width: 18px;
+  height: 18px;
 }
 
 .nav-label {

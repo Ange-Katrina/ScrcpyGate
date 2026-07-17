@@ -561,6 +561,7 @@ function renderStatus(){
   }
   const stopBtn=$('stopBtn');
   if (stopBtn) stopBtn.disabled = mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
+  renderKeyboardControl();
   renderAlasPanel();
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
@@ -1145,7 +1146,11 @@ function startControlKeepalive(){
 function setControlOwnership(ok){
   state.hasControl = !!ok;
   if (state.hasControl) startControlKeepalive();
-  else stopControlKeepalive();
+  else {
+    stopControlKeepalive();
+    if (state.input && typeof state.input.closeKeyboard === 'function') state.input.closeKeyboard();
+  }
+  renderKeyboardControl();
 }
 function destroyInput(){
   const input=state.input;
@@ -1547,7 +1552,7 @@ function setupInput(){
     const isTouchMove = bytes && bytes[0] === 2 && bytes[1] === 2;
     if (isTouchMove && state.controlWs.bufferedAmount > 32768) return;
     state.controlWs.send(data);
-  }, video, state.screen.w, state.screen.h);
+  }, video, state.screen.w, state.screen.h, false, renderKeyboardControl);
 }
 async function toggleControl(){
   const id=state.selectedDeviceId; if (!id) return show('请先选择设备');
@@ -1593,6 +1598,24 @@ function waitForControlResponse(ws, kind){
   });
 }
 function sendKey(code){ if (!state.hasControl || !state.input) return show('请先获取控制'); if (state.input.sendKeyCodePress) state.input.sendKeyCodePress(code); }
+function renderKeyboardControl(){
+  const button=$('keyboardBtn');
+  if (!button) return;
+  const ready=!!(state.hasControl && state.input);
+  const active=!!(ready && state.input.keyboardActive);
+  button.disabled=!ready;
+  button.dataset.active=String(active);
+  button.title='打开键盘';
+  button.setAttribute('aria-label', button.title);
+}
+function openMobileKeyboard(){
+  const input=state.input;
+  if (!state.hasControl || !input) return show('请先获取控制');
+  if (!input.openKeyboard()) {
+    show('浏览器未允许打开键盘，请再次点击键盘按钮');
+  }
+  renderKeyboardControl();
+}
 async function reloadAlas(){ await loadAlasPanel(true, {allowDuringAction:true}); }
 async function toggleAlas(){
   const binding=currentAlasBinding();
@@ -1857,6 +1880,7 @@ function initializeWorkspaceInteractions(){
   bindClick('backBtn', ()=>sendKey(4));
   bindClick('homeBtn', ()=>sendKey(3));
   bindClick('recentBtn', ()=>sendKey(187));
+  bindClick('keyboardBtn', openMobileKeyboard);
   bindClick('alasBtn', (_, button)=>{
     toggleToolPanel('alasTools', button);
     const panel=$('alasTools');

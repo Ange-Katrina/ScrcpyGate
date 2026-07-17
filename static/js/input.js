@@ -1,11 +1,12 @@
 class ScrcpyInput {
-    constructor(callback, videoElement, width, height, debug = false) {
+    constructor(callback, videoElement, width, height, debug = false, onKeyboardStateChange = null) {
         this.callback = callback
         this.width = width
         this.height = height
         this.debug = debug
         this.videoElement = videoElement
         this.keyboardActive = false
+        this.onKeyboardStateChange = typeof onKeyboardStateChange === 'function' ? onKeyboardStateChange : null
         this._isComposingText = false
         this._geometry = null
         this._geometryKey = ''
@@ -19,6 +20,7 @@ class ScrcpyInput {
         this._onMobilePaste = null;
         this._onMobileCompositionStart = null;
         this._onMobileCompositionEnd = null;
+        this._onKeyboardProxyBlur = null;
         if (document.body && this._keyboardProxy) {
             document.body.appendChild(this._keyboardProxy);
         }
@@ -26,25 +28,6 @@ class ScrcpyInput {
             if (!target) return false;
             const tag = (target.tagName || '').toLowerCase();
             return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
-        };
-        const activateKeyboard = () => {
-            this.keyboardActive = true;
-            if (this._keyboardProxy && document.activeElement !== this._keyboardProxy) {
-                try {
-                    this._keyboardProxy.focus({ preventScroll: true });
-                    return;
-                } catch (e) {
-                    try {
-                        this._keyboardProxy.focus();
-                        return;
-                    } catch (_) { }
-                }
-            }
-            try {
-                videoElement.focus({ preventScroll: true });
-            } catch (e) {
-                try { videoElement.focus(); } catch (_) { }
-            }
         };
         // 绑定处理器引用，便于后续解绑
         this._onMouseDown = null;
@@ -75,7 +58,7 @@ class ScrcpyInput {
         this._onMouseDown = (event) => {
             if (Date.now() < suppressMouseUntil) return;
             if (videoElement.contains(event.target)) {
-                activateKeyboard();
+                this.closeKeyboard(true);
                 if (event.button === 0) {
                     const point = this.mapClientToDevice(event.clientX, event.clientY, false);
                     if (!point) return;
@@ -107,10 +90,6 @@ class ScrcpyInput {
                     mouseY = point.y;
                 }
 
-                if (videoElement.contains(event.target)) {
-                    activateKeyboard();
-                }
-
                 if (mouseX !== null && mouseY !== null) {
                     this.sendControlData(this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0));
                     event.preventDefault();
@@ -132,9 +111,6 @@ class ScrcpyInput {
             const point = this.mapClientToDevice(event.clientX, event.clientY, true);
             if (!point) return;
 
-            if (videoElement.contains(event.target)) {
-                activateKeyboard();
-            }
             mouseX = point.x;
             mouseY = point.y;
 
@@ -149,7 +125,7 @@ class ScrcpyInput {
         videoElement.addEventListener('contextmenu', this._onContextMenu);
 
         this._onWheel = (event) => {
-            activateKeyboard();
+            this.closeKeyboard(true);
             // 阻止默认滚动行为
             event.preventDefault();
             
@@ -185,7 +161,7 @@ class ScrcpyInput {
         this._onTouchStart = (event) => {
             if (!event.changedTouches || event.changedTouches.length < 1 || touchIsPressed) return;
             const touch = event.changedTouches[0];
-            activateKeyboard();
+            this.closeKeyboard(true);
             const point = this.mapClientToDevice(touch.clientX, touch.clientY, false);
             if (!point) return;
 
@@ -383,12 +359,17 @@ class ScrcpyInput {
             this._keyboardProxy.addEventListener('paste', this._onMobilePaste);
 
             this._onMobileCompositionStart = () => {
+                if (!this.keyboardActive) return;
                 this._isComposingText = true;
             };
             this._keyboardProxy.addEventListener('compositionstart', this._onMobileCompositionStart);
 
             this._onMobileCompositionEnd = (event) => {
                 this._isComposingText = false;
+                if (!this.keyboardActive) {
+                    this.resetKeyboardProxy();
+                    return;
+                }
                 const text = event.data || this._keyboardProxy.value || '';
                 if (text) {
                     this.sendControlData(this.createTextProtocolData(text));
@@ -396,7 +377,59 @@ class ScrcpyInput {
                 this.resetKeyboardProxy();
             };
             this._keyboardProxy.addEventListener('compositionend', this._onMobileCompositionEnd);
+
+            this._onKeyboardProxyBlur = () => {
+                this._setKeyboardActive(false);
+                this._isComposingText = false;
+                this.resetKeyboardProxy();
+            };
+            this._keyboardProxy.addEventListener('blur', this._onKeyboardProxyBlur);
         }
+    }
+
+    _setKeyboardActive(active) {
+        const next = !!active;
+        if (this.keyboardActive === next) return;
+        this.keyboardActive = next;
+        if (this.onKeyboardStateChange) {
+            try { this.onKeyboardStateChange(next); } catch (_) { }
+        }
+    }
+
+    focusVideo() {
+        if (!this.videoElement) return false;
+        try {
+            this.videoElement.focus({ preventScroll: true });
+        } catch (e) {
+            try { this.videoElement.focus(); } catch (_) { return false; }
+        }
+        return typeof document === 'undefined' || document.activeElement === this.videoElement;
+    }
+
+    openKeyboard() {
+        if (!this._keyboardProxy) return false;
+        this.closeKeyboard();
+        this._setKeyboardActive(true);
+        try {
+            this._keyboardProxy.focus({ preventScroll: true });
+        } catch (e) {
+            try { this._keyboardProxy.focus(); } catch (_) { }
+        }
+        if (typeof document !== 'undefined' && document.activeElement !== this._keyboardProxy) {
+            this.closeKeyboard();
+            return false;
+        }
+        return true;
+    }
+
+    closeKeyboard(focusVideo = false) {
+        this._setKeyboardActive(false);
+        this._isComposingText = false;
+        this.resetKeyboardProxy();
+        if (this._keyboardProxy) {
+            try { this._keyboardProxy.blur(); } catch (_) { }
+        }
+        if (focusVideo) this.focusVideo();
     }
 
     createKeyboardProxy() {
@@ -869,6 +902,7 @@ class ScrcpyInput {
 
     destroy() {
         try {
+            this.closeKeyboard();
             if (this._moveFlushTimer) {
                 cancelAnimationFrame(this._moveFlushTimer);
                 this._moveFlushTimer = null;
@@ -897,11 +931,13 @@ class ScrcpyInput {
                 this._keyboardProxy.removeEventListener('paste', this._onMobilePaste);
                 this._keyboardProxy.removeEventListener('compositionstart', this._onMobileCompositionStart);
                 this._keyboardProxy.removeEventListener('compositionend', this._onMobileCompositionEnd);
+                this._keyboardProxy.removeEventListener('blur', this._onKeyboardProxyBlur);
                 if (this._keyboardProxy.parentNode) {
                     this._keyboardProxy.parentNode.removeChild(this._keyboardProxy);
                 }
                 this._keyboardProxy = null;
             }
+            this.onKeyboardStateChange = null;
         } catch (e) {
             console.warn('ScrcpyInput destroy error:', e);
         }
