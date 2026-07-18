@@ -373,6 +373,22 @@
       "page_title": "ScrcpyGate 后台",
       "heading": "后台管理",
       "system_summary": "系统摘要",
+      "eyebrow": {
+        "overview": "总览",
+        "devices": "设备",
+        "video": "画质",
+        "access": "用户权限",
+        "automation": "自动化",
+        "audit": "审计",
+        "device": "设备",
+        "user": "用户",
+        "runtime": "运行环境",
+        "config_ownership": "配置归属",
+        "runtime_config": "运行配置"
+      },
+      "labels": {
+        "runtime": "运行环境"
+      },
       "nav": {
         "close": "关闭后台导航",
         "label": "后台导航",
@@ -435,7 +451,7 @@
         "dimension_hint": "scrcpy 实际使用最长边上限并保持设备原始比例；竖屏、非 16:9 设备的另一边会自动换算，不会拉伸画面。2/5/10/20 Mbps 按钮会填入四档推荐值。",
         "bitrate_reference": "H.264 24–30fps 参考：480p 最低约 0.6M、推荐约 1.4M；540p 最低约 0.9M、推荐约 1.8M；720p 最低约 1.2M、推荐 2.4–4M；900p 最低约 2.5M、推荐约 5M；1080p 最低约 3M、推荐 6–8.5M。游戏等高动态画面应优先采用推荐值。",
         "custom_profiles_title": "自定义画质档位",
-        "custom_profiles_description": "添加适合特定网络或设备的额外画质档位。",
+      "custom_profiles_description": "添加适合特定网络或设备的额外画质档位。",
         "profile_id": "档位 ID",
         "display_name": "显示名称",
         "custom_profile_placeholder": "我的画质",
@@ -999,6 +1015,11 @@
     "video": {
       "output_size": "输出尺寸",
       "custom_output_size": "自定义输出尺寸",
+      "size_480": "854 × 480（480p）",
+      "size_540": "960 × 540（540p）",
+      "size_720": "1280 × 720（720p）",
+      "size_900": "1600 × 900（900p）",
+      "size_1080": "1920 × 1080（1080p）",
       "custom_width": "自定义宽度",
       "custom_height": "自定义高度",
       "width_px": "宽度 px",

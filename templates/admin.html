@@ -88,7 +88,7 @@
     <main id="adminContent" class="admin-content">
       <section id="overview" class="panel active" aria-labelledby="adminTabOverview" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Overview</p><h2>{{ t('admin.ui.overview.title') }}</h2><p>{{ t('admin.ui.overview.description') }}</p></div>
+          <div><p class="eyebrow">{{ t('admin.ui.eyebrow.overview') }}</p><h2>{{ t('admin.ui.overview.title') }}</h2><p>{{ t('admin.ui.overview.description') }}</p></div>
         </div>
         <div class="overview-summary">
           <section class="overview-summary__item" aria-labelledby="overviewDevicesTitle">
@@ -116,7 +116,7 @@
 
       <section id="devices" class="panel" aria-labelledby="adminTabDevices" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Devices</p><h2>{{ t('admin.ui.devices.title') }}</h2><p>{{ t('admin.ui.devices.description') }}</p></div>
+          <div><p class="eyebrow">{{ t('admin.ui.eyebrow.devices') }}</p><h2>{{ t('admin.ui.devices.title') }}</h2><p>{{ t('admin.ui.devices.description') }}</p></div>
           <button id="openDeviceDrawer" class="btn primary" type="button">{{ t('admin.ui.devices.create') }}</button>
         </div>
         <section class="workspace-section" aria-labelledby="deviceListTitle">
@@ -126,7 +126,7 @@
       </section>
 
       <section id="video" class="panel" aria-labelledby="adminTabVideo" tabindex="-1">
-        <div class="panel-heading"><div><p class="eyebrow">Video</p><h2>{{ t('admin.ui.video.title') }}</h2><p>{{ t('admin.ui.video.description') }}</p></div></div>
+        <div class="panel-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.video') }}</p><h2>{{ t('admin.ui.video.title') }}</h2><p>{{ t('admin.ui.video.description') }}</p></div></div>
         <section class="workspace-section" aria-labelledby="videoDefaultsTitle">
           <div class="section-heading"><div><h3 id="videoDefaultsTitle">{{ t('admin.ui.video.defaults_title') }}</h3><p>{{ t('admin.ui.video.defaults_description') }}</p></div></div>
           <div class="form-grid">
@@ -153,7 +153,7 @@
             <div class="col-2"><label for="customProfileId">{{ t('admin.ui.video.profile_id') }}</label><input id="customProfileId" placeholder="my_profile"></div>
             <div class="col-3"><label for="customProfileLabel">{{ t('admin.ui.video.display_name') }}</label><input id="customProfileLabel" placeholder="{{ t('admin.ui.video.custom_profile_placeholder') }}"></div>
             <div class="col-2"><label for="customProfileBitrate">{{ t('admin.ui.video.bitrate_mbps') }}</label><input id="customProfileBitrate" type="number" min="0.1" max="100" step="0.05" inputmode="decimal" value="0.9"></div>
-            <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">{{ t('admin.video.output_size') }}</label><select id="customProfileSizeSelect"><option value="854">854 × 480（480p）</option><option value="960" selected>960 × 540（540p）</option><option value="1280">1280 × 720（720p）</option><option value="1600">1600 × 900（900p）</option><option value="1920">1920 × 1080（1080p）</option><option value="custom">{{ t('admin.video.custom_output_size') }}…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><div class="custom-size-pair" role="group" aria-label="{{ t('admin.video.custom_output_size') }}"><label class="custom-size-field" for="customProfileWidth"><span>{{ t('admin.video.width_px') }}</span><input id="customProfileWidth" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric" required></label><span class="custom-size-separator" aria-hidden="true">×</span><label class="custom-size-field" for="customProfileHeight"><span>{{ t('admin.video.height_px') }}</span><input id="customProfileHeight" type="number" min="480" max="1080" step="1" value="540" inputmode="numeric" required></label></div><output id="customProfileSizeReference" for="customProfileWidth customProfileHeight">{{ t('admin.ui.video.long_edge_initial') }}</output></div></div>
+             <div class="col-3 custom-profile-size-field"><label for="customProfileSizeSelect">{{ t('admin.video.output_size') }}</label><select id="customProfileSizeSelect"><option value="854">{{ t('admin.video.size_480') }}</option><option value="960" selected>{{ t('admin.video.size_540') }}</option><option value="1280">{{ t('admin.video.size_720') }}</option><option value="1600">{{ t('admin.video.size_900') }}</option><option value="1920">{{ t('admin.video.size_1080') }}</option><option value="custom">{{ t('admin.video.custom_output_size') }}…</option></select><div id="customProfileSizeCustomWrap" class="custom-size-editor" hidden><div class="custom-size-pair" role="group" aria-label="{{ t('admin.video.custom_output_size') }}"><label class="custom-size-field" for="customProfileWidth"><span>{{ t('admin.video.width_px') }}</span><input id="customProfileWidth" type="number" min="854" max="1920" step="1" value="960" inputmode="numeric" required></label><span class="custom-size-separator" aria-hidden="true">×</span><label class="custom-size-field" for="customProfileHeight"><span>{{ t('admin.video.height_px') }}</span><input id="customProfileHeight" type="number" min="480" max="1080" step="1" value="540" inputmode="numeric" required></label></div><output id="customProfileSizeReference" for="customProfileWidth customProfileHeight">{{ t('admin.ui.video.long_edge_initial') }}</output></div></div>
             <div class="col-2"><label for="customProfileFps">{{ t('admin.ui.video.fps') }}</label><input id="customProfileFps" type="number" min="1" max="60" step="1" value="24"></div>
             <div class="col-12 actions"><button id="addCustomProfile" class="btn" type="button">{{ t('admin.ui.video.add_custom_profile') }}</button></div>
           </div>
@@ -163,7 +163,7 @@
 
       <section id="users" class="panel" aria-labelledby="adminTabUsers" tabindex="-1">
         <div class="panel-heading">
-          <div><p class="eyebrow">Access</p><h2>{{ t('admin.ui.access.title') }}</h2><p>{{ t('admin.ui.access.description') }}</p></div>
+          <div><p class="eyebrow">{{ t('admin.ui.eyebrow.access') }}</p><h2>{{ t('admin.ui.access.title') }}</h2><p>{{ t('admin.ui.access.description') }}</p></div>
           <button id="openUserDrawer" class="btn primary" type="button">{{ t('admin.ui.access.create_user') }}</button>
         </div>
         <div class="access-view-tabs" role="tablist" aria-label="{{ t('admin.ui.access.views') }}">
@@ -225,7 +225,7 @@
 
       <section id="alas" class="panel" aria-labelledby="adminTabAlas" tabindex="-1">
         <div class="panel-heading alas-page-heading">
-          <div><p class="eyebrow">Automation</p><h2>{{ t('admin.ui.alas.title') }}</h2><p>{{ t('admin.ui.alas.description') }}</p></div>
+          <div><p class="eyebrow">{{ t('admin.ui.eyebrow.automation') }}</p><h2>{{ t('admin.ui.alas.title') }}</h2><p>{{ t('admin.ui.alas.description') }}</p></div>
           <div class="alas-heading-actions" aria-label="{{ t('admin.ui.alas.page_actions') }}">
             <button id="reloadAlas" class="btn" type="button">{{ t('common.actions.refresh') }}</button>
             <a id="alasOpenCurrent" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">{{ t('admin.ui.alas.open_full_page') }}</a>
@@ -234,7 +234,7 @@
         </div>
 
         <section class="alas-summary" aria-label="{{ t('admin.ui.alas.authorization_summary') }}">
-          <div class="alas-summary__item"><span>Runtime</span><strong id="alasRuntimeSummary">{{ t('common.feedback.loading') }}</strong><small id="alasRuntimeMeta">{{ t('admin.ui.alas.reading_connection') }}</small></div>
+          <div class="alas-summary__item"><span>{{ t('admin.ui.labels.runtime') }}</span><strong id="alasRuntimeSummary">{{ t('common.feedback.loading') }}</strong><small id="alasRuntimeMeta">{{ t('admin.ui.alas.reading_connection') }}</small></div>
           <div class="alas-summary__item"><span>{{ t('admin.ui.alas.config_count') }}</span><strong id="alasConfigCount">0</strong><small>{{ t('admin.ui.alas.config_ownership_records') }}</small></div>
           <div class="alas-summary__item"><span>{{ t('admin.ui.alas.assigned_users') }}</span><strong id="alasUserCount">0</strong><small>{{ t('admin.ui.alas.assigned_users_hint') }}</small></div>
           <div class="alas-summary__item"><span>{{ t('admin.ui.alas.owned_configs') }}</span><strong id="alasAssignmentCount">0</strong><small>{{ t('admin.ui.alas.owned_configs_hint') }}</small></div>
@@ -340,7 +340,7 @@
       </section>
 
       <section id="logs" class="panel" aria-labelledby="adminTabLogs" tabindex="-1">
-        <div class="panel-heading"><div><p class="eyebrow">Audit</p><h2>{{ t('admin.ui.logs.title') }}</h2><p>{{ t('admin.ui.logs.description') }}</p></div></div>
+         <div class="panel-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.audit') }}</p><h2>{{ t('admin.ui.logs.title') }}</h2><p>{{ t('admin.ui.logs.description') }}</p></div></div>
         <section class="workspace-section log-section" aria-labelledby="runtimeLogsTitle">
           <div class="section-heading"><div><h3 id="runtimeLogsTitle">{{ t('admin.logs.runtime') }}</h3><p id="runtimeLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div><button id="reloadRuntimeLogs" class="btn" type="button">{{ t('admin.ui.logs.refresh_runtime') }}</button></div>
           <pre id="runtimeLogs" class="runtime-logs" tabindex="0" aria-label="{{ t('admin.ui.logs.runtime_label') }}"></pre>
@@ -356,7 +356,7 @@
 
 <div id="deviceDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Device</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.device') }}</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <input id="deviceId" type="hidden">
     <div class="col-12"><label for="deviceName">{{ t('admin.ui.drawers.device.name_optional') }}</label><input id="deviceName" placeholder="{{ t('admin.ui.drawers.device.name_placeholder') }}" autocomplete="off"></div>
@@ -369,7 +369,7 @@
 
 <div id="userDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="userDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="userDrawerTitle" aria-describedby="userDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">User</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.user') }}</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="newUsername">{{ t('admin.ui.access.username') }}</label><input id="newUsername" autocomplete="username"></div>
     <div class="col-12"><label for="newPassword">{{ t('admin.ui.drawers.user.password') }}</label><input id="newPassword" type="password" placeholder="{{ t('admin.ui.drawers.user.password_placeholder') }}" autocomplete="new-password"></div>
@@ -393,7 +393,7 @@
 
 <div id="alasConnectionDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConnectionDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasConnectionDrawerTitle" aria-describedby="alasConnectionDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Runtime</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime') }}</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
     <div class="col-12"><label for="alasToken">{{ t('admin.ui.drawers.alas_connection.token') }}</label><input id="alasToken" type="password" placeholder="{{ t('admin.ui.drawers.alas_connection.token_placeholder') }}" autocomplete="new-password"></div>
@@ -404,7 +404,7 @@
 
 <div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Config Ownership</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.config_ownership') }}</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t('admin.ui.drawers.assignment.summary') }}">
     <div class="alas-assignment-summary__item">
       <span>{{ t('admin.ui.alas.owner_user') }}</span>
@@ -433,7 +433,7 @@
 
 <div id="alasConfigDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConfigDrawer" class="ui-drawer admin-editor-drawer admin-editor-drawer--wide" role="dialog" aria-modal="true" aria-labelledby="alasConfigDrawerTitle" aria-describedby="alasConfigDrawerContext" aria-hidden="true" inert>
-  <div class="drawer-heading"><div><p class="eyebrow">Runtime Config</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime_config') }}</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-6"><label for="configSource">{{ t('admin.ui.drawers.config.source') }}</label><input id="configSource" readonly placeholder="{{ t('admin.ui.drawers.config.current') }}"></div>
     <div class="col-6"><label for="configTarget">{{ t('admin.ui.drawers.config.target') }}</label><input id="configTarget" readonly placeholder="{{ t('admin.ui.drawers.config.same_target') }}"></div>

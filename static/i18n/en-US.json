@@ -373,6 +373,22 @@
       "page_title": "ScrcpyGate Admin",
       "heading": "Admin console",
       "system_summary": "System summary",
+      "eyebrow": {
+        "overview": "Overview",
+        "devices": "Devices",
+        "video": "Video",
+        "access": "Access",
+        "automation": "Automation",
+        "audit": "Audit",
+        "device": "Device",
+        "user": "User",
+        "runtime": "Runtime",
+        "config_ownership": "Config ownership",
+        "runtime_config": "Runtime config"
+      },
+      "labels": {
+        "runtime": "Runtime"
+      },
       "nav": {
         "close": "Close admin navigation",
         "label": "Admin navigation",
@@ -999,6 +1015,11 @@
     "video": {
       "output_size": "Output size",
       "custom_output_size": "Custom output size",
+      "size_480": "854 × 480 (480p)",
+      "size_540": "960 × 540 (540p)",
+      "size_720": "1280 × 720 (720p)",
+      "size_900": "1600 × 900 (900p)",
+      "size_1080": "1920 × 1080 (1080p)",
       "custom_width": "Custom width",
       "custom_height": "Custom height",
       "width_px": "Width (px)",
