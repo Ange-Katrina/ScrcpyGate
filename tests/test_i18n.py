@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import subprocess
@@ -13,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class I18nCatalogTests(unittest.TestCase):
+    @staticmethod
+    def flatten_catalog(value, prefix=""):
+        result = {}
+        for key, item in value.items():
+            path = f"{prefix}.{key}" if prefix else key
+            if isinstance(item, dict):
+                result.update(I18nCatalogTests.flatten_catalog(item, path))
+            else:
+                result[path] = item
+        return result
+
     def test_default_catalog_has_no_duplicate_object_keys(self):
         duplicates = []
 
@@ -71,10 +83,70 @@ class I18nCatalogTests(unittest.TestCase):
             finally:
                 i18n.clear_catalog_cache()
 
-    def test_unsupported_locale_falls_back_to_default(self):
-        self.assertEqual(i18n.normalize_locale("en-US"), i18n.DEFAULT_LOCALE)
-        self.assertEqual(i18n.translate("login.password", "en-US"), "密码")
-        self.assertEqual(i18n.browser_payload("en-US")["locale"], i18n.DEFAULT_LOCALE)
+    def test_supported_catalogs_have_identical_keys_and_placeholders(self):
+        catalogs = {
+            locale: json.loads((ROOT / "static" / "i18n" / f"{locale}.json").read_text(encoding="utf-8"))
+            for locale in i18n.SUPPORTED_LOCALES
+        }
+        flattened = {locale: self.flatten_catalog(catalog) for locale, catalog in catalogs.items()}
+        self.assertEqual(set(flattened), set(i18n.SUPPORTED_LOCALES))
+        reference_keys = set(flattened[i18n.DEFAULT_LOCALE])
+        placeholder_pattern = re.compile(r"\{[a-zA-Z0-9_]+\}")
+        for locale, messages in flattened.items():
+            with self.subTest(locale=locale):
+                self.assertEqual(set(messages), reference_keys)
+                self.assertTrue(all(isinstance(value, str) for value in messages.values()))
+                for key in reference_keys:
+                    self.assertEqual(
+                        sorted(placeholder_pattern.findall(flattened[i18n.DEFAULT_LOCALE][key])),
+                        sorted(placeholder_pattern.findall(messages[key])),
+                        key,
+                    )
+
+    def test_locale_selection_prefers_cookie_then_quality_sorted_header(self):
+        request = type("Request", (), {})()
+        request.cookies = {i18n.LOCALE_COOKIE: "en-US"}
+        request.headers = {"accept-language": "zh-CN;q=1,en-US;q=0.1"}
+        self.assertEqual(i18n.locale_from_request(request), "en-US")
+
+        request.cookies = {}
+        request.headers = {"accept-language": "fr-FR;q=1,en-US;q=0.8,zh-CN;q=0.7"}
+        self.assertEqual(i18n.locale_from_request(request), "en-US")
+        request.headers = {"accept-language": "en-US;q=0,zh-CN;q=0.2,*;q=1"}
+        self.assertEqual(i18n.locale_from_request(request), "zh-CN")
+
+    def test_locale_context_resets_after_nested_override(self):
+        self.assertEqual(i18n.current_locale(), i18n.DEFAULT_LOCALE)
+        token = i18n.set_current_locale("en-US")
+        try:
+            self.assertEqual(i18n.current_locale(), "en-US")
+            self.assertEqual(i18n.translate("login.submit"), "Log in")
+        finally:
+            i18n.reset_current_locale(token)
+        self.assertEqual(i18n.current_locale(), i18n.DEFAULT_LOCALE)
+
+    def test_supported_english_locale_is_selected_and_translated(self):
+        self.assertEqual(i18n.normalize_locale("en"), "en-US")
+        self.assertEqual(i18n.translate("login.password", "en-US"), "Password")
+        payload = i18n.browser_payload("en-US")
+        self.assertEqual(payload["locale"], "en-US")
+        self.assertIn("en-US", payload["supported_locales"])
+        self.assertEqual(payload["storage_key"], i18n.LOCALE_STORAGE_KEY)
+
+    def test_locale_context_middleware_covers_websocket_and_resets(self):
+        observed = []
+
+        async def endpoint(scope, receive, send):
+            observed.append(i18n.current_locale())
+
+        scope = {
+            "type": "websocket",
+            "headers": [(b"accept-language", b"en-US,en;q=0.8")],
+            "path": "/ws/events",
+        }
+        asyncio.run(main.LocaleContextMiddleware(endpoint)(scope, None, None))
+        self.assertEqual(observed, ["en-US"])
+        self.assertEqual(i18n.current_locale(), i18n.DEFAULT_LOCALE)
 
     def test_browser_payload_json_cannot_terminate_script_node(self):
         malicious = '</script><script>alert("owned")</script>&'

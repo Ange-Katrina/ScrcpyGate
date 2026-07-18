@@ -168,6 +168,7 @@ class UiTemplateContractTests(unittest.TestCase):
             t=i18n.translate,
             i18n_payload=i18n.browser_payload,
             default_locale=i18n.DEFAULT_LOCALE,
+            current_locale=i18n.current_locale,
         )
         malicious = '</script><script>alert("owned")</script>'
         user = {"username": malicious, "role": "admin", "password_hash": "must-not-leak"}

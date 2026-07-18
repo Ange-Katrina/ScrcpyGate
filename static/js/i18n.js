@@ -13,6 +13,9 @@
   }
 
   const locale = String(payload.locale || "zh-CN");
+  const supportedLocales = Array.isArray(payload.supported_locales) ? payload.supported_locales.map(String) : [locale];
+  const storageKey = String(payload.storage_key || "scrcpygate:locale");
+  const cookieName = String(payload.cookie_name || "scrcpygate_locale");
   const messages = payload.messages && typeof payload.messages === "object" ? payload.messages : {};
 
   function resolve(key) {
@@ -37,5 +40,14 @@
   }
 
   document.documentElement.lang = locale;
-  window.ScrcpyGateI18n = Object.freeze({ locale, messages, resolve, has, t });
+  window.ScrcpyGateI18n = Object.freeze({
+    locale,
+    supportedLocales: Object.freeze(supportedLocales),
+    storageKey,
+    cookieName,
+    messages,
+    resolve,
+    has,
+    t
+  });
 })();

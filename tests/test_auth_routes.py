@@ -86,6 +86,23 @@ class AuthRouteTests(unittest.TestCase):
         self.assertIn('id="loginError"', response.text)
         self.assertIn('role="alert"', response.text)
 
+    def test_login_language_negotiation_sets_headers_and_server_selected_option(self):
+        response = self.client.get("/login", headers={"accept-language": "en-US,en;q=0.8"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("content-language"), "en-US")
+        self.assertIn("Cookie", response.headers.get("vary", ""))
+        self.assertIn("Accept-Language", response.headers.get("vary", ""))
+        self.assertIn('<html lang="en-US">', response.text)
+        self.assertIn('<option value="en-US" selected>', response.text)
+        self.assertIn("Log in", response.text)
+
+        self.client.cookies.set("scrcpygate_locale", "zh-CN")
+        response = self.client.get("/login", headers={"accept-language": "en-US"})
+        self.assertEqual(response.headers.get("content-language"), "zh-CN")
+        self.assertIn('<html lang="zh-CN">', response.text)
+        self.assertIn('<option value="zh-CN" selected>', response.text)
+
     def test_login_rejects_null_origin_by_default(self):
         response = self.client.post(
             "/login",

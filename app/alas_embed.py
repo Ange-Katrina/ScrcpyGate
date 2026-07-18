@@ -327,11 +327,17 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     safe_loading_detail = escape(i18n.translate("alas.shell.loading_detail"))
     safe_retry = escape(i18n.translate("common.actions.retry"))
     safe_return_scrcpygate = escape(i18n.translate("common.actions.return_scrcpygate"))
+    safe_locale_label = escape(i18n.translate("common.language.label"), quote=True)
+    safe_zh_label = escape(i18n.translate("common.language.zh_cn"))
+    safe_en_label = escape(i18n.translate("common.language.en_us"))
     safe_noscript_title = escape(i18n.translate("alas.shell.noscript_title"))
     safe_noscript_detail = escape(i18n.translate("alas.shell.noscript_detail"))
     locale_payload = i18n.browser_payload_json()
+    selected_locale = i18n.current_locale()
+    selected_zh = " selected" if selected_locale == "zh-CN" else ""
+    selected_en = " selected" if selected_locale == "en-US" else ""
     return f"""<!doctype html>
-<html lang="{i18n.DEFAULT_LOCALE}">
+<html lang="{i18n.current_locale()}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -339,10 +345,10 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
   <title>{safe_title}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
-  <link rel="stylesheet" href="/static/css/alas-shell.css?v=8310dfe3dbdc">
+  <link rel="stylesheet" href="/static/css/alas-shell.css?v=1c04d8ca47e1">
   <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
-  <script src="/static/js/i18n.js?v=dea74e2b3295" defer></script>
-  <script src="/static/js/alas-shell.js?v=14b8b1af378a" defer></script>
+  <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
+  <script src="/static/js/alas-shell.js?v=aa8526b19f9b" defer></script>
 </head>
 <body>
   <header class="alas-shell-bar">
@@ -355,6 +361,13 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     </div>
     <div class="alas-shell-toolbar" aria-label="{safe_toolbar_label}">
       <span id="loadStatus" class="alas-shell-status" data-state="loading" role="status" aria-live="polite">{safe_connecting}</span>
+      <label class="alas-shell-locale">
+        <span aria-hidden="true">A/文</span>
+        <select id="localeSelect" aria-label="{safe_locale_label}">
+          <option value="zh-CN"{selected_zh}>{safe_zh_label}</option>
+          <option value="en-US"{selected_en}>{safe_en_label}</option>
+        </select>
+      </label>
       <button id="refreshFrame" class="alas-shell-button" type="button">{safe_refresh}</button>
       <a class="alas-shell-button" href="{safe_src}" target="_blank" rel="noopener noreferrer">{safe_open_new_window}</a>
       <a class="alas-shell-button" href="/">{safe_back}</a>

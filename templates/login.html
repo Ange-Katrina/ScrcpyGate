@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="{{ default_locale }}">
+<html lang="{{ current_locale() }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,15 +7,23 @@
   <title>{{ t("login.page_title") }}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=db57b10586aa">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=18a2710caf44">
   <link rel="stylesheet" href="/static/css/login.css?v=eed0489be317">
-  <script src="/static/js/i18n.js?v=dea74e2b3295" defer></script>
-  <script src="/static/js/ui-core.js?v=dc260871e988" defer></script>
+  <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
+  <script src="/static/js/ui-core.js?v=c77c310fda33" defer></script>
   <script src="/static/js/login.js?v=4b3c037d5995" defer></script>
 </head>
 <body data-ui-page="login">
   <div class="login-shell">
     <div class="login-toolbar">
+      <label class="ui-locale-picker">
+        <span class="ui-locale-mark" aria-hidden="true">A/文</span>
+        <span class="ui-sr-only">{{ t("common.language.label") }}</span>
+        <select data-ui-locale-select aria-label="{{ t('common.language.label') }}">
+          <option value="zh-CN"{% if current_locale() == "zh-CN" %} selected{% endif %}>{{ t("common.language.zh_cn") }}</option>
+          <option value="en-US"{% if current_locale() == "en-US" %} selected{% endif %}>{{ t("common.language.en_us") }}</option>
+        </select>
+      </label>
       <div class="ui-theme-picker">
         <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
         <span class="ui-sr-only">{{ t("common.theme.label") }}</span>

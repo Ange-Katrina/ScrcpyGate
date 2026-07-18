@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.requests import HTTPConnection
 
 from . import alas, alas_embed, i18n, security, storage
 from .account_access import account_connections, account_expiration_monitor
@@ -124,6 +125,21 @@ class SelectiveGZipMiddleware(GZipMiddleware):
         await super().__call__(scope, receive, send)
 
 
+class LocaleContextMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        token = i18n.set_current_locale(i18n.locale_from_request(HTTPConnection(scope)))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            i18n.reset_current_locale(token)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global account_expiration_task, mirror_autostop_task
@@ -163,12 +179,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(SelectiveGZipMiddleware, minimum_size=500)
+app.add_middleware(LocaleContextMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals.update(
     t=i18n.translate,
     i18n_payload=i18n.browser_payload,
     default_locale=i18n.DEFAULT_LOCALE,
+    current_locale=i18n.current_locale,
+    supported_locales=i18n.SUPPORTED_LOCALES,
 )
 
 
@@ -194,11 +213,13 @@ async def mirror_autostop_loop() -> None:
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
+    request_locale = i18n.locale_from_request(request)
     try:
         security.enforce_http_boundary(request)
     except HTTPException as exc:
-        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-    response = await call_next(request)
+        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    else:
+        response = await call_next(request)
     is_alas_proxy = request.url.path.startswith("/alas/embed/proxy")
     is_static_asset = request.url.path.startswith("/static/")
     if is_static_asset:
@@ -207,6 +228,15 @@ async def security_middleware(request: Request, call_next):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    elif not is_alas_proxy:
+        response.headers.setdefault("Content-Language", request_locale)
+        vary_values = [item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()]
+        vary_names = {item.lower() for item in vary_values}
+        for value in ("Cookie", "Accept-Language"):
+            if value.lower() not in vary_names:
+                vary_values.append(value)
+                vary_names.add(value.lower())
+        response.headers["Vary"] = ", ".join(vary_values)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     if not is_alas_proxy:
         response.headers.setdefault("X-Frame-Options", "DENY")

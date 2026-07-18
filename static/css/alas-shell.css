@@ -89,6 +89,31 @@ a {
   margin-left: auto;
 }
 
+.alas-shell-locale {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface-raised);
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alas-shell-locale select {
+  min-height: 34px;
+  max-width: 112px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .alas-shell-status {
   display: inline-flex;
   align-items: center;

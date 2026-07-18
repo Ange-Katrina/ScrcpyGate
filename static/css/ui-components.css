@@ -89,6 +89,55 @@ textarea,
   color: var(--ui-color-text);
 }
 
+.ui-locale-picker {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: 0 var(--ui-space-2);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface-raised);
+  color: var(--ui-color-text-muted);
+}
+
+.ui-locale-picker:hover,
+.ui-locale-picker:focus-within {
+  border-color: var(--ui-color-border-strong);
+  color: var(--ui-color-text);
+}
+
+.ui-locale-mark {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: var(--ui-weight-bold);
+  letter-spacing: -0.04em;
+}
+
+.ui-locale-picker select {
+  min-height: 34px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.compact-locale-picker {
+  position: relative;
+  width: 40px;
+  justify-content: center;
+  padding: 0;
+}
+
+.compact-locale-picker select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+}
+
 .ui-theme-trigger {
   min-width: 92px;
   min-height: 34px;
@@ -517,6 +566,10 @@ body[data-ui-page="login"] input {
   .ui-theme-picker {
     min-height: 44px;
   }
+
+  .ui-locale-picker { min-height: 44px; }
+  .compact-locale-picker { width: 44px; }
+  .ui-locale-picker select { min-height: 42px; }
 
   .ui-icon-button { width: 44px; }
   .compact-theme-picker { width: 44px; }

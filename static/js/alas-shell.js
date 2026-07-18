@@ -15,6 +15,7 @@
   const loadStatus = document.getElementById("loadStatus");
   const refreshButton = document.getElementById("refreshFrame");
   const retryButton = document.getElementById("retryFrame");
+  const localeSelect = document.getElementById("localeSelect");
   const LOAD_TIMEOUT_MS = 15000;
   let timeoutId = 0;
 
@@ -88,6 +89,15 @@
     if (forceReload) frame.src = retryUrl();
   }
 
+  function switchLocale(locale, persist) {
+    if (!i18n || !i18n.supportedLocales.includes(locale)) return;
+    if (persist) {
+      try { window.localStorage.setItem(i18n.storageKey, locale); } catch (_) {}
+    }
+    document.cookie = `${encodeURIComponent(i18n.cookieName)}=${encodeURIComponent(locale)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    if (locale !== i18n.locale) window.location.reload();
+  }
+
   function responseLooksUnavailable(doc) {
     if (!doc) return true;
     const contentType = String(doc.contentType || "").toLowerCase();
@@ -129,8 +139,15 @@
   });
   refreshButton.addEventListener("click", () => startLoad(true));
   retryButton.addEventListener("click", () => startLoad(true));
+  if (localeSelect && i18n) {
+    localeSelect.value = i18n.locale;
+    localeSelect.addEventListener("change", () => {
+      switchLocale(localeSelect.value, true);
+    });
+  }
   window.addEventListener("storage", (event) => {
     if (event.key === THEME_KEY) applyTheme(event.newValue);
+    if (i18n && event.key === i18n.storageKey) switchLocale(event.newValue, false);
   });
   if (window.matchMedia) {
     const colorScheme = window.matchMedia("(prefers-color-scheme: light)");

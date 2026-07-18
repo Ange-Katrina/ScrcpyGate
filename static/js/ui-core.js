@@ -12,6 +12,7 @@
   const layerTriggers = new WeakMap();
   const activeLayers = [];
   const themeControls = [];
+  const localeControls = [];
   const iconUrl = "/static/icons/lucide.svg?v=da1ff202eea5#";
 
   function readTheme() {
@@ -55,6 +56,80 @@
     updateThemeColor();
     window.dispatchEvent(new CustomEvent("scrcpygate:themechange", { detail: { theme: next } }));
     return next;
+  }
+
+  function supportedLocale(locale) {
+    return !!(i18n && Array.isArray(i18n.supportedLocales) && i18n.supportedLocales.includes(locale));
+  }
+
+  function readLocalePreference() {
+    if (!i18n) return "zh-CN";
+    try {
+      const value = window.localStorage.getItem(i18n.storageKey);
+      return supportedLocale(value) ? value : i18n.locale;
+    } catch (_) {
+      return i18n.locale;
+    }
+  }
+
+  function writeLocaleCookie(locale) {
+    if (!i18n || !supportedLocale(locale)) return;
+    document.cookie = `${encodeURIComponent(i18n.cookieName)}=${encodeURIComponent(locale)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  }
+
+  function syncLocaleControls(locale) {
+    localeControls.forEach((select) => {
+      if (select.value !== locale) select.value = locale;
+    });
+  }
+
+  function applyLocale(locale, persist = true) {
+    if (!i18n || !supportedLocale(locale)) return i18n ? i18n.locale : "zh-CN";
+    if (persist) {
+      try { window.localStorage.setItem(i18n.storageKey, locale); }
+      catch (_) { /* The cookie still preserves the selected locale. */ }
+    }
+    writeLocaleCookie(locale);
+    syncLocaleControls(locale);
+    if (locale !== i18n.locale) {
+      root.dataset.localeSwitching = "true";
+      window.location.reload();
+    }
+    return locale;
+  }
+
+  function syncStoredLocale() {
+    if (!i18n) return false;
+    const preferred = readLocalePreference();
+    if (preferred === i18n.locale) {
+      try { window.sessionStorage.removeItem(`${i18n.storageKey}:reload`); }
+      catch (_) { /* Session storage is optional. */ }
+      writeLocaleCookie(preferred);
+      return false;
+    }
+    let alreadyRetried = false;
+    try {
+      alreadyRetried = window.sessionStorage.getItem(`${i18n.storageKey}:reload`) === preferred;
+      if (!alreadyRetried) window.sessionStorage.setItem(`${i18n.storageKey}:reload`, preferred);
+    } catch (_) {
+      // Do not auto-reload when the browser blocks sessionStorage; an explicit selection still works.
+      return false;
+    }
+    writeLocaleCookie(preferred);
+    if (!alreadyRetried) {
+      root.dataset.localeSwitching = "true";
+      window.location.reload();
+      return true;
+    }
+    return false;
+  }
+
+  function initializeLocaleSelect(select) {
+    if (!i18n || select.dataset.uiLocaleReady === "true") return;
+    select.dataset.uiLocaleReady = "true";
+    localeControls.push(select);
+    select.value = supportedLocale(i18n.locale) ? i18n.locale : i18n.supportedLocales[0];
+    select.addEventListener("change", () => applyLocale(select.value, true));
   }
 
   function icon(name, className) {
@@ -402,10 +477,12 @@
   }
 
   function initialize() {
+    if (syncStoredLocale()) return;
     syncThemeControls(root.dataset.theme || readTheme());
     updateThemeColor();
 
     document.querySelectorAll("[data-ui-theme-select]").forEach(enhanceThemeSelect);
+    document.querySelectorAll("[data-ui-locale-select]").forEach(initializeLocaleSelect);
 
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".ui-theme-picker")) closeThemeMenus(false);
@@ -454,10 +531,18 @@
     else if (colorScheme.addListener) colorScheme.addListener(onSystemThemeChange);
   }
 
+  window.addEventListener("storage", (event) => {
+    if (i18n && event.key === i18n.storageKey && supportedLocale(event.newValue) && event.newValue !== i18n.locale) {
+      applyLocale(event.newValue, false);
+    }
+  });
+
   window.ScrcpyGateUI = Object.freeze({
     THEME_KEY,
     getTheme: () => root.dataset.theme || readTheme(),
     setTheme: (theme) => applyTheme(theme, true),
+    getLocale: () => i18n ? i18n.locale : "zh-CN",
+    setLocale: (locale) => applyLocale(locale, true),
     setBusy,
     toast,
     openDrawer,
