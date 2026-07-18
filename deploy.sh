@@ -912,6 +912,7 @@ show_existing_scrcpygate() {
   panel_line "Compose 项目" "${EXISTING_SCRCPYGATE_PROJECT:-未知/手工创建}"
   panel_line "Compose 服务" "${EXISTING_SCRCPYGATE_SERVICE:-未知}"
   panel_line "工作目录" "${EXISTING_SCRCPYGATE_WORKING_DIR:-未知}"
+  panel_line "数据挂载" "${EXISTING_SCRCPYGATE_DATA_SOURCE:-未知}"
   print_rule
 }
 
@@ -926,7 +927,15 @@ existing_instance_can_be_managed() {
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_CONFIG_FILES" != "$expected_config" ]; then ownership_error="Compose 配置文件不匹配"; fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != scrcpygate:local ]; then ownership_error="容器镜像不匹配"; fi
   if [ -z "${ownership_error:-}" ]; then
-    expected_data=$(configured_data_dir_from_disk) || ownership_error="无法从磁盘配置解析数据目录"
+    if expected_data=$(configured_data_dir_from_disk); then
+      :
+    elif expected_data=$(existing_container_data_dir); then
+      WEB_SCRCPY_DATA_HOST=$expected_data
+      EXISTING_SCRCPYGATE_DATA_SOURCE=$expected_data
+      success_msg "未找到可用的 .env 数据目录，已恢复现有容器挂载: $(safe_display "$expected_data")"
+    else
+      ownership_error="无法从磁盘配置解析数据目录"
+    fi
   fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_DATA_SOURCE" != "$expected_data" ]; then ownership_error="数据挂载目录不匹配"; fi
   if [ -n "${ownership_error:-}" ]; then
@@ -1234,6 +1243,20 @@ configured_data_dir_from_disk() {
   load_uninstall_settings
   [ -d "$WEB_SCRCPY_DATA_HOST" ] || return 1
   (CDPATH= cd -- "$WEB_SCRCPY_DATA_HOST" && pwd -P)
+}
+
+existing_container_data_dir() {
+  source=${EXISTING_SCRCPYGATE_DATA_SOURCE:-}
+  [ -n "$source" ] || return 1
+  [ -d "$source" ] || return 1
+  candidate=$(CDPATH= cd -- "$source" && pwd -P) || return 1
+  case "$candidate" in
+    '/'|"$SCRIPT_DIR"|"${HOME:-}") return 1 ;;
+  esac
+  case "$SCRIPT_DIR/" in
+    "$candidate/"*) return 1 ;;
+  esac
+  printf '%s\n' "$candidate"
 }
 
 resolve_uninstall_data_dir() {

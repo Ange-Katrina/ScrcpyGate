@@ -623,6 +623,28 @@ class DeployScriptTests(unittest.TestCase):
         calls = (target / "docker.log").read_text(encoding="utf-8")
         self.assertNotIn("compose up", calls)
 
+    def test_existing_container_mount_recovers_missing_disk_configuration(self):
+        target = self.prepare_installer()
+        recovered_data = target / "legacy-data"
+        recovered_data.mkdir()
+        recovered_path = self.shell_realpath(recovered_data)
+
+        result = self.run_installer(
+            target,
+            "--configure",
+            input_text="1\n\n\n\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            FAKE_SCRCPYGATE_STATE="exited",
+            FAKE_SCRCPYGATE_PROJECT="scrcpygate",
+            FAKE_SCRCPYGATE_DATA_SOURCE=recovered_path,
+            TERM="dumb",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("已恢复现有容器挂载", result.stdout)
+        config = (target / ".env").read_text(encoding="utf-8")
+        self.assertIn(f"WEB_SCRCPY_DATA_HOST={recovered_path}", config)
+
     def test_guided_install_requires_confirmation_for_any_existing_container(self):
         for state in ("running", "exited"):
             with self.subTest(state=state):
