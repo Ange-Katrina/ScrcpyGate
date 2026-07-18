@@ -57,6 +57,8 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             "@media (max-width: 960px)",
             "@media (max-width: 640px), (pointer: coarse)",
             "transform: translateY(calc(100% + 8px))",
+            "height: var(--mirror-visual-viewport-height, 100dvh)",
+            "max-height: var(--mirror-visual-viewport-height, 100dvh)",
             ".device-search,\n  .device-filters {\n    display: none",
         ):
             with self.subTest(token=token):
@@ -68,6 +70,9 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("node.getClientRects().length > 0", self.script)
         self.assertIn(".device-card {\n    min-height: 48px", self.styles)
         self.assertIn("selectedButton.scrollIntoView({block:'nearest'})", self.script)
+        self.assertIn("function syncVisualViewportHeight()", self.script)
+        self.assertIn("window.visualViewport.height", self.script)
+        self.assertIn("handleViewportResize();\ndocument.querySelectorAll('[data-fit]')", self.script)
         self.assertIn(".sidebar-menu .sidebar-menu-btn {\n  justify-content: flex-start", self.styles)
         self.assertIn(".app.sidebar-collapsed .sidebar-menu .sidebar-menu-btn {\n  justify-content: center", self.styles)
 
@@ -136,6 +141,11 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("selectedButton.getClientRects().length > 0", self.script)
         self.assertIn("const visibleDevice=Array.from(state.deviceNodes.values()).find", self.script)
         self.assertIn("!button.disabled && !button.hidden && button.getClientRects().length > 0", self.script)
+        self.assertIn("const closeButton=$('sidebarCollapseBtn')", self.script)
+        self.assertIn("const focusTarget=(selectedVisible ? selectedButton : visibleDevice) || closeButton", self.script)
+        open_sidebar = self.script[self.script.index("function openSidebar(trigger)"):self.script.index("function closeSidebar(options={})")]
+        self.assertNotIn("deviceSearch", open_sidebar)
+        self.assertNotIn("searchVisible", open_sidebar)
 
     def test_async_commands_are_guarded_and_empty_states_are_structured(self):
         self.assertIn("const actionRequests = new Map()", self.script)

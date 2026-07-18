@@ -1614,15 +1614,25 @@ video {
     position: fixed;
     z-index: 30;
     top: 0;
-    bottom: 0;
+    bottom: auto;
     left: 0;
     width: min(340px, calc(100vw - 32px));
+    height: var(--mirror-visual-viewport-height, 100dvh);
+    max-height: var(--mirror-visual-viewport-height, 100dvh);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     gap: var(--ui-space-3);
     padding: max(var(--ui-space-3), env(safe-area-inset-top)) var(--ui-space-3) max(var(--ui-space-3), env(safe-area-inset-bottom));
+    overflow: hidden;
     border-right: 1px solid var(--ui-color-border);
     box-shadow: var(--ui-shadow-raised);
     transform: translateX(-100%);
     transition: transform var(--ui-duration-normal) var(--ui-ease-standard);
+  }
+
+  .side-actions {
+    position: relative;
+    z-index: 2;
+    align-self: end;
   }
 
   .sidebar.open,

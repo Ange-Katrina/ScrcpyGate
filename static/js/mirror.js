@@ -1562,7 +1562,17 @@ function scheduleLayout(){
     layoutVideo();
   });
 }
+function syncVisualViewportHeight(){
+  const root=document.documentElement;
+  if (!root || !window.visualViewport || !mobileSidebarMedia.matches) {
+    if (root) root.style.removeProperty('--mirror-visual-viewport-height');
+    return;
+  }
+  const height=Math.max(1, Math.round(window.visualViewport.height));
+  root.style.setProperty('--mirror-visual-viewport-height', `${height}px`);
+}
 function handleViewportResize(){
+  syncVisualViewportHeight();
   scheduleLayout();
 }
 function setupInput(){
@@ -1831,12 +1841,11 @@ function openSidebar(trigger){
   state.sidebarTrigger=trigger || document.activeElement;
   sidebar.classList.add('open');
   syncSidebarAccessibility();
-  const search=$('deviceSearch');
   const selectedButton=state.deviceNodes.get(state.selectedDeviceId);
-  const searchVisible=search && search.getClientRects().length > 0;
   const selectedVisible=selectedButton && !selectedButton.disabled && !selectedButton.hidden && selectedButton.getClientRects().length > 0;
   const visibleDevice=Array.from(state.deviceNodes.values()).find(button=>!button.disabled && !button.hidden && button.getClientRects().length > 0);
-  const focusTarget=searchVisible ? search : (selectedVisible ? selectedButton : visibleDevice || visibleLayerFocusables(sidebar)[0]) || sidebar;
+  const closeButton=$('sidebarCollapseBtn');
+  const focusTarget=(selectedVisible ? selectedButton : visibleDevice) || closeButton || visibleLayerFocusables(sidebar)[0] || sidebar;
   if (focusTarget === sidebar && !sidebar.hasAttribute('tabindex')) sidebar.setAttribute('tabindex','-1');
   if (focusTarget) requestAnimationFrame(()=>{
     if (focusTarget === selectedButton && typeof selectedButton.scrollIntoView === 'function') selectedButton.scrollIntoView({block:'nearest'});
@@ -2102,6 +2111,7 @@ function initializeWorkspaceInteractions(){
   render();
 }
 initializeWorkspaceInteractions();
+handleViewportResize();
 document.querySelectorAll('[data-fit]').forEach(btn=>btn.onclick=()=>{ state.fit=btn.dataset.fit; handleViewportResize(); render(); });
 window.addEventListener('resize', handleViewportResize);
 if (window.visualViewport) {
