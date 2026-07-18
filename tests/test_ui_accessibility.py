@@ -17,6 +17,8 @@ class UiAccessibilityContractTests(unittest.TestCase):
                 self.assertIn('<html lang="{{ current_locale() }}">', source)
                 self.assertIn('data-ui-locale-select', source)
                 self.assertIn('aria-label="{{ t(\'common.language.label\') }}"', source)
+                self.assertIn("interactive-widget=resizes-content", source)
+                self.assertIn("viewport-fit=cover", source)
                 self.assertNotRegex(source, r"\sstyle\s*=")
 
     def test_shared_controls_keep_focus_touch_and_motion_baselines(self):
@@ -28,6 +30,9 @@ class UiAccessibilityContractTests(unittest.TestCase):
         self.assertIn(".ui-button,\n  .ui-icon-button,\n  .ui-theme-picker", components)
         self.assertIn(".ui-locale-picker { min-height: 44px; }", components)
         self.assertIn(".ui-theme-option { min-height: 44px; }", components)
+        self.assertIn(".ui-toast__close { width: 44px; min-height: 44px; }", components)
+        self.assertIn("--ui-color-control-border: #68717d", tokens)
+        self.assertIn("--ui-color-control-border: #7c8592", tokens)
         self.assertIn("--ui-color-primary-text: #8ab4ff", tokens)
         self.assertIn("color: var(--ui-color-primary-text)", mirror)
 
@@ -41,6 +46,8 @@ class UiAccessibilityContractTests(unittest.TestCase):
             self.assertIn('aria-hidden', source)
         self.assertIn("trapLayerFocus", core)
         self.assertIn("trapLayerFocus", mirror)
+        self.assertIn("node.closest('[hidden], [inert], [aria-hidden=\"true\"]')", core)
+        self.assertIn("node.getClientRects().length", core)
 
     def test_mobile_layouts_declare_responsive_overflow_rules(self):
         for name in ("static/css/mirror.css", "static/css/admin.css"):

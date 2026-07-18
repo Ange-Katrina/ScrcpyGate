@@ -221,8 +221,15 @@ class UiTemplateContractTests(unittest.TestCase):
             self.assertIn(color, tokens)
         self.assertIn(':root[data-theme="light"]', tokens)
         self.assertIn(':root[data-theme="system"]', tokens)
+        self.assertIn("--ui-color-control-border: #68717d", tokens)
+        self.assertIn("--ui-visual-viewport-height: 100dvh", tokens)
         self.assertIn(":focus-visible", components)
         self.assertIn("prefers-reduced-motion: reduce", components)
+        self.assertIn("prefers-reduced-transparency: reduce", components)
+        self.assertIn("prefers-contrast: more", components)
+        self.assertIn("function syncVisualViewportMetrics()", core)
+        self.assertIn('window.visualViewport.addEventListener("resize"', core)
+        self.assertIn('window.visualViewport.addEventListener("scroll"', core)
         for primitive in (".ui-button", ".ui-toast", ".ui-drawer", ".ui-dialog", ".ui-empty", ".ui-skeleton"):
             self.assertIn(primitive, components)
 

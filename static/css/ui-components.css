@@ -7,6 +7,12 @@ html {
   background: var(--ui-color-canvas);
   color: var(--ui-color-text);
   font-family: var(--ui-font-sans);
+  font-size: 100%;
+  line-height: 1.5;
+  font-optical-sizing: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-block: max(var(--ui-space-4), env(safe-area-inset-top)) max(var(--ui-space-6), env(safe-area-inset-bottom));
 }
 
 body[data-ui-page] {
@@ -28,6 +34,7 @@ select,
 textarea,
 [tabindex]:not([tabindex="-1"]) {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 :where(button, a, input, select, textarea, [tabindex]):focus-visible {
@@ -76,7 +83,7 @@ textarea,
   gap: var(--ui-space-2);
   margin: 0;
   padding: 0 var(--ui-space-2);
-  border: 1px solid var(--ui-color-border);
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-radius-md);
   background: var(--ui-color-surface-raised);
   color: var(--ui-color-text-muted);
@@ -95,7 +102,7 @@ textarea,
   align-items: center;
   gap: var(--ui-space-2);
   padding: 0 var(--ui-space-2);
-  border: 1px solid var(--ui-color-border);
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-radius-md);
   background: var(--ui-color-surface-raised);
   color: var(--ui-color-text-muted);
@@ -111,7 +118,7 @@ textarea,
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: var(--ui-weight-bold);
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .ui-locale-picker select {
@@ -323,7 +330,7 @@ textarea,
 
 .ui-button:active,
 .ui-icon-button:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 .ui-button--primary {
@@ -396,7 +403,7 @@ textarea,
 .ui-textarea {
   width: 100%;
   min-height: 40px;
-  border: 1px solid var(--ui-color-border);
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-radius-md);
   background: var(--ui-color-surface-raised);
   color: var(--ui-color-text);
@@ -467,12 +474,12 @@ textarea,
 .ui-drawer {
   position: fixed;
   z-index: 900;
-  top: 0;
+  top: var(--ui-visual-viewport-offset-top, 0px);
   right: 0;
   width: min(420px, calc(100vw - 20px));
-  height: 100vh;
-  height: 100dvh;
-  padding: max(var(--ui-space-5), env(safe-area-inset-top)) var(--ui-space-5) max(var(--ui-space-5), env(safe-area-inset-bottom));
+  height: var(--ui-visual-viewport-height, 100dvh);
+  max-height: var(--ui-visual-viewport-height, 100dvh);
+  padding: max(var(--ui-space-5), env(safe-area-inset-top)) max(var(--ui-space-5), env(safe-area-inset-right)) max(var(--ui-space-5), env(safe-area-inset-bottom)) max(var(--ui-space-5), env(safe-area-inset-left));
   overflow: auto;
   border-left: 1px solid var(--ui-color-border);
   background: var(--ui-color-surface);
@@ -487,7 +494,9 @@ textarea,
 
 .ui-dialog {
   width: min(480px, calc(100vw - 32px));
+  max-height: calc(var(--ui-visual-viewport-height, 100dvh) - 24px);
   padding: var(--ui-space-5);
+  overflow: auto;
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-radius-lg);
   background: var(--ui-color-surface);
@@ -575,8 +584,54 @@ body[data-ui-page="login"] input {
   .compact-theme-picker { width: 44px; }
   .ui-theme-trigger { min-height: 42px; }
   .ui-theme-option { min-height: 44px; }
-  .ui-toast-region { right: var(--ui-space-3); width: calc(100vw - 24px); }
+  .ui-input,
+  .ui-select,
+  .ui-textarea { min-height: 44px; font-size: 16px; }
+  .ui-toast-region {
+    right: max(var(--ui-space-3), env(safe-area-inset-right));
+    left: max(var(--ui-space-3), env(safe-area-inset-left));
+    width: auto;
+  }
+  .ui-toast__close { width: 44px; min-height: 44px; }
   .ui-drawer { width: min(100%, 420px); }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .ui-button:active,
+  .ui-icon-button:active,
+  .ui-theme-option:active,
+  .ui-toast__close:active {
+    border-color: var(--ui-color-border-strong);
+    background: var(--ui-color-surface-hover);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ui-toast,
+  .ui-drawer,
+  .ui-dialog,
+  .ui-theme-menu {
+    background: var(--ui-color-surface);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ui-button,
+  .ui-icon-button,
+  .ui-input,
+  .ui-select,
+  .ui-textarea,
+  .ui-drawer,
+  .ui-dialog,
+  .ui-theme-menu {
+    border-color: var(--ui-color-border-strong);
+  }
+
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline-width: 3px;
+    box-shadow: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

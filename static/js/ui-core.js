@@ -14,6 +14,41 @@
   const themeControls = [];
   const localeControls = [];
   const iconUrl = "/static/icons/lucide.svg?v=da1ff202eea5#";
+  let viewportFrame = 0;
+  let viewportSignature = "";
+
+  function finiteMetric(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : fallback;
+  }
+
+  function syncVisualViewportMetrics() {
+    const viewport = window.visualViewport;
+    const fallbackHeight = Math.max(1, finiteMetric(window.innerHeight, root.clientHeight || 1));
+    const height = Math.max(1, Math.round(finiteMetric(viewport && viewport.height, fallbackHeight)));
+    const offsetTop = Math.round(finiteMetric(viewport && viewport.offsetTop, 0));
+    const offsetLeft = Math.round(finiteMetric(viewport && viewport.offsetLeft, 0));
+    const keyboardInset = Math.max(0, Math.round(fallbackHeight - height - offsetTop));
+    const compact = height <= 520 || keyboardInset >= 120;
+    const signature = `${height}:${offsetTop}:${offsetLeft}:${compact ? 1 : 0}`;
+    if (signature === viewportSignature) return;
+    viewportSignature = signature;
+    root.style.setProperty("--ui-visual-viewport-height", `${height}px`);
+    root.style.setProperty("--ui-visual-viewport-offset-top", `${offsetTop}px`);
+    root.style.setProperty("--ui-visual-viewport-offset-left", `${offsetLeft}px`);
+    root.classList.toggle("ui-compact-viewport", compact);
+    window.dispatchEvent(new CustomEvent("scrcpygate:viewportchange", {
+      detail: { height, offsetTop, offsetLeft, keyboardInset, compact }
+    }));
+  }
+
+  function scheduleVisualViewportMetrics() {
+    if (viewportFrame) return;
+    viewportFrame = window.requestAnimationFrame(() => {
+      viewportFrame = 0;
+      syncVisualViewportMetrics();
+    });
+  }
 
   function readTheme() {
     try {
@@ -370,7 +405,13 @@
   function focusableElements(layer) {
     return Array.from(layer.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true");
+    )).filter((node) => {
+      if (node.hidden || node.getAttribute("aria-hidden") === "true") return false;
+      if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      if (!node.getClientRects().length) return false;
+      const style = window.getComputedStyle(node);
+      return style.display !== "none" && style.visibility !== "hidden";
+    });
   }
 
   function showLayer(layer, trigger) {
@@ -382,9 +423,17 @@
     layer.classList.add("is-open");
     if (!activeLayers.includes(layer)) activeLayers.push(layer);
     document.documentElement.classList.add("ui-layer-open");
-    const focusTarget = layer.querySelector("[autofocus]") || focusableElements(layer)[0] || layer;
+    const available = focusableElements(layer);
+    const requested = layer.querySelector("[data-ui-initial-focus], [autofocus]");
+    const closeControl = layer.querySelector('[data-ui-drawer-close], [data-ui-dialog-close], .ui-icon-button[aria-label]');
+    const coarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    const requestedInput = requested && requested.matches("input, select, textarea, [contenteditable]");
+    const focusTarget = (coarsePointer && requestedInput ? closeControl : requested) || closeControl || available[0] || layer;
     if (!layer.hasAttribute("tabindex") && focusTarget === layer) layer.setAttribute("tabindex", "-1");
-    window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => {
+      if (layer.hidden || layer.getAttribute("aria-hidden") === "true" || layer.hasAttribute("inert")) return;
+      focusTarget.focus({ preventScroll: true });
+    });
     return layer;
   }
 
@@ -430,8 +479,16 @@
     else dialog.setAttribute("open", "");
     if (!activeLayers.includes(dialog)) activeLayers.push(dialog);
     document.documentElement.classList.add("ui-layer-open");
-    const targetToFocus = dialog.querySelector("[autofocus]") || focusableElements(dialog)[0] || dialog;
-    window.requestAnimationFrame(() => targetToFocus.focus({ preventScroll: true }));
+    const available = focusableElements(dialog);
+    const requested = dialog.querySelector("[data-ui-initial-focus], [autofocus]");
+    const closeControl = dialog.querySelector('[data-ui-dialog-close], .ui-icon-button[aria-label]');
+    const coarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    const requestedInput = requested && requested.matches("input, select, textarea, [contenteditable]");
+    const targetToFocus = (coarsePointer && requestedInput ? closeControl : requested) || closeControl || available[0] || dialog;
+    window.requestAnimationFrame(() => {
+      if (dialog.hidden || dialog.getAttribute("aria-hidden") === "true" || dialog.hasAttribute("inert")) return;
+      targetToFocus.focus({ preventScroll: true });
+    });
     return dialog;
   }
 
@@ -478,6 +535,7 @@
 
   function initialize() {
     if (syncStoredLocale()) return;
+    scheduleVisualViewportMetrics();
     syncThemeControls(root.dataset.theme || readTheme());
     updateThemeColor();
 
@@ -514,6 +572,13 @@
   }
 
   applyTheme(readTheme(), false);
+  scheduleVisualViewportMetrics();
+
+  window.addEventListener("resize", scheduleVisualViewportMetrics, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleVisualViewportMetrics, { passive: true });
+    window.visualViewport.addEventListener("scroll", scheduleVisualViewportMetrics, { passive: true });
+  }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true });
   else initialize();
@@ -548,6 +613,7 @@
     openDrawer,
     closeDrawer,
     openDialog,
-    closeDialog
+    closeDialog,
+    syncViewport: scheduleVisualViewportMetrics
   });
 })();

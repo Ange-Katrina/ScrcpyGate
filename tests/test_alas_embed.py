@@ -325,6 +325,8 @@ class AlasEmbedTests(unittest.TestCase):
         script = self.read_static("static/js/alas-shell.js")
 
         self.assertIn("grid-template-rows: auto minmax(0, 1fr)", stylesheet)
+        self.assertIn("interactive-widget=resizes-content", result)
+        self.assertIn("viewport-fit=cover", result)
         self.assertNotIn("calc(100vh - 45px)", stylesheet)
         self.assertIn('id="alasFrame"', result)
         self.assertIn('id="loadStatus"', result)

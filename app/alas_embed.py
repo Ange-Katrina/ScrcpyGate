@@ -340,11 +340,11 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
 <html lang="{i18n.current_locale()}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#111315">
   <title>{safe_title}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
-  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=6f63f3a3eadd">
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
   <link rel="stylesheet" href="/static/css/alas-shell.css?v=1c04d8ca47e1">
   <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
@@ -433,7 +433,7 @@ def denied_page_html(message: str, redirect_url: str = "/alas/embed/", seconds: 
 <html lang="{i18n.DEFAULT_LOCALE}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta http-equiv="refresh" content="{safe_seconds};url={safe_url}">
   <title>{safe_page_title}</title>
   <style>

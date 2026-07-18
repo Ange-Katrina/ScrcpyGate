@@ -8,6 +8,7 @@
   --ui-color-surface-hover: #292e35;
   --ui-color-border: #363c44;
   --ui-color-border-strong: #4b535d;
+  --ui-color-control-border: #68717d;
   --ui-color-text: #f1f3f5;
   --ui-color-text-muted: #b0b7c0;
   --ui-color-primary: #2563eb;
@@ -50,6 +51,9 @@
   --ui-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ui-shadow-raised: 0 16px 40px rgba(0, 0, 0, 0.3);
   --ui-focus-ring: 0 0 0 3px rgba(90, 162, 255, 0.32);
+  --ui-visual-viewport-height: 100dvh;
+  --ui-visual-viewport-offset-top: 0px;
+  --ui-visual-viewport-offset-left: 0px;
 
   /* Compatibility aliases used by the existing pages. */
   --bg: var(--ui-color-canvas);
@@ -77,6 +81,7 @@
   --ui-color-surface-hover: #e7eaf0;
   --ui-color-border: #c9cfd8;
   --ui-color-border-strong: #929baa;
+  --ui-color-control-border: #7c8592;
   --ui-color-text: #17191c;
   --ui-color-text-muted: #5f6670;
   --ui-color-primary: #1d4ed8;
@@ -107,6 +112,7 @@
     --ui-color-surface-hover: #e7eaf0;
     --ui-color-border: #c9cfd8;
     --ui-color-border-strong: #929baa;
+    --ui-color-control-border: #7c8592;
     --ui-color-text: #17191c;
     --ui-color-text-muted: #5f6670;
     --ui-color-primary: #1d4ed8;
