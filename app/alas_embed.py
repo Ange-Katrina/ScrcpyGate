@@ -344,7 +344,7 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
   <meta name="theme-color" content="#111315">
   <title>{safe_title}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
-  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=23c66068705b">
+  <link rel="stylesheet" href="/static/css/ui-tokens.css?v=6f63f3a3eadd">
   <link rel="stylesheet" href="/static/css/alas-shell.css?v=1c04d8ca47e1">
   <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>

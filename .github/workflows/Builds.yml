@@ -88,6 +88,35 @@ jobs:
             exit 1
           fi
 
+  ui:
+    name: UI accessibility gates
+    runs-on: ubuntu-24.04
+    needs: tests
+    if: ${{ vars.SCRCPYGATE_E2E_BASE_URL != '' }}
+    env:
+      SCRCPYGATE_E2E_BASE_URL: ${{ vars.SCRCPYGATE_E2E_BASE_URL }}
+      SCRCPYGATE_E2E_RUN: "1"
+      SCRCPYGATE_E2E_USERNAME: ${{ secrets.SCRCPYGATE_E2E_USERNAME }}
+      SCRCPYGATE_E2E_PASSWORD: ${{ secrets.SCRCPYGATE_E2E_PASSWORD }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install browser gate dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run axe and layout gates
+        run: npm run test:a11y
+
   docker:
     name: Docker Image
     runs-on: ubuntu-24.04

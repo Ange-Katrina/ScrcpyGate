@@ -12,6 +12,7 @@
   --ui-color-text-muted: #b0b7c0;
   --ui-color-primary: #2563eb;
   --ui-color-primary-hover: #1d4ed8;
+  --ui-color-primary-text: #8ab4ff;
   --ui-color-primary-soft: rgba(37, 99, 235, 0.16);
   --ui-color-success: #35c987;
   --ui-color-success-soft: rgba(53, 201, 135, 0.14);
@@ -80,6 +81,7 @@
   --ui-color-text-muted: #5f6670;
   --ui-color-primary: #1d4ed8;
   --ui-color-primary-hover: #1e40af;
+  --ui-color-primary-text: #1d4ed8;
   --ui-color-primary-soft: rgba(29, 78, 216, 0.11);
   --ui-color-success: #167a50;
   --ui-color-success-soft: rgba(22, 122, 80, 0.11);
@@ -109,6 +111,7 @@
     --ui-color-text-muted: #5f6670;
     --ui-color-primary: #1d4ed8;
     --ui-color-primary-hover: #1e40af;
+    --ui-color-primary-text: #1d4ed8;
     --ui-color-primary-soft: rgba(29, 78, 216, 0.11);
     --ui-color-success: #167a50;
     --ui-color-success-soft: rgba(22, 122, 80, 0.11);

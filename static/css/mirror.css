@@ -956,7 +956,7 @@ video {
 
 .nav-btn[data-active="true"] {
   background: var(--ui-color-primary-soft);
-  color: var(--ui-color-primary);
+  color: var(--ui-color-primary-text);
 }
 
 .nav-btn:disabled {

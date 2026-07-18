@@ -1,0 +1,13 @@
+{
+  "name": "scrcpygate-ui-gates",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test tests/e2e/ui-accessibility.spec.js"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.55.0"
+  }
+}
