@@ -94,15 +94,19 @@ class AlasAdminUiContractTests(unittest.TestCase):
             'id="alasAssignmentOwnerHint"',
             'aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint"',
             "function configOwnership(configName)",
-            "group.label='已归属其他用户（不可选）'",
+            "group.label=adminT('admin.alas_ui.owned_by_others')",
             "option.disabled=true",
             "otherOwners=configOwnership(configName).owners.filter(owner=>owner!==username)",
-            "不能直接分配给",
-            "ownership.owner?`归属 ${ownership.owner}`:'未分配'",
-            "$('alasCurrentUserCount').textContent=ownership.conflict?'需处理':ownership.owner?'已分配':'未分配'",
+            "admin.alas_ui.assignment_blocked",
+            "admin.alas_ui.owner",
+            "admin.alas_ui.unassigned",
+            "admin.alas_ui.needs_attention",
+            "admin.alas_ui.assigned",
             "$('alasBindDefault').value='keep'",
         ):
             self.assertIn(token, combined)
+        self.assertIn('"owned_by_others": "已归属其他用户（不可选）"', self.catalog)
+        self.assertIn("不能直接分配给", self.catalog)
         self.assertIn('.alas-owner-note[data-state="error"]', self.styles)
 
     def test_assignment_uses_standard_select_with_explicit_manual_entry(self):
@@ -116,11 +120,11 @@ class AlasAdminUiContractTests(unittest.TestCase):
             "function alasAssignmentManualSelected()",
             "function syncAlasAssignmentConfigMode",
             "function renderAlasAssignmentConfigOptions",
-            "group.label='未分配配置'",
-            "group.label='当前用户已拥有'",
-            "group.label='已归属其他用户（不可选）'",
+            "group.label=adminT('admin.alas_ui.unassigned_configs')",
+            "group.label=adminT('admin.alas_ui.current_user_owned')",
+            "group.label=adminT('admin.alas_ui.owned_by_others')",
             "manual.dataset.manual='true'",
-            "manual.textContent='手动输入配置名称…'",
+            "manual.textContent=adminT('admin.alas_ui.manual_config')",
             "customInput.disabled=!manual",
             "$('alasBindConfig').onchange=",
             "$('alasBindConfigCustom').oninput=",
@@ -129,6 +133,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
             "closeEditorDrawer('alasAssignment');",
         ):
             self.assertIn(token, self.template + self.script)
+        self.assertIn('"manual_config": "手动输入配置名称…"', self.catalog)
         self.assertNotIn("ALAS_CONFIG_MANUAL_VALUE", self.script)
 
     def test_config_identity_errors_and_focus_are_explicit(self):
@@ -161,11 +166,12 @@ class AlasAdminUiContractTests(unittest.TestCase):
             "function emptyListboxOption(text)",
             "option.setAttribute('role','option')",
             "option.setAttribute('aria-disabled','true')",
-            "list.appendChild(emptyListboxOption(query || filter!=='all'",
-            "list.appendChild(emptyListboxOption(query ? '没有匹配的配置。'",
-            "Runtime 与归属记录中都没有配置。",
+            "emptyListboxOption(adminT(query || filter!=='all' ? 'admin.alas_ui.no_user_match' : 'admin.alas_ui.no_assignable_users'))",
+            "emptyListboxOption(adminT(query ? 'admin.alas_ui.no_config_match' : 'admin.alas_ui.no_configs'))",
         ):
             self.assertIn(token, self.script)
+        self.assertIn('"no_config_match": "没有匹配的配置。"', self.catalog)
+        self.assertIn('"no_configs": "Runtime 与归属记录中都没有配置。"', self.catalog)
         self.assertNotIn("Runtime 与授权记录", self.script + self.template)
         strong_rule = self.styles.split(".alas-choice__main strong {", 1)[1].split("}", 1)[0]
         self.assertIn("overflow-wrap: anywhere", strong_rule)
@@ -179,11 +185,13 @@ class AlasAdminUiContractTests(unittest.TestCase):
             'id="alasAssignmentConfigName"',
             'id="alasAssignmentConfigMeta"',
             "function syncAlasAssignmentSummary()",
-            "kind:'用户账号'",
-            "kind:'Runtime 配置'",
+            "kind:adminT('admin.alas_ui.user_account')",
+            "kind:adminT('admin.alas_ui.runtime_config')",
             "syncAlasAssignmentSummary();",
         ):
             self.assertIn(token, self.template + self.script)
+        self.assertIn('"user_account": "用户账号"', self.catalog)
+        self.assertIn('"runtime_config": "Runtime 配置"', self.catalog)
         for token in (
             ".alas-assignment-summary",
             "flex: 0 0 auto",
@@ -244,6 +252,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
               var alasConfigReadSequence = 0;
               var alasConfigReadController = null;
               var state = {alas: {}};
+              function adminT(key, values={}){ return key + Object.values(values).map(value => ' ' + value).join(''); }
               function $(id){ return globalThis.__elements[id]; }
               function api(url, options){ return globalThis.__apiImpl(url, options || {}); }
               function show(message){ globalThis.__messages.push(message); }
@@ -425,6 +434,7 @@ class AlasAdminUiContractTests(unittest.TestCase):
               var alasPermissionsNeedsRefresh = false;
               var state = {alas: {}};
               var loadedResources = new Set();
+              function adminT(key, values={}){ return key + Object.values(values).map(value => ' ' + value).join(''); }
               function api(url, options){ return globalThis.__apiImpl(url, options || {}); }
               function markResourceStale(name){ globalThis.__stale.push(name); }
               function requestResource(name, request, apply){

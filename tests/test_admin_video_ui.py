@@ -26,7 +26,18 @@ class AdminVideoUiContractTests(unittest.TestCase):
     @classmethod
     def run_node(cls, function_names, expression, prelude=""):
         definitions = "\n".join(cls.function_source(name) for name in function_names)
-        program = f"{prelude}\n{definitions}\nconsole.log(JSON.stringify({expression}));"
+        translations = r"""
+const adminT = (key, values={}) => {
+  const messages = {
+    'mirror.quality.raw_size': '原始尺寸',
+    'admin.video.size_long_edge': '{size} · 最长边 {edge}px',
+  };
+  return (messages[key] || key).replace(/\{([^{}]+)\}/g, (match, name) => (
+    Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match
+  ));
+};
+"""
+        program = f"{translations}\n{prelude}\n{definitions}\nconsole.log(JSON.stringify({expression}));"
         completed = subprocess.run(
             ["node", "-e", program],
             cwd=ROOT,
@@ -113,7 +124,8 @@ const STANDARD_OUTPUT_SIZES=[
         self.assertIn("width.dataset.customWidth='1'", self.script)
         self.assertIn("height.dataset.customHeight='1'", self.script)
         self.assertIn("!width.checkValidity() || !height.checkValidity()", self.script)
-        self.assertIn("自定义宽度或高度超出允许范围", self.script)
+        self.assertIn("admin.video.custom_size_invalid", self.script)
+        self.assertIn('"custom_size_invalid": "自定义宽度或高度超出允许范围"', self.catalog)
         self.assertIn(".preset-size-control", self.styles)
         self.assertIn(".custom-size-editor", self.styles)
         self.assertIn(".custom-size-pair", self.styles)

@@ -11,6 +11,7 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         cls.template = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
         cls.styles = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
         cls.script = (ROOT / "static" / "js" / "admin.js").read_text(encoding="utf-8")
+        cls.catalog = (ROOT / "static" / "i18n" / "zh-CN.json").read_text(encoding="utf-8")
 
     def test_workspace_uses_sidebar_and_full_width_domains(self):
         for token in (
@@ -116,7 +117,7 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "function renderOverviewMirrors()",
             "function renderOverviewAlas()",
             "function alasOverviewErrorText(value)",
-            "ALAS Runtime 不可达",
+            "admin.overview.alas_unreachable",
             "config_statuses",
             "session.clients",
             "state.overview && Array.isArray(state.overview.users)",
@@ -124,6 +125,7 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "loadOverviewDevices",
         ):
             self.assertIn(token, self.script)
+        self.assertIn('"alas_unreachable": "ALAS Runtime 不可达"', self.catalog)
         self.assertIn('role="region" aria-labelledby="overviewDevicesTitle" tabindex="0"', self.template)
         self.assertIn(".overview-list:focus-visible", self.styles)
         self.assertIn("overflow-wrap: anywhere", self.styles)

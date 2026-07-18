@@ -223,6 +223,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
                 });
               }
               function isAbortError(error){ return error && error.name === 'AbortError'; }
+              function adminT(key, values={}){ return key + Object.values(values).map(value => ' ' + value).join(''); }
               function show(message){ __messages.push(message); }
               function renderUsers(){}
               function renderDevices(){}
@@ -350,7 +351,7 @@ class AdminAccessUiContractTests(unittest.TestCase):
                 if(method === 'PUT') return Promise.reject(new Error('write failed'));
                 return Promise.resolve({permissions: state.permissions});
               };
-              await assert.rejects(savePermission(), /1 .*保存失败/);
+              await assert.rejects(savePermission(), /admin\.permissions\.save_failed 1/);
               assert.deepStrictEqual(__calls, ['PUT', 'GET']);
               assert.strictEqual(permissionsMutations, 0);
 

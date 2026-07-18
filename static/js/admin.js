@@ -369,11 +369,11 @@ function updateText(element,value){ const text=String(value == null ? '' : value
 function alasOverviewErrorText(value){
   const text=String(value || '');
   const normalized=text.toLowerCase();
-  if(normalized.includes('control is disabled')) return 'ALAS 控制未启用';
-  if(normalized.includes('token is not configured')) return 'ALAS API 令牌未配置';
-  if(normalized.includes('unreachable') || normalized.includes('connection refused')) return 'ALAS Runtime 不可达';
-  if(normalized.includes('timed out') || normalized.includes('timeout')) return 'ALAS Runtime 响应超时';
-  if(normalized.includes('invalid config catalog')) return 'ALAS 配置目录格式无效';
+  if(normalized.includes('control is disabled')) return adminT('admin.overview.alas_control_disabled');
+  if(normalized.includes('token is not configured')) return adminT('admin.overview.alas_token_missing');
+  if(normalized.includes('unreachable') || normalized.includes('connection refused')) return adminT('admin.overview.alas_unreachable');
+  if(normalized.includes('timed out') || normalized.includes('timeout')) return adminT('admin.overview.alas_timeout');
+  if(normalized.includes('invalid config catalog')) return adminT('admin.overview.alas_catalog_invalid');
   return text;
 }
 function updateOverviewRows(container,items,emptyMessage){
@@ -425,7 +425,7 @@ function renderOverviewHeader(){
   const devices=overviewDevices();
   const sessionCount=devices.filter(device=>device.session&&device.session.running).length;
   const viewerCount=devices.reduce((total,device)=>total+Number(device.session&&device.session.running&&device.session.clients || 0),0);
-  $('summaryMirror').textContent=`投屏 ${sessionCount} · 观看 ${viewerCount}`;
+  $('summaryMirror').textContent=adminT('admin.overview.mirror_summary',{sessions:sessionCount,viewers:viewerCount});
   $('summaryMirror').className='chip ' + (sessionCount?'ok':'');
   const overviewAlas=state.overview && state.overview.alas;
   const alasStatus=(overviewAlas && overviewAlas.status) || (state.alas && state.alas.status && state.alas.status.status) || 'unknown';
@@ -437,61 +437,61 @@ function renderOverviewHeader(){
 function renderOverviewDevices(){
   const devices=overviewDevices();
   const onlineDevices=devices.filter(device=>deviceAdbMeta(device).state==='online').length;
-  updateText($('overviewDevicesMeta'),`${onlineDevices} / ${devices.length} 在线`);
+  updateText($('overviewDevicesMeta'),adminT('admin.overview.devices_summary',{online:onlineDevices,total:devices.length}));
   const priority={offline:0,network_unreachable:0,unauthorized:1,checking:2,reconnecting:2,unknown:3,disabled:4,online:5};
   const rows=[...devices].sort((a,b)=>(priority[deviceAdbMeta(a).state]??9)-(priority[deviceAdbMeta(b).state]??9)||String(a.name||getDeviceId(a)).localeCompare(String(b.name||getDeviceId(b)))).map(device=>{
     const heartbeat=deviceAdbMeta(device);
     const hasLatency=device.latency_ms!==null&&device.latency_ms!==undefined&&Number.isFinite(Number(device.latency_ms));
     const checked=relativeTs(device.last_checked_at) || adminT('admin.devices.not_checked');
     const seen=relativeTs(device.last_seen_at) || adminT('admin.devices.not_seen');
-    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${hasLatency?`${Math.round(Number(device.latency_ms))} ms`:'无延迟数据'} · ${checked}`,badge:heartbeat.label,tone:heartbeat.tone,detail:`最后在线：${seen}`};
+    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${hasLatency?`${Math.round(Number(device.latency_ms))} ms`:adminT('admin.overview.no_latency')} · ${checked}`,badge:heartbeat.label,tone:heartbeat.tone,detail:adminT('admin.overview.last_online',{value:seen})};
   });
-  updateOverviewRows($('overviewDevices'),rows,'暂无设备');
+  updateOverviewRows($('overviewDevices'),rows,adminT('admin.overview.no_devices'));
 }
 function renderOverviewUsers(){
   const users=overviewUsers();
   const expirationOrder={expired:0,expiring:1,active:2,permanent:3};
   const sorted=[...users].sort((a,b)=>(expirationOrder[userExpirationState(a)]??9)-(expirationOrder[userExpirationState(b)]??9)||a.username.localeCompare(b.username));
   const expiredUsers=sorted.filter(user=>userExpirationState(user)==='expired').length;
-  updateText($('overviewUsersMeta'),`${sorted.length} 位 · ${expiredUsers} 到期`);
+  updateText($('overviewUsersMeta'),adminT('admin.overview.users_summary',{total:sorted.length,expired:expiredUsers}));
   const rows=sorted.map(user=>{
     const expiryState=userExpirationState(user);
-    const label=expiryState==='permanent'?'永久有效':expiryState==='expired'?'已到期':expiryState==='expiring'?'即将到期':'有效';
+    const label=adminT(`admin.time.${expiryState}`);
     const tone=expiryState==='expired'?'danger':expiryState==='expiring'?'warn':'ok';
     const remaining=user.expires_at==null ? '' : formatRemainingSeconds(Number(user.expires_at)-Math.floor(Date.now()/1000));
-    const detail=user.expires_at==null ? '无到期时间' : expiryState==='expired' ? `到期时间：${formatUserExpiryDate(user.expires_at)}` : `有效至 ${formatUserExpiryDate(user.expires_at)} · 剩余 ${remaining}`;
+    const detail=user.expires_at==null ? adminT('admin.overview.no_expiry') : expiryState==='expired' ? adminT('admin.overview.expired_at',{value:formatUserExpiryDate(user.expires_at)}) : adminT('admin.overview.valid_until',{date:formatUserExpiryDate(user.expires_at),remaining});
     return {key:user.username,title:user.username,subtitle:accessRoleLabel(user.role),badge:label,tone,detail};
   });
-  updateOverviewRows($('overviewUsers'),rows,'暂无用户');
+  updateOverviewRows($('overviewUsers'),rows,adminT('admin.overview.no_users'));
 }
 function renderOverviewMirrors(){
   const running=overviewDevices().filter(device=>device.session&&device.session.running);
   const viewerCount=running.reduce((total,device)=>total+Math.max(0,Number(device.session.clients)||0),0);
-  updateText($('overviewMirrorMeta'),`${running.length} 路 · ${viewerCount} 人`);
+  updateText($('overviewMirrorMeta'),adminT('admin.overview.mirrors_summary',{sessions:running.length,viewers:viewerCount}));
   const rows=running.map(device=>{
     const session=device.session;
     const viewers=Math.max(0,Number(session.clients)||0);
     const lock=session.control_lock;
-    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${statusLabel(session.stream_health||'running')} · ${session.stream_mode||'raw'}`,badge:`${viewers} 人观看`,tone:viewers?'ok':'',detail:lock?`控制权：${lock.username||lock.owner||'已占用'}`:'控制权：空闲'};
+    return {key:getDeviceId(device),title:device.name||getDeviceId(device),subtitle:`${statusLabel(session.stream_health||'running')} · ${session.stream_mode||'raw'}`,badge:adminT('admin.overview.viewer_count',{count:viewers}),tone:viewers?'ok':'',detail:lock?adminT('admin.overview.control_owner',{owner:lock.username||lock.owner||adminT('admin.overview.occupied')}):adminT('admin.overview.control_available')};
   });
-  updateOverviewRows($('overviewMirror'),rows,'当前没有运行中的投屏');
+  updateOverviewRows($('overviewMirror'),rows,adminT('admin.overview.no_mirror'));
 }
 function renderOverviewAlas(){
   const overviewAlas=state.overview&&state.overview.alas;
   const alasConfigCount=Number(overviewAlas&&overviewAlas.config_count || 0);
   const alasRunningCount=Number(overviewAlas&&overviewAlas.running_count || 0);
-  updateText($('overviewAlasMeta'),`${alasRunningCount} / ${alasConfigCount} 运行`);
+  updateText($('overviewAlasMeta'),adminT('admin.overview.alas_summary',{running:alasRunningCount,total:alasConfigCount}));
   const legacyConfigs=Array.isArray(overviewAlas&&overviewAlas.configs)&&overviewAlas.configs.every(item=>item&&typeof item==='object') ? overviewAlas.configs : [];
   const configs=Array.isArray(overviewAlas&&overviewAlas.config_statuses) ? overviewAlas.config_statuses : legacyConfigs;
   const priority={running:0,starting:1,error:2,disconnected:3,stopped:4,idle:5,disabled:6,unknown:7};
   const rows=[...configs].sort((a,b)=>(priority[String(a.status||'unknown')]??9)-(priority[String(b.status||'unknown')]??9)||String(a.config||'').localeCompare(String(b.config||''))).map(config=>{
     const status=String(config.status || 'unknown');
     const tone=status==='running'?'ok':status==='error'||!config.ok?'danger':status==='disabled'||status==='disconnected'?'warn':'';
-    const owner=config.username ? `归属 ${config.username}` : '未分配用户';
-    const detail=config.task ? `当前任务：${config.task}` : alasOverviewErrorText(config.error) || '暂无运行任务';
-    return {key:config.config||'unnamed',title:config.config||'未命名配置',subtitle:owner,badge:statusLabel(status),tone,detail};
+    const owner=config.username ? adminT('admin.overview.owner',{username:config.username}) : adminT('admin.overview.unassigned_user');
+    const detail=config.task ? adminT('admin.overview.current_task',{task:config.task}) : alasOverviewErrorText(config.error) || adminT('admin.overview.no_task');
+    return {key:config.config||'unnamed',title:config.config||adminT('admin.overview.unnamed_config'),subtitle:owner,badge:statusLabel(status),tone,detail};
   });
-  const emptyMessage=overviewAlas&&overviewAlas.error&&overviewAlas.enabled ? `状态读取失败：${alasOverviewErrorText(overviewAlas.error)}` : overviewAlas&&overviewAlas.enabled ? '正在读取 Runtime 配置' : 'ALAS 未启用';
+  const emptyMessage=overviewAlas&&overviewAlas.error&&overviewAlas.enabled ? adminT('admin.overview.status_failed',{error:alasOverviewErrorText(overviewAlas.error)}) : overviewAlas&&overviewAlas.enabled ? adminT('admin.overview.loading_runtime') : adminT('admin.overview.alas_disabled');
   updateOverviewRows($('overviewAlas'),rows,emptyMessage);
 }
 function renderOverview(){
@@ -504,7 +504,7 @@ function renderOverview(){
 function renderDevices(){
   const box=$('deviceCards');
   clear(box);
-  if(!state.devices.length){ box.appendChild(chip('暂无设备','warn')); return; }
+  if(!state.devices.length){ box.appendChild(chip(adminT('admin.overview.no_devices'),'warn')); return; }
   state.devices.forEach(device=>{
     const id=getDeviceId(device);
     const card=document.createElement('div');
@@ -523,21 +523,21 @@ function renderDevices(){
     address.textContent=`ADB · ${device.address || id}`;
     const statuses=document.createElement('div');
     statuses.className='chips';
-    statuses.appendChild(chip(device.enabled?'启用':'禁用', device.enabled?'ok':'warn'));
-    statuses.appendChild(chip(device.session&&device.session.running?'投屏中':'未投屏', device.session&&device.session.running?'ok':''));
-    if(device.session&&device.session.control_lock) statuses.appendChild(chip(`控制: ${device.session.control_lock.username || '已占用'}`, 'warn'));
+    statuses.appendChild(chip(adminT(device.enabled?'admin.devices.enabled':'admin.devices.disabled'), device.enabled?'ok':'warn'));
+    statuses.appendChild(chip(adminT(device.session&&device.session.running?'admin.devices.mirroring':'admin.devices.not_mirroring'), device.session&&device.session.running?'ok':''));
+    if(device.session&&device.session.control_lock) statuses.appendChild(chip(adminT('admin.devices.control_owner',{owner:device.session.control_lock.username || adminT('admin.overview.occupied')}), 'warn'));
     const heartbeat=document.createElement('dl');
     heartbeat.className='device-heartbeat';
-    heartbeat.append(heartbeatField('网络延迟','latency','—'),heartbeatField('最后检测','checked','尚未检测'),heartbeatField('最后在线','seen','尚未在线'));
+    heartbeat.append(heartbeatField(adminT('admin.devices.network_latency'),'latency','—'),heartbeatField(adminT('admin.devices.last_checked'),'checked',adminT('admin.devices.not_checked')),heartbeatField(adminT('admin.devices.last_seen'),'seen',adminT('admin.devices.not_seen')));
     const actions=document.createElement('div');
     actions.className='actions';
-    const probeButton=btn(deviceProbeRequests.has(id)?'检测中':'立即检测','',()=>testDevice(id));
+    const probeButton=btn(adminT(deviceProbeRequests.has(id)?'admin.devices.checking':'admin.devices.check_now'),'',()=>testDevice(id));
     probeButton.dataset.deviceProbe='1';
     probeButton.disabled=deviceProbeRequests.has(id);
     actions.append(
-      btn('编辑','',()=>editDevice(device)),
+      btn(adminT('admin.devices.edit'),'',()=>editDevice(device)),
       probeButton,
-      btn('删除','danger',()=>deleteDevice(id))
+      btn(adminT('admin.devices.delete'),'danger',()=>deleteDevice(id))
     );
     card.append(heading,address,statuses,heartbeat,actions);
     box.appendChild(card);
@@ -581,7 +581,7 @@ function updateDeviceCardHeartbeat(device){
   if(checked){ checked.textContent=relativeTs(device.last_checked_at) || adminT('admin.devices.not_checked'); checked.title=ts(device.last_checked_at); }
   if(seen){ seen.textContent=relativeTs(device.last_seen_at) || adminT('admin.devices.not_seen'); seen.title=ts(device.last_seen_at); }
   const probe=card.querySelector('[data-device-probe]');
-  if(probe){ probe.textContent=deviceProbeRequests.has(id)?'检测中':'立即检测'; probe.disabled=deviceProbeRequests.has(id); }
+  if(probe){ probe.textContent=adminT(deviceProbeRequests.has(id)?'admin.devices.checking':'admin.devices.check_now'); probe.disabled=deviceProbeRequests.has(id); }
 }
 function applyDeviceStatuses(data){
   const statuses=data && data.devices || {};
@@ -592,29 +592,29 @@ function bitrateMbpsToBps(value){ const mbps=Number(value); return Number.isFini
 function outputSizeMeta(value){ const maxSize=Math.min(MAX_OUTPUT_SIZE,Math.max(MIN_OUTPUT_SIZE,Math.round(Number(value)||MIN_OUTPUT_SIZE))); const standard=STANDARD_OUTPUT_SIZES.find(item=>item.maxSize===maxSize); return standard || {maxSize,width:maxSize,height:Math.round(maxSize*9/16),quality:''}; }
 function dimensionsFromHeight(value){ const height=Math.min(MAX_OUTPUT_HEIGHT,Math.max(MIN_OUTPUT_HEIGHT,Math.round(Number(value)||MIN_OUTPUT_HEIGHT))); const width=Math.min(MAX_OUTPUT_SIZE,Math.max(MIN_OUTPUT_SIZE,Math.ceil(height*16/9))); return {maxSize:width,width,height:Math.round(width*9/16),quality:''}; }
 function outputSizeOptionLabel(item){ return `${item.width} × ${item.height}${item.quality ? `（${item.quality}）` : ''}`; }
-function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return '原始尺寸'; const item=outputSizeMeta(size); return `${outputSizeOptionLabel(item)} · 最长边 ${item.maxSize}px`; }
+function maxSizeQualityLabel(value){ const size=Number(value); if(!Number.isFinite(size) || size<=0) return adminT('mirror.quality.raw_size'); const item=outputSizeMeta(size); return adminT('admin.video.size_long_edge',{size:outputSizeOptionLabel(item),edge:item.maxSize}); }
 function presetFieldDisplayValue(field, value){ return field==='video_bit_rate' ? bitrateBpsToMbps(value) : value; }
-function populateOutputSizeSelect(select,value){ clear(select); STANDARD_OUTPUT_SIZES.forEach(item=>{ const option=document.createElement('option'); option.value=String(item.maxSize); option.textContent=outputSizeOptionLabel(item); select.appendChild(option); }); const custom=document.createElement('option'); custom.value=CUSTOM_OUTPUT_SIZE; custom.textContent='自定义尺寸…'; select.appendChild(custom); select.value=STANDARD_OUTPUT_SIZES.some(item=>item.maxSize===Number(value)) ? String(value) : CUSTOM_OUTPUT_SIZE; }
-function syncPresetSizeControl(control,value,forceCustom=false){ const select=control.querySelector('select'); const editor=control.querySelector('.custom-size-editor'); const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); const output=control.querySelector('output'); const item=outputSizeMeta(value); const standard=!forceCustom && STANDARD_OUTPUT_SIZES.some(option=>option.maxSize===item.maxSize); select.value=standard ? String(item.maxSize) : CUSTOM_OUTPUT_SIZE; width.value=String(item.width); height.value=String(item.height); editor.hidden=select.value!==CUSTOM_OUTPUT_SIZE; width.disabled=editor.hidden; height.disabled=editor.hidden; output.value=`将使用最长边 ${item.maxSize}px`; output.textContent=output.value; }
-function syncPresetCustomDimensions(control,source){ const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); const output=control.querySelector('output'); const sourceInput=source==='height' ? height : width; if(!sourceInput.checkValidity()){ output.value=source==='height' ? `高度需为 ${MIN_OUTPUT_HEIGHT}–${MAX_OUTPUT_HEIGHT}px` : `宽度需为 ${MIN_OUTPUT_SIZE}–${MAX_OUTPUT_SIZE}px`; output.textContent=output.value; return; } const item=source==='height' ? dimensionsFromHeight(height.value) : outputSizeMeta(width.value); if(source==='height'){ width.value=String(item.width); height.value=String(item.height); } else height.value=String(item.height); output.value=`将使用最长边 ${Math.max(Number(width.value),Number(height.value))}px`; output.textContent=output.value; }
+function populateOutputSizeSelect(select,value){ clear(select); STANDARD_OUTPUT_SIZES.forEach(item=>{ const option=document.createElement('option'); option.value=String(item.maxSize); option.textContent=outputSizeOptionLabel(item); select.appendChild(option); }); const custom=document.createElement('option'); custom.value=CUSTOM_OUTPUT_SIZE; custom.textContent=adminT('admin.video.custom_size_option'); select.appendChild(custom); select.value=STANDARD_OUTPUT_SIZES.some(item=>item.maxSize===Number(value)) ? String(value) : CUSTOM_OUTPUT_SIZE; }
+function syncPresetSizeControl(control,value,forceCustom=false){ const select=control.querySelector('select'); const editor=control.querySelector('.custom-size-editor'); const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); const output=control.querySelector('output'); const item=outputSizeMeta(value); const standard=!forceCustom && STANDARD_OUTPUT_SIZES.some(option=>option.maxSize===item.maxSize); select.value=standard ? String(item.maxSize) : CUSTOM_OUTPUT_SIZE; width.value=String(item.width); height.value=String(item.height); editor.hidden=select.value!==CUSTOM_OUTPUT_SIZE; width.disabled=editor.hidden; height.disabled=editor.hidden; output.value=adminT('admin.video.long_edge',{value:item.maxSize}); output.textContent=output.value; }
+function syncPresetCustomDimensions(control,source){ const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); const output=control.querySelector('output'); const sourceInput=source==='height' ? height : width; if(!sourceInput.checkValidity()){ output.value=source==='height' ? adminT('admin.video.height_range',{min:MIN_OUTPUT_HEIGHT,max:MAX_OUTPUT_HEIGHT}) : adminT('admin.video.width_range',{min:MIN_OUTPUT_SIZE,max:MAX_OUTPUT_SIZE}); output.textContent=output.value; return; } const item=source==='height' ? dimensionsFromHeight(height.value) : outputSizeMeta(width.value); if(source==='height'){ width.value=String(item.width); height.value=String(item.height); } else height.value=String(item.height); output.value=adminT('admin.video.long_edge',{value:Math.max(Number(width.value),Number(height.value))}); output.textContent=output.value; }
 function presetSizeControl(profile,value){ const control=document.createElement('div'); control.className='preset-size-control'; const select=document.createElement('select'); select.dataset.presetProfile=profile; select.dataset.presetField='max_size'; const label=profileLabel(profile); select.setAttribute('aria-label',`${label}${adminT('admin.video.output_size')}`); populateOutputSizeSelect(select,value); const editor=document.createElement('div'); editor.className='custom-size-editor'; const pair=document.createElement('div'); pair.className='custom-size-pair'; pair.setAttribute('role','group'); pair.setAttribute('aria-label',`${label}${adminT('admin.video.custom_output_size')}`); const widthLabel=document.createElement('label'); widthLabel.className='custom-size-field'; const widthText=document.createElement('span'); widthText.textContent=adminT('admin.video.width_px'); const width=document.createElement('input'); width.type='number'; width.min=String(MIN_OUTPUT_SIZE); width.max=String(MAX_OUTPUT_SIZE); width.step='1'; width.inputMode='numeric'; width.required=true; width.dataset.customWidth='1'; width.setAttribute('aria-label',`${label}${adminT('admin.video.custom_width')}`); widthLabel.append(widthText,width); const separator=document.createElement('span'); separator.className='custom-size-separator'; separator.setAttribute('aria-hidden','true'); separator.textContent='×'; const heightLabel=document.createElement('label'); heightLabel.className='custom-size-field'; const heightText=document.createElement('span'); heightText.textContent=adminT('admin.video.height_px'); const height=document.createElement('input'); height.type='number'; height.min=String(MIN_OUTPUT_HEIGHT); height.max=String(MAX_OUTPUT_HEIGHT); height.step='1'; height.inputMode='numeric'; height.required=true; height.dataset.customHeight='1'; height.setAttribute('aria-label',`${label}${adminT('admin.video.custom_height')}`); heightLabel.append(heightText,height); const output=document.createElement('output'); output.setAttribute('aria-live','polite'); pair.append(widthLabel,separator,heightLabel); editor.append(pair,output); control.append(select,editor); select.onchange=()=>{ syncPresetSizeControl(control,select.value===CUSTOM_OUTPUT_SIZE ? width.value : select.value,select.value===CUSTOM_OUTPUT_SIZE); refreshFullscreenProfilesFromForm(); }; width.oninput=()=>{ syncPresetCustomDimensions(control,'width'); refreshFullscreenProfilesFromForm(); }; height.oninput=()=>{ syncPresetCustomDimensions(control,'height'); refreshFullscreenProfilesFromForm(); }; syncPresetSizeControl(control,value); return control; }
 function presetInput(profile, field, value){ if(field==='max_size') return presetSizeControl(profile,value); const input=document.createElement('input'); input.type='number'; input.value=value == null ? '' : presetFieldDisplayValue(field, value); input.dataset.presetProfile=profile; input.dataset.presetField=field; if(field==='video_bit_rate'){ input.min='0.1'; input.max='100'; input.step='0.05'; input.inputMode='decimal'; } else { input.min='1'; input.max='60'; input.step='1'; } return input; }
 function setPresetValue(profile, field, value){ const input=document.querySelector(`[data-preset-profile="${profile}"][data-preset-field="${field}"]`); if(!input) return; if(field==='max_size'){ syncPresetSizeControl(input.closest('.preset-size-control'),value); return; } input.value=presetFieldDisplayValue(field, value); }
 function renderBandwidthActions(recommendations){ const box=$('bandwidthPresetActions'); if(!box) return; clear(box); Object.keys(recommendations).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(name=>box.appendChild(btn(name.toUpperCase(), 'warn', ()=>applyBandwidthRecommendation(name)))); }
-function applyBandwidthRecommendation(name){ const rec=((state.video || {}).bandwidth_recommendations || {})[name]; if(!rec) return; Object.entries(rec).forEach(([profile, values])=>['video_bit_rate','max_size','max_fps'].forEach(field=>setPresetValue(profile, field, values[field]))); refreshFullscreenProfilesFromForm(); show(`${name.toUpperCase()} \u63a8\u8350\u503c\u5df2\u586b\u5165\uff0c\u786e\u8ba4\u540e\u70b9\u4fdd\u5b58`); }
+function applyBandwidthRecommendation(name){ const rec=((state.video || {}).bandwidth_recommendations || {})[name]; if(!rec) return; Object.entries(rec).forEach(([profile, values])=>['video_bit_rate','max_size','max_fps'].forEach(field=>setPresetValue(profile, field, values[field]))); refreshFullscreenProfilesFromForm(); show(adminT('admin.video.bandwidth_filled',{name:name.toUpperCase()})); }
 async function removeCustomProfile(id){
   const confirmed=await confirmDanger({
-    title:'删除自定义档位',
-    message:`将自定义档位 ${id} 从当前设置中移除。保存画质设置后生效。`,
-    confirmText:'删除档位'
+    title:adminT('admin.actions.profile_remove'),
+    message:adminT('admin.video.remove_profile_message',{id}),
+    confirmText:adminT('admin.actions.profile_remove_confirm')
   });
   if(!confirmed) return;
   delete customProfiles[id];
   renderCustomProfiles();
   refreshFullscreenProfilesFromForm();
-  show('自定义档位已移除，确认后点保存');
+  show(adminT('admin.video.profile_removed'));
 }
-function syncCustomProfileSizeEditor(source='select'){ const select=$('customProfileSizeSelect'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); const wrap=$('customProfileSizeCustomWrap'); const output=$('customProfileSizeReference'); if(!select || !width || !height || !wrap || !output) return; const custom=select.value===CUSTOM_OUTPUT_SIZE; wrap.hidden=!custom; width.disabled=!custom; height.disabled=!custom; if(!custom){ const item=outputSizeMeta(select.value); width.value=String(item.width); height.value=String(item.height); output.value=`将使用最长边 ${item.maxSize}px`; } else { const sourceInput=source==='height' ? height : width; if(!sourceInput.checkValidity()){ output.value=source==='height' ? `高度需为 ${MIN_OUTPUT_HEIGHT}–${MAX_OUTPUT_HEIGHT}px` : `宽度需为 ${MIN_OUTPUT_SIZE}–${MAX_OUTPUT_SIZE}px`; output.textContent=output.value; return; } const item=source==='height' ? dimensionsFromHeight(height.value) : outputSizeMeta(width.value); if(source==='height'){ width.value=String(item.width); height.value=String(item.height); } else height.value=String(item.height); output.value=`将使用最长边 ${Math.max(Number(width.value),Number(height.value))}px`; } output.textContent=output.value; }
+function syncCustomProfileSizeEditor(source='select'){ const select=$('customProfileSizeSelect'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); const wrap=$('customProfileSizeCustomWrap'); const output=$('customProfileSizeReference'); if(!select || !width || !height || !wrap || !output) return; const custom=select.value===CUSTOM_OUTPUT_SIZE; wrap.hidden=!custom; width.disabled=!custom; height.disabled=!custom; if(!custom){ const item=outputSizeMeta(select.value); width.value=String(item.width); height.value=String(item.height); output.value=adminT('admin.video.long_edge',{value:item.maxSize}); } else { const sourceInput=source==='height' ? height : width; if(!sourceInput.checkValidity()){ output.value=source==='height' ? adminT('admin.video.height_range',{min:MIN_OUTPUT_HEIGHT,max:MAX_OUTPUT_HEIGHT}) : adminT('admin.video.width_range',{min:MIN_OUTPUT_SIZE,max:MAX_OUTPUT_SIZE}); output.textContent=output.value; return; } const item=source==='height' ? dimensionsFromHeight(height.value) : outputSizeMeta(width.value); if(source==='height'){ width.value=String(item.width); height.value=String(item.height); } else height.value=String(item.height); output.value=adminT('admin.video.long_edge',{value:Math.max(Number(width.value),Number(height.value))}); } output.textContent=output.value; }
 function setCustomProfileSize(value){ const select=$('customProfileSizeSelect'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); if(!select || !width || !height) return; const item=outputSizeMeta(value); const standard=STANDARD_OUTPUT_SIZES.some(option=>option.maxSize===Number(value)); select.value=standard ? String(item.maxSize) : CUSTOM_OUTPUT_SIZE; width.value=String(item.width); height.value=String(item.height); syncCustomProfileSizeEditor(); }
 function customProfileSizeValue(){ const select=$('customProfileSizeSelect'); if(select && select.value!==CUSTOM_OUTPUT_SIZE) return outputSizeMeta(select.value).maxSize; return Math.max(Number($('customProfileWidth').value),Number($('customProfileHeight').value)); }
 function renderCustomProfiles(){
@@ -628,21 +628,21 @@ function renderCustomProfiles(){
     const actions=document.createElement('td');
     actions.className='actions';
     actions.append(
-      btn('编辑','',()=>{
+      btn(adminT('admin.devices.edit'),'',()=>{
         $('customProfileId').value=id;
         $('customProfileLabel').value=profile.label || id;
         $('customProfileBitrate').value=bitrateBpsToMbps(profile.video_bit_rate || 900000);
         setCustomProfileSize(profile.max_size || 960);
         $('customProfileFps').value=profile.max_fps || 24;
       }),
-      btn('删除','danger',()=>removeCustomProfile(id))
+      btn(adminT('admin.devices.delete'),'danger',()=>removeCustomProfile(id))
     );
     tr.appendChild(actions);
     rows.appendChild(tr);
   });
   applyTableLabels(rows);
 }
-function streamModeLabel(mode){ return mode === 'legacy' ? 'legacy 诊断' : mode; }
+function streamModeLabel(mode){ return mode === 'legacy' ? adminT('admin.video.legacy_label') : mode; }
 function renderVideoStreamModes(data, selected){ const modes=data.stream_modes || ['raw','protocol','legacy']; const enabled=new Set(data.enabled_stream_modes || ['raw']); enabled.add('raw'); const toggles=$('streamModeToggles'); if(toggles){ clear(toggles); modes.forEach(mode=>{ const label=document.createElement('label'); label.className='stream-mode-toggle'; const input=document.createElement('input'); input.type='checkbox'; input.value=mode; input.checked=enabled.has(mode); input.disabled=mode==='raw'; input.dataset.streamModeToggle='1'; label.append(input, document.createTextNode(streamModeLabel(mode))); toggles.appendChild(label); }); } const select=$('videoStreamMode'); if(select){ clear(select); modes.filter(mode=>enabled.has(mode)).forEach(mode=>{ const option=document.createElement('option'); option.value=mode; option.textContent=streamModeLabel(mode); select.appendChild(option); }); select.value=enabled.has(selected) ? selected : 'raw'; } }
 function collectEnabledStreamModes(){ const modes=['raw']; document.querySelectorAll('[data-stream-mode-toggle]').forEach(input=>{ if(input.checked && !modes.includes(input.value)) modes.push(input.value); }); return modes; }
 function renderFullscreenProfiles(data,selected){ const select=$('videoFullscreenProfile'); if(!select) return; const profiles=data.profiles || {}; const labels=data.profile_labels || {}; const minimum=Number(data.fullscreen_min_max_size || 1280); const names=NORMAL_PROFILE_NAMES.concat(Object.keys(profiles).filter(name=>!NORMAL_PROFILE_NAMES.includes(name)).sort()).filter(name=>profiles[name] && Number(profiles[name].max_size)>=minimum); clear(select); names.forEach(name=>{ const option=document.createElement('option'); option.value=name; option.textContent=`${profileLabel(name,labels)} · ${maxSizeQualityLabel(profiles[name].max_size)}`; select.appendChild(option); }); if(!names.length){ const option=document.createElement('option'); option.value=''; option.textContent=adminT('admin.video.fullscreen_profile_unavailable'); option.disabled=true; select.appendChild(option); select.disabled=true; return; } select.disabled=false; select.value=names.includes(selected) ? selected : (names.includes('sharp') ? 'sharp' : names[0]); }
@@ -690,8 +690,8 @@ function renderVideo(){
 }
 function setDeviceDrawerContext(device=null){
   const id=device ? getDeviceId(device) : '';
-  $('deviceDrawerTitle').textContent=device?'编辑设备':'新建设备';
-  $('deviceDrawerContext').textContent=device ? `正在编辑 ${device.name || id}` : '填写名称、ADB 地址与启用状态';
+  $('deviceDrawerTitle').textContent=adminT(device?'admin.devices.edit':'admin.ui.devices.create');
+  $('deviceDrawerContext').textContent=device ? adminT('admin.devices.editing',{name:device.name || id}) : adminT('admin.devices.create_hint');
 }
 function editDevice(device){
   const id=getDeviceId(device);
@@ -722,8 +722,8 @@ function clearUserForm(){
   $('userExpiryMode').value='permanent';
   $('userExpiresAt').value='';
   syncUserExpiryFields();
-  $('userDrawerTitle').textContent='新建用户';
-  $('userDrawerContext').textContent='创建新的后台账户并选择角色';
+  $('userDrawerTitle').textContent=adminT('admin.users.create_title');
+  $('userDrawerContext').textContent=adminT('admin.users.create_context');
 }
 function openNewUserDrawer(){
   clearUserForm();
@@ -738,11 +738,11 @@ function editUser(user){
   $('userExpiryMode').value=user.expires_at == null ? 'permanent' : 'scheduled';
   $('userExpiresAt').value=user.expires_at == null ? '' : epochToLocalInput(user.expires_at);
   syncUserExpiryFields();
-  $('userDrawerTitle').textContent='编辑用户';
-  $('userDrawerContext').textContent=`正在编辑 ${user.username}，留空密码将保留原密码`;
+  $('userDrawerTitle').textContent=adminT('admin.users.edit_title');
+  $('userDrawerContext').textContent=adminT('admin.users.edit_context',{username:user.username});
   openEditorDrawer('user', document.activeElement);
 }
-function accessRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
+function accessRoleLabel(role){ return adminT(role==='admin'?'common.roles.admin':'common.roles.user'); }
 function epochToLocalInput(value){
   const date=new Date(Number(value)*1000);
   if(!Number.isFinite(date.getTime())) return '';
@@ -761,16 +761,16 @@ function userExpirationState(user, now=Math.floor(Date.now()/1000)){
 }
 function formatUserExpiryDate(value){
   const date=new Date(Number(value)*1000);
-  if(!Number.isFinite(date.getTime())) return '时间无效';
-  return new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
+  if(!Number.isFinite(date.getTime())) return adminT('admin.users.invalid_time');
+  return new Intl.DateTimeFormat((adminI18n && adminI18n.locale) || 'zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
 }
 function formatRemainingSeconds(seconds){
   const remaining=Math.max(0,Math.floor(Number(seconds) || 0));
   const days=Math.floor(remaining/86400);
-  if(days>=1) return `${days} 天`;
+  if(days>=1) return adminT('admin.users.days',{value:days});
   const hours=Math.floor(remaining/3600);
-  if(hours>=1) return `${hours} 小时`;
-  return `${Math.max(1,Math.ceil(remaining/60))} 分钟`;
+  if(hours>=1) return adminT('admin.users.hours',{value:hours});
+  return adminT('admin.users.minutes',{value:Math.max(1,Math.ceil(remaining/60))});
 }
 function userExpiryCell(user){
   const wrapper=document.createElement('div');
@@ -785,12 +785,12 @@ function updateUserExpiryNode(wrapper,user){
   wrapper.replaceChildren();
   const badge=document.createElement('span');
   badge.className=`chip ${stateName==='expired'?'danger':stateName==='expiring'?'warn':'ok'}`;
-  badge.textContent=stateName==='permanent'?'永久有效':stateName==='expired'?'已到期':stateName==='expiring'?'即将到期':'有效';
+  badge.textContent=adminT(`admin.time.${stateName}`);
   wrapper.appendChild(badge);
   if(user.expires_at != null){
     const detail=document.createElement('small');
     const remaining=Math.max(0,Number(user.expires_at)-Math.floor(Date.now()/1000));
-    detail.textContent=stateName==='expired' ? formatUserExpiryDate(user.expires_at) : `${formatUserExpiryDate(user.expires_at)} · 剩余 ${formatRemainingSeconds(remaining)}`;
+    detail.textContent=stateName==='expired' ? formatUserExpiryDate(user.expires_at) : adminT('admin.users.expiry_detail',{date:formatUserExpiryDate(user.expires_at),remaining:formatRemainingSeconds(remaining)});
     wrapper.appendChild(detail);
   }
 }
@@ -820,18 +820,18 @@ function refreshUserExpirationStatuses(){
 function updateUserExpiryPreview(){
   const preview=$('userExpiryPreview');
   if($('userExpiryMode').value==='permanent'){
-    preview.textContent='账户永久有效';
+    preview.textContent=adminT('admin.users.permanent_preview');
     preview.dataset.state='permanent';
     return;
   }
   const expiresAt=localInputToEpoch($('userExpiresAt').value);
   if(expiresAt == null){
-    preview.textContent='请选择到期时间';
+    preview.textContent=adminT('admin.users.select_expiry');
     preview.dataset.state='empty';
     return;
   }
   const remaining=expiresAt-Math.floor(Date.now()/1000);
-  preview.textContent=remaining<=0 ? `保存后立即到期 · ${formatUserExpiryDate(expiresAt)}` : `有效至 ${formatUserExpiryDate(expiresAt)} · 剩余 ${formatRemainingSeconds(remaining)}`;
+  preview.textContent=remaining<=0 ? adminT('admin.users.immediate_expiry',{date:formatUserExpiryDate(expiresAt)}) : adminT('admin.users.valid_until',{date:formatUserExpiryDate(expiresAt),remaining:formatRemainingSeconds(remaining)});
   preview.dataset.state=remaining<=0?'expired':remaining<=7*86400?'expiring':'active';
 }
 function syncUserExpiryFields(){
@@ -879,14 +879,14 @@ function renderUsers(){
     tr.append(td(user.username), td(accessRoleLabel(user.role)), expiry, td(user.created_at));
     const actions=document.createElement('td');
     actions.className='actions';
-    actions.append(btn('编辑','',()=>editUser(user)));
-    if(user.username !== currentUsername) actions.append(btn('删除','danger',()=>deleteUser(user.username)));
+    actions.append(btn(adminT('admin.devices.edit'),'',()=>editUser(user)));
+    if(user.username !== currentUsername) actions.append(btn(adminT('admin.devices.delete'),'danger',()=>deleteUser(user.username)));
     tr.appendChild(actions);
     rows.appendChild(tr);
   });
-  if(!pageUsers.length) appendTableEmpty(rows,5,state.users.length?'没有符合筛选条件的用户。':'暂无用户。');
-  $('userResultCount').textContent=filtered.length===state.users.length ? `${filtered.length} 位` : `${filtered.length} / ${state.users.length} 位`;
-  $('userPageStatus').textContent=`第 ${userAccountPage} / ${pageCount} 页`;
+  if(!pageUsers.length) appendTableEmpty(rows,5,adminT(state.users.length?'admin.users.no_filter_match':'admin.users.no_users'));
+  $('userResultCount').textContent=filtered.length===state.users.length ? adminT('admin.users.count',{count:filtered.length}) : adminT('admin.users.count_filtered',{visible:filtered.length,total:state.users.length});
+  $('userPageStatus').textContent=adminT('admin.users.page',{page:userAccountPage,total:pageCount});
   $('userPagePrevious').disabled=userAccountPage<=1;
   $('userPageNext').disabled=userAccountPage>=pageCount || !filtered.length;
   applyTableLabels(rows);
@@ -933,14 +933,14 @@ function permissionDraftCounts(){
 function permissionDraftCount(username,counts=permissionDraftCounts()){ return counts.get(username) || 0; }
 function totalPermissionDraftCount(counts=permissionDraftCounts()){ return [...counts.values()].reduce((total,count)=>total+count,0); }
 function permissionUserMeta(user,count=permissionDraftCount(user.username)){
-  return `${accessRoleLabel(user.role)}${count ? ` · ${count} 项待保存` : ''}`;
+  return `${accessRoleLabel(user.role)}${count ? adminT('admin.permissions.draft_suffix',{count}) : ''}`;
 }
 function syncPermissionDraftIndicators(){
   const counts=permissionDraftCounts();
   const total=totalPermissionDraftCount(counts);
   const users=new Map(state.users.map(user=>[user.username,user]));
   const summary=$('accessPermissionDraftSummary');
-  summary.textContent=total ? `${total} 项待保存` : '按用户配置';
+  summary.textContent=total ? adminT('admin.permissions.draft_count',{count:total}) : adminT('admin.permissions.by_user');
   $('accessPermissionsTab').classList.toggle('has-drafts',!!total);
   $('permissionUserList').querySelectorAll('.permission-user-choice').forEach(option=>{
     const user=users.get(option.dataset.username);
@@ -1003,7 +1003,7 @@ function fillPermissionUserSelect(draftCounts=permissionDraftCounts()){
   if(!state.users.length){
     const option=document.createElement('option');
     option.value='';
-    option.textContent='暂无用户';
+    option.textContent=adminT('admin.users.no_users');
     option.disabled=true;
     option.selected=true;
     select.appendChild(option);
@@ -1047,8 +1047,8 @@ function renderPermissionUserList(focusUsername=''){
     option.onclick=()=>selectPermissionUser(user.username,true);
     list.appendChild(option);
   });
-  if(!visibleUsers.length) list.appendChild(disabledPermissionOption(state.users.length?'没有符合搜索条件的用户。':'暂无用户。'));
-  $('permissionUserResultCount').textContent=visibleUsers.length===state.users.length ? `${visibleUsers.length} 位` : `${visibleUsers.length} / ${state.users.length} 位`;
+  if(!visibleUsers.length) list.appendChild(disabledPermissionOption(adminT(state.users.length?'admin.users.no_search_match':'admin.users.no_users')));
+  $('permissionUserResultCount').textContent=visibleUsers.length===state.users.length ? adminT('admin.users.count',{count:visibleUsers.length}) : adminT('admin.users.count_filtered',{visible:visibleUsers.length,total:state.users.length});
   fillPermissionUserSelect(draftCounts);
   syncPermissionDraftIndicators();
   const targetUsername=focusUsername || previousFocus;
@@ -1071,7 +1071,7 @@ function permissionDeviceCell(device){
   const name=document.createElement('strong');
   name.textContent=device.name || getDeviceId(device);
   const meta=document.createElement('small');
-  meta.textContent=`${getDeviceId(device)} · ${device.enabled?'已启用':'已禁用'}`;
+  meta.textContent=`${getDeviceId(device)} · ${adminT(device.enabled?'admin.permissions.device_enabled':'admin.permissions.device_disabled')}`;
   identity.append(name,meta);
   cell.appendChild(identity);
   return cell;
@@ -1116,10 +1116,10 @@ function renderPermissionLoadState(){
   const ready=permissionsAreReady();
   const phase=ready?'ready':permissionsLoadPhase;
   container.dataset.state=phase;
-  if(phase==='loading') status.textContent='正在加载设备权限…';
-  else if(phase==='error') status.textContent=`设备权限加载失败：${permissionsLoadError || '未知错误'}`;
-  else if(phase==='ready') status.textContent='设备权限已与服务器同步。';
-  else status.textContent='等待加载设备权限。';
+  if(phase==='loading') status.textContent=adminT('admin.permissions.loading');
+  else if(phase==='error') status.textContent=adminT('admin.permissions.load_failed',{error:permissionsLoadError || adminT('common.feedback.unknown_error')});
+  else if(phase==='ready') status.textContent=adminT('admin.permissions.synced');
+  else status.textContent=adminT('admin.permissions.waiting');
   status.setAttribute('role',phase==='error'?'alert':'status');
   $('permissionRetry').hidden=phase!=='error';
 }
@@ -1131,18 +1131,18 @@ function renderPermissionDetail(focusTarget=null){
   const permissionKnown=!!user && (isAdmin || ready);
   const dirtyCount=user ? permissionChangesForUser(user.username).length : 0;
   renderPermissionLoadState();
-  $('permissionSelectedUser').textContent=user ? user.username : '请选择用户';
-  $('permissionUserRole').textContent=user ? accessRoleLabel(user.role) : '未选择';
+  $('permissionSelectedUser').textContent=user ? user.username : adminT('admin.permissions.select_user');
+  $('permissionUserRole').textContent=user ? accessRoleLabel(user.role) : adminT('admin.permissions.not_selected');
   $('permissionUserRole').className=`chip ${isAdmin?'ok':''}`.trim();
   $('permissionAdminNotice').hidden=!isAdmin;
-  $('permissionDirtyCount').textContent=`${dirtyCount} 项待保存`;
+  $('permissionDirtyCount').textContent=adminT('admin.permissions.draft_count',{count:dirtyCount});
   $('permissionDirtyCount').className=`chip ${dirtyCount?'warn':''}`.trim();
   const visibleDevices=permissionKnown ? permissionDevicesFor(user) : [];
   const totalDevices=state.devices.length;
   const allowedView=permissionKnown ? state.devices.filter(device=>effectivePermissionFor(user,getDeviceId(device)).can_view).length : 0;
   const allowedControl=permissionKnown ? state.devices.filter(device=>effectivePermissionFor(user,getDeviceId(device)).can_control).length : 0;
-  $('permissionSelectedUserMeta').textContent=!user ? '选择用户后，仅显示该用户的设备访问权限。' : isAdmin ? `角色权限已覆盖 ${totalDevices} 台设备，当前页面仅供核对。` : !ready ? (permissionsLoadPhase==='error'?'设备权限读取失败，当前数据不可编辑。':'正在读取该用户的设备权限…') : `共 ${totalDevices} 台设备 · 可查看 ${allowedView} 台 · 可控制 ${allowedControl} 台`;
-  $('permissionDeviceResultCount').textContent=permissionKnown ? (visibleDevices.length===totalDevices ? `${visibleDevices.length} 台` : `${visibleDevices.length} / ${totalDevices} 台`) : '— 台';
+  $('permissionSelectedUserMeta').textContent=!user ? adminT('admin.permissions.select_user_hint') : isAdmin ? adminT('admin.permissions.admin_coverage',{total:totalDevices}) : !ready ? adminT(permissionsLoadPhase==='error'?'admin.permissions.read_failed':'admin.permissions.reading_user') : adminT('admin.permissions.user_summary',{total:totalDevices,view:allowedView,control:allowedControl});
+  $('permissionDeviceResultCount').textContent=permissionKnown ? (visibleDevices.length===totalDevices ? adminT('admin.permissions.device_count',{count:visibleDevices.length}) : adminT('admin.permissions.device_count_filtered',{visible:visibleDevices.length,total:totalDevices})) : adminT('admin.permissions.device_count_unknown');
   clear(rows);
   visibleDevices.forEach(device=>{
     const id=getDeviceId(device);
@@ -1150,17 +1150,17 @@ function renderPermissionDetail(focusTarget=null){
     const row=document.createElement('tr');
     row.dataset.deviceId=id;
     row.classList.toggle('is-dirty',permissionDrafts.has(permissionDraftKey(user.username,id)));
-    row.append(permissionDeviceCell(device),permissionCheckboxCell(user,device,'can_view','允许查看',permission.can_view),permissionCheckboxCell(user,device,'can_control','允许控制',permission.can_control));
+    row.append(permissionDeviceCell(device),permissionCheckboxCell(user,device,'can_view',adminT('admin.permissions.allow_view'),permission.can_view),permissionCheckboxCell(user,device,'can_control',adminT('admin.permissions.allow_control'),permission.can_control));
     rows.appendChild(row);
   });
   if(!visibleDevices.length){
-    const emptyMessage=!user?'请先选择用户。':!permissionKnown?(permissionsLoadPhase==='error'?'设备权限加载失败，无法确认当前权限。':'正在加载设备权限…'):totalDevices?'没有符合筛选条件的设备。':'暂无设备。';
+    const emptyMessage=adminT(!user?'admin.permissions.select_user_first':!permissionKnown?(permissionsLoadPhase==='error'?'admin.permissions.cannot_confirm':'admin.permissions.loading'):totalDevices?'admin.permissions.no_device_match':'admin.permissions.no_devices');
     appendTableEmpty(rows,3,emptyMessage);
   }
   applyTableLabels(rows);
   const saveButton=$('savePermission');
   saveButton.disabled=!user || isAdmin || !ready || !dirtyCount || permissionsMutations>0;
-  $('permissionSaveStatus').textContent=!user ? '请先选择用户。' : isAdmin ? '管理员权限由角色统一授予，不需要保存。' : !ready ? (dirtyCount?`仍有 ${dirtyCount} 台设备的草稿；权限重新加载成功后才能保存。`:'权限加载成功后才能编辑和保存。') : dirtyCount ? `有 ${dirtyCount} 台设备的权限尚未保存。` : '当前权限已与服务器同步。';
+  $('permissionSaveStatus').textContent=!user ? adminT('admin.permissions.select_user_first') : isAdmin ? adminT('admin.permissions.admin_no_save') : !ready ? (dirtyCount?adminT('admin.permissions.drafts_blocked',{count:dirtyCount}):adminT('admin.permissions.load_before_edit')) : dirtyCount ? adminT('admin.permissions.unsaved_devices',{count:dirtyCount}) : adminT('admin.permissions.current_synced');
   if(focusTarget) requestAnimationFrame(()=>{
     const selector=`input[data-device-id="${CSS.escape(focusTarget.deviceId)}"][data-permission-field="${focusTarget.field}"]`;
     const target=rows.querySelector(selector);
@@ -1237,9 +1237,9 @@ function syncAlasConfigSelectors(configName){
 }
 function formatAlasUpdated(value){
   const stamp=Number(value || 0);
-  return stamp ? new Date(stamp * 1000).toLocaleString([], {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '暂无记录';
+  return stamp ? new Date(stamp * 1000).toLocaleString([], {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : adminT('admin.users.no_record');
 }
-function alasRoleLabel(role){ return role==='admin'?'管理员':'普通用户'; }
+function alasRoleLabel(role){ return accessRoleLabel(role); }
 function emptyMessage(text){ const p=document.createElement('p'); p.className='alas-empty'; p.textContent=text; return p; }
 function emptyListboxOption(text){
   const option=document.createElement('div');
@@ -1318,17 +1318,17 @@ function renderAlasSummary(){
   const assignedConfigs=new Set(assignments.map(item=>configKey(item.config_name)));
   const catalogError=String(catalog.error || (state.alas && state.alas.catalog_error) || '');
   const detailsError=String(state.alas && state.alas.details_error || '');
-  let runtimeLabel='未配置';
-  let runtimeMeta='请打开连接设置配置 Runtime';
+  let runtimeLabel=adminT('admin.alas_ui.not_configured');
+  let runtimeMeta=adminT('admin.alas_ui.configure_runtime');
   if(detailsError){
-    runtimeLabel='数据异常';
+    runtimeLabel=adminT('admin.alas_ui.data_error');
     runtimeMeta=detailsError;
   } else if(settings.enabled && settings.token_set){
-    runtimeLabel=catalogError?'连接异常':'已连接';
-    runtimeMeta=catalogError || `${(catalog.runtime_configs || []).length} 个 Runtime 配置`;
+    runtimeLabel=adminT(catalogError?'admin.alas_ui.connection_error':'admin.alas_ui.connected');
+    runtimeMeta=catalogError || adminT('admin.alas_ui.runtime_config_count',{count:(catalog.runtime_configs || []).length});
   } else if(settings.enabled){
-    runtimeLabel='缺少 Token';
-    runtimeMeta='Runtime 已启用，访问 Token 未配置';
+    runtimeLabel=adminT('admin.alas_ui.token_missing');
+    runtimeMeta=adminT('admin.alas_ui.token_missing_detail');
   }
   $('alasRuntimeSummary').textContent=runtimeLabel;
   $('alasRuntimeSummary').className=catalogError || !settings.enabled || !settings.token_set ? 'is-warning' : 'is-ok';
@@ -1356,14 +1356,14 @@ function renderAlasUserList(){
     list.appendChild(createAlasChoice({
       title:user.username,
       meta:alasRoleLabel(user.role),
-      kind:'用户账号',
-      badges:[`${count} 个配置`],
+      kind:adminT('admin.alas_ui.user_account'),
+      badges:[adminT('admin.alas_ui.config_count',{count})],
       selected:user.username===selectedAlasUsername,
       onSelect:()=>{ selectedAlasUsername=user.username; localStorage.setItem(ALAS_USER_KEY,user.username); renderAlasUserList(); renderAlasUserDetail(); }
     }));
   });
-  if(!visible.length) list.appendChild(emptyListboxOption(query || filter!=='all' ? '没有符合筛选条件的用户。' : '暂无可分配用户。'));
-  $('alasUserResultCount').textContent=`${visible.length} 位`;
+  if(!visible.length) list.appendChild(emptyListboxOption(adminT(query || filter!=='all' ? 'admin.alas_ui.no_user_match' : 'admin.alas_ui.no_assignable_users')));
+  $('alasUserResultCount').textContent=adminT('admin.users.count',{count:visible.length});
   restoreAlasChoiceFocus(list,focusedKey);
 }
 function renderAlasUserDetail(){
@@ -1373,14 +1373,14 @@ function renderAlasUserDetail(){
   $('openAlasAssignmentDetail').disabled=!user;
   $('openAlasAssignment').disabled=!user;
   if(!user){
-    $('alasSelectedUser').textContent='请选择用户';
-    $('alasSelectedUserMeta').textContent='选择左侧用户后管理其配置权限。';
-    rows.appendChild(emptyMessage('没有可显示的用户。'));
+    $('alasSelectedUser').textContent=adminT('admin.permissions.select_user');
+    $('alasSelectedUserMeta').textContent=adminT('admin.alas_ui.select_user_hint');
+    rows.appendChild(emptyMessage(adminT('admin.alas_ui.no_display_users')));
     return;
   }
   const assignments=assignmentsForUser(user.username);
   $('alasSelectedUser').textContent=user.username;
-  $('alasSelectedUserMeta').textContent=`${alasRoleLabel(user.role)} · 拥有 ${assignments.length} 个配置`;
+  $('alasSelectedUserMeta').textContent=adminT('admin.alas_ui.user_config_summary',{role:alasRoleLabel(user.role),count:assignments.length});
   assignments.forEach(binding=>{
     const ownership=configOwnership(binding.config_name);
     const otherOwners=ownership.owners.filter(owner=>owner!==binding.username);
@@ -1390,29 +1390,29 @@ function renderAlasUserDetail(){
     main.className='alas-assignment-row__main';
     const kind=document.createElement('span');
     kind.className='alas-assignment-row__kind';
-    kind.textContent='Runtime 配置';
+    kind.textContent=adminT('admin.alas_ui.runtime_config');
     const title=document.createElement('h4');
     title.textContent=binding.config_name;
     const badges=document.createElement('div');
     badges.className='chips';
-    if(binding.is_default) badges.appendChild(chip('默认','ok'));
-    badges.appendChild(chip(binding.can_run?'可运行':'仅查看',binding.can_run?'ok':''));
-    badges.appendChild(chip(binding.can_edit?'可编辑':'不可编辑',binding.can_edit?'ok':''));
+    if(binding.is_default) badges.appendChild(chip(adminT('admin.alas_ui.default'),'ok'));
+    badges.appendChild(chip(adminT(binding.can_run?'admin.alas_ui.can_run':'admin.alas_ui.view_only'),binding.can_run?'ok':''));
+    badges.appendChild(chip(adminT(binding.can_edit?'admin.alas_ui.can_edit':'admin.alas_ui.cannot_edit'),binding.can_edit?'ok':''));
     main.append(kind,title,badges);
     const meta=document.createElement('div');
     meta.className='alas-assignment-row__meta';
     const ownerText=document.createElement('span');
-    ownerText.textContent=otherOwners.length ? `归属冲突：还关联 ${otherOwners.join('、')}` : `独占归属：${binding.username}`;
+    ownerText.textContent=otherOwners.length ? adminT('admin.alas_ui.owner_conflict',{owners:otherOwners.join(adminT('admin.alas_ui.list_separator'))}) : adminT('admin.alas_ui.exclusive_owner',{username:binding.username});
     const updated=document.createElement('span');
-    updated.textContent=`更新于 ${formatAlasUpdated(binding.updated_at)}`;
+    updated.textContent=adminT('admin.alas_ui.updated_at',{value:formatAlasUpdated(binding.updated_at)});
     meta.append(ownerText,updated);
     const actions=document.createElement('div');
     actions.className='actions alas-assignment-row__actions';
-    actions.append(btn('编辑','',()=>openAlasAssignmentDrawer(binding,document.activeElement)), btn('移除','danger',()=>removeAlasBinding(binding)));
+    actions.append(btn(adminT('admin.devices.edit'),'',()=>openAlasAssignmentDrawer(binding,document.activeElement)), btn(adminT('admin.alas_ui.remove'),'danger',()=>removeAlasBinding(binding)));
     row.append(main,meta,actions);
     rows.appendChild(row);
   });
-  if(!assignments.length) rows.appendChild(emptyMessage('此用户尚未分配 ALAS 配置。点击“分配配置”开始。'));
+  if(!assignments.length) rows.appendChild(emptyMessage(adminT('admin.alas_ui.user_no_configs')));
 }
 function renderAlasConfigList(){
   const list=$('alasConfigLibrary');
@@ -1432,19 +1432,19 @@ function renderAlasConfigList(){
     const ownership=configOwnership(name);
     list.appendChild(createAlasChoice({
       title:name,
-      meta:runtime.has(configKey(name))?'Runtime 中存在':'仅存在归属记录',
-      kind:'Runtime 配置',
-      badges:[ownership.conflict?'归属冲突':ownership.owner?`归属 ${ownership.owner}`:'未分配'],
+      meta:adminT(runtime.has(configKey(name))?'admin.alas_ui.in_runtime':'admin.alas_ui.ownership_only'),
+      kind:adminT('admin.alas_ui.runtime_config'),
+      badges:[adminT(ownership.conflict?'admin.alas_ui.ownership_conflict':ownership.owner?'admin.alas_ui.owner':'admin.alas_ui.unassigned',{owner:ownership.owner})],
       selected:configKey(name)===configKey(selectedAlasConfigName),
       tabStop:configKey(name)===configKey(selectedAlasConfigName) || (!selectedVisible && index===0),
       onSelect:()=>selectAlasConfig(name)
     }));
   });
-  if(!visible.length) list.appendChild(emptyListboxOption(query ? '没有匹配的配置。' : 'Runtime 与归属记录中都没有配置。'));
-  $('alasConfigResultCount').textContent=`${visible.length} 个`;
+  if(!visible.length) list.appendChild(emptyListboxOption(adminT(query ? 'admin.alas_ui.no_config_match' : 'admin.alas_ui.no_configs')));
+  $('alasConfigResultCount').textContent=adminT('admin.alas_ui.config_count',{count:visible.length});
   const catalog=alasCatalog();
   const error=String(catalog.error || (state.alas && state.alas.catalog_error) || '');
-  $('alasCatalogState').textContent=error ? `Runtime 配置读取失败：${error}` : `Runtime ${(catalog.runtime_configs || []).length} 个 · 已归属 ${((state.alas && state.alas.bound_configs) || []).length} 个`;
+  $('alasCatalogState').textContent=error ? adminT('admin.alas_ui.catalog_failed',{error}) : adminT('admin.alas_ui.catalog_summary',{runtime:(catalog.runtime_configs || []).length,owned:((state.alas && state.alas.bound_configs) || []).length});
   $('alasCatalogState').dataset.state=error?'error':'ready';
   restoreAlasChoiceFocus(list,focusedKey);
 }
@@ -1456,24 +1456,24 @@ function renderAlasConfigDetail(){
   const ownership=config?configOwnership(config):{bindings:[],owners:[],owner:'',conflict:false};
   const runtime=runtimeAlasConfigs();
   const loadingCurrent=alasStatusLoading && configKey(alasStatusLoadingConfig)===configKey(config);
-  $('alasCurrentConfigName').textContent=config || '请选择配置';
-  $('alasCurrentConfigMeta').textContent=config ? `${runtime.has(configKey(config))?'Runtime 中存在':'仅存在归属记录'} · ${ownership.conflict?'归属冲突':ownership.owner?`归属 ${ownership.owner}`:'未分配'}` : '选择左侧配置后才会读取运行状态。';
+  $('alasCurrentConfigName').textContent=config || adminT('admin.alas_ui.select_config');
+  $('alasCurrentConfigMeta').textContent=config ? `${adminT(runtime.has(configKey(config))?'admin.alas_ui.in_runtime':'admin.alas_ui.ownership_only')} · ${adminT(ownership.conflict?'admin.alas_ui.ownership_conflict':ownership.owner?'admin.alas_ui.owner':'admin.alas_ui.unassigned',{owner:ownership.owner})}` : adminT('admin.alas_ui.select_config_status_hint');
   const statusBox=$('alasStatus');
   clear(statusBox);
-  if(!config) statusBox.appendChild(chip('无配置','warn'));
-  else if(loadingCurrent) statusBox.appendChild(chip('正在读取','warn'));
-  else if(!statusMatches) statusBox.appendChild(chip('状态未读取'));
+  if(!config) statusBox.appendChild(chip(adminT('admin.alas_ui.no_config'),'warn'));
+  else if(loadingCurrent) statusBox.appendChild(chip(adminT('admin.alas_ui.reading'),'warn'));
+  else if(!statusMatches) statusBox.appendChild(chip(adminT('admin.alas_ui.status_not_read')));
   else {
     statusBox.appendChild(chip(statusLabel(status.status),status.status==='running'?'ok':status.status==='error'?'danger':''));
     if(status.task) statusBox.appendChild(chip(String(status.task)));
     if(status.error) statusBox.appendChild(chip(String(status.error),'danger'));
   }
-  if(config && ownership.conflict) $('alasImpactNote').textContent=`检测到历史归属冲突：${config} 同时关联 ${ownership.owners.join('、')}。请先在“用户与归属”中移除多余关系。`;
-  else if(config && ownership.owner) $('alasImpactNote').textContent=`启停或编辑 ${config} 只影响归属用户 ${ownership.owner} 使用的此配置。`;
-  else if(config) $('alasImpactNote').textContent=`${config} 当前未分配给用户；管理员仍可检查或维护它。`;
-  else $('alasImpactNote').textContent='启停操作只会发送给当前配置。';
+  if(config && ownership.conflict) $('alasImpactNote').textContent=adminT('admin.alas_ui.impact_conflict',{config,owners:ownership.owners.join(adminT('admin.alas_ui.list_separator'))});
+  else if(config && ownership.owner) $('alasImpactNote').textContent=adminT('admin.alas_ui.impact_owner',{config,owner:ownership.owner});
+  else if(config) $('alasImpactNote').textContent=adminT('admin.alas_ui.impact_unassigned',{config});
+  else $('alasImpactNote').textContent=adminT('admin.alas_ui.impact_current');
   $('toggleAlas').disabled=!config || !settings.enabled || !settings.token_set || loadingCurrent;
-  $('toggleAlas').textContent=statusMatches && status.status==='running'?'停止 ALAS':statusMatches && status.status==='error'?'重启 ALAS':'启动 ALAS';
+  $('toggleAlas').textContent=adminT(statusMatches && status.status==='running'?'admin.alas_ui.stop':statusMatches && status.status==='error'?'admin.alas_ui.restart':'admin.alas_ui.start');
   $('openConfigEditor').disabled=!config;
   $('alasOpenCurrent').href=config?`/alas/embed/?config=${encodeURIComponent(config)}`:'/alas/embed/';
   $('alasOpenCurrent').setAttribute('aria-disabled',String(!config));
@@ -1487,12 +1487,12 @@ function renderAlasConfigDetail(){
     const label=document.createElement('strong');
     label.textContent=binding.username;
     const permissions=document.createElement('small');
-    permissions.textContent=[binding.is_default?'默认':null,binding.can_run?'可运行':'仅查看',binding.can_edit?'可编辑':null].filter(Boolean).join(' · ');
+      permissions.textContent=[binding.is_default?adminT('admin.alas_ui.default'):null,adminT(binding.can_run?'admin.alas_ui.can_run':'admin.alas_ui.view_only'),binding.can_edit?adminT('admin.alas_ui.can_edit'):null].filter(Boolean).join(' · ');
     pill.append(label,permissions);
     currentUsers.appendChild(pill);
-  } else if(ownership.conflict) currentUsers.appendChild(emptyMessage(`历史归属冲突：${ownership.owners.join('、')}。请先移除多余授权。`));
-  else currentUsers.appendChild(emptyMessage('此配置尚未分配给用户。'));
-  $('alasCurrentUserCount').textContent=ownership.conflict?'需处理':ownership.owner?'已分配':'未分配';
+  } else if(ownership.conflict) currentUsers.appendChild(emptyMessage(adminT('admin.alas_ui.historical_conflict',{owners:ownership.owners.join(adminT('admin.alas_ui.list_separator'))})));
+  else currentUsers.appendChild(emptyMessage(adminT('admin.alas_ui.config_unassigned')));
+  $('alasCurrentUserCount').textContent=adminT(ownership.conflict?'admin.alas_ui.needs_attention':ownership.owner?'admin.alas_ui.assigned':'admin.alas_ui.unassigned');
 }
 function alasAssignmentUsername(){
   return editingAlasAssignment ? editingAlasAssignment.username : String($('alasBindUser').value || '').trim();
@@ -1534,38 +1534,38 @@ function renderAlasAssignmentConfigOptions(preferredValue=null){
   clear(select);
   const placeholder=document.createElement('option');
   placeholder.value='';
-  placeholder.textContent='请选择 Runtime 配置';
+  placeholder.textContent=adminT('admin.alas_ui.select_runtime_config');
   placeholder.disabled=true;
   select.appendChild(placeholder);
   if(unassigned.length){
     const group=document.createElement('optgroup');
-    group.label='未分配配置';
+    group.label=adminT('admin.alas_ui.unassigned_configs');
     unassigned.forEach(({name})=>{
       const option=document.createElement('option');
       option.value=name;
-      option.textContent=`${name} · 未分配`;
+      option.textContent=adminT('admin.alas_ui.config_unassigned_option',{name});
       group.appendChild(option);
     });
     select.appendChild(group);
   }
   if(ownedByCurrent.length){
     const group=document.createElement('optgroup');
-    group.label='当前用户已拥有';
+    group.label=adminT('admin.alas_ui.current_user_owned');
     ownedByCurrent.forEach(({name})=>{
       const option=document.createElement('option');
       option.value=name;
-      option.textContent=`${name} · 已归属当前用户`;
+      option.textContent=adminT('admin.alas_ui.config_owned_current',{name});
       group.appendChild(option);
     });
     select.appendChild(group);
   }
   if(occupied.length){
     const group=document.createElement('optgroup');
-    group.label='已归属其他用户（不可选）';
+    group.label=adminT('admin.alas_ui.owned_by_others');
     occupied.forEach(({name,ownership,otherOwners})=>{
       const option=document.createElement('option');
       option.value=name;
-      option.textContent=ownership.conflict ? `${name} · 归属冲突 ${ownership.owners.join('、')}` : `${name} · 已归属 ${otherOwners.join('、')}`;
+      option.textContent=ownership.conflict ? adminT('admin.alas_ui.config_conflict_option',{name,owners:ownership.owners.join(adminT('admin.alas_ui.list_separator'))}) : adminT('admin.alas_ui.config_owned_option',{name,owners:otherOwners.join(adminT('admin.alas_ui.list_separator'))});
       option.disabled=true;
       group.appendChild(option);
     });
@@ -1574,7 +1574,7 @@ function renderAlasAssignmentConfigOptions(preferredValue=null){
   const manual=document.createElement('option');
   manual.value='';
   manual.dataset.manual='true';
-  manual.textContent='手动输入配置名称…';
+  manual.textContent=adminT('admin.alas_ui.manual_config');
   select.appendChild(manual);
   select.disabled=!!editingAlasAssignment;
   if(editingAlasAssignment){
@@ -1604,14 +1604,14 @@ function renderAlasCompatibilityFields(){
 }
 async function removeAlasBinding(binding){
   const confirmed=await confirmDanger({
-    title:'移除配置归属',
-    message:`只解除 ${binding.config_name} 与用户 ${binding.username} 的归属关系；Runtime 中的配置内容不会被删除。`,
-    confirmText:'移除归属'
+    title:adminT('admin.alas_ui.remove_ownership'),
+    message:adminT('admin.alas_ui.remove_ownership_message',{config:binding.config_name,username:binding.username}),
+    confirmText:adminT('admin.alas_ui.remove_ownership_confirm')
   });
   if(!confirmed) return;
   await mutateAlasPermissions({username:binding.username, config_name:binding.config_name, enabled:false, is_default:false});
   focusAlasUserChoice(binding.username);
-  show('配置归属已移除');
+  show(adminT('admin.alas_ui.ownership_removed'));
   await refreshDomains('overview','overviewAlas');
 }
 function renderAlas(){
@@ -1644,7 +1644,7 @@ function activateAlasView(view, focus=false){
   if(!usersSelected){
     renderAlasConfigList();
     renderAlasConfigDetail();
-    loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置库加载失败')).finally(()=>{
+    loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,adminT('admin.alas_ui.library_load_failed'))).finally(()=>{
       const statusConfig=String(state.alas && state.alas.status && state.alas.status.config || '');
       if(selectedAlasConfig() && configKey(statusConfig)!==configKey(selectedAlasConfig())) loadAlasStatusForConfig(selectedAlasConfig());
     });
@@ -1674,7 +1674,7 @@ async function loadAlasStatusForConfig(configName){
       renderAlasSummary();
     },{force:true});
   } catch(error){
-    if(!isAbortError(error)) show(`配置状态读取失败：${error.message}`);
+    if(!isAbortError(error)) show(adminT('admin.alas_ui.status_read_failed',{error:error.message}));
   } finally {
     if(sequence===alasStatusSequence && configKey(config)===configKey(selectedAlasConfig()) && configKey(alasStatusLoadingConfig)===configKey(config)){
       alasStatusLoading=false;
@@ -1687,12 +1687,12 @@ function openAlasConnectionDrawer(trigger=document.activeElement){
   const settings=(state.alas && state.alas.settings) || {};
   $('alasBaseUrl').value=settings.base_url || '';
   $('alasToken').value='';
-  $('alasConnectionDrawerContext').textContent=settings.enabled ? `当前 Runtime：${settings.base_url || '未填写地址'}` : '连接 Alas-Gyre Overlay Runtime';
+  $('alasConnectionDrawerContext').textContent=settings.enabled ? adminT('admin.alas_ui.current_runtime',{url:settings.base_url || adminT('admin.alas_ui.address_missing')}) : adminT('admin.ui.drawers.alas_connection.context');
   openEditorDrawer('alasConnection',trigger);
 }
 function openAlasAssignmentDrawer(binding=null,trigger=document.activeElement){
   const users=alasUsers();
-  if(!users.length) return show('请先创建用户');
+  if(!users.length) return show(adminT('admin.alas_ui.create_user_first'));
   editingAlasAssignment=binding ? {username:binding.username,config_name:binding.config_name} : null;
   $('alasBindConfigCustom').value='';
   renderAlasCompatibilityFields();
@@ -1704,35 +1704,35 @@ function openAlasAssignmentDrawer(binding=null,trigger=document.activeElement){
   $('alasBindEdit').value=binding && binding.can_edit ? 'true' : 'false';
   $('alasBindDefault').value='keep';
   $('alasBindEnabled').value='true';
-  $('alasAssignmentDrawerTitle').textContent=binding?'编辑配置归属与权限':'分配配置归属';
-  $('alasAssignmentDrawerContext').textContent=binding ? `正在编辑 ${binding.username} → ${binding.config_name}；如需更换归属，请先移除当前归属` : `为 ${username} 分配一个独占配置`;
+  $('alasAssignmentDrawerTitle').textContent=adminT(binding?'admin.alas_ui.edit_ownership':'admin.alas_ui.assign_ownership');
+  $('alasAssignmentDrawerContext').textContent=binding ? adminT('admin.alas_ui.edit_ownership_context',{username:binding.username,config:binding.config_name}) : adminT('admin.alas_ui.assign_ownership_context',{username});
   updateAlasAssignmentOwnerHint();
   syncAlasAssignmentSummary();
   openEditorDrawer('alasAssignment',trigger);
-  loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,'配置建议加载失败'));
+  loadIfNeeded('alasCatalog',loadAlasCatalog).catch(error=>reportRequestError(error,adminT('admin.alas_ui.suggestions_load_failed')));
 }
 function syncAlasAssignmentSummary(){
   const username=alasAssignmentUsername();
   const configName=alasAssignmentConfigName();
   const user=alasUsers().find(item=>item.username===username);
-  $('alasAssignmentUserName').textContent=username || '待选择用户';
-  $('alasAssignmentUserMeta').textContent=user ? `${alasRoleLabel(user.role)} · 已拥有 ${assignmentsForUser(username).length} 个配置` : '选择接收配置的用户';
-  $('alasAssignmentConfigName').textContent=configName || '待选择配置';
+  $('alasAssignmentUserName').textContent=username || adminT('admin.alas_ui.pending_user');
+  $('alasAssignmentUserMeta').textContent=user ? adminT('admin.alas_ui.assignment_user_meta',{role:alasRoleLabel(user.role),count:assignmentsForUser(username).length}) : adminT('admin.alas_ui.select_recipient');
+  $('alasAssignmentConfigName').textContent=configName || adminT('admin.alas_ui.pending_config');
   const summary=$('alasAssignmentConfigSummary');
   let stateName='idle';
-  let meta='输入或选择一个配置名称';
+  let meta=adminT('admin.alas_ui.enter_or_select_config');
   if(configName){
     const ownership=configOwnership(configName);
     const otherOwners=ownership.owners.filter(owner=>owner!==username);
     if(otherOwners.length){
       stateName='error';
-      meta=`已归属 ${otherOwners.join('、')}`;
+      meta=adminT('admin.alas_ui.owned_by',{owners:otherOwners.join(adminT('admin.alas_ui.list_separator'))});
     } else if(ownership.owner===username){
       stateName='ready';
-      meta='已归属当前用户，将更新权限';
+      meta=adminT('admin.alas_ui.update_current_permissions');
     } else {
       stateName='available';
-      meta='当前未分配，可以建立归属';
+      meta=adminT('admin.alas_ui.available_for_assignment');
     }
   }
   summary.dataset.state=stateName;
@@ -1746,26 +1746,26 @@ function updateAlasAssignmentOwnerHint(){
   let blocked=false;
   let stateName='ready';
   if(!configName){
-    hint.textContent='每个配置只能独占归属一个用户；一个用户仍可拥有多个配置。';
+    hint.textContent=adminT('admin.alas_ui.exclusive_hint');
     stateName='idle';
   } else {
     const ownership=configOwnership(configName);
     const otherOwners=ownership.owners.filter(owner=>owner!==username);
     blocked=otherOwners.length>0;
     if(blocked){
-      hint.textContent=`${configName} 已归属 ${otherOwners.join('、')}，不能直接分配给 ${username || '当前用户'}。请先移除原归属。`;
+      hint.textContent=adminT('admin.alas_ui.assignment_blocked',{config:configName,owners:otherOwners.join(adminT('admin.alas_ui.list_separator')),username:username || adminT('admin.alas_ui.current_user')});
       stateName='error';
     } else if(ownership.owner===username){
-      hint.textContent=`${configName} 已归属当前用户；保存将更新这条授权的权限。`;
+      hint.textContent=adminT('admin.alas_ui.assignment_update',{config:configName});
     } else {
-      hint.textContent=`${configName} 当前未分配，可以独占分配给 ${username || '所选用户'}。`;
+      hint.textContent=adminT('admin.alas_ui.assignment_available',{config:configName,username:username || adminT('admin.alas_ui.selected_user')});
     }
   }
   hint.dataset.state=stateName;
   const saveButton=$('saveAlasBinding');
   if(saveButton && !saveButton.classList.contains('busy')) saveButton.disabled=blocked || !username || !configName;
 }
-function requireAlasSuccess(result, fallback='ALAS 操作失败'){
+function requireAlasSuccess(result, fallback=adminT('mirror.errors.alas_operation')){
   if(result && result.ok===false) throw new Error(result.error || result.detail || fallback);
   return result || {};
 }
@@ -1790,17 +1790,17 @@ function alasConfigReadIsCurrent(request){
 }
 function openAlasConfigDrawer(trigger=document.activeElement){
   const config=selectedAlasConfig();
-  if(!config) return show('请先从配置库选择配置');
+  if(!config) return show(adminT('admin.alas_ui.select_from_library'));
   const ownership=configOwnership(config);
   invalidateAlasConfigRead(false);
   alasConfigDrawerTarget=config;
   $('configSource').value=config;
   $('configTarget').value=config;
-  $('alasConfigDrawerContext').textContent=`正在编辑 ${config}`;
-  $('alasConfigDrawerImpact').textContent=ownership.conflict ? `保存会直接写回 ${config}；当前存在历史归属冲突，请随后清理 ${ownership.owners.join('、')} 的多余关系。` : ownership.owner ? `保存会直接写回 ${config}，并影响归属用户 ${ownership.owner}。` : `保存会直接写回 ${config}。该配置当前未分配给用户。`;
+  $('alasConfigDrawerContext').textContent=adminT('admin.alas_ui.editing_config',{config});
+  $('alasConfigDrawerImpact').textContent=ownership.conflict ? adminT('admin.alas_ui.save_conflict_impact',{config,owners:ownership.owners.join(adminT('admin.alas_ui.list_separator'))}) : ownership.owner ? adminT('admin.alas_ui.save_owner_impact',{config,owner:ownership.owner}) : adminT('admin.alas_ui.save_unassigned_impact',{config});
   $('configEditor').value='';
   openEditorDrawer('alasConfig',trigger);
-  withBusy($('loadConfig'),loadConfig,'读取中').catch(error=>{ if(!isAbortError(error)) show(error.message); });
+  withBusy($('loadConfig'),loadConfig,adminT('admin.busy.reading')).catch(error=>{ if(!isAbortError(error)) show(error.message); });
 }
 function renderRuntimeLogs(){
   $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n');
@@ -1886,12 +1886,12 @@ function applyAlasCatalog(data){
 function applyLogs(data){
   state.logs=data.logs || [];
   renderAuditLogs();
-  setLogLoadState('logs','ready',logReadyMessage('审计日志', state.logs.length));
+  setLogLoadState('logs','ready',logReadyMessage('admin.logs.audit', state.logs.length));
 }
 function applyRuntimeLogs(data){
   state.runtimeLogs=data.logs || [];
   renderRuntimeLogs();
-  setLogLoadState('runtimeLogs','ready',logReadyMessage('运行日志', state.runtimeLogs.length));
+  setLogLoadState('runtimeLogs','ready',logReadyMessage('admin.logs.runtime', state.runtimeLogs.length));
 }
 function overviewRequestPromises(){ return ['overview','overviewAlas'].map(name=>resourceRequests.get(name)).filter(Boolean).map(record=>record.promise); }
 function trackOverviewRequest(promise){
@@ -1928,7 +1928,7 @@ async function refreshDeviceStatuses(){
     if(activeTab==='overview') await loadOverviewDevices({force:true});
     else await loadDeviceStatuses({force:true});
   }
-  catch(error){ if(!isAbortError(error)) console.warn('设备心跳状态刷新失败',error); }
+  catch(error){ if(!isAbortError(error)) console.warn(adminT('admin.errors.device_heartbeat_refresh'),error); }
   finally{ if(generation===deviceStatusPollGeneration) scheduleDeviceStatusPoll(); }
 }
 function syncDeviceStatusPolling(){
@@ -1958,7 +1958,7 @@ async function refreshOverviewStatus(){
   try{
     const pending=overviewRequestPromises();
     const results=await Promise.allSettled(pending.length ? pending : [loadOverview({force:true}),loadOverviewAlas({force:true})]);
-    results.forEach(result=>{ if(result.status==='rejected'&&!isAbortError(result.reason)) console.warn('总览状态刷新失败',result.reason); });
+    results.forEach(result=>{ if(result.status==='rejected'&&!isAbortError(result.reason)) console.warn(adminT('admin.errors.overview_refresh'),result.reason); });
   }
   finally{ if(generation===overviewRefreshGeneration) scheduleOverviewRefresh(); }
 }
@@ -1994,7 +1994,7 @@ function loadPermissions(options={}){
   }).catch(error=>{
     if(!isAbortError(error) && !permissionsMutations && epoch===permissionsEpoch){
       permissionsLoadPhase='error';
-      permissionsLoadError=String(error && error.message || '未知错误');
+      permissionsLoadError=String(error && error.message || adminT('common.feedback.unknown_error'));
       renderPermissions();
     }
     throw error;
@@ -2052,7 +2052,7 @@ async function finishAlasPermissionsMutation(epoch, result, succeeded){
   if(!alasPermissionsMutations && alasPermissionsNeedsRefresh){
     alasPermissionsNeedsRefresh=false;
     try{ await loadAlasPermissions({force:true}); }
-    catch(error){ reportRequestError(error,'ALAS 归属刷新失败'); }
+    catch(error){ reportRequestError(error,adminT('admin.errors.alas_ownership_refresh')); }
   }
 }
 
@@ -2081,7 +2081,7 @@ async function loadAlas(options={}){
   if(results.every(result=>result.status==='rejected')) throw results[0].reason;
   state.alas={
     ...(state.alas || {}),
-    details_error:results[1].status==='rejected' ? String(results[1].reason && results[1].reason.message || 'ALAS 数据读取失败') : ''
+    details_error:results[1].status==='rejected' ? String(results[1].reason && results[1].reason.message || adminT('admin.errors.alas_data_read')) : ''
   };
   loadedResources.add('alas');
   renderAlas();
@@ -2090,23 +2090,23 @@ async function loadAlas(options={}){
 function loadAlasCatalog(options={}){
   return requestResource('alasCatalog',signal=>api('/api/admin/alas/configs',{signal}),applyAlasCatalog,options).catch(error=>{
     if(!isAbortError(error)){
-      state.alas={...(state.alas || {}),catalog_error:String(error && error.message || '配置库读取失败')};
+      state.alas={...(state.alas || {}),catalog_error:String(error && error.message || adminT('admin.errors.catalog_read'))};
       renderAlas();
     }
     throw error;
   });
 }
 function loadLogs(options={}){
-  setLogLoadState('logs','loading','正在加载审计日志…');
+  setLogLoadState('logs','loading',adminT('admin.logs.loading_audit'));
   return requestResource('logs', signal=>api('/api/admin/logs',{signal}), applyLogs, options).catch(error=>{
-    if(!isAbortError(error)) setLogLoadState('logs','error',`审计日志加载失败：${error.message || '未知错误'}`);
+    if(!isAbortError(error)) setLogLoadState('logs','error',adminT('admin.logs.audit_failed',{error:error.message || adminT('common.feedback.unknown_error')}));
     throw error;
   });
 }
 function loadRuntimeLogs(options={}){
-  setLogLoadState('runtimeLogs','loading','正在加载运行日志…');
+  setLogLoadState('runtimeLogs','loading',adminT('admin.logs.loading_runtime'));
   return requestResource('runtimeLogs', signal=>api('/api/admin/runtime-logs?lines=400',{signal}), applyRuntimeLogs, options).catch(error=>{
-    if(!isAbortError(error)) setLogLoadState('runtimeLogs','error',`运行日志加载失败：${error.message || '未知错误'}`);
+    if(!isAbortError(error)) setLogLoadState('runtimeLogs','error',adminT('admin.logs.runtime_failed',{error:error.message || adminT('common.feedback.unknown_error')}));
     throw error;
   });
 }
@@ -2115,14 +2115,14 @@ async function loadTab(tabId, options={}){
   const names=TAB_RESOURCES[tabId] || TAB_RESOURCES.overview;
   const force=!!options.force;
   const results=await Promise.allSettled(names.map(name=>loadIfNeeded(name, RESOURCE_LOADERS[name], {force})));
-  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${names[index]} 加载失败`); });
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, adminT('admin.errors.resource_load',{name:names[index]})); });
   return results;
 }
 async function loadAll(){
   const visible=new Set(TAB_RESOURCES[activeTab] || []);
   const names=Object.keys(RESOURCE_LOADERS).filter(name=>name==='overview' || loadedResources.has(name) || visible.has(name));
   const results=await Promise.allSettled(names.map(name=>RESOURCE_LOADERS[name]({force:true})));
-  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${names[index]} 加载失败`); });
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, adminT('admin.errors.resource_load',{name:names[index]})); });
   return results;
 }
 async function refreshDomains(...names){
@@ -2135,15 +2135,15 @@ async function refreshDomains(...names){
     if(name === 'overview' || wasLoaded || visible.has(name)) refresh.push(name);
   });
   const results=await Promise.allSettled(refresh.map(name=>RESOURCE_LOADERS[name]({force:true})));
-  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, `${refresh[index]} 刷新失败`); });
+  results.forEach((result, index)=>{ if(result.status==='rejected') reportRequestError(result.reason, adminT('admin.errors.resource_refresh',{name:refresh[index]})); });
 }
 async function saveUser(){
   const scheduled=$('userExpiryMode').value==='scheduled';
   const expiresAt=scheduled ? localInputToEpoch($('userExpiresAt').value) : null;
-  if(scheduled && expiresAt == null) throw new Error('请选择有效的账户到期时间');
+  if(scheduled && expiresAt == null) throw new Error(adminT('admin.users.invalid_expiry'));
   const username=editingUsername || $('newUsername').value.trim();
   await api('/api/admin/users',{method:'PUT', body:{username, password:$('newPassword').value, role:$('newRole').value, expires_at:expiresAt}});
-  show('用户已保存');
+  show(adminT('admin.users.saved'));
   closeEditorDrawer('user');
   if(username===currentUsername && expiresAt != null && expiresAt<=Math.floor(Date.now()/1000)){
     window.location.assign('/login');
@@ -2153,13 +2153,13 @@ async function saveUser(){
 }
 async function deleteUser(username){
   const confirmed=await confirmDanger({
-    title:'删除用户',
-    message:`删除用户 ${username} 后，其设备权限与 ALAS 配置绑定也将被移除。此操作无法撤销。`,
-    confirmText:'删除用户'
+    title:adminT('admin.users.delete'),
+    message:adminT('admin.users.delete_message',{username}),
+    confirmText:adminT('admin.users.delete')
   });
   if(!confirmed) return;
   await api(`/api/admin/users/${encodeURIComponent(username)}`,{method:'DELETE'});
-  show('用户已删除');
+  show(adminT('admin.users.deleted'));
   await refreshDomains('overview','overviewAlas','users','permissions','alas');
 }
 async function saveDevice(){
@@ -2176,7 +2176,7 @@ async function saveDevice(){
     markResourceStale('overview');
     const savedId=String(result.device_id || id).trim();
     const saved=state.devices.find(device=>getDeviceId(device)===savedId);
-    show(`设备已保存 · ${deviceAdbMeta(saved).label}`);
+    show(adminT('admin.devices.saved',{status:deviceAdbMeta(saved).label}));
     closeEditorDrawer('device');
     clearDeviceForm();
     await refreshDomains('permissions');
@@ -2186,15 +2186,15 @@ async function saveDevice(){
 }
 async function deleteDevice(id){
   const confirmed=await confirmDanger({
-    title:'删除设备',
-    message:`删除设备 ${id} 后，相关用户权限也会被移除。请先确认该设备不再使用。`,
-    confirmText:'删除设备'
+    title:adminT('admin.devices.delete_title'),
+    message:adminT('admin.devices.delete_message',{id}),
+    confirmText:adminT('admin.devices.delete_title')
   });
   if(!confirmed) return;
   stopDeviceStatusPolling(true);
   try{
     await api(`/api/admin/devices/${encodeURIComponent(id)}`,{method:'DELETE'});
-    show('设备已删除');
+    show(adminT('admin.devices.deleted'));
     await refreshDomains('overview','devices','permissions');
   } finally {
     scheduleDeviceStatusPoll();
@@ -2210,7 +2210,7 @@ async function testDevice(id){
     applyDeviceAdbResult(id,result);
     show(`${deviceAdbMeta(result).label}${result.detail ? ` · ${result.detail}` : ''}`,5200);
   } catch(error){
-    applyDeviceAdbResult(id,{state:'unknown',ok:false,detail:error.message || '检测失败'});
+    applyDeviceAdbResult(id,{state:'unknown',ok:false,detail:error.message || adminT('admin.devices.check_failed')});
     throw error;
   } finally {
     deviceProbeRequests.delete(id);
@@ -2221,11 +2221,11 @@ async function testDevice(id){
 }
 async function savePermission(){
   const user=selectedPermissionUser();
-  if(!user) throw new Error('请先选择用户');
-  if(user.role==='admin') throw new Error('管理员权限由角色统一授予，无需保存');
-  if(!permissionsAreReady()) throw new Error('设备权限尚未加载完成，请稍后重试');
+  if(!user) throw new Error(adminT('admin.permissions.select_user_first'));
+  if(user.role==='admin') throw new Error(adminT('admin.permissions.admin_no_save_short'));
+  if(!permissionsAreReady()) throw new Error(adminT('admin.permissions.not_ready'));
   const changes=permissionChangesForUser(user.username);
-  if(!changes.length) return show('没有待保存的权限修改');
+  if(!changes.length) return show(adminT('admin.permissions.no_changes'));
   const epoch=beginPermissionsMutation();
   let results=[];
   let refreshError=null;
@@ -2238,15 +2238,15 @@ async function savePermission(){
     try{ await finishPermissionsMutation(epoch); }
     catch(error){ refreshError=error; }
   }
-  if(refreshError) throw new Error(`权限已提交，但权威状态刷新失败：${refreshError.message || '未知错误'}`);
+  if(refreshError) throw new Error(adminT('admin.permissions.refresh_failed',{error:refreshError.message || adminT('common.feedback.unknown_error')}));
   const failed=results.filter(result=>result.status==='rejected');
-  if(failed.length) throw new Error(`${failed.length} 台设备权限保存失败，已重新读取服务器状态`);
-  show(`已保存 ${changes.length} 台设备的权限`);
+  if(failed.length) throw new Error(adminT('admin.permissions.save_failed',{count:failed.length}));
+  show(adminT('admin.permissions.saved',{count:changes.length}));
 }
-function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; let value=input.value; if(field==='video_bit_rate') value=bitrateMbpsToBps(value); else if(field==='max_size' && value===CUSTOM_OUTPUT_SIZE){ const control=input.closest('.preset-size-control'); const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); if(!width.checkValidity() || !height.checkValidity()){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); throw new Error('自定义宽度或高度超出允许范围'); } value=Math.max(Number(width.value),Number(height.value)); } else value=Number(value); presets[name]=presets[name] || {}; presets[name][field]=value; }); return presets; }
-function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show('档位 ID 只能使用字母、数字、下划线或短横线，且以字母开头'); if(NORMAL_PROFILE_NAMES.concat(['custom','auto']).includes(id) || id.startsWith('alas_')) return show('这个 ID 是保留名称'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); if($('customProfileSizeSelect').value===CUSTOM_OUTPUT_SIZE && (!width.checkValidity() || !height.checkValidity())){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); return show('自定义宽度或高度超出允许范围'); } customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:customProfileSizeValue(), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); refreshFullscreenProfilesFromForm(); show('自定义档位已加入，确认后点保存'); }
-async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const fullscreenProfile=$('videoFullscreenProfile').value || 'sharp'; const payload={profile, fullscreen_profile:fullscreenProfile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show('画质设置已保存'); }
-async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show('ALAS 连接设置已保存'); await refreshDomains('overview','overviewAlas','alas'); }
+function collectVideoPresets(){ const presets={}; document.querySelectorAll('[data-preset-profile]').forEach(input=>{ const name=input.dataset.presetProfile; const field=input.dataset.presetField; let value=input.value; if(field==='video_bit_rate') value=bitrateMbpsToBps(value); else if(field==='max_size' && value===CUSTOM_OUTPUT_SIZE){ const control=input.closest('.preset-size-control'); const width=control.querySelector('[data-custom-width]'); const height=control.querySelector('[data-custom-height]'); if(!width.checkValidity() || !height.checkValidity()){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); throw new Error(adminT('admin.video.custom_size_invalid')); } value=Math.max(Number(width.value),Number(height.value)); } else value=Number(value); presets[name]=presets[name] || {}; presets[name][field]=value; }); return presets; }
+function addCustomProfile(){ const id=($('customProfileId').value || '').trim(); if(!/^[a-zA-Z][a-zA-Z0-9_-]{1,31}$/.test(id)) return show(adminT('admin.video.invalid_profile_id')); if(NORMAL_PROFILE_NAMES.concat(['custom','auto']).includes(id) || id.startsWith('alas_')) return show(adminT('admin.video.reserved_profile_id')); const width=$('customProfileWidth'); const height=$('customProfileHeight'); if($('customProfileSizeSelect').value===CUSTOM_OUTPUT_SIZE && (!width.checkValidity() || !height.checkValidity())){ const invalid=!width.checkValidity() ? width : height; invalid.reportValidity(); return show(adminT('admin.video.custom_size_invalid')); } customProfiles[id]={label:($('customProfileLabel').value || id).trim(), video_bit_rate:bitrateMbpsToBps($('customProfileBitrate').value || 0.9), max_size:customProfileSizeValue(), max_fps:Number($('customProfileFps').value || 24)}; renderCustomProfiles(); refreshFullscreenProfilesFromForm(); show(adminT('admin.video.profile_added')); }
+async function saveVideo(){ const presets=collectVideoPresets(); const profile=$('videoProfile').value || 'balanced'; const selected=presets[profile] || customProfiles[profile] || presets.balanced || {}; const fullscreenProfile=$('videoFullscreenProfile').value || 'sharp'; const payload={profile, fullscreen_profile:fullscreenProfile, adaptive:false, scrcpy_stream_mode:$('videoStreamMode').value || 'raw', scrcpy_enabled_stream_modes:collectEnabledStreamModes(), auto_stop_minutes:Number($('videoAutoStop').value || 15), video_bit_rate:selected.video_bit_rate, max_size:selected.max_size, max_fps:selected.max_fps, presets, custom_profiles:customProfiles}; markResourceStale('video'); const result=await api('/api/admin/video',{method:'PUT', body:payload}); applyVideo(result); loadedResources.add('video'); show(adminT('admin.video.saved')); }
+async function saveAlas(){ await api('/api/admin/alas',{method:'PUT', body:{enabled:true, base_url:$('alasBaseUrl').value, api_token:$('alasToken').value}}); closeEditorDrawer('alasConnection'); show(adminT('admin.alas_ui.connection_saved')); await refreshDomains('overview','overviewAlas','alas'); }
 async function reloadAlas(){
   const requests=[loadAlas({force:true})];
   if(activeAlasView==='configs') requests.push(loadAlasCatalog({force:true}));
@@ -2256,25 +2256,25 @@ async function reloadAlas(){
 }
 async function toggleAlas(){
   const config=selectedAlasConfig();
-  if(!config) return show('请先从配置库选择配置');
+  if(!config) return show(adminT('admin.alas_ui.select_from_library'));
   const sequence=++alasToggleSequence;
-  const result=requireAlasSuccess(await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}),'ALAS 启停失败');
+  const result=requireAlasSuccess(await api('/api/admin/alas/toggle',{method:'POST', body:{config_name:config}}),adminT('admin.alas_ui.toggle_failed'));
   if(sequence!==alasToggleSequence) return;
   const current=selectedAlasConfig();
-  show(configKey(current)===configKey(config) ? `${config} 状态已更新` : `${config} 操作已完成；当前查看 ${current || '其他配置'}`);
+  show(configKey(current)===configKey(config) ? adminT('admin.alas_ui.status_updated',{config}) : adminT('admin.alas_ui.operation_completed',{config,current:current || adminT('admin.alas_ui.other_config')}));
   const statusRefresh=configKey(current)===configKey(config) ? loadAlasStatusForConfig(config) : Promise.resolve();
   await Promise.allSettled([statusRefresh,refreshDomains('overview','overviewAlas')]);
   return result;
 }
 async function loadConfig(){
   const config=alasConfigDrawerTarget;
-  if(!config) throw new Error('配置编辑器没有固定目标，请重新打开');
+  if(!config) throw new Error(adminT('admin.alas_ui.editor_target_missing'));
   const request=beginAlasConfigRead(config);
   try{
-    const data=requireAlasSuccess(await api(`/api/admin/alas/config?config=${encodeURIComponent(config)}`,{signal:request.controller.signal}),'配置读取失败');
+    const data=requireAlasSuccess(await api(`/api/admin/alas/config?config=${encodeURIComponent(config)}`,{signal:request.controller.signal}),adminT('admin.alas_ui.config_read_failed'));
     if(!alasConfigReadIsCurrent(request)) return;
     $('configEditor').value=JSON.stringify(data.data || {}, null, 2);
-    show(`${config} 配置已读取`);
+    show(adminT('admin.alas_ui.config_read',{config}));
     return data;
   } finally {
     if(alasConfigReadController===request.controller) alasConfigReadController=null;
@@ -2282,16 +2282,16 @@ async function loadConfig(){
 }
 async function saveConfig(){
   const config=alasConfigDrawerTarget;
-  if(!config) return show('配置编辑器没有固定目标，请重新打开');
+  if(!config) return show(adminT('admin.alas_ui.editor_target_missing'));
   let data;
   try{ data=JSON.parse($('configEditor').value); }
-  catch(e){ show('JSON 格式错误，请检查后再保存'); return; }
+  catch(e){ show(adminT('admin.alas_ui.json_invalid')); return; }
   const request=beginAlasConfigRead(config);
   try{
-    const result=requireAlasSuccess(await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}, signal:request.controller.signal}),'配置保存失败');
+    const result=requireAlasSuccess(await api('/api/admin/alas/config',{method:'PUT', body:{source:config, target:config, data}, signal:request.controller.signal}),adminT('admin.alas_ui.config_save_failed'));
     if(!alasConfigReadIsCurrent(request)) return;
     closeEditorDrawer('alasConfig');
-    show(`${config} 配置已保存`);
+    show(adminT('admin.alas_ui.config_saved',{config}));
     await refreshDomains('alas');
     return result;
   } finally {
@@ -2302,10 +2302,10 @@ async function saveAlasBinding(){
   const wasEditing=!!editingAlasAssignment;
   const username=alasAssignmentUsername();
   const configName=alasAssignmentConfigName();
-  if(!username) return show('请选择用户');
-  if(!configName) return show('请选择配置或输入配置名称');
+  if(!username) return show(adminT('admin.permissions.select_user'));
+  if(!configName) return show(adminT('admin.alas_ui.select_or_enter'));
   const otherOwners=configOwnership(configName).owners.filter(owner=>owner!==username);
-  if(otherOwners.length) return show(`${configName} 已归属 ${otherOwners.join('、')}；请先移除原归属后再分配`);
+  if(otherOwners.length) return show(adminT('admin.alas_ui.remove_before_assign',{config:configName,owners:otherOwners.join(adminT('admin.alas_ui.list_separator'))}));
   const payload={
     username,
     config_name:configName,
@@ -2320,7 +2320,7 @@ async function saveAlasBinding(){
   editingAlasAssignment=null;
   closeEditorDrawer('alasAssignment');
   if(wasEditing) focusAlasUserChoice(username);
-  show(`已保存 ${username} → ${configName} 的归属与权限`);
+  show(adminT('admin.alas_ui.ownership_saved',{username,config:configName}));
   await refreshDomains('overview','overviewAlas');
 }
 function activateTab(tabId, save=true, focusPanel=false){
@@ -2485,7 +2485,7 @@ function initializeAccessWorkspace(){
   $('permUser').onchange=()=>selectPermissionUser($('permUser').value);
   $('permissionDeviceSearch').oninput=()=>renderPermissionDetail();
   $('permissionDeviceFilter').onchange=()=>renderPermissionDetail();
-  $('permissionRetry').onclick=()=>withBusy($('permissionRetry'),()=>loadPermissions({force:true}),'加载中').catch(error=>reportRequestError(error,'设备权限加载失败'));
+  $('permissionRetry').onclick=()=>withBusy($('permissionRetry'),()=>loadPermissions({force:true}),adminT('admin.busy.loading')).catch(error=>reportRequestError(error,adminT('admin.permissions.load_prefix')));
   window.addEventListener('beforeunload',handlePermissionBeforeUnload);
   activateAccessView(activeAccessView);
 }
@@ -2513,7 +2513,7 @@ function initializeAlasWorkspace(){
   $('alasOpenCurrent').onclick=event=>{
     if(selectedAlasConfig()) return;
     event.preventDefault();
-    show('请先从配置库选择配置');
+    show(adminT('admin.alas_ui.select_from_library'));
   };
 }
 function initializeConfirmDialog(){
@@ -2546,21 +2546,21 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 setInterval(refreshUserExpirationStatuses,USER_EXPIRY_REFRESH_INTERVAL);
 const savedInitialTab=$(localStorage.getItem(ADMIN_TAB_KEY)) ? localStorage.getItem(ADMIN_TAB_KEY) : 'overview';
 activateTab('overview', false);
-bindAction('reloadAll', loadAll, '刷新中');
-bindAction('saveUser', saveUser, '保存中');
-bindAction('saveDevice', saveDevice, '保存中');
+bindAction('reloadAll', loadAll, adminT('admin.busy.refreshing'));
+bindAction('saveUser', saveUser, adminT('admin.busy.saving'));
+bindAction('saveDevice', saveDevice, adminT('admin.busy.saving'));
 $('clearDeviceForm').onclick=()=>clearDeviceForm();
-bindAction('reloadRuntimeLogs', ()=>loadRuntimeLogs({force:true}), '刷新中');
-bindAction('reloadAuditLogs', ()=>loadLogs({force:true}), '刷新中');
-$('savePermission').onclick=()=>withBusy($('savePermission'),savePermission,'保存中').catch(error=>show(error.message)).finally(()=>renderPermissionDetail());
-bindAction('saveVideo', saveVideo, '保存中');
-bindAction('addCustomProfile', async()=>addCustomProfile(), '添加中');
-bindAction('saveAlas', saveAlas, '保存中');
-bindAction('reloadAlas', reloadAlas, '刷新中');
-bindAction('toggleAlas', toggleAlas, '执行中');
-bindAction('loadConfig', loadConfig, '读取中');
-bindAction('saveConfig', saveConfig, '保存中');
-bindAction('saveAlasBinding', saveAlasBinding, '保存中');
+bindAction('reloadRuntimeLogs', ()=>loadRuntimeLogs({force:true}), adminT('admin.busy.refreshing'));
+bindAction('reloadAuditLogs', ()=>loadLogs({force:true}), adminT('admin.busy.refreshing'));
+$('savePermission').onclick=()=>withBusy($('savePermission'),savePermission,adminT('admin.busy.saving')).catch(error=>show(error.message)).finally(()=>renderPermissionDetail());
+bindAction('saveVideo', saveVideo, adminT('admin.busy.saving'));
+bindAction('addCustomProfile', async()=>addCustomProfile(), adminT('admin.busy.adding'));
+bindAction('saveAlas', saveAlas, adminT('admin.busy.saving'));
+bindAction('reloadAlas', reloadAlas, adminT('admin.busy.refreshing'));
+bindAction('toggleAlas', toggleAlas, adminT('admin.busy.executing'));
+bindAction('loadConfig', loadConfig, adminT('admin.busy.reading'));
+bindAction('saveConfig', saveConfig, adminT('admin.busy.saving'));
+bindAction('saveAlasBinding', saveAlasBinding, adminT('admin.busy.saving'));
 loadOverview()
   .then(()=>{ if(savedInitialTab !== 'overview') activateTab(savedInitialTab, false); })
   .catch(error=>reportRequestError(error));
