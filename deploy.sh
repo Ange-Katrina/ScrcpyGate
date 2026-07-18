@@ -1172,11 +1172,21 @@ configure_and_install_flow() {
       warn_msg "配置已保存，已取消重新部署；现有实例尚未应用新配置"
       return 0
     fi
+    INSTALL_INSTANCE_CHECKED=true
   fi
   install_service
 }
 
 install_service() {
+  if [ "${INSTALL_INSTANCE_CHECKED:-false}" != true ]; then
+    ensure_env_file
+    load_settings
+    validate_settings
+    detect_scrcpygate_instance
+    if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
+      existing_instance_can_be_managed || return 1
+    fi
+  fi
   prepare_deployment
   prepare_data_directory
   show_install_summary
@@ -1237,10 +1247,8 @@ reset_admin() {
 }
 
 load_uninstall_settings() {
-  if [ -f .env ]; then
+  if [ -z "${WEB_SCRCPY_DATA_HOST:-}" ] && [ -f .env ]; then
     WEB_SCRCPY_DATA_HOST=$(dotenv_value WEB_SCRCPY_DATA_HOST)
-  else
-    WEB_SCRCPY_DATA_HOST=./data
   fi
   WEB_SCRCPY_DATA_HOST=${WEB_SCRCPY_DATA_HOST:-./data}
 }
@@ -1270,8 +1278,10 @@ existing_container_data_dir() {
 }
 
 resolve_uninstall_data_dir() {
-  UNINSTALL_DATA_DIR=$(configured_data_dir_from_disk) \
-    || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
+  if ! UNINSTALL_DATA_DIR=$(configured_data_dir_from_disk); then
+    UNINSTALL_DATA_DIR=$(existing_container_data_dir) \
+      || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
+  fi
   case "$UNINSTALL_DATA_DIR" in
     '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝删除不安全的数据目录: $UNINSTALL_DATA_DIR" ;;
   esac
@@ -1290,7 +1300,9 @@ confirm_permanent_data_deletion() {
   IFS= read -r answer || return 1
   answer=$(printf '%s' "$answer" | tr -d '\r')
   [ "$answer" = "$UNINSTALL_DATA_DIR" ] || return 1
-  current_data_dir=$(configured_data_dir_from_disk) || return 1
+  current_data_dir=$(configured_data_dir_from_disk) \
+    || current_data_dir=$(existing_container_data_dir) \
+    || return 1
   [ "$current_data_dir" = "$UNINSTALL_DATA_DIR" ]
 }
 

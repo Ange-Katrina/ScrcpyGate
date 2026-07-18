@@ -341,6 +341,44 @@ class DeployScriptTests(unittest.TestCase):
         self.assertTrue((target / ".env").is_file())
         self.assertIn("非交互卸载已保留", result.stdout)
 
+    def test_noninteractive_uninstall_recovers_missing_env_from_bind_mount(self):
+        target = self.prepare_installer()
+        data_dir = target / "legacy-data"
+        data_dir.mkdir()
+        data_path = self.shell_realpath(data_dir)
+
+        result = self.run_installer(
+            target,
+            "--uninstall",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_DATA_SOURCE=data_path,
+            TERM="dumb",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.compose_down_calls(target)), 1)
+        self.assertTrue(data_dir.is_dir())
+        self.assertIn("非交互卸载已保留", result.stdout)
+
+    def test_uninstall_honors_environment_data_directory(self):
+        target = self.prepare_installer()
+        data_dir = target / "environment-data"
+        data_dir.mkdir()
+        data_path = self.shell_realpath(data_dir)
+
+        result = self.run_installer(
+            target,
+            "--uninstall",
+            WEB_SCRCPY_DATA_HOST=data_path,
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_DATA_SOURCE=data_path,
+            TERM="dumb",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.compose_down_calls(target)), 1)
+        self.assertTrue(data_dir.is_dir())
+
     def test_interactive_uninstall_can_remove_image_project_data_and_environment(self):
         target = self.prepare_installer()
         shutil.copy2(target / ".env.example", target / ".env")
@@ -901,6 +939,7 @@ class DeployScriptTests(unittest.TestCase):
 
     def test_noninteractive_install_does_not_prompt_for_running_instance(self):
         target = self.prepare_installer()
+        (target / "data").mkdir()
         result = self.run_installer(
             target,
             "--skip-build",
@@ -912,6 +951,23 @@ class DeployScriptTests(unittest.TestCase):
         self.assertNotIn("[y/N]", result.stdout)
         calls = (target / "docker.log").read_text(encoding="utf-8")
         self.assertIn("compose up -d", calls)
+
+    def test_direct_install_refuses_another_compose_project(self):
+        target = self.prepare_installer()
+        (target / "data").mkdir()
+        result = self.run_installer(
+            target,
+            "--install",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_PROJECT="legacy-project",
+            TERM="dumb",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("不会自动接管", result.stderr)
+        calls = (target / "docker.log").read_text(encoding="utf-8")
+        self.assertNotIn("compose build", calls)
+        self.assertNotIn("compose up", calls)
 
     def test_invalid_port_stops_before_calling_docker(self):
         target = self.prepare_installer()
