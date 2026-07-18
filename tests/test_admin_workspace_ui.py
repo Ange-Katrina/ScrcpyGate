@@ -52,6 +52,22 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             self.assertIn(token, self.script)
         self.assertIn("@media (max-width: 920px)", self.styles)
         self.assertIn("min-height: 44px", self.styles)
+        self.assertIn("height: var(--ui-visual-viewport-height, 100dvh)", self.styles)
+        self.assertIn("padding: max(var(--ui-space-4), env(safe-area-inset-top))", self.styles)
+        self.assertIn("nav.setAttribute('role','dialog')", self.script)
+        self.assertIn("nav.setAttribute('aria-modal','true')", self.script)
+        self.assertIn("element.closest('[hidden], [inert], [aria-hidden=\"true\"]')", self.script)
+        self.assertIn("element.getClientRects().length", self.script)
+        self.assertIn("panel.scrollIntoView({block:'start',behavior:'instant'})", self.script)
+
+    def test_mobile_forms_and_actions_do_not_overflow_narrow_screens(self):
+        self.assertIn("font-size: 16px", self.styles)
+        self.assertIn("white-space: normal", self.styles)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", self.styles)
+        self.assertIn(".device-card .actions .danger:last-child", self.styles)
+        self.assertIn("@media (max-height: 520px) and (orientation: landscape)", self.styles)
+        self.assertIn("grid-template-rows: auto minmax(0, 1fr)", self.styles)
+        self.assertIn("position: sticky", self.styles)
 
     def test_tables_and_danger_actions_use_responsive_accessible_patterns(self):
         self.assertGreaterEqual(self.template.count('class="responsive-table"'), 5)

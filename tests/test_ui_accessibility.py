@@ -29,6 +29,7 @@ class UiAccessibilityContractTests(unittest.TestCase):
         self.assertIn("@media (prefers-reduced-motion: reduce)", components)
         self.assertIn(".ui-button,\n  .ui-icon-button,\n  .ui-theme-picker", components)
         self.assertIn(".ui-locale-picker { min-height: 44px; }", components)
+        self.assertIn(".ui-locale-option { min-height: 44px; }", components)
         self.assertIn(".ui-theme-option { min-height: 44px; }", components)
         self.assertIn(".ui-toast__close { width: 44px; min-height: 44px; }", components)
         self.assertIn("--ui-color-control-border: #68717d", tokens)

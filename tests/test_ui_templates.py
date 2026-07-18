@@ -258,6 +258,43 @@ class UiTemplateContractTests(unittest.TestCase):
             self.assertIn(token, core)
         for selector in (".ui-theme-trigger", ".ui-theme-menu", ".ui-theme-option", '.ui-theme-option[aria-checked="true"]', ".compact-theme-picker .ui-theme-trigger"):
             self.assertIn(selector, components)
+
+    def test_locale_picker_matches_theme_picker_and_uses_self_hosted_popup(self):
+        core = self.read("static/js/ui-core.js")
+        components = self.read("static/css/ui-components.css")
+        sprite = self.read("static/icons/lucide.svg")
+        for name in ("login.html", "index.html", "admin.html"):
+            with self.subTest(name=name):
+                template = self.read(f"templates/{name}")
+                self.assertIn('class="ui-locale-picker', template)
+                self.assertIn("data-ui-locale-select", template)
+                self.assertIn("#languages", template)
+                self.assertNotIn("A/文", template)
+                self.assertNotIn('<label class="ui-locale-picker', template)
+        for token in (
+            'trigger.setAttribute("aria-haspopup", "menu")',
+            'menu.setAttribute("role", "menu")',
+            'item.setAttribute("role", "menuitemradio")',
+            'item.setAttribute("aria-checked", String(option.value === select.value))',
+            'trigger.setAttribute("aria-expanded", "true")',
+            'trigger.setAttribute("aria-expanded", "false")',
+            '"ArrowDown"',
+            '"ArrowUp"',
+            '"Enter"',
+            '"Escape"',
+            "closeLocaleMenus(false)",
+        ):
+            self.assertIn(token, core)
+        for selector in (
+            ".ui-locale-trigger",
+            ".ui-locale-menu",
+            ".ui-locale-option",
+            '.ui-locale-option[aria-checked="true"]',
+            ".compact-locale-picker .ui-locale-trigger",
+            "@keyframes ui-picker-enter",
+        ):
+            self.assertIn(selector, components)
+        self.assertIn('<symbol id="languages"', sprite)
         self.assertIn(".compact-theme-picker { width: 44px; }", components)
 
     def test_scripts_avoid_template_code_and_unsafe_html_sinks(self):
@@ -282,6 +319,10 @@ class UiTemplateContractTests(unittest.TestCase):
         self.assertIn('form.addEventListener("submit"', script)
         self.assertIn("ScrcpyGateUI.setBusy", script)
         self.assertIn('addEventListener("pageshow"', script)
+        self.assertNotIn("autofocus", template)
+        self.assertIn('(hover: hover) and (pointer: fine)', script)
+        self.assertIn("const passwordHadFocus = document.activeElement === password", script)
+        self.assertIn("if (passwordHadFocus)", script)
 
     def test_lucide_sprite_and_attribution_are_complete(self):
         sprite_path = ROOT / "static/icons/lucide.svg"

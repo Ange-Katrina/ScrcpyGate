@@ -7,10 +7,10 @@
   <title>{{ t('admin.ui.page_title') }}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=85bb61ce9876">
-  <link rel="stylesheet" href="/static/css/admin.css?v=817f03c5eab3">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
+  <link rel="stylesheet" href="/static/css/admin.css?v=741fed7f98c5">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
-  <script src="/static/js/ui-core.js?v=506190289bc3" defer></script>
+  <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
 </head>
 <body data-ui-page="admin">
 <div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -24,7 +24,7 @@
         <span><strong>ScrcpyGate</strong><small>{{ t('admin.ui.nav.management_workspace') }}</small></span>
       </a>
       <button id="adminNavClose" class="ui-icon-button admin-nav__close" type="button" aria-label="{{ t('admin.ui.nav.close') }}" aria-controls="adminNav">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg>
       </button>
     </div>
 
@@ -42,16 +42,16 @@
         <span class="admin-user__avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
         <span><strong>{{ user.username }}</strong><small>{{ t('common.roles.admin') }}</small></span>
       </div>
-      <label class="ui-locale-picker">
-        <span class="ui-locale-mark" aria-hidden="true">A/文</span>
+      <div class="ui-locale-picker" data-ui-locale-placement="top">
+        <svg class="ui-icon ui-locale-mark" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#languages"></use></svg>
         <span class="ui-sr-only">{{ t("common.language.label") }}</span>
         <select id="adminLocale" data-ui-locale-select aria-label="{{ t('common.language.label') }}">
           <option value="zh-CN"{% if current_locale() == "zh-CN" %} selected{% endif %}>{{ t("common.language.zh_cn") }}</option>
           <option value="en-US"{% if current_locale() == "en-US" %} selected{% endif %}>{{ t("common.language.en_us") }}</option>
         </select>
-      </label>
+      </div>
       <div class="ui-theme-picker" data-ui-theme-placement="top">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#sun-moon"></use></svg>
         <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
         <select id="adminTheme" data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
           <option value="dark">{{ t("common.theme.dark") }}</option>
@@ -71,7 +71,7 @@
     <header class="admin-topbar">
       <div class="admin-topbar__title">
         <button id="adminNavToggle" class="ui-icon-button admin-nav__toggle" type="button" aria-label="{{ t('admin.ui.nav.open') }}" aria-controls="adminNav" aria-expanded="false">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#menu"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#menu"></use></svg>
         </button>
         <div>
           <p>ScrcpyGate</p>
@@ -356,7 +356,7 @@
 
 <div id="deviceDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
-   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.device') }}</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.device') }}</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <input id="deviceId" type="hidden">
     <div class="col-12"><label for="deviceName">{{ t('admin.ui.drawers.device.name_optional') }}</label><input id="deviceName" placeholder="{{ t('admin.ui.drawers.device.name_placeholder') }}" autocomplete="off"></div>
@@ -369,7 +369,7 @@
 
 <div id="userDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="userDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="userDrawerTitle" aria-describedby="userDrawerContext" aria-hidden="true" inert>
-   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.user') }}</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.user') }}</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="newUsername">{{ t('admin.ui.access.username') }}</label><input id="newUsername" autocomplete="username"></div>
     <div class="col-12"><label for="newPassword">{{ t('admin.ui.drawers.user.password') }}</label><input id="newPassword" type="password" placeholder="{{ t('admin.ui.drawers.user.password_placeholder') }}" autocomplete="new-password"></div>
@@ -393,7 +393,7 @@
 
 <div id="alasConnectionDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConnectionDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasConnectionDrawerTitle" aria-describedby="alasConnectionDrawerContext" aria-hidden="true" inert>
-   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime') }}</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime') }}</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
     <div class="col-12"><label for="alasToken">{{ t('admin.ui.drawers.alas_connection.token') }}</label><input id="alasToken" type="password" placeholder="{{ t('admin.ui.drawers.alas_connection.token_placeholder') }}" autocomplete="new-password"></div>
@@ -404,7 +404,7 @@
 
 <div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
-   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.config_ownership') }}</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.config_ownership') }}</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
   <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t('admin.ui.drawers.assignment.summary') }}">
     <div class="alas-assignment-summary__item">
       <span>{{ t('admin.ui.alas.owner_user') }}</span>
@@ -433,7 +433,7 @@
 
 <div id="alasConfigDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConfigDrawer" class="ui-drawer admin-editor-drawer admin-editor-drawer--wide" role="dialog" aria-modal="true" aria-labelledby="alasConfigDrawerTitle" aria-describedby="alasConfigDrawerContext" aria-hidden="true" inert>
-   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime_config') }}</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg></button></div>
+   <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime_config') }}</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
   <div class="form-grid drawer-form">
     <div class="col-6"><label for="configSource">{{ t('admin.ui.drawers.config.source') }}</label><input id="configSource" readonly placeholder="{{ t('admin.ui.drawers.config.current') }}"></div>
     <div class="col-6"><label for="configTarget">{{ t('admin.ui.drawers.config.target') }}</label><input id="configTarget" readonly placeholder="{{ t('admin.ui.drawers.config.same_target') }}"></div>
@@ -444,13 +444,13 @@
 </aside>
 
 <dialog id="confirmDialog" class="ui-dialog confirm-dialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
-  <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=da1ff202eea5#triangle-alert"></use></svg></div>
+  <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=cb7d1235489f#triangle-alert"></use></svg></div>
   <div><p class="eyebrow">{{ t('admin.ui.confirm.required') }}</p><h2 id="confirmDialogTitle">{{ t('admin.actions.confirm_danger') }}</h2><p id="confirmDialogMessage">{{ t('admin.actions.irreversible') }}</p></div>
   <div class="confirm-dialog__actions"><button id="confirmDialogCancel" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="confirmDialogConfirm" class="btn danger" type="button">{{ t('admin.actions.confirm') }}</button></div>
 </dialog>
 
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=472808c3ffa1" defer></script>
+<script src="/static/js/admin.js?v=d97ab689a3ed" defer></script>
 </body>
 </html>

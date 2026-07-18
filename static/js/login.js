@@ -37,9 +37,20 @@
 
   if (passwordToggle) {
     passwordToggle.addEventListener("click", () => {
+      const passwordHadFocus = document.activeElement === password;
+      const selectionStart = passwordHadFocus ? password.selectionStart : null;
+      const selectionEnd = passwordHadFocus ? password.selectionEnd : null;
       setPasswordVisible(passwordToggle.getAttribute("aria-pressed") !== "true");
-      password.focus({ preventScroll: true });
+      if (passwordHadFocus) {
+        password.focus({ preventScroll: true });
+        if (selectionStart !== null && selectionEnd !== null) password.setSelectionRange(selectionStart, selectionEnd);
+      }
     });
+  }
+
+  if (window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+    const target = document.querySelector('[aria-invalid="true"]') || document.getElementById("username");
+    if (target) window.requestAnimationFrame(() => target.focus({ preventScroll: true }));
   }
 
   if (form) {

@@ -112,7 +112,13 @@ function setAdminWorkspaceHidden(hidden){
 function focusableElements(container){
   if(!container) return [];
   return [...container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-    .filter(element=>!element.hidden && element.getAttribute('aria-hidden')!=='true');
+    .filter(element=>{
+      if(element.hidden || element.getAttribute('aria-hidden')==='true') return false;
+      if(element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      if(!element.getClientRects().length) return false;
+      const style=window.getComputedStyle(element);
+      return style.display!=='none' && style.visibility!=='hidden';
+    });
 }
 function syncAdminNavMode(){
   const nav=$('adminNav');
@@ -125,6 +131,8 @@ function syncAdminNavMode(){
     nav.classList.remove('is-open');
     nav.removeAttribute('aria-hidden');
     nav.removeAttribute('inert');
+    nav.removeAttribute('role');
+    nav.removeAttribute('aria-modal');
     backdrop.classList.remove('is-open');
     backdrop.hidden=true;
     toggle.setAttribute('aria-expanded','false');
@@ -147,6 +155,8 @@ function openAdminNav(trigger=$('adminNavToggle')){
   const backdrop=$('adminNavBackdrop');
   clearTimeout(syncAdminNavMode.hideTimer);
   adminNavReturnFocus=trigger || document.activeElement;
+  nav.setAttribute('role','dialog');
+  nav.setAttribute('aria-modal','true');
   nav.removeAttribute('inert');
   nav.setAttribute('aria-hidden','false');
   nav.classList.add('is-open');
@@ -2343,7 +2353,12 @@ function activateTab(tabId, save=true, focusPanel=false){
   loadTab(target).catch(error=>reportRequestError(error));
   syncDeviceStatusPolling();
   syncOverviewPolling();
-  if(focusPanel) requestAnimationFrame(()=>$(target).focus({preventScroll:true}));
+  if(focusPanel) requestAnimationFrame(()=>{
+    const panel=$(target);
+    if(!panel) return;
+    if(adminNavMedia.matches) panel.scrollIntoView({block:'start',behavior:'instant'});
+    panel.focus({preventScroll:true});
+  });
 }
 function initializeTabs(){
   const tablist=document.querySelector('.tabs');

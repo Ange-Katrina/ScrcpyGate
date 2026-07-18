@@ -7,10 +7,10 @@
   <title>ScrcpyGate</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=85bb61ce9876">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
   <link rel="stylesheet" href="/static/css/mirror.css?v=aa9e4ac1e67b">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
-  <script src="/static/js/ui-core.js?v=506190289bc3" defer></script>
+  <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
   <script src="/static/js/input.js?v=82b95837d0bb"></script>
 </head>
@@ -23,7 +23,7 @@
           <div class="brand">ScrcpyGate</div>
         </div>
         <button id="sidebarCollapseBtn" class="ui-icon-button sidebar-collapse-btn" type="button" title="{{ t('mirror.ui.collapse_sidebar') }}" aria-label="{{ t('mirror.ui.collapse_sidebar') }}" aria-controls="sidebar" aria-expanded="true">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#panel-left-close"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#panel-left-close"></use></svg>
         </button>
       </div>
       <div class="sidebar-account-row">
@@ -36,18 +36,18 @@
         </div>
         <div class="sidebar-account-actions" aria-label="{{ t('mirror.ui.account_and_theme') }}">
           <a id="adminLink" class="ui-icon-button sidebar-utility-btn" href="/admin" title="{{ t('mirror.ui.admin') }}" aria-label="{{ t('mirror.ui.admin') }}" hidden>
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#settings"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#settings"></use></svg>
           </a>
-          <label class="ui-locale-picker compact-locale-picker" title="{{ t('common.language.label') }}">
-            <span class="ui-locale-mark" aria-hidden="true">A/文</span>
+          <div class="ui-locale-picker compact-locale-picker" title="{{ t('common.language.label') }}">
+            <svg class="ui-icon ui-locale-mark" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#languages"></use></svg>
             <span class="ui-sr-only">{{ t("common.language.label") }}</span>
             <select data-ui-locale-select aria-label="{{ t('common.language.label') }}">
               <option value="zh-CN"{% if current_locale() == "zh-CN" %} selected{% endif %}>{{ t("common.language.zh_cn") }}</option>
               <option value="en-US"{% if current_locale() == "en-US" %} selected{% endif %}>{{ t("common.language.en_us") }}</option>
             </select>
-          </label>
+          </div>
           <div class="ui-theme-picker compact-theme-picker">
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#sun-moon"></use></svg>
             <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
             <select data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
               <option value="dark">{{ t("common.theme.dark") }}</option>
@@ -58,7 +58,7 @@
           <form method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="logout ui-icon-button sidebar-utility-btn" type="submit" title="{{ t('mirror.ui.logout') }}" aria-label="{{ t('mirror.ui.logout') }}">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#log-out"></use></svg>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#log-out"></use></svg>
             </button>
           </form>
         </div>
@@ -67,15 +67,15 @@
 
     <nav class="sidebar-menu" aria-label="{{ t('mirror.ui.workspace_tools') }}">
       <button id="toolBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sliders-horizontal"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#sliders-horizontal"></use></svg>
         <span class="menu-label">{{ t('mirror.ui.visual') }}</span>
       </button>
       <button id="alasBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#bot"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#bot"></use></svg>
         <span class="menu-label">ALAS</span>
       </button>
       <button id="accountBtn" class="btn sidebar-menu-btn" type="button" aria-haspopup="dialog" aria-controls="workspaceDrawer" aria-expanded="false">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#user-round"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#user-round"></use></svg>
         <span class="menu-label">{{ t('mirror.ui.account') }}</span>
       </button>
     </nav>
@@ -87,11 +87,11 @@
           <span id="deviceSummary" class="device-summary" aria-live="polite">{{ t('mirror.ui.loading') }}</span>
         </div>
         <button id="refreshBtn" class="ui-icon-button refresh-btn" type="button" title="{{ t('mirror.ui.refresh_devices') }}" aria-label="{{ t('mirror.ui.refresh_devices') }}">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#refresh-cw"></use></svg>
         </button>
       </div>
       <label class="device-search" for="deviceSearch">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#search"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#search"></use></svg>
         <span class="ui-sr-only">{{ t('mirror.ui.search_devices') }}</span>
         <input id="deviceSearch" type="search" inputmode="search" autocomplete="off" placeholder="{{ t('mirror.ui.search_device_name') }}">
       </label>
@@ -104,15 +104,15 @@
 
     <div class="side-actions" aria-label="{{ t('mirror.ui.mirror_actions') }}">
       <button id="startBtn" class="btn primary wide" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#play"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#play"></use></svg>
         <span class="action-label">{{ t('mirror.ui.start_mirror') }}</span>
       </button>
       <button id="controlBtn" class="btn" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#monitor"></use></svg>
         <span class="action-label">{{ t('mirror.ui.get_control') }}</span>
       </button>
       <button id="stopBtn" class="btn danger" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#square"></use></svg>
         <span class="action-label">{{ t('mirror.ui.stop_mirror') }}</span>
       </button>
     </div>
@@ -122,7 +122,7 @@
     <header class="viewer-top">
       <div class="top-left">
         <button id="menuBtn" class="ui-icon-button top-menu-btn" type="button" title="{{ t('mirror.ui.open_sidebar') }}" aria-label="{{ t('mirror.ui.open_sidebar') }}" aria-controls="sidebar" aria-expanded="false">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#menu"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#menu"></use></svg>
         </button>
         <div class="top-copy">
           <div id="selectedTitle" class="selected-title">{{ t('mirror.ui.not_selected') }}</div>
@@ -135,11 +135,11 @@
           <span id="controlOwnership" class="control-ownership">{{ t('mirror.ui.not_acquired') }}</span>
         </div>
         <button id="fullscreenBtn" class="ui-icon-button fullscreen-btn" type="button" title="{{ t('mirror.ui.enter_fullscreen') }}" aria-label="{{ t('mirror.ui.enter_fullscreen') }}" aria-pressed="false">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#maximize-2"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#maximize-2"></use></svg>
         </button>
         <details id="statusDetails" class="status-details">
           <summary>
-            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#info"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#info"></use></svg>
             <span class="status-details-label">{{ t('mirror.ui.status_details') }}</span>
           </summary>
           <div id="topStatus" class="top-status" aria-label="{{ t('mirror.ui.connection_status') }}"></div>
@@ -151,14 +151,14 @@
       <div id="screenArea" class="screen-area">
         <div id="videoWrap" class="video-wrap"><video id="phoneVideo" muted autoplay playsinline tabindex="0"></video></div>
         <div id="empty" class="empty ui-empty">
-          <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#monitor"></use></svg>
+          <svg class="ui-icon empty-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#monitor"></use></svg>
           <strong id="emptyTitle">{{ t('mirror.ui.no_device_selected') }}</strong>
           <span id="emptyDescription">{{ t('mirror.ui.choose_device_hint') }}</span>
         </div>
       </div>
       <div id="immersiveRail" class="immersive-rail" data-open="false">
         <button id="immersiveRailToggle" class="immersive-rail-toggle" type="button" title="{{ t('mirror.ui.show_rail') }}" aria-label="{{ t('mirror.ui.show_rail') }}" aria-controls="immersiveControls" aria-expanded="false" aria-hidden="true">
-          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#chevron-left"></use></svg>
+          <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#chevron-left"></use></svg>
         </button>
         <div id="immersiveControls" class="immersive-controls" aria-hidden="false">
           <nav class="dock" aria-label="{{ t('mirror.ui.android_navigation') }}">
@@ -172,15 +172,15 @@
               <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.recent') }}</span>
             </button>
             <button id="keyboardBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.open_keyboard') }}" aria-label="{{ t('mirror.ui.open_keyboard') }}" data-active="false" disabled>
-              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#keyboard"></use></svg><span class="nav-label">{{ t('mirror.ui.keyboard') }}</span>
+              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#keyboard"></use></svg><span class="nav-label">{{ t('mirror.ui.keyboard') }}</span>
             </button>
           </nav>
           <div class="immersive-actions" aria-label="{{ t('mirror.ui.fullscreen_actions') }}">
             <button id="immersiveStopBtn" class="nav-btn immersive-action danger" type="button" title="{{ t('mirror.ui.stop_mirror') }}" aria-label="{{ t('mirror.ui.stop_mirror') }}">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#square"></use></svg><span class="nav-label">{{ t('mirror.ui.stop') }}</span>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#square"></use></svg><span class="nav-label">{{ t('mirror.ui.stop') }}</span>
             </button>
             <button id="exitFullscreenBtn" class="nav-btn immersive-action" type="button" title="{{ t('mirror.ui.exit_fullscreen') }}" aria-label="{{ t('mirror.ui.exit_fullscreen') }}">
-              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#minimize-2"></use></svg><span class="nav-label">{{ t('mirror.ui.exit') }}</span>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#minimize-2"></use></svg><span class="nav-label">{{ t('mirror.ui.exit') }}</span>
             </button>
           </div>
         </div>
@@ -197,7 +197,7 @@
       <p>{{ t('mirror.ui.drawer_description') }}</p>
     </div>
     <button id="toolDrawerCloseBtn" class="ui-icon-button" type="button" title="{{ t('mirror.ui.close_tools') }}" aria-label="{{ t('mirror.ui.close_tools') }}">
-      <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#x"></use></svg>
+      <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg>
     </button>
   </header>
 
@@ -249,11 +249,11 @@
     <div class="actions panel-actions">
       <button id="alasToggleRun" class="btn warn" type="button">{{ t('mirror.ui.start_alas') }}</button>
       <button id="alasReload" class="btn" type="button">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#refresh-cw"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#refresh-cw"></use></svg>
         <span>{{ t('mirror.ui.refresh') }}</span>
       </button>
       <a id="alasOpenLink" class="btn" href="/alas/embed/" target="_blank" rel="noopener noreferrer">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#external-link"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#external-link"></use></svg>
         <span>{{ t('mirror.ui.open_alas') }}</span>
       </a>
     </div>

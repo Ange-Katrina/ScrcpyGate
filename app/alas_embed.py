@@ -345,9 +345,11 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
   <title>{safe_title}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
-  <link rel="stylesheet" href="/static/css/alas-shell.css?v=1c04d8ca47e1">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
+  <link rel="stylesheet" href="/static/css/alas-shell.css?v=c880a1b7e43b">
   <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
+  <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
   <script src="/static/js/alas-shell.js?v=aa8526b19f9b" defer></script>
 </head>
 <body>
@@ -361,13 +363,14 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
     </div>
     <div class="alas-shell-toolbar" aria-label="{safe_toolbar_label}">
       <span id="loadStatus" class="alas-shell-status" data-state="loading" role="status" aria-live="polite">{safe_connecting}</span>
-      <label class="alas-shell-locale">
-        <span aria-hidden="true">A/文</span>
-        <select id="localeSelect" aria-label="{safe_locale_label}">
+      <div class="ui-locale-picker compact-locale-picker" title="{safe_locale_label}">
+        <svg class="ui-icon ui-locale-mark" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#languages"></use></svg>
+        <span class="ui-sr-only">{safe_locale_label}</span>
+        <select id="localeSelect" data-ui-locale-select aria-label="{safe_locale_label}">
           <option value="zh-CN"{selected_zh}>{safe_zh_label}</option>
           <option value="en-US"{selected_en}>{safe_en_label}</option>
         </select>
-      </label>
+      </div>
       <button id="refreshFrame" class="alas-shell-button" type="button">{safe_refresh}</button>
       <a class="alas-shell-button" href="{safe_src}" target="_blank" rel="noopener noreferrer">{safe_open_new_window}</a>
       <a class="alas-shell-button" href="/">{safe_back}</a>

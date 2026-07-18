@@ -7,25 +7,25 @@
   <title>{{ t("login.page_title") }}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=85bb61ce9876">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
   <link rel="stylesheet" href="/static/css/login.css?v=eed0489be317">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
-  <script src="/static/js/ui-core.js?v=506190289bc3" defer></script>
-  <script src="/static/js/login.js?v=4b3c037d5995" defer></script>
+  <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
+  <script src="/static/js/login.js?v=9d74e50093b6" defer></script>
 </head>
 <body data-ui-page="login">
   <div class="login-shell">
     <div class="login-toolbar">
-      <label class="ui-locale-picker">
-        <span class="ui-locale-mark" aria-hidden="true">A/文</span>
+      <div class="ui-locale-picker">
+        <svg class="ui-icon ui-locale-mark" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#languages"></use></svg>
         <span class="ui-sr-only">{{ t("common.language.label") }}</span>
         <select data-ui-locale-select aria-label="{{ t('common.language.label') }}">
           <option value="zh-CN"{% if current_locale() == "zh-CN" %} selected{% endif %}>{{ t("common.language.zh_cn") }}</option>
           <option value="en-US"{% if current_locale() == "en-US" %} selected{% endif %}>{{ t("common.language.en_us") }}</option>
         </select>
-      </label>
+      </div>
       <div class="ui-theme-picker">
-        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#sun-moon"></use></svg>
+        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#sun-moon"></use></svg>
         <span class="ui-sr-only">{{ t("common.theme.label") }}</span>
         <select data-ui-theme-select aria-label="{{ t('common.theme.label') }}">
           <option value="dark">{{ t("common.theme.dark") }}</option>
@@ -44,15 +44,15 @@
       <form id="loginForm" class="login-form" method="post" action="/login">
         <div class="ui-field">
           <label for="username">{{ t("login.username") }}</label>
-          <input class="ui-input" id="username" name="username" value="{{ username | default('', true) }}" autocomplete="username" autocapitalize="none" spellcheck="false"{% if not error %} autofocus{% endif %} required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
+          <input class="ui-input" id="username" name="username" value="{{ username | default('', true) }}" autocomplete="username" autocapitalize="none" spellcheck="false" required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
         </div>
         <div class="ui-field">
           <label for="password">{{ t("login.password") }}</label>
           <div class="login-password-field">
-            <input class="ui-input" id="password" name="password" type="password" autocomplete="current-password"{% if error %} autofocus{% endif %} required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
+            <input class="ui-input" id="password" name="password" type="password" autocomplete="current-password" required{% if error %} aria-invalid="true" aria-describedby="loginError"{% endif %}>
             <button id="passwordToggle" class="login-password-toggle" type="button" aria-label="{{ t('login.show_password') }}" aria-controls="password" aria-pressed="false" title="{{ t('login.show_password') }}">
-              <svg class="ui-icon password-icon-show" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#eye"></use></svg>
-              <svg class="ui-icon password-icon-hide" aria-hidden="true"><use href="/static/icons/lucide.svg?v=da1ff202eea5#eye-off"></use></svg>
+              <svg class="ui-icon password-icon-show" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#eye"></use></svg>
+              <svg class="ui-icon password-icon-hide" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#eye-off"></use></svg>
             </button>
           </div>
         </div>

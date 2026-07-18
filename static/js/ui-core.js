@@ -13,7 +13,8 @@
   const activeLayers = [];
   const themeControls = [];
   const localeControls = [];
-  const iconUrl = "/static/icons/lucide.svg?v=da1ff202eea5#";
+  const localePopupControls = [];
+  const iconUrl = "/static/icons/lucide.svg?v=cb7d1235489f#";
   let viewportFrame = 0;
   let viewportSignature = "";
 
@@ -116,6 +117,7 @@
     localeControls.forEach((select) => {
       if (select.value !== locale) select.value = locale;
     });
+    localePopupControls.forEach((control) => control.sync(locale));
   }
 
   function applyLocale(locale, persist = true) {
@@ -159,12 +161,139 @@
     return false;
   }
 
-  function initializeLocaleSelect(select) {
+  function closeLocaleMenus(restoreFocus, except) {
+    localePopupControls.forEach((control) => {
+      if (control !== except && control.isOpen()) control.close(restoreFocus);
+    });
+  }
+
+  function initializeLocaleSelect(select, index) {
     if (!i18n || select.dataset.uiLocaleReady === "true") return;
+    const wrapper = select.closest(".ui-locale-picker");
+    if (!wrapper) return;
     select.dataset.uiLocaleReady = "true";
     localeControls.push(select);
     select.value = supportedLocale(i18n.locale) ? i18n.locale : i18n.supportedLocales[0];
     select.addEventListener("change", () => applyLocale(select.value, true));
+
+    const trigger = document.createElement("button");
+    const triggerLabel = document.createElement("span");
+    const triggerArrow = document.createElement("span");
+    const menu = document.createElement("div");
+    const menuId = `uiLocaleMenu-${select.id || index + 1}`;
+
+    select.classList.add("ui-locale-native");
+    select.hidden = true;
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
+    trigger.type = "button";
+    trigger.className = "ui-locale-trigger";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", menuId);
+    triggerLabel.className = "ui-locale-trigger__label";
+    triggerArrow.className = "ui-picker-arrow";
+    triggerArrow.setAttribute("aria-hidden", "true");
+    trigger.append(triggerLabel, triggerArrow);
+
+    menu.id = menuId;
+    menu.className = "ui-locale-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", t("common.language.label"));
+    menu.hidden = true;
+
+    const items = Array.from(select.options).map((option) => {
+      const item = document.createElement("button");
+      const label = document.createElement("span");
+      item.type = "button";
+      item.className = "ui-locale-option";
+      item.dataset.localeValue = option.value;
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(option.value === select.value));
+      item.tabIndex = -1;
+      label.textContent = option.textContent;
+      item.append(label, icon("check", "ui-icon ui-locale-option__check"));
+      menu.appendChild(item);
+      return item;
+    });
+
+    function selectedIndex() {
+      return Math.max(0, items.findIndex((item) => item.dataset.localeValue === select.value));
+    }
+
+    function focusItem(itemIndex) {
+      if (!items.length) return;
+      items[(itemIndex + items.length) % items.length].focus({ preventScroll: true });
+    }
+
+    const control = {
+      sync(locale) {
+        if (select.value !== locale) select.value = locale;
+        const selectedOption = Array.from(select.options).find((option) => option.value === locale) || select.options[0];
+        const label = selectedOption ? selectedOption.textContent : locale;
+        triggerLabel.textContent = label;
+        trigger.setAttribute("aria-label", `${t("common.language.label")}：${label}`);
+        items.forEach((item) => item.setAttribute("aria-checked", String(item.dataset.localeValue === locale)));
+      },
+      isOpen() { return !menu.hidden; },
+      open(itemIndex) {
+        closeThemeMenus(false);
+        closeLocaleMenus(false, control);
+        menu.hidden = false;
+        wrapper.classList.add("is-open");
+        trigger.setAttribute("aria-expanded", "true");
+        window.requestAnimationFrame(() => focusItem(itemIndex === undefined ? selectedIndex() : itemIndex));
+      },
+      close(restoreFocus) {
+        menu.hidden = true;
+        wrapper.classList.remove("is-open");
+        trigger.setAttribute("aria-expanded", "false");
+        if (restoreFocus) trigger.focus({ preventScroll: true });
+      }
+    };
+
+    items.forEach((item) => item.addEventListener("click", () => {
+      const locale = item.dataset.localeValue;
+      control.close(false);
+      applyLocale(locale, true);
+    }));
+    trigger.addEventListener("click", () => control.isOpen() ? control.close(true) : control.open(selectedIndex()));
+    trigger.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End", "Escape"].includes(event.key)) return;
+      if (event.key === "Escape") {
+        if (!control.isOpen()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        control.close(true);
+        return;
+      }
+      event.preventDefault();
+      control.open(event.key === "ArrowUp" || event.key === "End" ? items.length - 1 : 0);
+    });
+    menu.addEventListener("keydown", (event) => {
+      const current = items.indexOf(document.activeElement);
+      if (event.key === "Tab") { control.close(false); return; }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        control.close(true);
+        return;
+      }
+      if ((event.key === "Enter" || event.key === " ") && current >= 0) {
+        event.preventDefault();
+        items[current].click();
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "Home") focusItem(0);
+      else if (event.key === "End") focusItem(items.length - 1);
+      else focusItem((current < 0 ? selectedIndex() : current) + (event.key === "ArrowUp" ? -1 : 1));
+    });
+
+    wrapper.append(trigger, menu);
+    localePopupControls.push(control);
+    control.sync(select.value);
   }
 
   function icon(name, className) {
@@ -258,6 +387,7 @@
         return !menu.hidden;
       },
       open(itemIndex) {
+        closeLocaleMenus(false);
         closeThemeMenus(false, control);
         menu.hidden = false;
         wrapper.classList.add("is-open");
@@ -544,6 +674,7 @@
 
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".ui-theme-picker")) closeThemeMenus(false);
+      if (!event.target.closest(".ui-locale-picker")) closeLocaleMenus(false);
       const openDrawerButton = event.target.closest("[data-ui-drawer-open]");
       const closeDrawerButton = event.target.closest("[data-ui-drawer-close]");
       const openDialogButton = event.target.closest("[data-ui-dialog-open]");
@@ -556,6 +687,13 @@
 
     document.addEventListener("keydown", (event) => {
       const openThemeControl = themeControls.find((control) => control.isOpen());
+      const openLocaleControl = localePopupControls.find((control) => control.isOpen());
+      if (event.key === "Escape" && openLocaleControl) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openLocaleControl.close(true);
+        return;
+      }
       if (event.key === "Escape" && openThemeControl) {
         event.preventDefault();
         event.stopImmediatePropagation();

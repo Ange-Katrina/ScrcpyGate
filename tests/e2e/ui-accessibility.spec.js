@@ -42,6 +42,51 @@ test.describe("ScrcpyGate accessibility and layout gates", () => {
     await expect(page.locator("#password")).toHaveAttribute("type", "text");
   });
 
+  test("mobile login does not summon the keyboard or steal password-toggle focus", async ({ page }, testInfo) => {
+    test.skip(!["mobile", "mobile-landscape"].includes(testInfo.project.name), "Mobile projects only");
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#username")).not.toBeFocused();
+    await expect(page.locator("#password")).not.toBeFocused();
+    await page.locator("#passwordToggle").click();
+    await expect(page.locator("#password")).not.toBeFocused();
+    await expect(page.locator("#password")).toHaveAttribute("type", "text");
+  });
+
+  test("language picker matches the theme control and keeps keyboard focus", async ({ page }) => {
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    const localeTrigger = page.locator(".ui-locale-trigger");
+    const localeMenu = page.locator(".ui-locale-menu");
+    await expect(localeTrigger).toBeVisible();
+    const pickerGeometry = await page.evaluate(() => {
+      const inspect = (selector) => {
+        const element = document.querySelector(selector);
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          height: rect.height,
+          backgroundColor: style.backgroundColor,
+          borderColor: style.borderColor,
+          borderRadius: style.borderRadius,
+          fontSize: style.fontSize,
+        };
+      };
+      return {
+        locale: inspect(".ui-locale-picker"),
+        theme: inspect(".ui-theme-picker"),
+      };
+    });
+    expect(pickerGeometry.locale).toEqual(pickerGeometry.theme);
+
+    await localeTrigger.click();
+    await expect(localeMenu).toBeVisible();
+    await expect(localeTrigger).toHaveAttribute("aria-expanded", "true");
+    await expect(localeMenu.getByRole("menuitemradio")).toHaveCount(2);
+    await page.keyboard.press("Escape");
+    await expect(localeMenu).toBeHidden();
+    await expect(localeTrigger).toBeFocused();
+    await expect(localeTrigger).toHaveAttribute("aria-expanded", "false");
+  });
+
   test("login page keeps dark and light themes readable", async ({ browser }) => {
     for (const theme of ["dark", "light"]) {
       const context = await browser.newContext({ colorScheme: theme });
@@ -98,5 +143,68 @@ test.describe("ScrcpyGate accessibility and layout gates", () => {
     }
 
     await expect(page.locator("#sidebar")).toHaveClass(/open/);
+  });
+
+  test("mobile admin navigation and editor drawers keep actions reachable", async ({ page }, testInfo) => {
+    test.skip(!["mobile", "mobile-landscape"].includes(testInfo.project.name), "Mobile projects only");
+    test.skip(!e2eUsername || !e2ePassword, "Set authenticated E2E credentials");
+    await signIn(page);
+    await page.goto("/admin", { waitUntil: "domcontentloaded" });
+    await page.locator("#adminNavToggle").click();
+    await expect(page.locator("#adminNav")).toHaveClass(/is-open/);
+    await expect(page.locator("#adminNav")).toHaveAttribute("role", "dialog");
+    await expect(page.locator("#adminNav")).toHaveAttribute("aria-modal", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#adminNavToggle")).toBeFocused();
+    await expect(page.locator("#adminNav")).not.toHaveClass(/is-open/);
+    await expect(page.locator("#adminNavBackdrop")).toBeHidden();
+
+    await page.locator("#adminNavToggle").click();
+    await page.locator("#adminTabDevices").click();
+    await page.locator("#openDeviceDrawer").click();
+    await expect(page.locator("#deviceDrawer")).toHaveClass(/is-open/);
+    await expect(page.locator("#deviceDrawerClose")).toBeFocused();
+    await expect(page.locator("#deviceAddress")).not.toBeFocused();
+    const drawerGeometry = await page.evaluate(() => {
+      const viewportHeight = window.visualViewport ? window.visualViewport.height : innerHeight;
+      const actions = document.querySelector("#deviceDrawer .drawer-actions").getBoundingClientRect();
+      const buttons = Array.from(document.querySelectorAll("#deviceDrawer .drawer-actions button")).map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      });
+      return { viewportHeight, actionsBottom: actions.bottom, buttons };
+    });
+    expect(drawerGeometry.actionsBottom).toBeLessThanOrEqual(drawerGeometry.viewportHeight + 1);
+    for (const button of drawerGeometry.buttons) {
+      expect(button.width).toBeGreaterThanOrEqual(44);
+      expect(button.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test("mobile ALAS shell keeps return action and locale control visible", async ({ page }, testInfo) => {
+    test.skip(!["mobile", "mobile-landscape"].includes(testInfo.project.name), "Mobile projects only");
+    test.skip(!e2eUsername || !e2ePassword, "Set authenticated E2E credentials");
+    await signIn(page);
+    await page.goto("/alas/embed/", { waitUntil: "domcontentloaded" });
+    const returnLink = page.locator('.alas-shell-toolbar > .alas-shell-button[href="/"]');
+    const localeTrigger = page.locator(".alas-shell-toolbar .ui-locale-trigger");
+    await expect(returnLink).toBeVisible();
+    await expect(localeTrigger).toBeVisible();
+    const shellGeometry = await page.evaluate(() => {
+      const toolbar = document.querySelector(".alas-shell-toolbar");
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const returnRect = document.querySelector('.alas-shell-toolbar > .alas-shell-button[href="/"]').getBoundingClientRect();
+      const localeRect = document.querySelector(".alas-shell-toolbar .ui-locale-trigger").getBoundingClientRect();
+      return {
+        toolbarOverflow: toolbar.scrollWidth > toolbar.clientWidth + 1,
+        returnRight: returnRect.right,
+        localeHeight: localeRect.height,
+        viewportWidth: document.documentElement.clientWidth,
+        toolbarBottom: toolbarRect.bottom,
+      };
+    });
+    expect(shellGeometry.toolbarOverflow).toBe(false);
+    expect(shellGeometry.returnRight).toBeLessThanOrEqual(shellGeometry.viewportWidth + 1);
+    expect(shellGeometry.localeHeight).toBeGreaterThanOrEqual(44);
   });
 });

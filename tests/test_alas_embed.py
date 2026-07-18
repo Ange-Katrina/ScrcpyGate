@@ -322,11 +322,19 @@ class AlasEmbedTests(unittest.TestCase):
     def test_embed_shell_uses_resilient_grid_layout_and_recovery_states(self):
         result = embed_shell_html("ALAS", "/alas/embed/proxy/", "管理员完整访问")
         stylesheet = self.read_static("static/css/alas-shell.css")
+        components = self.read_static("static/css/ui-components.css")
         script = self.read_static("static/js/alas-shell.js")
 
         self.assertIn("grid-template-rows: auto minmax(0, 1fr)", stylesheet)
         self.assertIn("interactive-widget=resizes-content", result)
         self.assertIn("viewport-fit=cover", result)
+        self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr))", stylesheet)
+        self.assertIn('class="ui-locale-picker compact-locale-picker"', result)
+        self.assertIn("data-ui-locale-select", result)
+        self.assertIn("#languages", result)
+        self.assertNotIn("A/文", result)
+        self.assertIn(".ui-locale-picker { min-height: 44px; }", components)
+        self.assertNotIn("overflow-x: auto", stylesheet)
         self.assertNotIn("calc(100vh - 45px)", stylesheet)
         self.assertIn('id="alasFrame"', result)
         self.assertIn('id="loadStatus"', result)
@@ -337,7 +345,8 @@ class AlasEmbedTests(unittest.TestCase):
         self.assertIn("新窗口打开", result)
         self.assertIn('id="scrcpygate-i18n"', result)
         self.assertEqual(result.count('id="scrcpygate-i18n"'), 1)
-        self.assertLess(result.index('/static/js/i18n.js?'), result.index('/static/js/alas-shell.js?'))
+        self.assertLess(result.index('/static/js/i18n.js?'), result.index('/static/js/ui-core.js?'))
+        self.assertLess(result.index('/static/js/ui-core.js?'), result.index('/static/js/alas-shell.js?'))
         self.assertIn('rel="noopener noreferrer"', result)
         self.assertIn('aria-live="polite"', result)
         self.assertNotIn("<style", result.lower())
@@ -349,8 +358,11 @@ class AlasEmbedTests(unittest.TestCase):
         for relative_path in (
             "static/js/theme-init.js",
             "static/css/ui-tokens.css",
+            "static/css/ui-components.css",
             "static/css/alas-shell.css",
+            "static/icons/lucide.svg",
             "static/js/i18n.js",
+            "static/js/ui-core.js",
             "static/js/alas-shell.js",
         ):
             digest = hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest()[:12]
