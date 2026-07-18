@@ -104,14 +104,22 @@ const STANDARD_OUTPUT_SIZES=[
     def test_size_selector_offers_standard_and_custom_resolutions(self):
         self.assertNotIn("输出尺寸下拉项按 16:9 显示完整参考值", self.template)
         self.assertNotIn("输出尺寸提供 854 × 480", self.template)
-        for label in (
-            "854 × 480（480p）",
-            "960 × 540（540p）",
-            "1280 × 720（720p）",
-            "1600 × 900（900p）",
-            "1920 × 1080（1080p）",
+        for key in (
+            "admin.video.size_480",
+            "admin.video.size_540",
+            "admin.video.size_720",
+            "admin.video.size_900",
+            "admin.video.size_1080",
         ):
-            self.assertIn(label, self.template)
+            self.assertIn(f"t('{key}')", self.template)
+        for label in (
+            "\"size_480\": \"854 × 480（480p）\"",
+            "\"size_540\": \"960 × 540（540p）\"",
+            "\"size_720\": \"1280 × 720（720p）\"",
+            "\"size_900\": \"1600 × 900（900p）\"",
+            "\"size_1080\": \"1920 × 1080（1080p）\"",
+        ):
+            self.assertIn(label, self.catalog)
         self.assertIn("t('admin.video.custom_output_size')", self.template)
         self.assertIn('"custom_output_size": "自定义输出尺寸"', self.catalog)
         self.assertIn('id="customProfileWidth" type="number" min="854" max="1920"', self.template)
