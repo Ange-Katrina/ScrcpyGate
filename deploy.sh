@@ -1253,7 +1253,7 @@ configured_data_dir_from_disk() {
 
 existing_container_data_dir() {
   case "${EXISTING_SCRCPYGATE_DATA_TYPE:-}" in
-    ''|bind) ;;
+    bind) ;;
     *) return 1 ;;
   esac
   source=${EXISTING_SCRCPYGATE_DATA_SOURCE:-}
