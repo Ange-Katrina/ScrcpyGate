@@ -24,6 +24,7 @@ const state = {
 const resourceRequests = Object.create(null);
 const actionRequests = new Map();
 const mobileSidebarMedia = window.matchMedia ? window.matchMedia(MOBILE_SIDEBAR_QUERY) : {matches:false};
+let toolDrawerHideTimer=null;
 const $ = (id) => document.getElementById(id);
 function alasConfigStorageKey(){
   const username=String((state.user && state.user.username) || '').trim();
@@ -89,6 +90,10 @@ async function runBusyAction(key, element, label, action){
     if (key === 'alas' && completed) flushPendingAlasStatusRefresh();
     scheduleRender();
   }
+}
+function closeMobileSidebarAfterSuccess(completed){
+  if (completed === true && mobileSidebarMedia.matches) closeSidebar();
+  return completed;
 }
 async function fetchJson(url, options={}){
   const opts = Object.assign({headers:{}}, options);
@@ -157,7 +162,6 @@ function selectDevice(id){
   state.selectedDeviceId=id;
   state.mirrorError='';
   localStorage.setItem(SELECTED_KEY, id);
-  closeSidebar();
   render();
 }
 async function stopSwitchedMirror(id){
@@ -742,18 +746,26 @@ function closeToolDrawer(){
   state.toolTrigger=null;
   syncToolTriggerState('');
   closeToolPanels();
+  if (toolDrawerHideTimer) {
+    clearTimeout(toolDrawerHideTimer);
+    toolDrawerHideTimer=null;
+  }
   if (drawer) {
     drawer.classList.remove('open','is-open');
-    drawer.hidden=true;
     drawer.setAttribute('aria-hidden','true');
     drawer.setAttribute('inert','');
   }
   const backdrop=$('toolDrawerBackdrop');
   if (backdrop) {
     backdrop.classList.remove('open','is-open');
-    backdrop.hidden=true;
     backdrop.setAttribute('aria-hidden','true');
   }
+  const reduceMotion=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  toolDrawerHideTimer=setTimeout(()=>{
+    toolDrawerHideTimer=null;
+    if (drawer && !drawer.classList.contains('open')) drawer.hidden=true;
+    if (backdrop && !backdrop.classList.contains('open')) backdrop.hidden=true;
+  }, reduceMotion ? 0 : 180);
   const app=document.querySelector('.app');
   if (app) app.removeAttribute('inert');
   if (trigger && trigger.isConnected) requestAnimationFrame(()=>trigger.focus({preventScroll:true}));
@@ -770,21 +782,28 @@ function openToolDrawer(id, trigger){
   closeToolPanels(id);
   setToolPanelActive(el, true);
   if (!drawer) return;
+  if (toolDrawerHideTimer) {
+    clearTimeout(toolDrawerHideTimer);
+    toolDrawerHideTimer=null;
+  }
   const app=document.querySelector('.app');
   if (app) app.setAttribute('inert','');
   drawer.hidden=false;
   drawer.removeAttribute('inert');
   drawer.setAttribute('aria-hidden','false');
-  drawer.classList.add('open','is-open');
   const backdrop=$('toolDrawerBackdrop');
   if (backdrop) {
     backdrop.hidden=false;
     backdrop.setAttribute('aria-hidden','false');
-    backdrop.classList.add('open','is-open');
   }
-  const focusTarget=drawer.querySelector('[autofocus]') || visibleLayerFocusables(drawer)[0] || drawer;
+  const focusTarget=$('toolDrawerCloseBtn') || drawer.querySelector('[data-ui-initial-focus]') || visibleLayerFocusables(drawer)[0] || drawer;
   if (focusTarget === drawer && !drawer.hasAttribute('tabindex')) drawer.setAttribute('tabindex','-1');
-  requestAnimationFrame(()=>focusTarget.focus({preventScroll:true}));
+  requestAnimationFrame(()=>{
+    if (drawer.hidden || drawer.getAttribute('aria-hidden')==='true') return;
+    drawer.classList.add('open','is-open');
+    if (backdrop) backdrop.classList.add('open','is-open');
+    focusTarget.focus({preventScroll:true});
+  });
 }
 function toggleToolPanel(id, trigger){
   const el=$(id);
@@ -1037,11 +1056,11 @@ async function loadAll(options={}){
 }
 async function startMirror(){
   const id=state.selectedDeviceId;
-  if (!id) return show(mirrorT('mirror.actions.select_device'));
-  if (state.starting) return show(mirrorT('mirror.actions.starting_wait'));
-  if (state.qualityApplying) return show(mirrorT('mirror.actions.quality_wait'));
+  if (!id) { show(mirrorT('mirror.actions.select_device')); return false; }
+  if (state.starting) { show(mirrorT('mirror.actions.starting_wait')); return false; }
+  if (state.qualityApplying) { show(mirrorT('mirror.actions.quality_wait')); return false; }
   const now = Date.now();
-  if (now - state.lastStartAt < 1200) return show(mirrorT('mirror.actions.too_fast'));
+  if (now - state.lastStartAt < 1200) { show(mirrorT('mirror.actions.too_fast')); return false; }
   state.lastStartAt = now;
   state.starting = true;
   render();
@@ -1051,15 +1070,17 @@ async function startMirror(){
     if (data.ok === false) {
       state.mirrorError=data.detail || data.error || mirrorT('mirror.actions.start_failed');
       render();
-      return show(state.mirrorError, 5200);
+      show(state.mirrorError, 5200);
+      return false;
     }
     if (state.activeDeviceId === id && socketLive(state.videoWs)) {
       schedulePlayerReset();
       if (!socketLive(state.controlWs)) openControl(id);
       show(mirrorT('mirror.actions.already_running'));
-      return;
+      return true;
     }
     reconnectSockets(id, 'connecting');
+    return true;
   } finally {
     state.starting = false;
     render();
@@ -1067,14 +1088,15 @@ async function startMirror(){
 }
 async function stopMirror(){
   const id=state.selectedDeviceId;
-  if (!id) return show(mirrorT('mirror.actions.select_device'));
-  if (state.starting) return show(mirrorT('mirror.actions.starting_wait'));
+  if (!id) { show(mirrorT('mirror.actions.select_device')); return false; }
+  if (state.starting) { show(mirrorT('mirror.actions.starting_wait')); return false; }
   const result=await fetchJson(`/api/devices/${encodeURIComponent(id)}/mirror/stop`, {method:'POST'});
   replaceMutationSessions(result.sessions);
   closeVideo();
   state.connectionPhase='idle';
   state.mirrorError='';
   render();
+  return true;
 }
 async function performQualityApply(payload){
   const id=state.selectedDeviceId;
@@ -1559,20 +1581,36 @@ function scheduleLayout(){
   if (state.layoutFrame) return;
   state.layoutFrame=requestAnimationFrame(()=>{
     state.layoutFrame=null;
+    syncVisualViewportMetrics();
     layoutVideo();
   });
 }
-function syncVisualViewportHeight(){
+function syncVisualViewportMetrics(){
   const root=document.documentElement;
   if (!root || !window.visualViewport || !mobileSidebarMedia.matches) {
-    if (root) root.style.removeProperty('--mirror-visual-viewport-height');
+    if (root) {
+      root.style.removeProperty('--mirror-visual-viewport-height');
+      root.style.removeProperty('--mirror-visual-viewport-offset-top');
+      root.style.removeProperty('--mirror-visual-viewport-offset-left');
+      root.classList.remove('mirror-keyboard-visible');
+    }
     return;
   }
-  const height=Math.max(1, Math.round(window.visualViewport.height));
+  const viewport=window.visualViewport;
+  const fallbackHeight=Math.max(1, Number(window.innerHeight) || root.clientHeight || 1);
+  const rawHeight=Number(viewport.height);
+  const height=Math.max(1, Math.round(Number.isFinite(rawHeight) && rawHeight>0 ? rawHeight : fallbackHeight));
+  const rawTop=Number(viewport.offsetTop);
+  const rawLeft=Number(viewport.offsetLeft);
+  const offsetTop=Math.round(Number.isFinite(rawTop) && rawTop>=0 ? rawTop : 0);
+  const offsetLeft=Math.round(Number.isFinite(rawLeft) && rawLeft>=0 ? rawLeft : 0);
+  const keyboardInset=Math.max(0, Math.round(fallbackHeight-height-offsetTop));
   root.style.setProperty('--mirror-visual-viewport-height', `${height}px`);
+  root.style.setProperty('--mirror-visual-viewport-offset-top', `${offsetTop}px`);
+  root.style.setProperty('--mirror-visual-viewport-offset-left', `${offsetLeft}px`);
+  root.classList.toggle('mirror-keyboard-visible', keyboardInset>=120);
 }
 function handleViewportResize(){
-  syncVisualViewportHeight();
   scheduleLayout();
 }
 function setupInput(){
@@ -1590,7 +1628,8 @@ function setupInput(){
   }, video, state.screen.w, state.screen.h, false, renderKeyboardControl);
 }
 async function toggleControl(){
-  const id=state.selectedDeviceId; if (!id) return show(mirrorT('mirror.actions.select_device'));
+  const id=state.selectedDeviceId;
+  if (!id) { show(mirrorT('mirror.actions.select_device')); return false; }
   const ws = openControl(id);
   await waitForSocketOpen(ws);
   if (state.controlWs !== ws || ws.readyState !== WebSocket.OPEN) throw new Error(mirrorT('mirror.control.channel_not_connected'));
@@ -1603,6 +1642,7 @@ async function toggleControl(){
     settleControlRequest(error);
   }
   await response;
+  return true;
 }
 function waitForSocketOpen(ws, timeoutMs=8000){
   if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
@@ -1799,6 +1839,8 @@ function syncSidebarAccessibility(){
   if (!mobileSidebarMedia.matches) {
     sidebar.classList.remove('open');
     sidebar.removeAttribute('inert');
+    sidebar.removeAttribute('role');
+    sidebar.removeAttribute('aria-modal');
     sidebar.setAttribute('aria-hidden','false');
     if (backdrop) {
       backdrop.classList.remove('open');
@@ -1813,6 +1855,8 @@ function syncSidebarAccessibility(){
   }
   const open=sidebar.classList.contains('open');
   const app=document.querySelector('.app'); if (app) app.classList.remove('sidebar-collapsed');
+  sidebar.setAttribute('role','dialog');
+  sidebar.setAttribute('aria-modal','true');
   sidebar.toggleAttribute('inert', !open);
   sidebar.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (backdrop) {
@@ -2044,9 +2088,9 @@ function initializeWorkspaceInteractions(){
   try { state.sidebarCollapsed=localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch (_) { state.sidebarCollapsed=false; }
   syncSidebarAccessibility();
   closeToolDrawer();
-  bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.starting'), startMirror).catch(e=>show(e.message)));
-  bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).catch(e=>show(e.message)));
-  bindClick('controlBtn', (_, button)=>runBusyAction('control', button, mirrorT('mirror.busy.control'), toggleControl).catch(e=>show(e.message)));
+  bindClick('startBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.starting'), startMirror).then(closeMobileSidebarAfterSuccess).catch(e=>show(e.message)));
+  bindClick('stopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).then(closeMobileSidebarAfterSuccess).catch(e=>show(e.message)));
+  bindClick('controlBtn', (_, button)=>runBusyAction('control', button, mirrorT('mirror.busy.control'), toggleControl).then(closeMobileSidebarAfterSuccess).catch(e=>show(e.message)));
   bindClick('refreshBtn', (_, button)=>runBusyAction('refresh', button, mirrorT('mirror.busy.refresh'), ()=>loadAll({force:true, refreshAlasCatalog:true})).catch(e=>show(e.message)));
   bindClick('menuBtn', (_, button)=>openSidebar(button));
   bindClick('sidebarCollapseBtn', ()=>{ if (mobileSidebarMedia.matches) closeSidebar(); else setSidebarCollapsed(!state.sidebarCollapsed); });

@@ -59,7 +59,8 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             "transform: translateY(calc(100% + 8px))",
             "height: var(--mirror-visual-viewport-height, 100dvh)",
             "max-height: var(--mirror-visual-viewport-height, 100dvh)",
-            ".device-search,\n  .device-filters {\n    display: none",
+            ".device-search:not(:focus-within)",
+            'grid-template-areas: "screen navigation"',
         ):
             with self.subTest(token=token):
                 self.assertIn(token, self.styles)
@@ -70,8 +71,11 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("node.getClientRects().length > 0", self.script)
         self.assertIn(".device-card {\n    min-height: 48px", self.styles)
         self.assertIn("selectedButton.scrollIntoView({block:'nearest'})", self.script)
-        self.assertIn("function syncVisualViewportHeight()", self.script)
-        self.assertIn("window.visualViewport.height", self.script)
+        self.assertIn("function syncVisualViewportMetrics()", self.script)
+        self.assertIn("const viewport=window.visualViewport", self.script)
+        self.assertIn("viewport.height", self.script)
+        self.assertIn("viewport.offsetTop", self.script)
+        self.assertIn("mirror-keyboard-visible", self.script + self.styles)
         self.assertIn("handleViewportResize();\ndocument.querySelectorAll('[data-fit]')", self.script)
         self.assertIn(".sidebar-menu .sidebar-menu-btn {\n  justify-content: flex-start", self.styles)
         self.assertIn(".app.sidebar-collapsed .sidebar-menu .sidebar-menu-btn {\n  justify-content: center", self.styles)
@@ -146,6 +150,25 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         open_sidebar = self.script[self.script.index("function openSidebar(trigger)"):self.script.index("function closeSidebar(options={})")]
         self.assertNotIn("deviceSearch", open_sidebar)
         self.assertNotIn("searchVisible", open_sidebar)
+        self.assertIn("sidebar.setAttribute('role','dialog')", self.script)
+        self.assertIn("sidebar.setAttribute('aria-modal','true')", self.script)
+
+    def test_mobile_actions_keep_selection_open_then_close_after_success(self):
+        select_device = self.script[self.script.index("function selectDevice(id)"):self.script.index("async function stopSwitchedMirror")]
+        self.assertNotIn("closeSidebar()", select_device)
+        self.assertIn("function closeMobileSidebarAfterSuccess(completed)", self.script)
+        self.assertIn("completed === true && mobileSidebarMedia.matches", self.script)
+        for action in ("startBtn", "stopBtn", "controlBtn"):
+            with self.subTest(action=action):
+                binding = self.script[self.script.index(f"bindClick('{action}'"):]
+                self.assertIn(".then(closeMobileSidebarAfterSuccess)", binding.splitlines()[0])
+
+    def test_workspace_drawer_uses_visual_viewport_and_symmetric_transition(self):
+        self.assertIn("top: var(--ui-visual-viewport-offset-top, 0px)", self.styles)
+        self.assertIn("height: var(--ui-visual-viewport-height, 100dvh)", self.styles)
+        self.assertIn("toolDrawerHideTimer=setTimeout", self.script)
+        self.assertIn("drawer.classList.add('open','is-open')", self.script)
+        self.assertIn("if (drawer.hidden || drawer.getAttribute('aria-hidden')==='true') return", self.script)
 
     def test_async_commands_are_guarded_and_empty_states_are_structured(self):
         self.assertIn("const actionRequests = new Map()", self.script)

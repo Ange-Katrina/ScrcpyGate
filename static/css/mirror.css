@@ -354,12 +354,17 @@ button {
   transition:
     background-color var(--ui-duration-fast) var(--ui-ease-standard),
     border-color var(--ui-duration-fast) var(--ui-ease-standard),
-    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .device-card:hover {
   border-color: var(--ui-color-border-strong);
   background: var(--ui-color-surface-hover);
+}
+
+.device-card:active {
+  transform: scale(0.99);
 }
 
 .device-card.active,
@@ -523,12 +528,17 @@ button {
     background-color var(--ui-duration-fast) var(--ui-ease-standard),
     border-color var(--ui-duration-fast) var(--ui-ease-standard),
     color var(--ui-duration-fast) var(--ui-ease-standard),
-    opacity var(--ui-duration-fast) var(--ui-ease-standard);
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .btn:hover {
   border-color: var(--ui-color-border-strong);
   background: var(--ui-color-surface-hover);
+}
+
+.btn:active {
+  transform: scale(0.98);
 }
 
 .btn:disabled {
@@ -954,6 +964,12 @@ video {
   color: var(--ui-color-text);
 }
 
+.nav-btn:active {
+  background: var(--ui-color-surface-hover);
+  color: var(--ui-color-text);
+  transform: scale(0.96);
+}
+
 .nav-btn[data-active="true"] {
   background: var(--ui-color-primary-soft);
   color: var(--ui-color-primary-text);
@@ -1171,11 +1187,11 @@ video {
 .workspace-drawer {
   position: fixed;
   z-index: 40;
-  top: 0;
+  top: var(--ui-visual-viewport-offset-top, 0px);
   right: 0;
   width: min(400px, calc(100vw - 24px));
-  height: 100vh;
-  height: 100dvh;
+  height: var(--ui-visual-viewport-height, 100dvh);
+  max-height: var(--ui-visual-viewport-height, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1194,7 +1210,7 @@ video {
 .drawer-header {
   flex: 0 0 auto;
   min-height: 68px;
-  padding: max(var(--ui-space-4), env(safe-area-inset-top)) var(--ui-space-4) var(--ui-space-3);
+  padding: max(var(--ui-space-4), env(safe-area-inset-top)) max(var(--ui-space-4), env(safe-area-inset-right)) var(--ui-space-3) max(var(--ui-space-4), env(safe-area-inset-left));
   border-bottom: 1px solid var(--ui-color-border);
 }
 
@@ -1221,7 +1237,7 @@ video {
   min-height: 0;
   display: block;
   flex: 1 1 auto;
-  padding: var(--ui-space-4) var(--ui-space-4) max(var(--ui-space-5), env(safe-area-inset-bottom));
+  padding: var(--ui-space-4) max(var(--ui-space-4), env(safe-area-inset-right)) max(var(--ui-space-5), env(safe-area-inset-bottom)) max(var(--ui-space-4), env(safe-area-inset-left));
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1307,7 +1323,7 @@ video {
   width: 100%;
   min-height: 40px;
   padding: 7px 9px;
-  border: 1px solid var(--ui-color-border);
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-radius-md);
   outline: none;
   background: var(--ui-color-surface-raised);
@@ -1390,7 +1406,7 @@ video {
   min-height: 44px;
   padding: 8px 40px 8px 12px;
   overflow: hidden;
-  border: 1px solid var(--ui-color-border-strong);
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-radius-md);
   outline: none;
   appearance: none;
@@ -1613,15 +1629,15 @@ video {
   .app.sidebar-collapsed .sidebar {
     position: fixed;
     z-index: 30;
-    top: 0;
+    top: var(--mirror-visual-viewport-offset-top, 0px);
     bottom: auto;
-    left: 0;
+    left: var(--mirror-visual-viewport-offset-left, 0px);
     width: min(340px, calc(100vw - 32px));
     height: var(--mirror-visual-viewport-height, 100dvh);
     max-height: var(--mirror-visual-viewport-height, 100dvh);
     grid-template-rows: auto auto minmax(0, 1fr) auto;
     gap: var(--ui-space-3);
-    padding: max(var(--ui-space-3), env(safe-area-inset-top)) var(--ui-space-3) max(var(--ui-space-3), env(safe-area-inset-bottom));
+    padding: max(var(--ui-space-3), env(safe-area-inset-top)) max(var(--ui-space-3), env(safe-area-inset-right)) max(var(--ui-space-3), env(safe-area-inset-bottom)) max(var(--ui-space-3), env(safe-area-inset-left));
     overflow: hidden;
     border-right: 1px solid var(--ui-color-border);
     box-shadow: var(--ui-shadow-raised);
@@ -1701,7 +1717,7 @@ video {
 
   .viewer-top {
     gap: var(--ui-space-2);
-    padding: 7px var(--ui-space-3);
+    padding: max(7px, env(safe-area-inset-top)) max(var(--ui-space-3), env(safe-area-inset-right)) 7px max(var(--ui-space-3), env(safe-area-inset-left));
   }
 
   .top-left {
@@ -1730,7 +1746,7 @@ video {
 
   .stage {
     gap: var(--ui-space-1);
-    padding: var(--ui-space-2) var(--ui-space-2) 0;
+    padding: var(--ui-space-2) max(var(--ui-space-2), env(safe-area-inset-right)) 0 max(var(--ui-space-2), env(safe-area-inset-left));
   }
 
   .workspace-drawer {
@@ -1740,8 +1756,7 @@ video {
     left: 0;
     width: 100%;
     height: auto;
-    max-height: min(78vh, 680px);
-    max-height: min(78dvh, 680px);
+    max-height: min(calc(var(--ui-visual-viewport-height, 100dvh) - 8px), 680px);
     border-top: 1px solid var(--ui-color-border);
     border-left: 0;
     border-radius: var(--ui-radius-lg) var(--ui-radius-lg) 0 0;
@@ -1791,9 +1806,37 @@ video {
   }
 
   .workspace-drawer > .tools.open {
-    padding-right: var(--ui-space-3);
-    padding-left: var(--ui-space-3);
+    padding-right: max(var(--ui-space-3), env(safe-area-inset-right));
+    padding-left: max(var(--ui-space-3), env(safe-area-inset-left));
   }
+
+  .quality-grid input,
+  .quality-grid select,
+  .account-grid input,
+  .alas-config-picker select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .account-grid .btn {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .sidebar-account-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar-account-actions {
+    justify-content: space-between;
+  }
+}
+
+.mirror-keyboard-visible .sidebar-account-row,
+.mirror-keyboard-visible .sidebar-menu,
+.mirror-keyboard-visible .device-filters {
+  display: none !important;
 }
 
 @media (max-height: 640px) and (max-width: 960px) {
@@ -1839,12 +1882,15 @@ video {
   }
 
   .device-browser {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     gap: var(--ui-space-1);
   }
 
-  .device-search,
   .device-filters {
+    display: none;
+  }
+
+  .device-search:not(:focus-within) {
     display: none;
   }
 
@@ -1878,13 +1924,29 @@ video {
   }
 
   .stage {
-    padding: var(--ui-space-1) var(--ui-space-1) 0;
+    grid-template-columns: minmax(0, 1fr) 52px;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "screen navigation";
+    padding: var(--ui-space-1) max(var(--ui-space-1), env(safe-area-inset-right)) max(var(--ui-space-1), env(safe-area-inset-bottom)) max(var(--ui-space-1), env(safe-area-inset-left));
   }
 
   .dock {
-    height: 48px;
-    padding-top: 2px;
-    padding-bottom: 2px;
+    width: 52px;
+    height: max-content;
+    align-self: center;
+    flex-direction: column;
+    padding: var(--ui-space-1);
+  }
+
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    grid-template-rows: 18px;
+  }
+
+  .nav-label {
+    display: none;
   }
 
   .workspace-drawer {
