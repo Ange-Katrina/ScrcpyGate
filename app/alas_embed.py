@@ -3207,7 +3207,7 @@ def _read_upstream_response(opener, request: Request, timeout: float):
 async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, decision: ProxyDecision, body: bytes | None = None) -> Response:
     """转发 HTTP 请求到 ALAS Runtime，并按权限策略过滤 HTML 响应。"""
     if request.headers.get("upgrade") or "upgrade" in request.headers.get("connection", "").lower():
-        raise HTTPException(status_code=501, detail="ALAS websocket proxy is not implemented")
+        raise HTTPException(status_code=501, detail=i18n.translate("server.proxy.websocket_not_implemented"))
     method = request.method.upper()
     if body is None:
         body = await request.body()
@@ -3215,7 +3215,7 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
     try:
         target = build_upstream_url(base_url, path, bound_config_query_items(request.query_params, decision))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=i18n.translate("server.proxy.invalid_request")) from exc
     req = Request(
         target,
         data=data,
@@ -3227,7 +3227,7 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         raw, status, upstream_headers = await asyncio.to_thread(_read_upstream_response, opener, req, 15.0)
         out_headers = _proxy_response_headers(upstream_headers, target, decision)
     except (URLError, TimeoutError, OSError) as exc:
-        raise HTTPException(status_code=502, detail="ALAS Runtime unreachable") from exc
+        raise HTTPException(status_code=502, detail=i18n.translate("server.proxy.runtime_unreachable")) from exc
 
     content_type = ""
     content_encoding = ""
@@ -3243,7 +3243,7 @@ async def proxy_http_request(request: FastAPIRequest, base_url: str, path: str, 
         try:
             raw = _decode_content_encoding(raw, content_encoding)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail="ALAS encoded response could not be filtered") from exc
+            raise HTTPException(status_code=502, detail=i18n.translate("server.proxy.encoded_response_unfilterable")) from exc
         _pop_header_case_insensitive(out_headers, "Content-Encoding")
         content_encoding = ""
     if should_filter:

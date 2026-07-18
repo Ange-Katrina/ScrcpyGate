@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import RedirectResponse
 
-from . import storage
+from . import i18n, storage
 
 SESSION_COOKIE = "wsid"
 PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip")
@@ -162,14 +162,14 @@ def enforce_http_boundary(request: Request) -> None:
         return
     remote = request.client.host if request.client else ""
     if not proxy_headers_allowed(request.headers, remote, request.url.path):
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.security.forbidden"))
     if not request_host_allowed(request):
         log.warning("HOST_REJECT path=%s host=%s allowed=%s", request.url.path, request.headers.get("host", ""), sorted(allowed_hosts()))
-        raise HTTPException(status_code=400, detail="Bad Request")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.security.bad_request"))
     origin = request.headers.get("origin")
     if origin and not origin_check_exempt(request) and not origin_allowed(origin, str(request.base_url).rstrip("/")):
         log.warning("ORIGIN_REJECT path=%s origin=%s base=%s allowed=%s", request.url.path, origin, str(request.base_url).rstrip("/"), sorted(allowed_origins()))
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.security.forbidden"))
 
 
 def get_current_session(request: Request) -> dict | None:
@@ -187,14 +187,14 @@ def get_current_user(request: Request) -> dict | None:
 def require_user(request: Request) -> dict:
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="login required")
+        raise HTTPException(status_code=401, detail=i18n.translate("server.security.login_required"))
     return user
 
 
 def require_admin(request: Request) -> dict:
     user = require_user(request)
     if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="admin required")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.security.admin_required"))
     return user
 
 
@@ -206,7 +206,7 @@ def csrf_valid(request: Request, provided: str) -> bool:
 
 def verify_csrf_token(request: Request, provided: str) -> None:
     if not csrf_valid(request, provided):
-        raise HTTPException(status_code=400, detail="CSRF failed")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.security.csrf_failed"))
 
 
 def verify_csrf(request: Request) -> None:

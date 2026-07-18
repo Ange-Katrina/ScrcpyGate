@@ -360,7 +360,8 @@ class AuthRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("用户名或密码错误。", response.text)
-        self.assertNotIn("account_expired_or_missing", response.text)
+        visible_html = response.text.split('<script type="application/json" id="scrcpygate-i18n">', 1)[0]
+        self.assertNotIn("account_expired_or_missing", visible_html)
 
     def test_last_permanent_admin_cannot_receive_a_deadline(self):
         session = self.storage.create_session("admin")
@@ -378,7 +379,7 @@ class AuthRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "last_permanent_admin_required")
+        self.assertEqual(response.json()["detail"], "必须保留至少一个永久有效的管理员账户")
 
     def test_websocket_registration_rechecks_session_after_registry_insert(self):
         websocket = AsyncMock()
@@ -476,7 +477,7 @@ class AuthRouteTests(unittest.TestCase):
             json={"fullscreen_profile": "smooth"},
         )
         self.assertEqual(invalid.status_code, 400)
-        self.assertIn("at least 1280", invalid.json()["detail"])
+        self.assertIn("至少为 1280", invalid.json()["detail"])
         self.assertEqual(self.storage.get_setting("video_fullscreen_profile"), "sharp")
 
         valid = self.client.put(

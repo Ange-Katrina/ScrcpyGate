@@ -1,6 +1,6 @@
 ﻿from typing import Any
 
-from . import storage
+from . import i18n, storage
 
 
 def device_id_of(device: dict[str, Any]) -> str:
@@ -35,9 +35,9 @@ def public_adb_payload(status: dict[str, Any] | None, exposed_id: str) -> dict[s
     payload = {key: status.get(key) for key in PUBLIC_ADB_FIELDS if key in status}
     payload["device_id"] = exposed_id
     if "detail" in status:
-        payload["detail"] = "" if status.get("ok") else "ADB 连接不可用"
+        payload["detail"] = "" if status.get("ok") else i18n.translate("server.status.adb_unavailable")
     if "last_error" in status:
-        payload["last_error"] = "" if status.get("ok") else "ADB 连接不可用"
+        payload["last_error"] = "" if status.get("ok") else i18n.translate("server.status.adb_unavailable")
     return payload
 
 
@@ -64,7 +64,7 @@ def session_payload(
         data.pop("address", None)
         data.pop("real_device_id", None)
         if "last_error" in data:
-            data["last_error"] = "" if not data.get("last_error") else "设备视频流不可用"
+            data["last_error"] = "" if not data.get("last_error") else i18n.translate("server.status.video_stream_unavailable")
         if "adb" in data:
             data["adb"] = public_adb_payload(data.get("adb"), exposed_id)
         if "control_lock" in data:

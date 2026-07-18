@@ -2,6 +2,8 @@
 import re
 from typing import Any
 
+from . import i18n
+
 
 VIDEO_LIMITS = {
     "video_bit_rate": (100000, 100000000),
@@ -42,11 +44,11 @@ VIDEO_PROFILES = {
     "low_latency": {"video_bit_rate": 1800000, "max_size": 960, "max_fps": 30},
 }
 
-PROFILE_LABELS = {
-    "smooth": "流畅",
-    "balanced": "稳定",
-    "sharp": "高清",
-    "low_latency": "低延迟",
+PROFILE_LABEL_KEYS = {
+    "smooth": "server.profile.smooth",
+    "balanced": "server.profile.balanced",
+    "sharp": "server.profile.sharp",
+    "low_latency": "server.profile.low_latency",
 }
 
 BANDWIDTH_RECOMMENDATIONS = {
@@ -78,7 +80,13 @@ BANDWIDTH_RECOMMENDATIONS = {
 
 
 class VideoOptionError(ValueError):
-    pass
+    def __init__(self, message: str, message_key: str, **message_values: Any):
+        super().__init__(message)
+        self.message_key = message_key
+        self.message_values = message_values
+
+    def localized(self, locale: str = i18n.DEFAULT_LOCALE) -> str:
+        return i18n.translate(self.message_key, locale, **self.message_values)
 
 
 def bool_value(value: Any, default: bool = False) -> bool:
@@ -97,17 +105,24 @@ def int_value(value: Any, key: str, default: int) -> int:
     try:
         parsed = int(value)
     except Exception as exc:
-        raise VideoOptionError(f"{key} must be integer") from exc
+        raise VideoOptionError(
+            f"{key} must be integer",
+            "server.video_error.must_be_integer",
+            field=key,
+        ) from exc
     minimum, maximum = VIDEO_LIMITS[key]
     if parsed < minimum or parsed > maximum:
-        raise VideoOptionError(f"{key} out of range")
+        raise VideoOptionError(f"{key} out of range", "server.video_error.out_of_range", field=key)
     return parsed
 
 
 def stream_mode_value(value: Any, default: str = "raw") -> str:
     mode = str(value if value is not None and value != "" else default).strip().lower()
     if mode not in STREAM_MODES:
-        raise VideoOptionError("scrcpy_stream_mode must be raw, protocol, or legacy")
+        raise VideoOptionError(
+            "scrcpy_stream_mode must be raw, protocol, or legacy",
+            "server.video_error.invalid_stream_mode",
+        )
     return mode
 
 
@@ -139,18 +154,25 @@ def profile_setting_keys() -> list[str]:
     return [profile_setting_key(profile, field) for profile in PROFILE_NAMES for field in PROFILE_FIELDS]
 
 
-def label_for_profile(profile: str, values: dict[str, Any] | None = None) -> str:
+def label_for_profile(
+    profile: str,
+    values: dict[str, Any] | None = None,
+    locale: str = i18n.DEFAULT_LOCALE,
+) -> str:
     values = values or {}
-    label = str(values.get("label") or PROFILE_LABELS.get(profile) or profile).strip()
+    label = str(values.get("label") or "").strip()
+    if not label and profile in PROFILE_LABEL_KEYS:
+        label = i18n.translate(PROFILE_LABEL_KEYS[profile], locale)
+    label = label or profile
     return label[:32] or profile
 
 
 def normalize_profile_id(value: Any) -> str:
     profile_id = str(value or "").strip()
     if not CUSTOM_PROFILE_RE.fullmatch(profile_id):
-        raise VideoOptionError("custom profile id is invalid")
+        raise VideoOptionError("custom profile id is invalid", "server.video_error.invalid_custom_profile_id")
     if profile_id in PROFILE_NAMES or profile_id in LEGACY_PROFILE_ALIASES or profile_id in ("custom", "auto") or profile_id.startswith("alas_"):
-        raise VideoOptionError("custom profile id is reserved")
+        raise VideoOptionError("custom profile id is reserved", "server.video_error.reserved_custom_profile_id")
     return profile_id
 
 
@@ -184,7 +206,12 @@ def normalize_single_profile(values: dict[str, Any], fallback: dict[str, Any]) -
     for field in PROFILE_FIELDS:
         value = int_value(values.get(field), field, int(fallback[field]))
         if field == "max_size" and not MIN_PRESET_MAX_SIZE <= value <= MAX_PRESET_MAX_SIZE:
-            raise VideoOptionError(f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
+            raise VideoOptionError(
+                f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}",
+                "server.video_error.max_size_range",
+                min=MIN_PRESET_MAX_SIZE,
+                max=MAX_PRESET_MAX_SIZE,
+            )
         result[field] = value
     return result
 
@@ -216,11 +243,20 @@ def normalize_profile_payloads(payload: dict[str, Any] | None, fallback: dict[st
     for profile in PROFILE_NAMES:
         values = payload.get(profile) or {}
         if not isinstance(values, dict):
-            raise VideoOptionError(f"{profile} preset must be an object")
+            raise VideoOptionError(
+                f"{profile} preset must be an object",
+                "server.video_error.preset_object",
+                profile=profile,
+            )
         for field in PROFILE_FIELDS:
             value = int_value(values.get(field), field, int(result[profile][field]))
             if field == "max_size" and not MIN_PRESET_MAX_SIZE <= value <= MAX_PRESET_MAX_SIZE:
-                raise VideoOptionError(f"{profile} max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
+                raise VideoOptionError(
+                    f"{profile} max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}",
+                    "server.video_error.max_size_range",
+                    min=MIN_PRESET_MAX_SIZE,
+                    max=MAX_PRESET_MAX_SIZE,
+                )
             result[profile][field] = value
     return result
 
@@ -229,14 +265,22 @@ def normalize_custom_profile_payloads(payload: Any) -> dict[str, dict[str, Any]]
     if payload in (None, ""):
         return {}
     if not isinstance(payload, dict):
-        raise VideoOptionError("custom_profiles must be an object")
+        raise VideoOptionError("custom_profiles must be an object", "server.video_error.custom_profiles_object")
     if len(payload) > MAX_CUSTOM_PROFILES:
-        raise VideoOptionError(f"custom_profiles cannot exceed {MAX_CUSTOM_PROFILES}")
+        raise VideoOptionError(
+            f"custom_profiles cannot exceed {MAX_CUSTOM_PROFILES}",
+            "server.video_error.custom_profiles_limit",
+            max=MAX_CUSTOM_PROFILES,
+        )
     result: dict[str, dict[str, Any]] = {}
     for name, values in payload.items():
         profile_id = normalize_profile_id(name)
         if not isinstance(values, dict):
-            raise VideoOptionError(f"{profile_id} profile must be an object")
+            raise VideoOptionError(
+                f"{profile_id} profile must be an object",
+                "server.video_error.profile_object",
+                profile=profile_id,
+            )
         normalized = normalize_single_profile(values, VIDEO_PROFILES["balanced"])
         normalized["label"] = label_for_profile(profile_id, values)
         result[profile_id] = normalized
@@ -247,8 +291,11 @@ def serialize_custom_profiles(profiles: dict[str, dict[str, Any]]) -> str:
     return json.dumps(profiles, ensure_ascii=False, separators=(",", ":"))
 
 
-def profile_label_payloads(settings: dict[str, Any] | None = None) -> dict[str, str]:
-    labels = {name: PROFILE_LABELS[name] for name in PROFILE_NAMES}
+def profile_label_payloads(
+    settings: dict[str, Any] | None = None,
+    locale: str = i18n.DEFAULT_LOCALE,
+) -> dict[str, str]:
+    labels = {name: label_for_profile(name, locale=locale) for name in PROFILE_NAMES}
     for name, values in custom_profile_payloads(settings).items():
         labels[name] = label_for_profile(name, values)
     return labels
@@ -267,8 +314,12 @@ def fullscreen_profile_value(
         return requested
     if strict:
         if requested not in profiles:
-            raise VideoOptionError("fullscreen profile is invalid")
-        raise VideoOptionError(f"fullscreen profile max_size must be at least {FULLSCREEN_MIN_MAX_SIZE}")
+            raise VideoOptionError("fullscreen profile is invalid", "server.video_error.fullscreen_profile_invalid")
+        raise VideoOptionError(
+            f"fullscreen profile max_size must be at least {FULLSCREEN_MIN_MAX_SIZE}",
+            "server.video_error.fullscreen_profile_minimum",
+            min=FULLSCREEN_MIN_MAX_SIZE,
+        )
     for candidate in (DEFAULT_FULLSCREEN_PROFILE, "balanced"):
         values = profiles.get(candidate)
         if values and int(values.get("max_size") or 0) >= FULLSCREEN_MIN_MAX_SIZE:
@@ -280,7 +331,11 @@ def fullscreen_profile_value(
     ]
     if eligible:
         return max(eligible, key=lambda name: int(profiles[name].get("max_size") or 0))
-    raise VideoOptionError(f"at least one fullscreen profile must use max_size {FULLSCREEN_MIN_MAX_SIZE} or higher")
+    raise VideoOptionError(
+        f"at least one fullscreen profile must use max_size {FULLSCREEN_MIN_MAX_SIZE} or higher",
+        "server.video_error.fullscreen_profile_required",
+        min=FULLSCREEN_MIN_MAX_SIZE,
+    )
 
 
 def normalize_video_options(
@@ -295,7 +350,7 @@ def normalize_video_options(
     profile = str(payload.get("profile", fallback.get("profile", DEFAULT_VIDEO_OPTIONS["profile"])) or "balanced").strip()
     profile = LEGACY_PROFILE_ALIASES.get(profile, profile)
     if profile not in profiles and profile not in ("custom", "auto"):
-        raise VideoOptionError("profile is invalid")
+        raise VideoOptionError("profile is invalid", "server.video_error.profile_invalid")
 
     base = dict(DEFAULT_VIDEO_OPTIONS)
     base.update({key: fallback[key] for key in DEFAULT_VIDEO_OPTIONS if key in fallback})
@@ -314,7 +369,12 @@ def normalize_video_options(
         ),
     }
     if not MIN_PRESET_MAX_SIZE <= int(options["max_size"]) <= MAX_PRESET_MAX_SIZE:
-        raise VideoOptionError(f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}")
+        raise VideoOptionError(
+            f"max_size must be between {MIN_PRESET_MAX_SIZE} and {MAX_PRESET_MAX_SIZE}",
+            "server.video_error.max_size_range",
+            min=MIN_PRESET_MAX_SIZE,
+            max=MAX_PRESET_MAX_SIZE,
+        )
     if enabled_stream_modes is not None:
         options["scrcpy_stream_mode"] = stream_mode_or_default(str(options["scrcpy_stream_mode"]), enabled_stream_modes)
     if profile in profiles:

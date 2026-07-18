@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app import i18n, main
+from app import i18n, main, video_options
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,7 +112,10 @@ class I18nCatalogTests(unittest.TestCase):
     def test_all_static_translation_key_references_exist(self):
         source_paths = (
             "app/alas_embed.py",
+            "app/devices.py",
             "app/main.py",
+            "app/security.py",
+            "app/video_options.py",
             "static/js/alas-shell.js",
             "static/js/admin.js",
             "static/js/login.js",
@@ -123,11 +126,11 @@ class I18nCatalogTests(unittest.TestCase):
             "templates/login.html",
         )
         direct_call_pattern = re.compile(
-            r"(?:i18n\.translate|t)\(\s*[\"']((?:common|login|alas|mirror|admin)(?:\.[a-z0-9_]+)+)[\"']",
+            r"(?:i18n\.translate|t)\(\s*[\"']((?:common|login|alas|mirror|admin|server)(?:\.[a-z0-9_]+)+)[\"']",
             re.IGNORECASE,
         )
         quoted_key_pattern = re.compile(
-            r"[\"']((?:common|login|alas|mirror|admin)(?:\.[a-z0-9_]+)+)[\"']",
+            r"[\"']((?:common|login|alas|mirror|admin|server)(?:\.[a-z0-9_]+)+)[\"']",
             re.IGNORECASE,
         )
         references = set()
@@ -147,6 +150,45 @@ class I18nCatalogTests(unittest.TestCase):
 
         self.assertGreater(len(keys), 8)
         self.assertEqual(sorted(key for key in keys if i18n.resolve_message(key) is None), [])
+
+    def test_server_error_code_mappings_resolve_without_changing_codes(self):
+        keys = set(main.SERVER_ERROR_MESSAGE_KEYS.values())
+        self.assertEqual(sorted(key for key in keys if i18n.resolve_message(key) is None), [])
+        self.assertEqual(main.server_error_message("invalid_username"), "用户名无效")
+        self.assertEqual(
+            main.server_error_message("Password must be at least 12 characters"),
+            "密码至少需要 12 个字符",
+        )
+        self.assertEqual(main.server_error_message("third-party diagnostic"), "third-party diagnostic")
+
+    def test_all_server_translation_key_references_exist(self):
+        pattern = re.compile(r"[\"'](server(?:\.[a-z0-9_]+)+)[\"']", re.IGNORECASE)
+        references = set()
+        for relative_path in (
+            "app/alas_embed.py",
+            "app/devices.py",
+            "app/main.py",
+            "app/security.py",
+            "app/video_options.py",
+        ):
+            references.update(pattern.findall((ROOT / relative_path).read_text(encoding="utf-8")))
+        self.assertGreater(len(references), 40)
+        self.assertEqual(sorted(key for key in references if i18n.resolve_message(key) is None), [])
+
+    def test_video_option_errors_keep_internal_diagnostics_and_localize_at_boundary(self):
+        with self.assertRaises(video_options.VideoOptionError) as raised:
+            video_options.normalize_video_options({"max_size": "invalid"})
+        self.assertEqual(str(raised.exception), "max_size must be integer")
+        self.assertEqual(raised.exception.message_key, "server.video_error.must_be_integer")
+        self.assertEqual(raised.exception.localized(), "max_size 必须是整数")
+
+    def test_builtin_profile_labels_are_catalog_backed(self):
+        source = (ROOT / "app" / "video_options.py").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"[流畅稳定高清低延迟]")
+        self.assertEqual(
+            video_options.profile_label_payloads(),
+            {"smooth": "流畅", "balanced": "稳定", "sharp": "高清", "low_latency": "低延迟"},
+        )
 
 
 class I18nBrowserRuntimeTests(unittest.TestCase):

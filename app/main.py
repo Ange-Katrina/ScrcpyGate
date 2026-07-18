@@ -69,6 +69,51 @@ ALAS_EMBED_DENIED_MESSAGE_KEYS = {
     "edit permission denied": "alas.denied.reason.edit_permission_denied",
 }
 ALAS_EMBED_DENIED_DEFAULT_MESSAGE_KEY = "alas.denied.reason.default"
+SERVER_ERROR_MESSAGE_KEYS = {
+    "invalid_expires_at": "server.error.invalid_expires_at",
+    "invalid_extension_days": "server.error.invalid_extension_days",
+    "invalid_username": "server.error.invalid_username",
+    "invalid_role": "server.error.invalid_role",
+    "password_required": "server.error.password_required",
+    "last_admin_required": "server.error.last_admin_required",
+    "last_permanent_admin_required": "server.error.last_permanent_admin_required",
+    "invalid_user": "server.error.user_not_found",
+    "current_password_invalid": "server.error.current_password_incorrect",
+    "new_password_must_be_different": "server.error.new_password_different",
+    "invalid_config_name": "server.error.invalid_config_name",
+    "invalid_alas_binding": "server.error.invalid_alas_binding",
+    "invalid_device": "server.error.invalid_device",
+    "account_expired_or_missing": "server.error.account_expired_or_missing",
+    "Password is too common": "server.error.password_too_common",
+    "Password must not match username": "server.error.password_matches_username",
+    "invalid ALAS token": "server.error.invalid_alas_token",
+    "invalid ALAS runtime URL": "server.error.invalid_alas_runtime_url",
+    "invalid ALAS runtime URL scheme": "server.error.invalid_alas_runtime_scheme",
+    "invalid ALAS runtime URL host": "server.error.invalid_alas_runtime_host",
+    "ALAS runtime URL must not include credentials": "server.error.alas_runtime_credentials",
+    "ALAS runtime URL must not include path, params, query or fragment": "server.error.alas_runtime_path",
+    "invalid ALAS runtime URL port": "server.error.invalid_alas_runtime_port",
+    "ALAS control is disabled": "server.status.alas_control_disabled",
+    "ALAS API token is not configured": "server.status.alas_token_missing",
+}
+PASSWORD_MIN_LENGTH_ERROR_RE = re.compile(r"^Password must be at least (?P<min>\d+) characters$")
+
+
+def server_error_message(error: object) -> str:
+    text = str(error or "").strip()
+    key = SERVER_ERROR_MESSAGE_KEYS.get(text)
+    if key:
+        return i18n.translate(key)
+    match = PASSWORD_MIN_LENGTH_ERROR_RE.fullmatch(text)
+    if match:
+        return i18n.translate("server.error.password_min_length", min=match.group("min"))
+    if text.startswith("ALAS Runtime unreachable"):
+        return i18n.translate("server.status.alas_runtime_unreachable")
+    return text
+
+
+def video_option_error_message(error: VideoOptionError) -> str:
+    return error.localized()
 
 
 class SelectiveGZipMiddleware(GZipMiddleware):
@@ -403,22 +448,22 @@ def require_alas_binding(
         try:
             requested = alas.sanitize_config_name(requested)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid ALAS config") from exc
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config")) from exc
     binding = alas_binding_for_user(
         user,
         allow_admin_global=user.get("role") == "admin",
         config_name=requested or None,
     )
     if not binding:
-        raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.alas_config_not_bound"))
     if run and not binding.get("can_run"):
-        raise HTTPException(status_code=403, detail="ALAS run permission denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.alas_run_denied"))
     if edit and not binding.get("can_edit"):
-        raise HTTPException(status_code=403, detail="ALAS config edit permission denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.alas_edit_denied"))
     try:
         binding["config_name"] = alas.sanitize_config_name(binding.get("config_name"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="invalid bound ALAS config") from exc
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_bound_alas_config")) from exc
     return binding
 
 
@@ -448,6 +493,8 @@ def public_alas_status(result: dict, binding: dict) -> dict:
     cleaned["config"] = binding.get("config_name") or cleaned.get("config") or ""
     cleaned["can_run"] = bool(binding.get("can_run"))
     cleaned["can_edit"] = bool(binding.get("can_edit"))
+    if cleaned.get("error"):
+        cleaned["error"] = server_error_message(cleaned["error"])
     return cleaned
 
 
@@ -478,7 +525,7 @@ def admin_alas_status_for_config(config_name: str | None = None, bindings: list[
         try:
             selected = alas.sanitize_config_name(selected)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config_name")) from exc
     elif configs:
         selected = configs[0]
     if not selected:
@@ -493,9 +540,11 @@ def admin_alas_status_for_config(config_name: str | None = None, bindings: list[
             "task": "",
             "config": "",
             "configs": [],
-            "error": "" if settings.get("enabled") else "ALAS control is disabled",
+            "error": "" if settings.get("enabled") else i18n.translate("server.status.alas_control_disabled"),
         }
     result = alas.status_for_config(selected, include_configs=False)
+    if result.get("error"):
+        result["error"] = server_error_message(result["error"])
     result["enabled"] = bool(settings.get("enabled"))
     result["token_set"] = bool(settings.get("token_set"))
     return result
@@ -523,7 +572,9 @@ def admin_alas_overview_local(bindings: list[dict] | None = None) -> dict:
     configured = bool(enabled and token_set)
     selected = config_names[0] if config_names else ""
     status = "unknown" if configured else "disabled" if not enabled else "error"
-    error = "" if configured else "ALAS control is disabled" if not enabled else "ALAS API token is not configured"
+    error = "" if configured else i18n.translate(
+        "server.status.alas_control_disabled" if not enabled else "server.status.alas_token_missing"
+    )
     config_statuses = [
         {
             "config": name,
@@ -616,8 +667,8 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
                 "config_statuses": [],
                 "config_count": 0,
                 "running_count": 0,
-                "error": catalog_error,
-                "catalog_error": catalog_error,
+                "error": server_error_message(catalog_error),
+                "catalog_error": server_error_message(catalog_error),
             }
         selected = runtime_configs[0]
         selected_status_pair = await load_status(selected)
@@ -654,14 +705,14 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
             "status": str(result.get("status") or "unknown"),
             "task": str(result.get("task") or ""),
             "ok": bool(result.get("ok", not result.get("error"))),
-            "error": str(result.get("error") or ""),
+            "error": server_error_message(result.get("error")),
         }
         config_statuses.append(item)
         errors.append(item["error"])
     running_count = sum(item["status"] == "running" for item in config_statuses)
     has_error = bool(catalog.get("error")) or any(not item["ok"] or item["status"] == "error" for item in config_statuses)
     overall_status = "error" if has_error else "running" if running_count else "stopped" if config_statuses else "unknown"
-    first_error = next((error for error in errors if error), "")
+    first_error = server_error_message(next((error for error in errors if error), ""))
     primary_name = bound_configs[0] if bound_configs else config_names[0] if config_names else ""
     primary_status = status_by_config.get(primary_name) or {}
     return {
@@ -675,7 +726,7 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
         "config_count": len(config_statuses),
         "running_count": running_count,
         "error": first_error,
-        "catalog_error": str(catalog.get("error") or ""),
+        "catalog_error": server_error_message(catalog.get("error")),
     }
 
 
@@ -712,7 +763,7 @@ def admin_overview_storage_payload() -> tuple[list[dict], list[dict], list[dict]
 def resolve_device_or_404(device_ref: str) -> str:
     device_id = storage.resolve_device_ref(device_ref)
     if not device_id:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     return device_id
 
 
@@ -812,7 +863,7 @@ async def logout(request: Request):
     security.verify_csrf_token(request, str(data.get("csrf_token") or request.headers.get("x-csrf-token", "")))
     user = security.get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="login required")
+        raise HTTPException(status_code=401, detail=i18n.translate("server.security.login_required"))
     sess = security.get_current_session(request)
     if sess:
         storage.delete_session(sess["sid"])
@@ -898,7 +949,7 @@ async def api_save_video_preferences(request: Request):
     try:
         options = user_video_options(user["username"], payload)
     except VideoOptionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
     storage.set_user_video_preference(user["username"], options)
     storage.audit(user["username"], "video_preference_save", json.dumps(public_video_options(options), ensure_ascii=False))
     return {"ok": True, "preferences": public_video_options(options), "effective": public_video_options(options), "video_mode": "normal"}
@@ -914,18 +965,11 @@ async def api_change_password(request: Request):
     new_password = str(payload.get("new_password", ""))
     confirm_password = str(payload.get("confirm_password", ""))
     if new_password != confirm_password:
-        raise HTTPException(status_code=400, detail="New passwords do not match")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.passwords_mismatch"))
     try:
         storage.change_user_password(user["username"], current_password, new_password)
     except ValueError as exc:
-        message = str(exc)
-        if message == "current_password_invalid":
-            message = "Current password is incorrect"
-        elif message == "new_password_must_be_different":
-            message = "New password must be different from the current password"
-        elif message == "invalid_user":
-            message = "User does not exist"
-        raise HTTPException(status_code=400, detail=message) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     removed = storage.delete_other_sessions(user["username"], sess["sid"] if sess else None)
     storage.audit(user["username"], "password_change", audit_detail(request, f"other_sessions_removed={removed}"))
     return {"ok": True, "other_sessions_removed": removed}
@@ -937,12 +981,12 @@ async def api_mirror_start(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
-        raise HTTPException(status_code=403, detail="device denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     try:
         options = user_video_options(user["username"], payload or None)
     except VideoOptionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
     if payload.get("save_preference"):
         storage.set_user_video_preference(user["username"], options)
     ok = await manager.start(real_device_id, options)
@@ -951,7 +995,12 @@ async def api_mirror_start(device_id: str, request: Request):
         sessions = await public_sessions_for_user(user)
         session = (await manager.snapshot()).get(real_device_id) or {}
         adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
-        failure = public_mirror_failure(real_device_id, session, adb_status, "mirror start failed")
+        failure = public_mirror_failure(
+            real_device_id,
+            session,
+            adb_status,
+            i18n.translate("server.status.mirror_start_failed"),
+        )
         return {
             "ok": False,
             "error": failure["error"],
@@ -973,12 +1022,12 @@ async def api_mirror_settings(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
-        raise HTTPException(status_code=403, detail="device denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     try:
         options = user_video_options(user["username"], payload)
     except VideoOptionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
     sessions = await manager.snapshot()
     current_session = sessions.get(real_device_id) or {}
     running = bool(current_session.get("running"))
@@ -992,7 +1041,12 @@ async def api_mirror_settings(device_id: str, request: Request):
         if not restart_ok:
             session = (await manager.snapshot()).get(real_device_id) or {}
             adb_status = session.get("adb") or adb_monitor.snapshot(real_device_id)
-            failure = public_mirror_failure(real_device_id, session, adb_status, "mirror restart failed")
+            failure = public_mirror_failure(
+                real_device_id,
+                session,
+                adb_status,
+                i18n.translate("server.status.mirror_restart_failed"),
+            )
             return {
                 "ok": False,
                 "restarted": False,
@@ -1013,7 +1067,7 @@ async def api_mirror_stop(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
-        raise HTTPException(status_code=403, detail="device denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     ok = await manager.stop(real_device_id)
     storage.audit(user["username"], "mirror_stop", real_device_id)
     return {"ok": ok, "sessions": await public_sessions_for_user(user)}
@@ -1025,7 +1079,7 @@ async def api_mirror_idle_stop(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
-        raise HTTPException(status_code=403, detail="device denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     ok = await manager.stop_if_no_clients(real_device_id, wait_seconds=2)
     storage.audit(user["username"], "mirror_idle_stop", f"{real_device_id}: stopped={ok}")
     return {"ok": True, "stopped": ok, "sessions": await public_sessions_for_user(user)}
@@ -1037,7 +1091,7 @@ async def api_control_acquire(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "control"):
-        raise HTTPException(status_code=403, detail="device denied")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     force = bool(payload.get("force") and user["role"] == "admin")
     result, _epoch = acquire_control_lock(real_device_id, user["username"], "http", force=force)
@@ -1065,7 +1119,7 @@ async def api_alas_status(request: Request):
         config_name=requested or None,
     )
     if requested and not binding:
-        raise HTTPException(status_code=403, detail="ALAS config is not bound to this user")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.alas_config_not_bound"))
     if not binding:
         return {
             "ok": False,
@@ -1075,7 +1129,7 @@ async def api_alas_status(request: Request):
             "config": "",
             "can_run": False,
             "can_edit": False,
-            "error": "ALAS config is not bound to this user",
+            "error": i18n.translate("server.error.alas_config_not_bound"),
         }
     try:
         config_name = alas.sanitize_config_name(binding.get("config_name"))
@@ -1106,7 +1160,12 @@ async def api_alas_toggle(request: Request):
     result = await asyncio.to_thread(alas.control_for_config, "toggle", binding["config_name"])
     if not result.get("ok"):
         storage.audit(user["username"], "alas_toggle_failed", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
-        return {"ok": False, "error": result.get("error") or "ALAS operation failed", "status_code": result.get("status_code"), "config": binding["config_name"]}
+        return {
+            "ok": False,
+            "error": server_error_message(result.get("error")) or i18n.translate("server.status.alas_operation_failed"),
+            "status_code": result.get("status_code"),
+            "config": binding["config_name"],
+        }
     if isinstance(result.get("alas"), dict):
         result["alas"] = public_alas_status(result["alas"], binding)
     storage.audit(user["username"], "alas_toggle", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
@@ -1135,7 +1194,10 @@ async def alas_embed_page(request: Request):
         )
         raise HTTPException(status_code=403, detail=alas_embed_denied_message("missing_binding"))
     if not binding:
-        raise HTTPException(status_code=400 if requested else 403, detail="invalid ALAS config")
+        raise HTTPException(
+            status_code=400 if requested else 403,
+            detail=i18n.translate("server.error.invalid_alas_config"),
+        )
     if user.get("role") == "admin":
         config_name = alas.sanitize_config_name(binding.get("config_name"))
         iframe_src = f"/alas/embed/proxy/?{urlencode({'config': config_name})}" if requested else "/alas/embed/proxy/"
@@ -1192,11 +1254,11 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
         log_alas_embed_denied(user, binding, "http", path or "/", "disabled")
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "disabled", path or "/"))
-        raise HTTPException(status_code=400, detail="ALAS 控制未启用")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.status.alas_control_disabled"))
     if not settings.get("base_url"):
         log_alas_embed_denied(user, binding, "http", path or "/", "unconfigured")
         storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
-        raise HTTPException(status_code=502, detail="ALAS Runtime 未配置，请先在后台填写 Runtime URL")
+        raise HTTPException(status_code=502, detail=i18n.translate("server.status.alas_runtime_not_configured"))
     try:
         return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision, body=body)
     except HTTPException as exc:
@@ -1208,7 +1270,7 @@ async def alas_embed_proxy(request: Request, path: str = ""):
             )
             raise HTTPException(
                 status_code=502,
-                detail="ALAS Runtime 不可达，请确认服务已启动且 Runtime URL 可访问",
+                detail=i18n.translate("server.status.alas_runtime_unreachable"),
             ) from exc
         raise
 
@@ -1330,7 +1392,7 @@ async def admin_upsert_user(request: Request):
         else:
             storage.upsert_user(username, password, role)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     updated = storage.get_user(username)
     should_close_connections = "expires_at" in payload or bool(password) or bool(
         previous and updated and previous["role"] != updated["role"]
@@ -1346,11 +1408,11 @@ async def admin_delete_user(username: str, request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
     if username == admin["username"]:
-        raise HTTPException(status_code=403, detail="cannot delete current admin session")
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.cannot_delete_current_admin"))
     try:
         storage.delete_user(username)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     await account_connections.close_user_connections(username)
     storage.audit(admin["username"], "user_delete", username)
     return {"ok": True, "users": storage.list_users()}
@@ -1371,18 +1433,18 @@ async def admin_upsert_device(request: Request):
     device_id = str(payload.get("device_id", "")).strip()
     address = str(payload.get("address", "")).strip()
     if not address:
-        raise HTTPException(status_code=400, detail="address is required")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.address_required"))
     name = str(payload.get("name", "")).strip() or address
     enabled = parse_bool(payload.get("enabled"), True)
     previous = storage.get_device(device_id) if device_id else None
     if device_id and not previous:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     disabling = bool(previous and bool(previous["enabled"]) and not enabled)
     notify_users = await manager.event_usernames_for_device(device_id) if disabling else None
     if previous:
         adb_monitor.invalidate_device(device_id)
         if not storage.update_device(device_id, name, address, enabled):
-            raise HTTPException(status_code=404, detail="device not found")
+            raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     else:
         device_id = storage.create_device(name, address, enabled)
     if admin["role"] == "admin":
@@ -1408,7 +1470,7 @@ async def admin_test_adb_device(device_id: str, request: Request):
     admin = security.require_admin(request)
     device = storage.get_device(device_id)
     if not device:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     result = await adb_monitor.reconnect_device(device_id)
     storage.audit(admin["username"], "device_adb_test", f"{device_id}:{result.get('state')}")
     return result
@@ -1425,7 +1487,7 @@ async def admin_reconnect_adb_device(device_id: str, request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
     if not storage.get_device(device_id):
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     result = await adb_monitor.reconnect_device(device_id)
     storage.audit(admin["username"], "device_adb_reconnect", f"{device_id}:{result.get('state')}")
     return result
@@ -1436,12 +1498,12 @@ async def admin_delete_device(device_id: str, request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
     if not storage.get_device(device_id):
-        raise HTTPException(status_code=404, detail="device not found")
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     notify_users = await manager.event_usernames_for_device(device_id)
     adb_monitor.forget_device(device_id)
     try:
         if not storage.delete_device(device_id):
-            raise HTTPException(status_code=404, detail="device not found")
+            raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     except Exception:
         adb_monitor.restore_device(device_id)
         raise
@@ -1470,7 +1532,7 @@ async def admin_set_permission(request: Request):
     try:
         storage.set_permission(username, device_id, can_view, can_control)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     storage.audit(admin["username"], "permission_set", f"{username}:{device_id}:{can_view}:{can_control}")
     return {"ok": True, "permissions": storage.list_permissions()}
 
@@ -1524,7 +1586,7 @@ async def admin_save_video_settings(request: Request):
         current_profiles = profile_payloads(current_settings)
         raw_presets = payload.get("presets") if "presets" in payload else None
         if raw_presets is not None and not isinstance(raw_presets, dict):
-            raise VideoOptionError("presets must be an object")
+            raise VideoOptionError("presets must be an object", "server.video_error.presets_object")
         presets = normalize_profile_payloads(raw_presets, current_profiles)
         custom_profiles = (
             normalize_custom_profile_payloads(payload.get("custom_profiles"))
@@ -1554,13 +1616,24 @@ async def admin_save_video_settings(request: Request):
         try:
             auto_stop = int(raw_auto_stop)
         except Exception as exc:
-            raise VideoOptionError("auto_stop_minutes must be integer") from exc
+            raise VideoOptionError(
+                "auto_stop_minutes must be integer",
+                "server.video_error.must_be_integer",
+                field="auto_stop_minutes",
+            ) from exc
         if auto_stop < 0 or auto_stop > 1440:
-            raise VideoOptionError("auto_stop_minutes out of range")
+            raise VideoOptionError(
+                "auto_stop_minutes out of range",
+                "server.video_error.out_of_range",
+                field="auto_stop_minutes",
+            )
         stream_mode_submitted = "scrcpy_stream_mode" in payload or "stream_mode" in payload
         stream_mode = str(payload.get("scrcpy_stream_mode", payload.get("stream_mode", current_settings.get("scrcpy_stream_mode", "raw")))).strip().lower()
         if stream_mode not in ("raw", "protocol", "legacy"):
-            raise VideoOptionError("scrcpy_stream_mode must be raw, protocol, or legacy")
+            raise VideoOptionError(
+                "scrcpy_stream_mode must be raw, protocol, or legacy",
+                "server.video_error.invalid_stream_mode",
+            )
         stream_mode = stream_mode_or_default(stream_mode, enabled_modes)
         settings_updates = {}
         if enabled_modes_submitted:
@@ -1599,7 +1672,7 @@ async def admin_save_video_settings(request: Request):
     try:
         storage.update_settings(build_video_updates)
     except VideoOptionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
     storage.audit(admin["username"], "video_settings", json.dumps(payload, ensure_ascii=False)[:400])
     settings = storage.get_settings(keys)
     saved_profiles = profile_payloads(settings)
@@ -1634,7 +1707,7 @@ async def admin_save_alas(request: Request):
     try:
         await asyncio.to_thread(alas.save_settings, payload)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     storage.audit(admin["username"], "alas_settings", "updated")
     return {"ok": True, **await asyncio.to_thread(admin_alas_payload)}
 
@@ -1646,13 +1719,17 @@ async def admin_toggle_alas(request: Request):
     payload = await parse_body(request)
     config_name = str(payload.get("config_name") or payload.get("config") or "").strip()
     if not config_name:
-        raise HTTPException(status_code=400, detail="ALAS config name is required")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
     try:
         config_name = alas.sanitize_config_name(config_name)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config_name")) from exc
     result = await asyncio.to_thread(alas.control_for_config, "toggle", config_name)
     storage.audit(admin["username"], "alas_admin_toggle", json.dumps(result, ensure_ascii=False)[:400])
+    if result.get("error"):
+        result["error"] = server_error_message(result["error"])
+    if isinstance(result.get("alas"), dict) and result["alas"].get("error"):
+        result["alas"]["error"] = server_error_message(result["alas"]["error"])
     return result
 
 
@@ -1661,7 +1738,7 @@ async def admin_alas_config(request: Request):
     security.require_admin(request)
     config_name = str(request.query_params.get("config") or "").strip()
     if not config_name:
-        raise HTTPException(status_code=400, detail="ALAS config name is required")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
     return await asyncio.to_thread(alas.get_config, config_name)
 
 
@@ -1675,7 +1752,7 @@ async def admin_alas_configs(request: Request):
     if settings.get("enabled") and settings.get("token_set"):
         try:
             result = await asyncio.to_thread(alas.list_configs)
-            error = str(result.get("error") or "")
+            error = server_error_message(result.get("error"))
             for raw in result.get("configs") or []:
                 try:
                     name = alas.sanitize_config_name(raw)
@@ -1685,7 +1762,7 @@ async def admin_alas_configs(request: Request):
                     runtime_configs.append(name)
         except Exception as exc:
             log.warning("ALAS_CONFIG_CATALOG_FAILED error=%s", exc)
-            error = str(exc)
+            error = server_error_message(exc)
     configs = list(bound_configs)
     for name in runtime_configs:
         if name not in configs:
@@ -1706,15 +1783,15 @@ async def admin_save_alas_config(request: Request):
     source = str(payload.get("source", ""))
     target = str(payload.get("target") or source)
     if not source.strip() or not target.strip():
-        raise HTTPException(status_code=400, detail="ALAS config name is required")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
     data = payload.get("data")
     if isinstance(data, str):
         try:
             data = json.loads(data)
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="config must be valid JSON") from exc
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.config_valid_json")) from exc
     if not isinstance(data, dict):
-        raise HTTPException(status_code=400, detail="config data must be a JSON object")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.config_json_object"))
     result = await asyncio.to_thread(alas.save_config, source, target, data, False)
     storage.audit(admin["username"], "alas_config_save", target or source)
     return result
@@ -1736,12 +1813,12 @@ async def admin_set_alas_permission(request: Request):
     multi_config_request = "is_default" in payload
     enabled = parse_bool(payload.get("enabled"), bool(config_name))
     if not storage.get_user(username):
-        raise HTTPException(status_code=400, detail="invalid username")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_username"))
     if config_name:
         try:
             config_name = alas.sanitize_config_name(config_name)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid ALAS config name") from exc
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config_name")) from exc
     if not enabled:
         if multi_config_request and config_name:
             storage.delete_user_alas_binding(username, config_name)
@@ -1752,7 +1829,7 @@ async def admin_set_alas_permission(request: Request):
         storage.audit(admin["username"], "alas_binding_delete", detail)
         return {"ok": True, **admin_alas_permissions_payload()}
     if not config_name:
-        raise HTTPException(status_code=400, detail="ALAS config name is required")
+        raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
     can_run = parse_bool(payload.get("can_run"), True)
     can_edit = parse_bool(payload.get("can_edit"), False)
     raw_default = payload.get("is_default")
@@ -1763,10 +1840,10 @@ async def admin_set_alas_permission(request: Request):
         else:
             storage.set_user_alas_config(username, config_name, can_run, can_edit)
     except storage.AlasConfigOwnershipError as exc:
-        detail = f"配置“{exc.config_name}”已归属用户“{exc.owner}”，请先移除原归属再分配。"
+        detail = i18n.translate("server.error.alas_config_owned", config=exc.config_name, owner=exc.owner)
         raise HTTPException(status_code=409, detail=detail) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     storage.audit(admin["username"], "alas_binding_set", f"{username}:{config_name}:{can_run}:{can_edit}:{bool(is_default)}")
     return {"ok": True, **admin_alas_permissions_payload()}
 
