@@ -100,6 +100,7 @@ case "$1" in
       *com.docker.compose.project*) printf '%s\n' "${FAKE_SCRCPYGATE_PROJECT:-scrcpygate}" ;;
       *com.docker.compose.service*) printf '%s\n' "${FAKE_SCRCPYGATE_SERVICE:-scrcpygate}" ;;
       *'.Config.Image'*) printf '%s\n' "${FAKE_SCRCPYGATE_IMAGE:-scrcpygate:local}" ;;
+      *'.Type'*) printf '%s\n' "${FAKE_SCRCPYGATE_DATA_TYPE:-bind}" ;;
       *'.Destination "/app/data"'*) printf '%s\n' "${FAKE_SCRCPYGATE_DATA_SOURCE:-$PWD/data}" ;;
       *Health*) printf '%s\n' 'healthy' ;;
       *) printf '%s\n' "$state" ;;
@@ -210,6 +211,7 @@ class DeployScriptTests(unittest.TestCase):
             "FAKE_SCRCPYGATE_WORKING_DIR",
             "FAKE_SCRCPYGATE_CONFIG_FILES",
             "FAKE_SCRCPYGATE_IMAGE",
+            "FAKE_SCRCPYGATE_DATA_TYPE",
             "FAKE_SCRCPYGATE_DATA_SOURCE",
             "FAKE_COMPOSE_DOWN_FAIL",
             "FAKE_CONTAINER_REMAINS_AFTER_DOWN",
@@ -644,6 +646,25 @@ class DeployScriptTests(unittest.TestCase):
         self.assertIn("已恢复现有容器挂载", result.stdout)
         config = (target / ".env").read_text(encoding="utf-8")
         self.assertIn(f"WEB_SCRCPY_DATA_HOST={recovered_path}", config)
+
+    def test_existing_named_volume_is_not_auto_managed(self):
+        target = self.prepare_installer()
+        shutil.copy2(target / ".env.example", target / ".env")
+        data_dir = target / "data"
+        data_dir.mkdir()
+
+        result = self.run_installer(
+            target,
+            "--uninstall",
+            FAKE_SCRCPYGATE_STATE="running",
+            FAKE_SCRCPYGATE_DATA_TYPE="volume",
+            FAKE_SCRCPYGATE_DATA_SOURCE=self.shell_realpath(data_dir),
+            TERM="dumb",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.compose_down_calls(target), [])
+        self.assertIn("不会自动接管", result.stderr)
 
     def test_guided_install_requires_confirmation_for_any_existing_container(self):
         for state in ("running", "exited"):

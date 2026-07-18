@@ -892,6 +892,7 @@ detect_scrcpygate_instance() {
   EXISTING_SCRCPYGATE_WORKING_DIR=""
   EXISTING_SCRCPYGATE_CONFIG_FILES=""
   EXISTING_SCRCPYGATE_IMAGE=""
+  EXISTING_SCRCPYGATE_DATA_TYPE=""
   EXISTING_SCRCPYGATE_DATA_SOURCE=""
   command -v docker >/dev/null 2>&1 || return 0
   docker info >/dev/null 2>&1 || return 0
@@ -902,6 +903,7 @@ detect_scrcpygate_instance() {
   EXISTING_SCRCPYGATE_WORKING_DIR=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
   EXISTING_SCRCPYGATE_CONFIG_FILES=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
   EXISTING_SCRCPYGATE_IMAGE=$(docker inspect --format '{{.Config.Image}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
+  EXISTING_SCRCPYGATE_DATA_TYPE=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}{{end}}{{end}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
   EXISTING_SCRCPYGATE_DATA_SOURCE=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' scrcpygate 2>/dev/null | tr -d '\r' || true)
 }
 
@@ -928,7 +930,11 @@ existing_instance_can_be_managed() {
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != scrcpygate:local ]; then ownership_error="容器镜像不匹配"; fi
   if [ -z "${ownership_error:-}" ]; then
     if expected_data=$(configured_data_dir_from_disk); then
-      :
+      if actual_data=$(existing_container_data_dir); then
+        EXISTING_SCRCPYGATE_DATA_SOURCE=$actual_data
+      else
+        ownership_error="无法从磁盘配置解析数据目录"
+      fi
     elif expected_data=$(existing_container_data_dir); then
       WEB_SCRCPY_DATA_HOST=$expected_data
       EXISTING_SCRCPYGATE_DATA_SOURCE=$expected_data
@@ -1246,6 +1252,10 @@ configured_data_dir_from_disk() {
 }
 
 existing_container_data_dir() {
+  case "${EXISTING_SCRCPYGATE_DATA_TYPE:-}" in
+    ''|bind) ;;
+    *) return 1 ;;
+  esac
   source=${EXISTING_SCRCPYGATE_DATA_SOURCE:-}
   [ -n "$source" ] || return 1
   [ -d "$source" ] || return 1
