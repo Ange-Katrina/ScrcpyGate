@@ -2871,6 +2871,11 @@ td.table-action-cell {
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
+  .admin-nav {
+    grid-template-rows: auto auto auto;
+    align-content: start;
+  }
+
   textarea,
   .runtime-logs {
     min-height: 180px;

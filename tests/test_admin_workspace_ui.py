@@ -67,6 +67,9 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn(".device-card .actions .danger:last-child", self.styles)
         self.assertIn("@media (max-height: 520px) and (orientation: landscape)", self.styles)
         self.assertIn("grid-template-rows: auto minmax(0, 1fr) auto", self.styles)
+        landscape = self.styles.split("@media (max-height: 520px) and (orientation: landscape)", 1)[1].split("@media", 1)[0]
+        self.assertIn("grid-template-rows: auto auto auto", landscape)
+        self.assertIn("align-content: start", landscape)
         body_rule = self.styles.split(".admin-editor-drawer > .drawer-body {", 1)[1].split("}", 1)[0]
         form_rule = self.styles.split(".drawer-form {", 1)[1].split("}", 1)[0]
         actions_rule = self.styles.split(".drawer-actions {", 1)[1].split("}", 1)[0]
