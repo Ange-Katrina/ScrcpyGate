@@ -898,8 +898,46 @@ td select {
   min-width: 100px;
 }
 
-td.actions {
+td.table-action-cell {
   min-width: 152px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+}
+
+.table-actions .btn {
+  min-width: 68px;
+}
+
+[data-table="users"] {
+  min-width: 860px;
+  table-layout: fixed;
+}
+
+[data-table="users"] th:nth-child(2) {
+  width: 100px;
+}
+
+[data-table="users"] th:nth-child(3) {
+  width: 220px;
+}
+
+[data-table="users"] th:nth-child(4) {
+  width: 170px;
+}
+
+[data-table="users"] th:nth-child(5) {
+  width: 180px;
+}
+
+[data-table="users"] td:nth-child(4),
+[data-table="audit-logs"] td:nth-child(1) {
+  font-variant-numeric: tabular-nums;
 }
 
 [data-table="video-presets"] th:nth-child(3),
@@ -2568,6 +2606,7 @@ td.actions {
   }
 
   .responsive-table td {
+    width: 100%;
     min-width: 0;
     display: grid;
     grid-template-columns: minmax(82px, 34%) minmax(0, 1fr);
@@ -2588,16 +2627,19 @@ td.actions {
     text-align: left;
   }
 
-  .responsive-table td.actions {
+  .responsive-table td.table-action-cell {
     min-width: 0;
-    display: flex;
-    justify-content: flex-end;
+    display: block;
     padding-top: var(--ui-space-2);
     border-top: 1px solid var(--ui-color-border);
   }
 
-  .responsive-table td.actions::before {
+  .responsive-table td.table-action-cell::before {
     content: none;
+  }
+
+  .responsive-table .table-actions {
+    width: 100%;
   }
 
   .responsive-table td input,
@@ -2610,33 +2652,6 @@ td.actions {
     min-width: 0;
     text-align: left;
   }
-
-  [data-table="users"] td:nth-child(1):not([data-label])::before { content: "用户名"; }
-  [data-table="users"] td:nth-child(2):not([data-label])::before { content: "角色"; }
-  [data-table="users"] td:nth-child(3):not([data-label])::before { content: "创建时间"; }
-  [data-table="users"] td:nth-child(4):not([data-label])::before { content: "操作"; }
-  [data-table="permissions"] td:nth-child(1):not([data-label])::before { content: "用户"; }
-  [data-table="permissions"] td:nth-child(2):not([data-label])::before { content: "设备"; }
-  [data-table="permissions"] td:nth-child(3):not([data-label])::before { content: "查看"; }
-  [data-table="permissions"] td:nth-child(4):not([data-label])::before { content: "控制"; }
-  [data-table="video-presets"] td:nth-child(1):not([data-label])::before { content: "预设"; }
-  [data-table="video-presets"] td:nth-child(2):not([data-label])::before { content: "码率 Mbps"; }
-  [data-table="video-presets"] td:nth-child(3):not([data-label])::before { content: "输出尺寸"; }
-  [data-table="video-presets"] td:nth-child(4):not([data-label])::before { content: "帧率"; }
-  [data-table="video-presets"] td:nth-child(5):not([data-label])::before { content: "建议"; }
-  [data-table="custom-profiles"] td:nth-child(1):not([data-label])::before { content: "ID"; }
-  [data-table="custom-profiles"] td:nth-child(2):not([data-label])::before { content: "名称"; }
-  [data-table="custom-profiles"] td:nth-child(3):not([data-label])::before { content: "码率 Mbps"; }
-  [data-table="custom-profiles"] td:nth-child(4):not([data-label])::before { content: "输出尺寸"; }
-  [data-table="custom-profiles"] td:nth-child(5):not([data-label])::before { content: "帧率"; }
-  [data-table="alas-bindings"] td:nth-child(1):not([data-label])::before { content: "用户"; }
-  [data-table="alas-bindings"] td:nth-child(2):not([data-label])::before { content: "角色"; }
-  [data-table="alas-bindings"] td:nth-child(3):not([data-label])::before { content: "绑定配置"; }
-  [data-table="alas-bindings"] td:nth-child(4):not([data-label])::before { content: "运行"; }
-  [data-table="audit-logs"] td:nth-child(1):not([data-label])::before { content: "时间"; }
-  [data-table="audit-logs"] td:nth-child(2):not([data-label])::before { content: "用户"; }
-  [data-table="audit-logs"] td:nth-child(3):not([data-label])::before { content: "动作"; }
-  [data-table="audit-logs"] td:nth-child(4):not([data-label])::before { content: "详情"; }
 
   .audit-log-table {
     min-height: 0;

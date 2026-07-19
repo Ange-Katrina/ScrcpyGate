@@ -97,6 +97,18 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
     def test_tables_and_danger_actions_use_responsive_accessible_patterns(self):
         self.assertGreaterEqual(self.template.count('class="responsive-table"'), 5)
         self.assertIn("applyTableLabels(rows)", self.script)
+        self.assertIn("function tableActionCell(...buttons)", self.script)
+        self.assertIn("cell.className='table-action-cell'", self.script)
+        self.assertIn("actions.className='table-actions'", self.script)
+        self.assertIn("td.table-action-cell", self.styles)
+        self.assertIn(".table-actions", self.styles)
+        self.assertNotIn(":not([data-label])::before", self.styles)
+        mobile_cells = self.styles.split(".responsive-table td {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 100%;", mobile_cells)
+        custom_profiles = self.script.split("function renderCustomProfiles", 1)[1].split("function streamModeLabel", 1)[0]
+        users = self.script.split("function renderUsers", 1)[1].split("function fillSelect", 1)[0]
+        self.assertNotIn("actions.className='actions'", custom_profiles)
+        self.assertNotIn("actions.className='actions'", users)
         self.assertIn('id="confirmDialog"', self.template)
         self.assertIn("confirmDanger({", self.script)
         self.assertIn("pendingConfirmation", self.script)

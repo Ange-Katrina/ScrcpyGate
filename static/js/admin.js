@@ -367,6 +367,7 @@ function markResourceStale(name){
 function clear(el){ el.textContent=''; }
 function chip(text, cls=''){ const s=document.createElement('span'); s.className=`chip ${cls}`.trim(); s.textContent=text; return s; }
 function td(text){ const cell=document.createElement('td'); cell.textContent=text == null ? '' : String(text); return cell; }
+function tableActionCell(...buttons){ const cell=document.createElement('td'); cell.className='table-action-cell'; const actions=document.createElement('div'); actions.className='table-actions'; actions.append(...buttons); cell.appendChild(actions); return cell; }
 function btn(text, cls, fn){ const b=document.createElement('button'); b.className=`btn ${cls||''}`.trim(); b.type='button'; b.textContent=text; b.onclick=()=>{ try{ const result=fn && fn(); if(result && typeof result.then==='function') withBusy(b, ()=>result).catch(e=>show(e.message)); }catch(e){ show(e.message); } }; return b; }
 function heartbeatField(label,key,value){ const row=document.createElement('div'); const term=document.createElement('dt'); term.textContent=label; const detail=document.createElement('dd'); detail.setAttribute(`data-device-${key}`,''); detail.textContent=value; row.append(term,detail); return row; }
 function ts(value){ return value ? new Date(value * 1000).toLocaleString() : ''; }
@@ -635,9 +636,7 @@ function renderCustomProfiles(){
     const profile=customProfiles[id] || {};
     const tr=document.createElement('tr');
     tr.append(td(id), td(profile.label || id), td(bitrateBpsToMbps(profile.video_bit_rate)), td(maxSizeQualityLabel(profile.max_size)), td(profile.max_fps));
-    const actions=document.createElement('td');
-    actions.className='actions';
-    actions.append(
+    const actions=tableActionCell(
       btn(adminT('admin.devices.edit'),'',()=>{
         $('customProfileId').value=id;
         $('customProfileLabel').value=profile.label || id;
@@ -645,7 +644,7 @@ function renderCustomProfiles(){
         setCustomProfileSize(profile.max_size || 960);
         $('customProfileFps').value=profile.max_fps || 24;
       }),
-      btn(adminT('admin.devices.delete'),'danger',()=>removeCustomProfile(id))
+      btn(adminT('admin.devices.delete'),'danger',()=>removeCustomProfile(id)),
     );
     tr.appendChild(actions);
     rows.appendChild(tr);
@@ -887,10 +886,9 @@ function renderUsers(){
     const expiry=document.createElement('td');
     expiry.appendChild(userExpiryCell(user));
     tr.append(td(user.username), td(accessRoleLabel(user.role)), expiry, td(user.created_at));
-    const actions=document.createElement('td');
-    actions.className='actions';
-    actions.append(btn(adminT('admin.devices.edit'),'',()=>editUser(user)));
-    if(user.username !== currentUsername) actions.append(btn(adminT('admin.devices.delete'),'danger',()=>deleteUser(user.username)));
+    const buttons=[btn(adminT('admin.devices.edit'),'',()=>editUser(user))];
+    if(user.username !== currentUsername) buttons.push(btn(adminT('admin.devices.delete'),'danger',()=>deleteUser(user.username)));
+    const actions=tableActionCell(...buttons);
     tr.appendChild(actions);
     rows.appendChild(tr);
   });

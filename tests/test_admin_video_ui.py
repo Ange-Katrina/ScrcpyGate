@@ -199,7 +199,8 @@ global.document={querySelectorAll:()=>inputs};
         self.assertGreaterEqual(self.template.count("admin.ui.video.bitrate_mbps"), 3)
         self.assertIn('"bitrate_mbps": "码率 Mbps"', self.catalog)
         self.assertNotIn("码率 bps", self.template)
-        self.assertIn('content: "码率 Mbps"', self.styles)
+        self.assertIn("applyTableLabels(rows)", self.script)
+        self.assertNotIn(":not([data-label])::before", self.styles)
 
 
 if __name__ == "__main__":
