@@ -23,6 +23,7 @@ body {
   min-height: 36px;
   display: flex;
   justify-content: flex-end;
+  gap: var(--ui-space-2);
 }
 
 .login-panel {

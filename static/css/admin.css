@@ -238,13 +238,15 @@ h3 {
   font-size: 12px;
 }
 
+.admin-nav__footer .ui-locale-picker,
 .admin-nav__footer .ui-theme-picker {
   width: 100%;
   justify-content: flex-start;
 }
 
-.admin-nav__footer .ui-theme-picker select {
-  flex: 1 1 auto;
+.admin-nav__footer .ui-locale-trigger,
+.admin-nav__footer .ui-theme-trigger {
+  width: 100%;
 }
 
 .admin-nav__link {

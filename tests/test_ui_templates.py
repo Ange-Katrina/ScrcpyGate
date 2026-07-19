@@ -254,10 +254,23 @@ class UiTemplateContractTests(unittest.TestCase):
             "closeThemeMenus(false)",
             "event.stopPropagation()",
             "event.stopImmediatePropagation()",
+            "function positionPickerMenu(menu)",
+            "repositionOpenPickerMenus()",
+            "control.close(event.detail === 0)",
         ):
             self.assertIn(token, core)
         for selector in (".ui-theme-trigger", ".ui-theme-menu", ".ui-theme-option", '.ui-theme-option[aria-checked="true"]', ".compact-theme-picker .ui-theme-trigger"):
             self.assertIn(selector, components)
+        self.assertEqual(core.count("if (leadingIcon) trigger.appendChild(leadingIcon);"), 2)
+        self.assertEqual(core.count("control.close(event.detail === 0);"), 2)
+        self.assertIn("right: var(--ui-picker-inline-offset, 0px);", components)
+        self.assertIn("outline: 2px solid var(--ui-color-info);", components)
+        self.assertNotIn(".ui-theme-picker:focus-within", components)
+        self.assertNotIn('body[data-ui-page="admin"] .tabs button', components)
+        fine_pointer = components.split("@media (hover: hover) and (pointer: fine)", 1)[1].split("@media", 1)[0]
+        self.assertIn(".ui-theme-picker:hover", fine_pointer)
+        self.assertIn(".ui-locale-picker:hover", fine_pointer)
+        self.assertIn(".admin-nav__footer .ui-locale-picker", self.read("static/css/admin.css"))
 
     def test_locale_picker_matches_theme_picker_and_uses_self_hosted_popup(self):
         core = self.read("static/js/ui-core.js")
@@ -296,6 +309,9 @@ class UiTemplateContractTests(unittest.TestCase):
             self.assertIn(selector, components)
         self.assertIn('<symbol id="languages"', sprite)
         self.assertIn(".compact-theme-picker { width: 44px; }", components)
+        self.assertNotIn(".ui-locale-picker:focus-within", components)
+        login_toolbar = self.read("static/css/login.css").split(".login-toolbar {", 1)[1].split("}", 1)[0]
+        self.assertIn("gap: var(--ui-space-2);", login_toolbar)
 
     def test_scripts_avoid_template_code_and_unsafe_html_sinks(self):
         for name in ("mirror.js", "admin.js", "login.js", "ui-core.js", "theme-init.js", "i18n.js", "alas-shell.js"):

@@ -345,11 +345,11 @@ def embed_shell_html(title: str, iframe_src: str, message: str = "") -> str:
   <title>{safe_title}</title>
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
-  <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
+  <link rel="stylesheet" href="/static/css/ui-components.css?v=54474b070308">
   <link rel="stylesheet" href="/static/css/alas-shell.css?v=c880a1b7e43b">
   <script type="application/json" id="scrcpygate-i18n">{locale_payload}</script>
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
-  <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
+  <script src="/static/js/ui-core.js?v=ec67834375f9" defer></script>
   <script src="/static/js/alas-shell.js?v=aa8526b19f9b" defer></script>
 </head>
 <body>

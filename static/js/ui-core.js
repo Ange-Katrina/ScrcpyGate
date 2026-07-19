@@ -48,6 +48,29 @@
     viewportFrame = window.requestAnimationFrame(() => {
       viewportFrame = 0;
       syncVisualViewportMetrics();
+      repositionOpenPickerMenus();
+    });
+  }
+
+  function positionPickerMenu(menu) {
+    if (!menu || menu.hidden) return;
+    menu.style.removeProperty("--ui-picker-inline-offset");
+    const viewport = window.visualViewport;
+    const viewportLeft = finiteMetric(viewport && viewport.offsetLeft, 0);
+    const viewportWidth = Math.max(1, finiteMetric(viewport && viewport.width, window.innerWidth || root.clientWidth || 1));
+    const edge = 8;
+    const allowedLeft = viewportLeft + edge;
+    const allowedRight = viewportLeft + viewportWidth - edge;
+    const rect = menu.getBoundingClientRect();
+    let inlineOffset = 0;
+    if (rect.left < allowedLeft) inlineOffset = rect.left - allowedLeft;
+    else if (rect.right > allowedRight) inlineOffset = rect.right - allowedRight;
+    menu.style.setProperty("--ui-picker-inline-offset", `${Math.round(inlineOffset)}px`);
+  }
+
+  function repositionOpenPickerMenus() {
+    [...themeControls, ...localePopupControls].forEach((control) => {
+      if (control.isOpen()) control.reposition();
     });
   }
 
@@ -181,6 +204,7 @@
     const triggerArrow = document.createElement("span");
     const menu = document.createElement("div");
     const menuId = `uiLocaleMenu-${select.id || index + 1}`;
+    const leadingIcon = Array.from(wrapper.children).find((child) => child.classList.contains("ui-icon"));
 
     select.classList.add("ui-locale-native");
     select.hidden = true;
@@ -194,6 +218,7 @@
     triggerLabel.className = "ui-locale-trigger__label";
     triggerArrow.className = "ui-picker-arrow";
     triggerArrow.setAttribute("aria-hidden", "true");
+    if (leadingIcon) trigger.appendChild(leadingIcon);
     trigger.append(triggerLabel, triggerArrow);
 
     menu.id = menuId;
@@ -242,19 +267,24 @@
         menu.hidden = false;
         wrapper.classList.add("is-open");
         trigger.setAttribute("aria-expanded", "true");
-        window.requestAnimationFrame(() => focusItem(itemIndex === undefined ? selectedIndex() : itemIndex));
+        window.requestAnimationFrame(() => {
+          positionPickerMenu(menu);
+          focusItem(itemIndex === undefined ? selectedIndex() : itemIndex);
+        });
       },
       close(restoreFocus) {
         menu.hidden = true;
+        menu.style.removeProperty("--ui-picker-inline-offset");
         wrapper.classList.remove("is-open");
         trigger.setAttribute("aria-expanded", "false");
         if (restoreFocus) trigger.focus({ preventScroll: true });
-      }
+      },
+      reposition() { positionPickerMenu(menu); }
     };
 
-    items.forEach((item) => item.addEventListener("click", () => {
+    items.forEach((item) => item.addEventListener("click", (event) => {
       const locale = item.dataset.localeValue;
-      control.close(false);
+      control.close(event.detail === 0);
       applyLocale(locale, true);
     }));
     trigger.addEventListener("click", () => control.isOpen() ? control.close(true) : control.open(selectedIndex()));
@@ -322,6 +352,7 @@
     const triggerArrow = document.createElement("span");
     const menu = document.createElement("div");
     const menuId = `uiThemeMenu-${select.id || index + 1}`;
+    const leadingIcon = Array.from(wrapper.children).find((child) => child.classList.contains("ui-icon"));
 
     select.dataset.uiThemeEnhanced = "true";
     select.classList.add("ui-theme-native");
@@ -337,6 +368,7 @@
     triggerLabel.className = "ui-theme-trigger__label";
     triggerArrow.className = "ui-theme-trigger__arrow";
     triggerArrow.setAttribute("aria-hidden", "true");
+    if (leadingIcon) trigger.appendChild(leadingIcon);
     trigger.append(triggerLabel, triggerArrow);
 
     menu.id = menuId;
@@ -356,9 +388,9 @@
       item.tabIndex = -1;
       label.textContent = option.textContent;
       item.append(label, icon("check", "ui-icon ui-theme-option__check"));
-      item.addEventListener("click", () => {
+      item.addEventListener("click", (event) => {
         applyTheme(option.value, true);
-        control.close(true);
+        control.close(event.detail === 0);
       });
       menu.appendChild(item);
       return item;
@@ -392,14 +424,19 @@
         menu.hidden = false;
         wrapper.classList.add("is-open");
         trigger.setAttribute("aria-expanded", "true");
-        window.requestAnimationFrame(() => focusItem(itemIndex === undefined ? selectedIndex() : itemIndex));
+        window.requestAnimationFrame(() => {
+          positionPickerMenu(menu);
+          focusItem(itemIndex === undefined ? selectedIndex() : itemIndex);
+        });
       },
       close(restoreFocus) {
         menu.hidden = true;
+        menu.style.removeProperty("--ui-picker-inline-offset");
         wrapper.classList.remove("is-open");
         trigger.setAttribute("aria-expanded", "false");
         if (restoreFocus) trigger.focus({ preventScroll: true });
-      }
+      },
+      reposition() { positionPickerMenu(menu); }
     };
 
     trigger.addEventListener("click", () => {
