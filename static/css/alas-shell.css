@@ -141,11 +141,6 @@ a {
     transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
-.alas-shell-button:hover {
-  border-color: var(--ui-color-primary);
-  background: var(--ui-color-surface);
-}
-
 .alas-shell-button:active {
   transform: scale(0.98);
 }
@@ -154,10 +149,6 @@ a {
   border-color: var(--ui-color-primary);
   background: var(--ui-color-primary);
   color: var(--ui-color-on-primary);
-}
-
-.alas-shell-button.primary:hover {
-  background: var(--ui-color-primary-hover);
 }
 
 .alas-shell-button:focus-visible {
@@ -252,6 +243,23 @@ a {
 @keyframes alas-shell-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .alas-shell-button:hover {
+    border-color: var(--ui-color-primary);
+    background: var(--ui-color-surface);
+  }
+
+  .alas-shell-button.primary:hover {
+    background: var(--ui-color-primary-hover);
+  }
+}
+
+@media (pointer: coarse) {
+  .alas-shell-button {
+    min-height: 44px;
   }
 }
 

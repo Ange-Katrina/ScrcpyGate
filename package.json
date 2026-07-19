@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test:e2e": "playwright test",
-    "test:a11y": "playwright test tests/e2e/ui-accessibility.spec.js"
+    "test:a11y": "playwright test tests/e2e/ui-accessibility.spec.js tests/e2e/alas-shell.spec.js"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.0",

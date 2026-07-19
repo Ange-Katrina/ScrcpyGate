@@ -26,6 +26,11 @@ env/
 build/
 dist/
 node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright-cli/
+/output/playwright/
 
 .vscode/
 .idea/

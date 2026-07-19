@@ -25,6 +25,7 @@ class UiAccessibilityContractTests(unittest.TestCase):
         components = self.read("static/css/ui-components.css")
         tokens = self.read("static/css/ui-tokens.css")
         mirror = self.read("static/css/mirror.css")
+        alas_shell = self.read("static/css/alas-shell.css")
         self.assertIn(":where(button, a, input, select, textarea, [tabindex]):focus-visible", components)
         self.assertIn("@media (prefers-reduced-motion: reduce)", components)
         self.assertIn(".ui-button,\n  .ui-icon-button,\n  .ui-theme-picker", components)
@@ -36,6 +37,11 @@ class UiAccessibilityContractTests(unittest.TestCase):
         self.assertIn("--ui-color-control-border: #7c8592", tokens)
         self.assertIn("--ui-color-primary-text: #8ab4ff", tokens)
         self.assertIn("color: var(--ui-color-primary-text)", mirror)
+        self.assertIn("@media (hover: hover) and (pointer: fine)", alas_shell)
+        self.assertRegex(
+            alas_shell,
+            r"@media \(pointer: coarse\) \{\s+\.alas-shell-button \{\s+min-height: 44px;",
+        )
 
     def test_drawers_and_dialogs_have_keyboard_closure_and_inert_isolation(self):
         core = self.read("static/js/ui-core.js")
@@ -68,13 +74,31 @@ class UiAccessibilityContractTests(unittest.TestCase):
         self.assertIn('"@playwright/test"', package)
         self.assertIn('"lockfileVersion": 3', lockfile)
         self.assertIn("SCRCPYGATE_E2E_BASE_URL", config)
+        self.assertIn("SCRCPYGATE_E2E_BROWSER_CHANNEL", config)
+        self.assertIn('browserName: "chromium"', config)
         for viewport in ("1440, height: 900", "1280, height: 720", "768, height: 1024", "390, height: 844", "844, height: 390"):
             self.assertIn(viewport, config)
         self.assertIn("@axe-core/playwright", spec)
         self.assertIn("critical", spec)
         self.assertIn("horizontal overflow", spec)
+        self.assertIn('"test:a11y": "playwright test tests/e2e/ui-accessibility.spec.js tests/e2e/alas-shell.spec.js"', package)
         self.assertIn("npm ci", workflow)
         self.assertIn("playwright install --with-deps chromium", workflow)
+
+    def test_alas_shell_gate_covers_runtime_recovery_and_viewport_geometry(self):
+        spec = self.read("tests/e2e/alas-shell.spec.js")
+        for token in (
+            'page.route("**/alas/embed/proxy/**"',
+            'data-kind", "unreachable"',
+            'data-kind", "timeout"',
+            '"_scrcpygate_retry"',
+            "page.clock.fastForward(15_001)",
+            "assertShellGeometry",
+            "assertShellA11y",
+            'page.keyboard.press("Escape")',
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, spec)
 
 
 if __name__ == "__main__":
