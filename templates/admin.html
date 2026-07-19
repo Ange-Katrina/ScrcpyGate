@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
-  <link rel="stylesheet" href="/static/css/admin.css?v=741fed7f98c5">
+  <link rel="stylesheet" href="/static/css/admin.css?v=f6fbed68321b">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
   <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
 </head>
@@ -357,89 +357,99 @@
 <div id="deviceDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="deviceDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="deviceDrawerTitle" aria-describedby="deviceDrawerContext" aria-hidden="true" inert>
    <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.device') }}</p><h2 id="deviceDrawerTitle">{{ t('admin.ui.drawers.device.save') }}</h2><p id="deviceDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.device.create') }}</p></div><button id="deviceDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.device.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
-  <div class="form-grid drawer-form">
-    <input id="deviceId" type="hidden">
-    <div class="col-12"><label for="deviceName">{{ t('admin.ui.drawers.device.name_optional') }}</label><input id="deviceName" placeholder="{{ t('admin.ui.drawers.device.name_placeholder') }}" autocomplete="off"></div>
-    <div class="col-8"><label for="deviceAddress">{{ t('admin.ui.drawers.device.adb_address') }}</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
-    <div class="col-4"><label for="deviceEnabled">{{ t('admin.ui.drawers.device.status') }}</label><select id="deviceEnabled"><option value="true">{{ t('admin.ui.drawers.device.enabled') }}</option><option value="false">{{ t('admin.ui.drawers.device.disabled') }}</option></select></div>
+  <div class="drawer-body">
+    <div class="form-grid drawer-form">
+      <input id="deviceId" type="hidden">
+      <div class="col-12"><label for="deviceName">{{ t('admin.ui.drawers.device.name_optional') }}</label><input id="deviceName" placeholder="{{ t('admin.ui.drawers.device.name_placeholder') }}" autocomplete="off"></div>
+      <div class="col-8"><label for="deviceAddress">{{ t('admin.ui.drawers.device.adb_address') }}</label><input id="deviceAddress" placeholder="ADB_HOST:ADB_PORT" autocomplete="off"></div>
+      <div class="col-4"><label for="deviceEnabled">{{ t('admin.ui.drawers.device.status') }}</label><select id="deviceEnabled"><option value="true">{{ t('admin.ui.drawers.device.enabled') }}</option><option value="false">{{ t('admin.ui.drawers.device.disabled') }}</option></select></div>
+    </div>
+    <p class="muted drawer-note">{{ t('admin.ui.drawers.device.note') }}</p>
   </div>
-  <p class="muted drawer-note">{{ t('admin.ui.drawers.device.note') }}</p>
   <div class="drawer-actions"><button id="clearDeviceForm" class="btn" type="button">{{ t('admin.ui.drawers.clear') }}</button><button id="cancelDeviceForm" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveDevice" class="btn primary" type="button">{{ t('admin.ui.drawers.device.save') }}</button></div>
 </aside>
 
 <div id="userDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="userDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="userDrawerTitle" aria-describedby="userDrawerContext" aria-hidden="true" inert>
    <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.user') }}</p><h2 id="userDrawerTitle">{{ t('admin.ui.drawers.user.save') }}</h2><p id="userDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.user.create') }}</p></div><button id="userDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.user.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
-  <div class="form-grid drawer-form">
-    <div class="col-12"><label for="newUsername">{{ t('admin.ui.access.username') }}</label><input id="newUsername" autocomplete="username"></div>
-    <div class="col-12"><label for="newPassword">{{ t('admin.ui.drawers.user.password') }}</label><input id="newPassword" type="password" placeholder="{{ t('admin.ui.drawers.user.password_placeholder') }}" autocomplete="new-password"></div>
-    <div class="col-12"><label for="newRole">{{ t('admin.ui.access.role') }}</label><select id="newRole"><option value="user">{{ t('common.roles.user') }}</option><option value="admin">{{ t('common.roles.admin') }}</option></select></div>
-    <div class="col-12"><label for="userExpiryMode">{{ t('admin.ui.drawers.user.account_expiry') }}</label><select id="userExpiryMode"><option value="permanent">{{ t('admin.time.permanent') }}</option><option value="scheduled">{{ t('admin.ui.drawers.user.scheduled_expiry') }}</option></select></div>
-    <div id="userExpiresAtField" class="col-12 user-expiry-field" hidden>
-      <label for="userExpiresAt">{{ t('admin.ui.drawers.user.expires_at') }}</label>
-      <input id="userExpiresAt" type="datetime-local" step="60">
-      <div id="userExpiryShortcuts" class="user-expiry-shortcuts" aria-label="{{ t('admin.ui.drawers.user.extend_shortcuts') }}">
-        <button class="btn" type="button" data-days="1">{{ t('admin.ui.drawers.user.add_one_day') }}</button>
-        <button class="btn" type="button" data-days="7">{{ t('admin.ui.drawers.user.add_seven_days') }}</button>
-        <button class="btn" type="button" data-days="30">{{ t('admin.ui.drawers.user.add_thirty_days') }}</button>
-        <button class="btn" type="button" data-days="90">{{ t('admin.ui.drawers.user.add_ninety_days') }}</button>
+  <div class="drawer-body">
+    <div class="form-grid drawer-form">
+      <div class="col-12"><label for="newUsername">{{ t('admin.ui.access.username') }}</label><input id="newUsername" autocomplete="username"></div>
+      <div class="col-12"><label for="newPassword">{{ t('admin.ui.drawers.user.password') }}</label><input id="newPassword" type="password" placeholder="{{ t('admin.ui.drawers.user.password_placeholder') }}" autocomplete="new-password"></div>
+      <div class="col-12"><label for="newRole">{{ t('admin.ui.access.role') }}</label><select id="newRole"><option value="user">{{ t('common.roles.user') }}</option><option value="admin">{{ t('common.roles.admin') }}</option></select></div>
+      <div class="col-12"><label for="userExpiryMode">{{ t('admin.ui.drawers.user.account_expiry') }}</label><select id="userExpiryMode"><option value="permanent">{{ t('admin.time.permanent') }}</option><option value="scheduled">{{ t('admin.ui.drawers.user.scheduled_expiry') }}</option></select></div>
+      <div id="userExpiresAtField" class="col-12 user-expiry-field" hidden>
+        <label for="userExpiresAt">{{ t('admin.ui.drawers.user.expires_at') }}</label>
+        <input id="userExpiresAt" type="datetime-local" step="60">
+        <div id="userExpiryShortcuts" class="user-expiry-shortcuts" aria-label="{{ t('admin.ui.drawers.user.extend_shortcuts') }}">
+          <button class="btn" type="button" data-days="1">{{ t('admin.ui.drawers.user.add_one_day') }}</button>
+          <button class="btn" type="button" data-days="7">{{ t('admin.ui.drawers.user.add_seven_days') }}</button>
+          <button class="btn" type="button" data-days="30">{{ t('admin.ui.drawers.user.add_thirty_days') }}</button>
+          <button class="btn" type="button" data-days="90">{{ t('admin.ui.drawers.user.add_ninety_days') }}</button>
+        </div>
       </div>
     </div>
+    <p id="userExpiryPreview" class="user-expiry-preview" role="status" aria-live="polite">{{ t('admin.ui.drawers.user.permanent_preview') }}</p>
+    <p class="muted drawer-note">{{ t('admin.ui.drawers.user.note') }}</p>
   </div>
-  <p id="userExpiryPreview" class="user-expiry-preview" role="status" aria-live="polite">{{ t('admin.ui.drawers.user.permanent_preview') }}</p>
-  <p class="muted drawer-note">{{ t('admin.ui.drawers.user.note') }}</p>
   <div class="drawer-actions"><button id="cancelUserForm" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveUser" class="btn primary" type="button">{{ t('admin.ui.drawers.user.save') }}</button></div>
 </aside>
 
 <div id="alasConnectionDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConnectionDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasConnectionDrawerTitle" aria-describedby="alasConnectionDrawerContext" aria-hidden="true" inert>
    <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime') }}</p><h2 id="alasConnectionDrawerTitle">{{ t('admin.ui.alas.connection_settings') }}</h2><p id="alasConnectionDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.alas_connection.context') }}</p></div><button id="alasConnectionDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.alas_connection.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
-  <div class="form-grid drawer-form">
-    <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
-    <div class="col-12"><label for="alasToken">{{ t('admin.ui.drawers.alas_connection.token') }}</label><input id="alasToken" type="password" placeholder="{{ t('admin.ui.drawers.alas_connection.token_placeholder') }}" autocomplete="new-password"></div>
+  <div class="drawer-body">
+    <div class="form-grid drawer-form">
+      <div class="col-12"><label for="alasBaseUrl">Runtime URL</label><input id="alasBaseUrl" placeholder="http://127.0.0.1:22267" autocomplete="url"></div>
+      <div class="col-12"><label for="alasToken">{{ t('admin.ui.drawers.alas_connection.token') }}</label><input id="alasToken" type="password" placeholder="{{ t('admin.ui.drawers.alas_connection.token_placeholder') }}" autocomplete="new-password"></div>
+    </div>
+    <p class="muted drawer-note">{{ t('admin.ui.drawers.alas_connection.note') }}</p>
   </div>
-  <p class="muted drawer-note">{{ t('admin.ui.drawers.alas_connection.note') }}</p>
   <div class="drawer-actions"><button id="cancelAlasConnection" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveAlas" class="btn primary" type="button">{{ t('admin.ui.drawers.alas_connection.save') }}</button></div>
 </aside>
 
 <div id="alasAssignmentDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasAssignmentDrawer" class="ui-drawer admin-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="alasAssignmentDrawerTitle" aria-describedby="alasAssignmentDrawerContext alasAssignmentOwnerHint" aria-hidden="true" inert>
    <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.config_ownership') }}</p><h2 id="alasAssignmentDrawerTitle">{{ t('admin.ui.drawers.assignment.title') }}</h2><p id="alasAssignmentDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.assignment.context') }}</p></div><button id="alasAssignmentDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.assignment.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
-  <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t('admin.ui.drawers.assignment.summary') }}">
-    <div class="alas-assignment-summary__item">
-      <span>{{ t('admin.ui.alas.owner_user') }}</span>
-      <strong id="alasAssignmentUserName">{{ t('admin.ui.drawers.assignment.pending_user') }}</strong>
-      <small id="alasAssignmentUserMeta">{{ t('admin.ui.drawers.assignment.select_recipient') }}</small>
+  <div class="drawer-body">
+    <div id="alasAssignmentSummary" class="alas-assignment-summary" role="group" aria-label="{{ t('admin.ui.drawers.assignment.summary') }}">
+      <div class="alas-assignment-summary__item">
+        <span>{{ t('admin.ui.alas.owner_user') }}</span>
+        <strong id="alasAssignmentUserName">{{ t('admin.ui.drawers.assignment.pending_user') }}</strong>
+        <small id="alasAssignmentUserMeta">{{ t('admin.ui.drawers.assignment.select_recipient') }}</small>
+      </div>
+      <span class="alas-assignment-summary__arrow" aria-hidden="true">→</span>
+      <div id="alasAssignmentConfigSummary" class="alas-assignment-summary__item alas-assignment-summary__item--config" data-state="idle">
+        <span>{{ t('admin.ui.alas.runtime_configs') }}</span>
+        <strong id="alasAssignmentConfigName">{{ t('admin.ui.drawers.assignment.pending_config') }}</strong>
+        <small id="alasAssignmentConfigMeta">{{ t('admin.ui.drawers.assignment.select_or_enter') }}</small>
+      </div>
     </div>
-    <span class="alas-assignment-summary__arrow" aria-hidden="true">→</span>
-    <div id="alasAssignmentConfigSummary" class="alas-assignment-summary__item alas-assignment-summary__item--config" data-state="idle">
-      <span>{{ t('admin.ui.alas.runtime_configs') }}</span>
-      <strong id="alasAssignmentConfigName">{{ t('admin.ui.drawers.assignment.pending_config') }}</strong>
-      <small id="alasAssignmentConfigMeta">{{ t('admin.ui.drawers.assignment.select_or_enter') }}</small>
+    <div class="form-grid drawer-form">
+      <div class="col-12"><label for="alasBindUser">{{ t('admin.ui.access.user') }}</label><select id="alasBindUser"></select></div>
+      <div class="col-12"><label for="alasBindConfig">{{ t('admin.ui.drawers.assignment.owned_config') }}</label><select id="alasBindConfig" aria-controls="alasBindConfigCustomField" aria-describedby="alasAssignmentOwnerHint"><option value="" disabled selected>{{ t('admin.ui.alas.select_config_prompt') }}</option></select></div>
+      <div id="alasBindConfigCustomField" class="col-12" hidden><label for="alasBindConfigCustom">{{ t('admin.ui.drawers.assignment.manual_name') }}</label><input id="alasBindConfigCustom" placeholder="{{ t('admin.ui.drawers.assignment.manual_name_placeholder') }}" autocomplete="off" spellcheck="false" aria-describedby="alasAssignmentOwnerHint"></div>
+      <div class="col-6"><label for="alasBindRun">{{ t('admin.ui.drawers.assignment.run_permission') }}</label><select id="alasBindRun"><option value="true">{{ t('admin.ui.drawers.assignment.allow_run') }}</option><option value="false">{{ t('admin.ui.drawers.assignment.status_only') }}</option></select></div>
+      <div class="col-6"><label for="alasBindEdit">{{ t('admin.ui.drawers.assignment.edit_permission') }}</label><select id="alasBindEdit"><option value="false">{{ t('admin.ui.drawers.assignment.deny_edit') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.allow_edit') }}</option></select></div>
+      <div class="col-12"><label for="alasBindDefault">{{ t('admin.ui.drawers.assignment.default_entry') }}</label><select id="alasBindDefault"><option value="keep">{{ t('admin.ui.drawers.assignment.keep_default') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.set_default') }}</option></select></div>
+      <input id="alasBindEnabled" type="hidden" value="true">
     </div>
+    <p id="alasAssignmentOwnerHint" class="muted drawer-note alas-owner-note" data-state="idle" role="status">{{ t('admin.ui.drawers.assignment.note') }}</p>
   </div>
-  <div class="form-grid drawer-form">
-    <div class="col-12"><label for="alasBindUser">{{ t('admin.ui.access.user') }}</label><select id="alasBindUser"></select></div>
-    <div class="col-12"><label for="alasBindConfig">{{ t('admin.ui.drawers.assignment.owned_config') }}</label><select id="alasBindConfig" aria-controls="alasBindConfigCustomField" aria-describedby="alasAssignmentOwnerHint"><option value="" disabled selected>{{ t('admin.ui.alas.select_config_prompt') }}</option></select></div>
-    <div id="alasBindConfigCustomField" class="col-12" hidden><label for="alasBindConfigCustom">{{ t('admin.ui.drawers.assignment.manual_name') }}</label><input id="alasBindConfigCustom" placeholder="{{ t('admin.ui.drawers.assignment.manual_name_placeholder') }}" autocomplete="off" spellcheck="false" aria-describedby="alasAssignmentOwnerHint"></div>
-    <div class="col-6"><label for="alasBindRun">{{ t('admin.ui.drawers.assignment.run_permission') }}</label><select id="alasBindRun"><option value="true">{{ t('admin.ui.drawers.assignment.allow_run') }}</option><option value="false">{{ t('admin.ui.drawers.assignment.status_only') }}</option></select></div>
-    <div class="col-6"><label for="alasBindEdit">{{ t('admin.ui.drawers.assignment.edit_permission') }}</label><select id="alasBindEdit"><option value="false">{{ t('admin.ui.drawers.assignment.deny_edit') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.allow_edit') }}</option></select></div>
-    <div class="col-12"><label for="alasBindDefault">{{ t('admin.ui.drawers.assignment.default_entry') }}</label><select id="alasBindDefault"><option value="keep">{{ t('admin.ui.drawers.assignment.keep_default') }}</option><option value="true">{{ t('admin.ui.drawers.assignment.set_default') }}</option></select></div>
-    <input id="alasBindEnabled" type="hidden" value="true">
-  </div>
-  <p id="alasAssignmentOwnerHint" class="muted drawer-note alas-owner-note" data-state="idle" role="status">{{ t('admin.ui.drawers.assignment.note') }}</p>
   <div class="drawer-actions"><button id="cancelAlasAssignment" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="saveAlasBinding" class="btn primary" type="button">{{ t('admin.ui.drawers.assignment.save') }}</button></div>
 </aside>
 
 <div id="alasConfigDrawerBackdrop" class="ui-drawer-backdrop" hidden></div>
 <aside id="alasConfigDrawer" class="ui-drawer admin-editor-drawer admin-editor-drawer--wide" role="dialog" aria-modal="true" aria-labelledby="alasConfigDrawerTitle" aria-describedby="alasConfigDrawerContext" aria-hidden="true" inert>
    <div class="drawer-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.runtime_config') }}</p><h2 id="alasConfigDrawerTitle">{{ t('admin.ui.drawers.config.title') }}</h2><p id="alasConfigDrawerContext" class="drawer-context">{{ t('admin.ui.drawers.config.context') }}</p></div><button id="alasConfigDrawerClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.drawers.config.close') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
-  <div class="form-grid drawer-form">
-    <div class="col-6"><label for="configSource">{{ t('admin.ui.drawers.config.source') }}</label><input id="configSource" readonly placeholder="{{ t('admin.ui.drawers.config.current') }}"></div>
-    <div class="col-6"><label for="configTarget">{{ t('admin.ui.drawers.config.target') }}</label><input id="configTarget" readonly placeholder="{{ t('admin.ui.drawers.config.same_target') }}"></div>
-    <div class="col-12"><label for="configEditor">{{ t('admin.ui.drawers.config.json') }}</label><textarea id="configEditor" spellcheck="false" placeholder="{{ t('admin.ui.drawers.config.editor_placeholder') }}"></textarea></div>
+  <div class="drawer-body">
+    <div class="form-grid drawer-form">
+      <div class="col-6"><label for="configSource">{{ t('admin.ui.drawers.config.source') }}</label><input id="configSource" readonly placeholder="{{ t('admin.ui.drawers.config.current') }}"></div>
+      <div class="col-6"><label for="configTarget">{{ t('admin.ui.drawers.config.target') }}</label><input id="configTarget" readonly placeholder="{{ t('admin.ui.drawers.config.same_target') }}"></div>
+      <div class="col-12"><label for="configEditor">{{ t('admin.ui.drawers.config.json') }}</label><textarea id="configEditor" spellcheck="false" placeholder="{{ t('admin.ui.drawers.config.editor_placeholder') }}"></textarea></div>
+    </div>
+    <p id="alasConfigDrawerImpact" class="muted drawer-note">{{ t('admin.ui.drawers.config.impact') }}</p>
   </div>
-  <p id="alasConfigDrawerImpact" class="muted drawer-note">{{ t('admin.ui.drawers.config.impact') }}</p>
   <div class="drawer-actions"><button id="cancelAlasConfig" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="loadConfig" class="btn" type="button">{{ t('admin.ui.drawers.config.reload') }}</button><button id="saveConfig" class="btn primary" type="button">{{ t('admin.ui.drawers.config.save') }}</button></div>
 </aside>
 

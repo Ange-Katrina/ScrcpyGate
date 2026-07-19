@@ -2129,18 +2129,21 @@ td.actions {
 
 .admin-editor-drawer {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  align-content: start;
-  gap: var(--ui-space-5);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
   overflow: hidden;
 }
 
-.admin-editor-drawer > .drawer-form,
-.admin-editor-drawer > .config-diff-workspace,
-.admin-editor-drawer > .alas-assignment-editor {
+.admin-editor-drawer > .drawer-body {
+  min-width: 0;
   min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-1);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .drawer-heading {
@@ -2154,6 +2157,8 @@ td.actions {
 
 .drawer-form {
   align-items: start;
+  align-content: start;
+  grid-auto-rows: max-content;
 }
 
 .drawer-note {
@@ -2204,11 +2209,11 @@ td.actions {
 }
 
 .drawer-actions {
-  position: sticky;
-  bottom: 0;
+  position: static;
   z-index: 2;
+  flex: 0 0 auto;
   justify-content: flex-end;
-  margin-top: auto;
+  margin-top: 0;
   padding-top: var(--ui-space-4);
   padding-bottom: max(var(--ui-space-1), env(safe-area-inset-bottom));
   border-top: 1px solid var(--ui-color-border);
@@ -2855,8 +2860,8 @@ td.actions {
     height: min(46vh, 240px);
   }
 
-  .admin-editor-drawer {
-    gap: var(--ui-space-3);
+  .admin-editor-drawer > .drawer-body {
+    padding-block: var(--ui-space-3);
   }
 }
 

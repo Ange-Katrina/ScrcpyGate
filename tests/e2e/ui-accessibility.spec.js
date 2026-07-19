@@ -181,6 +181,84 @@ test.describe("ScrcpyGate accessibility and layout gates", () => {
     }
   });
 
+  test("admin editor drawers keep compact fields and fixed actions", async ({ page }) => {
+    test.skip(!e2eUsername || !e2ePassword, "Set authenticated E2E credentials");
+    await signIn(page);
+    await page.goto("/admin", { waitUntil: "domcontentloaded" });
+
+    const openDrawer = async (tabSelector, triggerSelector, drawerSelector) => {
+      const navToggle = page.locator("#adminNavToggle");
+      if (await navToggle.isVisible()) {
+        await navToggle.click();
+      }
+      await page.locator(tabSelector).evaluate((element) => element.click());
+      await expect(page.locator(triggerSelector)).toBeVisible();
+      await page.locator(triggerSelector).click();
+      await expect(page.locator(drawerSelector)).toHaveClass(/is-open/);
+    };
+
+    const assertDrawerGeometry = async (drawerSelector) => {
+      const geometry = await page.locator(drawerSelector).evaluate((drawer) => {
+        const heading = drawer.querySelector(".drawer-heading");
+        const body = drawer.querySelector(".drawer-body");
+        const actions = drawer.querySelector(".drawer-actions");
+        const visibleFields = Array.from(drawer.querySelectorAll(".drawer-form > div"))
+          .filter((field) => !field.hidden && field.getClientRects().length)
+          .map((field) => field.getBoundingClientRect())
+          .sort((left, right) => left.top - right.top || left.left - right.left);
+        const rowGaps = [];
+        let previousRow = null;
+        for (const rect of visibleFields) {
+          if (!previousRow || Math.abs(rect.top - previousRow.top) <= 1) {
+            previousRow = previousRow
+              ? { top: previousRow.top, bottom: Math.max(previousRow.bottom, rect.bottom) }
+              : { top: rect.top, bottom: rect.bottom };
+            continue;
+          }
+          rowGaps.push(rect.top - previousRow.bottom);
+          previousRow = { top: rect.top, bottom: rect.bottom };
+        }
+        const headingRect = heading.getBoundingClientRect();
+        const bodyRect = body.getBoundingClientRect();
+        const actionsRect = actions.getBoundingClientRect();
+        const anchorsBeforeScroll = { headingTop: headingRect.top, actionsBottom: actionsRect.bottom };
+        const canScroll = body.scrollHeight > body.clientHeight + 1;
+        if (canScroll) body.scrollTop = body.scrollHeight;
+        const anchorsAfterScroll = {
+          headingTop: heading.getBoundingClientRect().top,
+          actionsBottom: actions.getBoundingClientRect().bottom,
+        };
+        return {
+          rowGaps,
+          bodyTop: bodyRect.top,
+          bodyBottom: bodyRect.bottom,
+          headingBottom: headingRect.bottom,
+          actionsTop: actionsRect.top,
+          actionsBottom: actionsRect.bottom,
+          viewportHeight: window.visualViewport ? window.visualViewport.height : innerHeight,
+          canScroll,
+          anchorsBeforeScroll,
+          anchorsAfterScroll,
+        };
+      });
+      expect(geometry.rowGaps.every((gap) => gap >= 0 && gap <= 32)).toBe(true);
+      expect(geometry.bodyTop).toBeGreaterThanOrEqual(geometry.headingBottom - 1);
+      expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.actionsTop + 1);
+      expect(geometry.actionsBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+      if (geometry.canScroll) {
+        expect(Math.abs(geometry.anchorsBeforeScroll.headingTop - geometry.anchorsAfterScroll.headingTop)).toBeLessThanOrEqual(1);
+        expect(Math.abs(geometry.anchorsBeforeScroll.actionsBottom - geometry.anchorsAfterScroll.actionsBottom)).toBeLessThanOrEqual(1);
+      }
+    };
+
+    await openDrawer("#adminTabDevices", "#openDeviceDrawer", "#deviceDrawer");
+    await assertDrawerGeometry("#deviceDrawer");
+    await page.keyboard.press("Escape");
+
+    await openDrawer("#adminTabUsers", "#openUserDrawer", "#userDrawer");
+    await assertDrawerGeometry("#userDrawer");
+  });
+
   test("mobile ALAS shell keeps return action and locale control visible", async ({ page }, testInfo) => {
     test.skip(!["mobile", "mobile-landscape"].includes(testInfo.project.name), "Mobile projects only");
     test.skip(!e2eUsername || !e2ePassword, "Set authenticated E2E credentials");

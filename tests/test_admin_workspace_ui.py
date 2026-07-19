@@ -66,8 +66,33 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", self.styles)
         self.assertIn(".device-card .actions .danger:last-child", self.styles)
         self.assertIn("@media (max-height: 520px) and (orientation: landscape)", self.styles)
-        self.assertIn("grid-template-rows: auto minmax(0, 1fr)", self.styles)
-        self.assertIn("position: sticky", self.styles)
+        self.assertIn("grid-template-rows: auto minmax(0, 1fr) auto", self.styles)
+        body_rule = self.styles.split(".admin-editor-drawer > .drawer-body {", 1)[1].split("}", 1)[0]
+        form_rule = self.styles.split(".drawer-form {", 1)[1].split("}", 1)[0]
+        actions_rule = self.styles.split(".drawer-actions {", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-y: auto", body_rule)
+        self.assertIn("align-content: start", body_rule)
+        self.assertIn("grid-auto-rows: max-content", form_rule)
+        self.assertIn("position: static", actions_rule)
+
+    def test_all_editor_drawers_use_fixed_header_scrollable_body_and_actions(self):
+        drawer_ids = (
+            "deviceDrawer",
+            "userDrawer",
+            "alasConnectionDrawer",
+            "alasAssignmentDrawer",
+            "alasConfigDrawer",
+        )
+        for drawer_id in drawer_ids:
+            start = self.template.index(f'<aside id="{drawer_id}"')
+            end = self.template.index("</aside>", start)
+            drawer = self.template[start:end]
+            self.assertEqual(drawer.count('class="drawer-body"'), 1, drawer_id)
+            self.assertEqual(drawer.count('class="drawer-actions"'), 1, drawer_id)
+            self.assertIn('\n  <div class="drawer-body">', drawer, drawer_id)
+            self.assertIn('\n  <div class="drawer-actions">', drawer, drawer_id)
+            self.assertLess(drawer.index('class="drawer-heading"'), drawer.index('class="drawer-body"'))
+            self.assertLess(drawer.index('class="drawer-body"'), drawer.index('class="drawer-actions"'))
 
     def test_tables_and_danger_actions_use_responsive_accessible_patterns(self):
         self.assertGreaterEqual(self.template.count('class="responsive-table"'), 5)
