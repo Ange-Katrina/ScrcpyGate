@@ -27,6 +27,9 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, self.template + self.script)
 
+    def test_compact_status_details_keeps_an_accessible_name(self):
+        self.assertIn('aria-label="{{ t(\'mirror.ui.status_details\') }}"', self.template)
+
     def test_tools_use_one_accessible_workspace_drawer(self):
         for trigger in ("toolBtn", "alasBtn", "accountBtn"):
             self.assertRegex(
