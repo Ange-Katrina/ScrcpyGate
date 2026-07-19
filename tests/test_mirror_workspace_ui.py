@@ -86,6 +86,8 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             'id="immersiveRail"',
             'id="immersiveRailToggle"',
             'id="immersiveControls"',
+            'id="immersiveControlBtn"',
+            'id="immersiveAlasBtn"',
             'id="immersiveStopBtn"',
             'id="exitFullscreenBtn"',
             'aria-controls="immersiveControls"',
@@ -101,9 +103,18 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             "function toggleImmersiveMode(trigger)",
             "FULLSCREEN_MIN_MAX_SIZE = 1280",
             "fullscreen_profile",
+            "function videoLayoutSize(availW, availH, screenW, screenH, fit='contain', immersive=false)",
+            "if (immersive) return {width:safeW, height:safeH, objectFit:'cover'}",
+            "grid-template-columns: repeat(2, 44px)",
+            "font-size: 10px",
+            ".app.is-immersive .stage {\n    grid-template-columns: minmax(0, 1fr)",
+            ".app.is-immersive .immersive-rail-toggle {\n    width: 44px",
+            "overflow-x: hidden",
+            ".app.is-immersive .immersive-action[data-tone=\"danger\"]",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, self.styles + self.script)
+        self.assertIn('class="nav-label-immersive"', self.template)
         self.assertIn("controls.toggleAttribute('inert', hidden)", self.script)
         self.assertIn("request.call(app, {navigationUI:'hide'})", self.script)
         self.assertIn("function queueQualityApply(payload, options={})", self.script)
@@ -118,6 +129,12 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("requestAnimationFrame(()=>toggle.focus({preventScroll:true}))", self.script)
         self.assertIn("requestAnimationFrame(()=>target.focus({preventScroll:true}))", self.script)
         self.assertIn("right: env(safe-area-inset-right)", self.styles)
+        self.assertIn("bindClick('immersiveControlBtn'", self.script)
+        self.assertIn("bindClick('immersiveAlasBtn'", self.script)
+        self.assertIn("loadAlasPanel().catch(()=>{})", self.script)
+        self.assertIn("alas.disabled=!binding || !binding.can_run || loading || actionBusy('alas')", self.script)
+        self.assertIn("alas.setAttribute('aria-busy', String(loading || actionBusy('alas')))", self.script)
+        self.assertIn(".app.is-immersive .nav-label {\n    display: block", self.styles)
 
     def test_sidebar_identity_and_device_rows_use_compact_information_hierarchy(self):
         for token in (

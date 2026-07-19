@@ -572,14 +572,12 @@ function renderStatus(){
   const stopDisabled=mirrorBusy || state.starting || state.qualityApplying || !device || (!running && !localConnected);
   const stopBtn=$('stopBtn');
   if (stopBtn) stopBtn.disabled = stopDisabled;
-  const immersiveStopBtn=$('immersiveStopBtn');
-  if (immersiveStopBtn) immersiveStopBtn.disabled = stopDisabled;
   renderKeyboardControl();
   renderAlasPanel();
+  renderImmersiveActions(device, stopDisabled);
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
   renderStageEmpty(device, session);
-  const phoneVideo=$('phoneVideo'); if (phoneVideo) phoneVideo.style.objectFit = 'contain';
   scheduleLayout();
 }
 function setButtonLabel(button, text){
@@ -710,6 +708,41 @@ function renderAlasPanel(){
       openLink.setAttribute('tabindex','-1');
     }
   }
+}
+function renderImmersiveActions(device, stopDisabled){
+  const control=$('immersiveControlBtn');
+  if (control) {
+    const releasing=state.hasControl;
+    const label=mirrorT(releasing ? 'mirror.ui.fullscreen_release' : 'mirror.ui.fullscreen_control');
+    const description=mirrorT(releasing ? 'mirror.actions.release_control' : 'mirror.actions.acquire_control');
+    setButtonLabel(control, label);
+    control.disabled=actionBusy('control') || state.starting || !deviceSelectable(device) || !device.can_control;
+    control.dataset.active=String(releasing);
+    control.setAttribute('aria-pressed', String(releasing));
+    control.setAttribute('aria-label', description);
+    control.title=description;
+  }
+  const alas=$('immersiveAlasBtn');
+  if (alas) {
+    const binding=currentAlasBinding();
+    const status=state.alas && state.alas.config === state.selectedAlasConfig ? state.alas.status : '';
+    const running=status === 'running';
+    const actionKey=status === 'error' ? 'restart' : running ? 'stop' : 'start';
+    const loading=state.alasConfigsLoading || state.alasStatusLoading;
+    const description=loading
+      ? (binding ? mirrorT('mirror.alas_panel.loading_status',{config:binding.config_name}) : mirrorT('mirror.alas_panel.loading_configs'))
+      : mirrorT(`mirror.alas_panel.${actionKey}`);
+    const details=binding && !loading ? `${binding.config_name} · ${alasStatusLabel(status || 'unknown')} · ${description}` : description;
+    alas.disabled=!binding || !binding.can_run || loading || actionBusy('alas');
+    alas.dataset.active=String(running);
+    alas.dataset.tone=!loading && status === 'error' ? 'danger' : '';
+    alas.setAttribute('aria-pressed', String(running));
+    alas.setAttribute('aria-busy', String(loading || actionBusy('alas')));
+    alas.setAttribute('aria-label', details);
+    alas.title=details;
+  }
+  const stop=$('immersiveStopBtn');
+  if (stop) stop.disabled=stopDisabled;
 }
 function renderAccountPanel(){
   const box=$('accountInfo'); if(!box) return; box.textContent='';
@@ -1557,24 +1590,35 @@ function updateInputSize(){
   if (state.input && state.input.resizeScreen) state.input.resizeScreen(w,h);
   scheduleLayout();
 }
+function videoLayoutSize(availW, availH, screenW, screenH, fit='contain', immersive=false){
+  const safeW=Math.max(1, Number(availW) || 1);
+  const safeH=Math.max(1, Number(availH) || 1);
+  const naturalW=Math.max(1, Number(screenW) || 1280);
+  const naturalH=Math.max(1, Number(screenH) || 720);
+  if (immersive) return {width:safeW, height:safeH, objectFit:'cover'};
+  const aspect=naturalW / naturalH;
+  let width=safeW;
+  let height=width / aspect;
+  if (fit === 'original') {
+    const scale=Math.min(1, safeW / naturalW, safeH / naturalH);
+    width=naturalW * scale;
+    height=naturalH * scale;
+  } else if (height > safeH) {
+    height=safeH;
+    width=height * aspect;
+  }
+  return {width, height, objectFit:'contain'};
+}
 function layoutVideo(){
   const stage=$('stage'); const area=$('screenArea') || stage; const wrap=$('videoWrap'); if (!area || !wrap) return;
   const style=getComputedStyle(area);
   const availW=Math.max(1, area.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0));
   const availH=Math.max(1, area.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0));
-  const aspect=(state.screen.w || 1280) / Math.max(1, state.screen.h || 720);
-  let width=availW; let height=width / aspect;
-  if (state.fit === 'original') {
-    const naturalW = state.screen.w || 1280;
-    const naturalH = state.screen.h || 720;
-    const scale = Math.min(1, availW / naturalW, availH / naturalH);
-    width = naturalW * scale;
-    height = naturalH * scale;
-  } else if (height > availH) {
-    height=availH; width=height * aspect;
-  }
-  wrap.style.width=`${Math.max(1, Math.floor(width))}px`;
-  wrap.style.height=`${Math.max(1, Math.floor(height))}px`;
+  const layout=videoLayoutSize(availW, availH, state.screen.w, state.screen.h, state.fit, state.immersive);
+  wrap.style.width=`${Math.max(1, Math.floor(layout.width))}px`;
+  wrap.style.height=`${Math.max(1, Math.floor(layout.height))}px`;
+  const video=$('phoneVideo');
+  if (video && video.style.objectFit !== layout.objectFit) video.style.objectFit=layout.objectFit;
   if (state.input && state.input.invalidateGeometry) state.input.invalidateGeometry();
 }
 function scheduleLayout(){
@@ -2003,6 +2047,7 @@ function setImmersiveMode(enabled, options={}){
   if (state.immersive && !wasImmersive) {
     const toggle=$('immersiveRailToggle');
     if (toggle) requestAnimationFrame(()=>toggle.focus({preventScroll:true}));
+    if (!state.alasConfigsLoaded && !state.alasConfigsLoading) loadAlasPanel().catch(()=>{});
   } else if (!state.immersive && wasImmersive) {
     state.immersiveTrigger=null;
     const target=(trigger && trigger.isConnected ? trigger : $('fullscreenBtn'));
@@ -2102,6 +2147,8 @@ function initializeWorkspaceInteractions(){
   bindClick('keyboardBtn', openMobileKeyboard);
   bindClick('fullscreenBtn', (_, button)=>toggleImmersiveMode(button));
   bindClick('immersiveRailToggle', ()=>syncImmersiveRail(!state.immersiveRailOpen));
+  bindClick('immersiveControlBtn', (_, button)=>runBusyAction('control', button, mirrorT('mirror.busy.control'), toggleControl).catch(e=>show(e.message)));
+  bindClick('immersiveAlasBtn', (_, button)=>runBusyAction('alas', button, mirrorT('mirror.busy.alas_update'), toggleAlas).catch(()=>{}));
   bindClick('immersiveStopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).catch(e=>show(e.message)));
   bindClick('exitFullscreenBtn', ()=>exitImmersiveMode());
   bindClick('alasBtn', (_, button)=>{

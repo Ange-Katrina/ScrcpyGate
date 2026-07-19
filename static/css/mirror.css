@@ -1017,6 +1017,10 @@ video {
   line-height: 1;
 }
 
+.nav-label-immersive {
+  display: none;
+}
+
 .app.is-immersive {
   grid-template-columns: minmax(0, 1fr);
   background: var(--mirror-video);
@@ -1998,6 +2002,81 @@ video {
 
   .device-search input {
     height: 42px;
+  }
+}
+
+@media (max-width: 960px), (pointer: coarse) {
+  .app.is-immersive .stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "screen";
+    padding: 0;
+  }
+
+  .app.is-immersive .immersive-rail-toggle {
+    width: 44px;
+    min-height: 56px;
+  }
+
+  .app.is-immersive .immersive-controls {
+    width: 96px;
+    max-height: calc(var(--mirror-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)));
+    gap: 3px;
+    padding: 3px 2px 3px 3px;
+    overflow-x: hidden;
+  }
+
+  .app.is-immersive .immersive-rail[data-open="true"] .immersive-rail-toggle {
+    right: 96px;
+  }
+
+  .app.is-immersive .dock,
+  .app.is-immersive .immersive-actions {
+    width: 90px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    gap: 2px;
+  }
+
+  .app.is-immersive .dock {
+    padding: 0;
+  }
+
+  .app.is-immersive .immersive-actions {
+    padding-top: 3px;
+  }
+
+  .app.is-immersive .nav-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    flex-basis: 44px;
+    grid-template-rows: 16px 10px;
+    gap: 1px;
+    padding: 2px 0;
+  }
+
+  .app.is-immersive .nav-label {
+    display: block;
+    max-width: 42px;
+    overflow: visible;
+    font-size: 10px;
+    font-weight: var(--ui-weight-semibold);
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .app.is-immersive .nav-label-default {
+    display: none;
+  }
+
+  .app.is-immersive .nav-label-immersive {
+    display: inline;
+  }
+
+  .app.is-immersive .immersive-action[data-tone="danger"] {
+    background: var(--ui-color-danger-soft);
+    color: var(--ui-color-danger);
   }
 }
 

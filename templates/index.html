@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=5279ccd47ece">
-  <link rel="stylesheet" href="/static/css/mirror.css?v=aa9e4ac1e67b">
+  <link rel="stylesheet" href="/static/css/mirror.css?v=ac9617248235">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
   <script src="/static/js/ui-core.js?v=0eda8e065ff2" defer></script>
   <script src="/static/js/jmuxer.min.js?v=70381d825b1a"></script>
@@ -163,19 +163,25 @@
         <div id="immersiveControls" class="immersive-controls" aria-hidden="false">
           <nav class="dock" aria-label="{{ t('mirror.ui.android_navigation') }}">
             <button id="backBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.back') }}" aria-label="{{ t('mirror.ui.back') }}">
-              <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.back') }}</span>
+              <span class="nav-icon nav-back" aria-hidden="true"></span><span class="nav-label"><span class="nav-label-default">{{ t('mirror.ui.back') }}</span><span class="nav-label-immersive">{{ t('mirror.ui.fullscreen_back') }}</span></span>
             </button>
             <button id="homeBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.home') }}" aria-label="{{ t('mirror.ui.home') }}">
-              <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.home') }}</span>
+              <span class="nav-icon nav-home" aria-hidden="true"></span><span class="nav-label"><span class="nav-label-default">{{ t('mirror.ui.home') }}</span><span class="nav-label-immersive">{{ t('mirror.ui.fullscreen_home') }}</span></span>
             </button>
             <button id="recentBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.recent') }}" aria-label="{{ t('mirror.ui.recent') }}">
-              <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label">{{ t('mirror.ui.recent') }}</span>
+              <span class="nav-icon nav-recent" aria-hidden="true"></span><span class="nav-label"><span class="nav-label-default">{{ t('mirror.ui.recent') }}</span><span class="nav-label-immersive">{{ t('mirror.ui.fullscreen_recent') }}</span></span>
             </button>
             <button id="keyboardBtn" class="nav-btn" type="button" title="{{ t('mirror.ui.open_keyboard') }}" aria-label="{{ t('mirror.ui.open_keyboard') }}" data-active="false" disabled>
-              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#keyboard"></use></svg><span class="nav-label">{{ t('mirror.ui.keyboard') }}</span>
+              <svg class="ui-icon nav-keyboard" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#keyboard"></use></svg><span class="nav-label"><span class="nav-label-default">{{ t('mirror.ui.keyboard') }}</span><span class="nav-label-immersive">{{ t('mirror.ui.fullscreen_keyboard') }}</span></span>
             </button>
           </nav>
           <div class="immersive-actions" aria-label="{{ t('mirror.ui.fullscreen_actions') }}">
+            <button id="immersiveControlBtn" class="nav-btn immersive-action" type="button" title="{{ t('mirror.ui.get_control') }}" aria-label="{{ t('mirror.ui.get_control') }}" aria-pressed="false" disabled>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#user-round"></use></svg><span class="nav-label action-label">{{ t('mirror.ui.fullscreen_control') }}</span>
+            </button>
+            <button id="immersiveAlasBtn" class="nav-btn immersive-action" type="button" title="{{ t('mirror.ui.start_alas') }}" aria-label="{{ t('mirror.ui.start_alas') }}" aria-pressed="false" disabled>
+              <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#bot"></use></svg><span class="nav-label action-label">ALAS</span>
+            </button>
             <button id="immersiveStopBtn" class="nav-btn immersive-action danger" type="button" title="{{ t('mirror.ui.stop_mirror') }}" aria-label="{{ t('mirror.ui.stop_mirror') }}">
               <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#square"></use></svg><span class="nav-label">{{ t('mirror.ui.stop') }}</span>
             </button>
@@ -286,6 +292,6 @@
 </aside>
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/mirror.js?v=983e1699606c" defer></script>
+<script src="/static/js/mirror.js?v=9636a1353524" defer></script>
 </body>
 </html>

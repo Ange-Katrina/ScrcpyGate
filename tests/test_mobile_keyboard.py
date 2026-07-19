@@ -214,6 +214,33 @@ console.log(JSON.stringify({
         )
         self.assertEqual(result, {"bodyChildren": 0, "documentListeners": 0, "videoListeners": 0})
 
+    def test_cover_fit_maps_cropped_landscape_and_portrait_video(self):
+        result = self.run_node(
+            r"""
+const landscapeVideo=new FakeTarget('video');
+landscapeVideo.style.objectFit='cover';
+const landscape=new ScrcpyInput(()=>{}, landscapeVideo, 200, 100, false);
+const landscapeLeft=landscape.mapClientToDevice(0, 100);
+const landscapeCenter=landscape.mapClientToDevice(50, 100);
+
+const portraitVideo=new FakeTarget('video');
+portraitVideo.style.objectFit='cover';
+portraitVideo.getBoundingClientRect=()=>({left:0,top:0,right:200,bottom:100,width:200,height:100});
+const portrait=new ScrcpyInput(()=>{}, portraitVideo, 100, 200, false);
+const portraitTop=portrait.mapClientToDevice(100, 0);
+const portraitCenter=portrait.mapClientToDevice(100, 50);
+
+landscape.destroy();
+portrait.destroy();
+console.log(JSON.stringify({landscapeLeft,landscapeCenter,portraitTop,portraitCenter}));
+"""
+        )
+
+        self.assertEqual(result["landscapeLeft"], {"x": 75, "y": 50})
+        self.assertEqual(result["landscapeCenter"], {"x": 100, "y": 50})
+        self.assertEqual(result["portraitTop"], {"x": 50, "y": 75})
+        self.assertEqual(result["portraitCenter"], {"x": 50, "y": 100})
+
 
 class MobileKeyboardWorkspaceContractTests(unittest.TestCase):
     @classmethod
