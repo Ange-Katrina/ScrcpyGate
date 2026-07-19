@@ -453,7 +453,7 @@ class DeployScriptTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
         self.assertIn("项目目录之外", result.stderr)
 
-    def test_uninstall_refuses_owned_labels_when_disk_data_path_is_missing(self):
+    def test_uninstall_removes_owned_container_when_matching_data_path_is_missing(self):
         target = self.prepare_installer()
         shutil.copy2(target / ".env.example", target / ".env")
 
@@ -464,9 +464,30 @@ class DeployScriptTests(unittest.TestCase):
             TERM="dumb",
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.compose_down_calls(target), [])
-        self.assertIn("无法从磁盘配置解析数据目录", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.compose_down_calls(target)), 1)
+        self.assertFalse((target / "data").exists())
+        self.assertTrue((target / ".env").is_file())
+        self.assertIn("跳过数据清理", result.stderr)
+
+    def test_menu_uninstall_handles_exited_container_with_missing_data_directory(self):
+        target = self.prepare_installer()
+        shutil.copy2(target / ".env.example", target / ".env")
+
+        result = self.run_installer(
+            target,
+            "--menu",
+            input_text="13\ny\n\n\n\n0\n",
+            SCRCPYGATE_FORCE_INTERACTIVE="1",
+            FAKE_SCRCPYGATE_STATE="exited",
+            TERM="dumb",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.compose_down_calls(target)), 1)
+        self.assertIn("卸载完成", result.stdout)
+        self.assertIn("数据目录不存在，无需清理", result.stdout)
+        self.assertIn("跳过数据清理", result.stderr)
 
     def test_uninstall_refuses_containers_without_exact_ownership(self):
         mismatches = {

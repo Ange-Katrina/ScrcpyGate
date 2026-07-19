@@ -935,10 +935,16 @@ existing_instance_can_be_managed() {
       else
         ownership_error="无法从磁盘配置解析数据目录"
       fi
-    elif expected_data=$(existing_container_data_dir); then
-      WEB_SCRCPY_DATA_HOST=$expected_data
-      EXISTING_SCRCPYGATE_DATA_SOURCE=$expected_data
-      success_msg "未找到可用的 .env 数据目录，已恢复现有容器挂载: $(safe_display "$expected_data")"
+    elif actual_data=$(existing_container_data_dir); then
+      expected_data=$actual_data
+      WEB_SCRCPY_DATA_HOST=$actual_data
+      EXISTING_SCRCPYGATE_DATA_SOURCE=$actual_data
+      success_msg "未找到可用的 .env 数据目录，已恢复现有容器挂载: $(safe_display "$actual_data")"
+    elif expected_data=$(configured_data_path_from_disk) && actual_data=$(existing_container_data_path); then
+      EXISTING_SCRCPYGATE_DATA_SOURCE=$actual_data
+      if [ "$actual_data" = "$expected_data" ]; then
+        warn_msg "数据目录不存在，将只移除服务容器并跳过数据清理: $(safe_display "$actual_data")"
+      fi
     else
       ownership_error="无法从磁盘配置解析数据目录"
     fi
@@ -1259,15 +1265,41 @@ configured_data_dir_from_disk() {
   (CDPATH= cd -- "$WEB_SCRCPY_DATA_HOST" && pwd -P)
 }
 
-existing_container_data_dir() {
+canonical_path_allow_missing_leaf() {
+  raw_path=${1:-}
+  [ -n "$raw_path" ] || return 1
+  case "$raw_path" in
+    /*) candidate=$raw_path ;;
+    *) candidate=$SCRIPT_DIR/$raw_path ;;
+  esac
+  while [ "$candidate" != / ] && [ "${candidate%/}" != "$candidate" ]; do
+    candidate=${candidate%/}
+  done
+  leaf=${candidate##*/}
+  parent=${candidate%/*}
+  [ -n "$leaf" ] || return 1
+  [ -n "$parent" ] || parent=/
+  [ -d "$parent" ] || return 1
+  parent=$(CDPATH= cd -- "$parent" && pwd -P) || return 1
+  case "$parent" in
+    /) printf '/%s\n' "$leaf" ;;
+    *) printf '%s/%s\n' "$parent" "$leaf" ;;
+  esac
+}
+
+configured_data_path_from_disk() {
+  load_uninstall_settings
+  canonical_path_allow_missing_leaf "$WEB_SCRCPY_DATA_HOST"
+}
+
+existing_container_data_path() {
   case "${EXISTING_SCRCPYGATE_DATA_TYPE:-}" in
     bind) ;;
     *) return 1 ;;
   esac
   source=${EXISTING_SCRCPYGATE_DATA_SOURCE:-}
   [ -n "$source" ] || return 1
-  [ -d "$source" ] || return 1
-  candidate=$(CDPATH= cd -- "$source" && pwd -P) || return 1
+  candidate=$(canonical_path_allow_missing_leaf "$source") || return 1
   case "$candidate" in
     '/'|"$SCRIPT_DIR"|"${HOME:-}") return 1 ;;
   esac
@@ -1277,10 +1309,21 @@ existing_container_data_dir() {
   printf '%s\n' "$candidate"
 }
 
+existing_container_data_dir() {
+  candidate=$(existing_container_data_path) || return 1
+  [ -d "$candidate" ] || return 1
+  printf '%s\n' "$candidate"
+}
+
 resolve_uninstall_data_dir() {
   if ! UNINSTALL_DATA_DIR=$(configured_data_dir_from_disk); then
-    UNINSTALL_DATA_DIR=$(existing_container_data_dir) \
+    UNINSTALL_DATA_DIR=$(configured_data_path_from_disk) \
+      || UNINSTALL_DATA_DIR=$(existing_container_data_path) \
       || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
+    actual_data=$(existing_container_data_path) \
+      || die "无法验证现有容器的数据挂载目录"
+    [ "$actual_data" = "$UNINSTALL_DATA_DIR" ] \
+      || die "数据挂载目录不匹配: $actual_data"
   fi
   case "$UNINSTALL_DATA_DIR" in
     '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝删除不安全的数据目录: $UNINSTALL_DATA_DIR" ;;
@@ -1291,6 +1334,7 @@ resolve_uninstall_data_dir() {
 }
 
 uninstall_data_can_be_removed() {
+  [ -d "$UNINSTALL_DATA_DIR" ] || return 1
   case "$UNINSTALL_DATA_DIR" in "$SCRIPT_DIR"/*) return 0 ;; esac
   return 1
 }
@@ -1325,10 +1369,15 @@ uninstall_service() {
   resolve_uninstall_data_dir
 
   if is_interactive; then
+    if [ -d "$UNINSTALL_DATA_DIR" ]; then
+      uninstall_data_label="$UNINSTALL_DATA_DIR（默认保留）"
+    else
+      uninstall_data_label="$UNINSTALL_DATA_DIR（不存在）"
+    fi
     panel_top "卸载 ScrcpyGate"
     panel_line "服务容器" "scrcpygate（将停止并移除）"
     panel_line "本地镜像" "scrcpygate:local（默认保留）"
-    panel_line "数据目录" "$UNINSTALL_DATA_DIR（默认保留）"
+    panel_line "数据目录" "$uninstall_data_label"
     panel_line "部署配置" ".env（默认保留）"
     print_rule
     warn_msg "删除数据目录会永久移除账号、设备、权限和全部应用配置"
@@ -1367,8 +1416,11 @@ uninstall_service() {
     fi
   fi
 
-  data_status="已保留"
-  if uninstall_data_can_be_removed; then
+  if [ ! -d "$UNINSTALL_DATA_DIR" ]; then
+    data_status="不存在"
+    success_msg "数据目录不存在，无需清理"
+  elif uninstall_data_can_be_removed; then
+    data_status="已保留"
     if prompt_confirm_no "是否删除数据目录 ${UNINSTALL_DATA_DIR}？此操作不可恢复"; then
       if ! confirm_permanent_data_deletion; then
         warn_msg "确认路径不匹配或目录已变化，已保留数据目录"
@@ -1381,6 +1433,7 @@ uninstall_service() {
       success_msg "已保留数据目录"
     fi
   else
+    data_status="已保留"
     warn_msg "数据目录位于项目目录之外，脚本不会自动删除：$(safe_display "$UNINSTALL_DATA_DIR")"
     warn_msg "确认不再需要后请手工备份并删除该目录"
   fi
