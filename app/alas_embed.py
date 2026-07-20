@@ -2980,15 +2980,65 @@ async def proxy_websocket(
     role: str = "",
     connection_id: str = "",
     authorization_check=None,
+    audit_callback=None,
 ) -> None:
     """双向转发 ScrcpyGate 客户端与 ALAS Runtime 的 WebSocket 消息。"""
     connection_id = _safe_connection_id(connection_id) or uuid.uuid4().hex[:12]
+    audited_events: set[tuple[str, str, str, str]] = set()
+
+    async def emit_audit(
+        action: str,
+        *,
+        outcome: str,
+        reason: str,
+        severity: str = "warning",
+        permission: str = "",
+        event: str = "",
+    ) -> None:
+        """Emit bounded policy categories only; never forward message bodies."""
+        if audit_callback is None:
+            return
+        key = (action, reason, permission, event)
+        if key in audited_events or len(audited_events) >= 16:
+            return
+        audited_events.add(key)
+        safe_event = event if re.fullmatch(r"[a-z][a-z0-9_]{0,31}", event or "") else "none"
+        metadata = {
+            "permission": permission or "none",
+            "event": safe_event,
+        }
+        try:
+            result = audit_callback(
+                action,
+                outcome=outcome,
+                reason=reason,
+                severity=severity,
+                metadata=metadata,
+            )
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "ALAS_WS_AUDIT_FAILED connection=%s event=%s reason=callback_failed permission=none task=none",
+                connection_id,
+                event or "audit",
+            )
+
     try:
         target = websocket_target_url(base_url, path, bound_config_query_items(websocket.query_params, decision))
     except ValueError:
         log.warning(
             "ALAS_WS_CLOSE connection=%s event=connect reason=invalid_target permission=none task=none",
             connection_id,
+        )
+        await emit_audit(
+            "alas_embed_ws_failed",
+            outcome="failure",
+            reason="invalid_target",
+            severity="error",
+            event="connect",
         )
         await websocket.close(code=1011)
         return
@@ -3023,6 +3073,13 @@ async def proxy_websocket(
                 "ALAS_WS_POLICY connection=%s event=authorization reason=binding_revoked permission=restricted task=none",
                 connection_id,
             )
+            await emit_audit(
+                "alas_embed_ws_denied",
+                outcome="denied",
+                reason="binding_revoked",
+                permission="restricted",
+                event="authorization",
+            )
             return False
         policy.can_run = bool(current.get("can_run"))
         policy.can_edit = bool(current.get("can_edit"))
@@ -3030,12 +3087,19 @@ async def proxy_websocket(
 
     try:
         async with websocket_connect(target, open_timeout=10.0) as upstream:
+            client_message_seen = asyncio.Event()
+            client_message_done = asyncio.Event()
+            client_message_done.set()
+
             async def client_to_upstream() -> None:
                 """转发客户端文本或二进制消息到上游，并执行普通用户配置越权检查。"""
                 while True:
                     message = await websocket.receive()
+                    client_message_seen.set()
+                    client_message_done.clear()
                     if message.get("type") == "websocket.disconnect":
                         await _close_upstream_safely(upstream)
+                        client_message_done.set()
                         return 1000
                     if "text" in message:
                         text = message["text"]
@@ -3044,16 +3108,35 @@ async def proxy_websocket(
                                 if not await refresh_authorization():
                                     await _close_upstream_safely(upstream, code=1008)
                                     await _close_websocket_safely(websocket, 1008)
+                                    client_message_done.set()
                                     return 1008
                                 message_decision = policy.evaluate_upstream(text)
                             _log_upstream_decision(connection_id, message_decision)
-                            if message_decision.action is WebSocketMessageAction.DROP:
-                                continue
                             if message_decision.closes_connection:
                                 await _close_upstream_safely(upstream, code=1008)
                                 await _close_websocket_safely(websocket, 1008)
+                                await emit_audit(
+                                    "alas_embed_ws_denied",
+                                    outcome="denied",
+                                    reason=message_decision.reason,
+                                    permission=message_decision.permission or "restricted",
+                                    event=message_decision.event,
+                                )
+                                client_message_done.set()
                                 return 1008
+                            if message_decision.action is not WebSocketMessageAction.FORWARD:
+                                await emit_audit(
+                                    "alas_embed_ws_denied",
+                                    outcome="denied",
+                                    reason=message_decision.reason,
+                                    permission=message_decision.permission or "restricted",
+                                    event=message_decision.event,
+                                )
+                            if message_decision.action is WebSocketMessageAction.DROP:
+                                client_message_done.set()
+                                continue
                         await upstream.send(text)
+                        client_message_done.set()
                     elif "bytes" in message:
                         data = message["bytes"]
                         if policy is not None:
@@ -3061,16 +3144,37 @@ async def proxy_websocket(
                                 if not await refresh_authorization():
                                     await _close_upstream_safely(upstream, code=1008)
                                     await _close_websocket_safely(websocket, 1008)
+                                    client_message_done.set()
                                     return 1008
                                 message_decision = policy.evaluate_upstream(data)
                             _log_upstream_decision(connection_id, message_decision)
-                            if message_decision.action is WebSocketMessageAction.DROP:
-                                continue
                             if message_decision.closes_connection:
                                 await _close_upstream_safely(upstream, code=1008)
                                 await _close_websocket_safely(websocket, 1008)
+                                await emit_audit(
+                                    "alas_embed_ws_denied",
+                                    outcome="denied",
+                                    reason=message_decision.reason,
+                                    permission=message_decision.permission or "restricted",
+                                    event=message_decision.event,
+                                )
+                                client_message_done.set()
                                 return 1008
+                            if message_decision.action is not WebSocketMessageAction.FORWARD:
+                                await emit_audit(
+                                    "alas_embed_ws_denied",
+                                    outcome="denied",
+                                    reason=message_decision.reason,
+                                    permission=message_decision.permission or "restricted",
+                                    event=message_decision.event,
+                                )
+                            if message_decision.action is WebSocketMessageAction.DROP:
+                                client_message_done.set()
+                                continue
                         await upstream.send(data)
+                        client_message_done.set()
+                    else:
+                        client_message_done.set()
 
             async def upstream_to_client() -> None:
                 """转发上游文本或二进制消息回客户端。"""
@@ -3107,6 +3211,14 @@ async def proxy_websocket(
                             observation.reason,
                             "none" if observation.reason == "forwarded" else "restricted",
                         )
+                        if observation.reason != "forwarded":
+                            await emit_audit(
+                                "alas_embed_ws_denied",
+                                outcome="denied",
+                                reason=observation.reason,
+                                permission="restricted",
+                                event=downstream_event,
+                            )
                         if message is None:
                             continue
                     if isinstance(message, bytes):
@@ -3114,20 +3226,51 @@ async def proxy_websocket(
                     else:
                         await websocket.send_text(str(message))
 
-            tasks = [
-                asyncio.create_task(client_to_upstream()),
-                asyncio.create_task(upstream_to_client()),
-            ]
+            client_task = asyncio.create_task(client_to_upstream())
+            upstream_task = asyncio.create_task(upstream_to_client())
+            tasks = [client_task, upstream_task]
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            close_code = 1000
+            upstream_result = None
+            for task in done:
+                result = task.result()
+                if task is upstream_task:
+                    upstream_result = result
+                if isinstance(result, int):
+                    close_code = result
+
+            if upstream_task in done and upstream_result is None and client_task in pending:
+                if not client_message_seen.is_set():
+                    # Run already-ready receive work before starting a wall-clock
+                    # timeout, which may already be expired after scheduler stalls.
+                    await asyncio.sleep(0)
+                if not client_message_seen.is_set():
+                    try:
+                        # A busy scheduler may surface an already-sent client
+                        # frame just after upstream EOF. Give the receive pump
+                        # one bounded chance to finish that frame.
+                        await asyncio.wait_for(client_message_seen.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        pass
+                if client_message_seen.is_set() and not client_message_done.is_set():
+                    try:
+                        await asyncio.wait_for(client_message_done.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        close_code = 1008
+                        log.warning(
+                            "ALAS_WS_CLOSE connection=%s event=policy reason=evaluation_timeout permission=restricted task=none",
+                            connection_id,
+                        )
+                if client_task.done():
+                    pending.discard(client_task)
+                    result = client_task.result()
+                    if isinstance(result, int):
+                        close_code = result
+
             for task in pending:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-            close_code = 1000
-            for task in done:
-                result = task.result()
-                if isinstance(result, int):
-                    close_code = result
             await _close_upstream_safely(upstream, code=close_code)
             await _close_websocket_safely(websocket, close_code)
             log.debug(
@@ -3138,6 +3281,13 @@ async def proxy_websocket(
         log.warning(
             "ALAS_WS_CLOSE connection=%s event=exception reason=exception permission=none task=none",
             connection_id,
+        )
+        await emit_audit(
+            "alas_embed_ws_failed",
+            outcome="failure",
+            reason="upstream_exception",
+            severity="error",
+            event="exception",
         )
         await _close_websocket_safely(websocket, 1011)
 

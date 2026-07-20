@@ -15,6 +15,7 @@ PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-
 log = logging.getLogger("webscrcpy.security")
 _LOGIN_FAILURES: dict[str, list[float]] = {}
 _LOGIN_LOCKOUTS: dict[str, float] = {}
+MAX_PENDING_AUDIT_EVENTS = 32
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -168,18 +169,100 @@ def client_ip(request: Request) -> str:
     return canonical_ip(remote) or "unknown"
 
 
+def _audit_route(request: Request) -> str:
+    route = getattr(request.scope.get("route"), "path", "") if hasattr(request, "scope") else ""
+    path = str(route or getattr(getattr(request, "url", None), "path", "/") or "/")
+    if path.startswith("/alas/embed/proxy"):
+        return "/alas/embed/proxy/*"
+    return path[:240]
+
+
+def queue_audit_event(
+    request: Request,
+    *,
+    action: str,
+    outcome: str = "denied",
+    reason: str = "",
+    severity: str = "warning",
+    username: str = "",
+    actor_role: str = "",
+    target_type: str = "route",
+    target_id: str = "",
+    detail: str = "",
+    metadata: dict | None = None,
+    dedupe_key: str = "",
+) -> bool:
+    """Queue one bounded audit event for the HTTP middleware to persist safely."""
+    try:
+        state = request.state
+    except Exception:
+        return False
+    events = getattr(state, "audit_events", None)
+    if not isinstance(events, list):
+        events = []
+        state.audit_events = events
+    if len(events) >= MAX_PENDING_AUDIT_EVENTS:
+        return False
+    if not username:
+        try:
+            user = get_current_user(request)
+        except Exception:
+            user = None
+        if user:
+            username = str(user.get("username") or "")
+            actor_role = actor_role or str(user.get("role") or "")
+    events.append(
+        {
+            "username": username or "anonymous",
+            "actor_role": actor_role or "unknown",
+            "action": action,
+            "detail": detail,
+            "outcome": outcome,
+            "reason": reason,
+            "severity": severity,
+            "target_type": target_type,
+            "target_id": target_id or _audit_route(request),
+            "request_id": str(getattr(state, "request_id", "") or ""),
+            "source_ip": client_ip(request),
+            "user_agent": str(request.headers.get("user-agent", "") or ""),
+            "metadata": {"http_method": str(getattr(request, "method", "") or "").upper(), **(metadata or {})},
+            "dedupe_key": dedupe_key,
+        }
+    )
+    return True
+
+
+def pop_audit_events(request: Request) -> list[dict]:
+    try:
+        events = request.state.audit_events
+        request.state.audit_events = []
+    except Exception:
+        return []
+    return list(events) if isinstance(events, list) else []
+
+
+def has_pending_audit_events(request: Request) -> bool:
+    try:
+        return bool(request.state.audit_events)
+    except Exception:
+        return False
+
+
 def enforce_http_boundary(request: Request) -> None:
     if request.url.path == "/healthz":
         return
     remote = request.client.host if request.client else ""
     if not proxy_headers_allowed(request.headers, remote, request.url.path):
+        queue_audit_event(request, action="http_boundary", reason="untrusted_proxy_headers")
         raise HTTPException(status_code=403, detail=i18n.translate("server.security.forbidden"))
     if not request_host_allowed(request):
         log.warning("HOST_REJECT path=%s host=%s allowed=%s", request.url.path, request.headers.get("host", ""), sorted(allowed_hosts()))
+        queue_audit_event(request, action="http_boundary", reason="host_rejected")
         raise HTTPException(status_code=400, detail=i18n.translate("server.security.bad_request"))
     origin = request.headers.get("origin")
     if origin and not origin_check_exempt(request) and not origin_allowed(origin, str(request.base_url).rstrip("/")):
         log.warning("ORIGIN_REJECT path=%s origin=%s base=%s allowed=%s", request.url.path, origin, str(request.base_url).rstrip("/"), sorted(allowed_origins()))
+        queue_audit_event(request, action="http_boundary", reason="origin_rejected")
         raise HTTPException(status_code=403, detail=i18n.translate("server.security.forbidden"))
 
 
@@ -198,6 +281,7 @@ def get_current_user(request: Request) -> dict | None:
 def require_user(request: Request) -> dict:
     user = get_current_user(request)
     if not user:
+        queue_audit_event(request, action="authentication", reason="login_required")
         raise HTTPException(status_code=401, detail=i18n.translate("server.security.login_required"))
     return user
 
@@ -205,6 +289,13 @@ def require_user(request: Request) -> dict:
 def require_admin(request: Request) -> dict:
     user = require_user(request)
     if user.get("role") != "admin":
+        queue_audit_event(
+            request,
+            action="admin_access",
+            reason="admin_required",
+            username=str(user.get("username") or ""),
+            actor_role=str(user.get("role") or ""),
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.security.admin_required"))
     return user
 
@@ -217,6 +308,7 @@ def csrf_valid(request: Request, provided: str) -> bool:
 
 def verify_csrf_token(request: Request, provided: str) -> None:
     if not csrf_valid(request, provided):
+        queue_audit_event(request, action="csrf_validation", reason="token_invalid")
         raise HTTPException(status_code=400, detail=i18n.translate("server.security.csrf_failed"))
 
 

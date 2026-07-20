@@ -125,6 +125,57 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("Promise.allSettled", self.script)
         self.assertIn("loadedResources.has(name) || visible.has(name)", self.script)
 
+    def test_security_audit_workspace_has_filters_cursor_actions_and_accessible_detail(self):
+        for token in (
+            'id="auditSummaryDenied"',
+            'id="auditSummaryFailed"',
+            'id="auditSummaryHighRisk"',
+            'id="auditFilters"',
+            'id="auditFrom"',
+            'id="auditTo"',
+            'id="auditActor"',
+            'id="auditAction"',
+            'id="auditOutcome"',
+            'id="auditSeverity"',
+            'id="auditRequestId"',
+            'id="auditLoadMore"',
+            'id="auditExportCsv"',
+            'id="auditExportJson"',
+            'id="auditIntegrityCheck"',
+            'id="auditDetailDialog"',
+            'aria-labelledby="auditDetailTitle"',
+            'aria-describedby="auditDetailStatus"',
+            'aria-hidden="true" inert hidden',
+        ):
+            self.assertIn(token, self.template)
+
+        for token in (
+            "api(auditRequestUrl(filters,before),{signal})",
+            "before=append ? auditNextCursor : null",
+            "renderAuditLogs(additions,true)",
+            "api(`/api/admin/logs/${encodeURIComponent(eventId)}`)",
+            "api('/api/admin/logs/export',{method:'POST'",
+            "api('/api/admin/logs/integrity-check',{method:'POST'",
+            "window.ScrcpyGateUI.openDialog(dialog,trigger)",
+            "window.ScrcpyGateUI.closeDialog(dialog,'close')",
+            "$('auditDetailDialog').addEventListener('cancel'",
+            "anchor.download=download.filename",
+            "function auditReasonText(reason)",
+            "admin.audit_reason.http_status",
+        ):
+            self.assertIn(token, self.script)
+        self.assertNotIn("innerHTML", self.script)
+
+        for token in (
+            ".audit-summary",
+            ".audit-filter-form",
+            ".audit-log-table .responsive-table",
+            ".audit-detail-dialog",
+            ".audit-detail-grid",
+            "grid-template-columns: minmax(0, 1fr)",
+        ):
+            self.assertIn(token, self.styles)
+
     def test_admin_script_avoids_runtime_inline_styles(self):
         self.assertNotIn(".style.", self.script)
         self.assertIn("className='stream-mode-toggle'", self.script)

@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -42,6 +42,22 @@ _control_epoch_lock = threading.RLock()
 _control_device_locks: dict[str, threading.Lock] = {}
 _control_lock_epochs: dict[str, int] = {}
 log = logging.getLogger("webscrcpy.mirror")
+ControlAuditCallback = Callable[..., Awaitable[None]]
+
+
+async def _emit_control_audit(
+    callback: ControlAuditCallback | None,
+    action: str,
+    **fields: Any,
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(action, **fields)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("CONTROL_AUDIT_CALLBACK_FAILED action=%s", action)
 
 
 def _stream_mode() -> str:
@@ -93,8 +109,13 @@ def release_control_lock(
     *,
     force: bool = False,
     client_id: str | None = None,
+    only_if_owned: bool = False,
 ) -> bool:
     with _control_device_lock(device_id):
+        if only_if_owned and (
+            client_id is None or not storage.lock_owned_by(device_id, username, client_id)
+        ):
+            return False
         ok = storage.release_lock(device_id, username, force=force, client_id=client_id)
         if ok:
             with _control_epoch_lock:
@@ -983,8 +1004,22 @@ async def video_socket(websocket: WebSocket, user: dict, device_id: str, exposed
         session.remove_client(client.id)
 
 
-async def control_socket(websocket: WebSocket, user: dict, device_id: str, exposed_device_id: str | None = None):
+async def control_socket(
+    websocket: WebSocket,
+    user: dict,
+    device_id: str,
+    exposed_device_id: str | None = None,
+    audit_callback: ControlAuditCallback | None = None,
+):
     if not storage.user_can(user["username"], device_id, "control"):
+        await _emit_control_audit(
+            audit_callback,
+            "control_acquire",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            metadata={"channel": "websocket"},
+        )
         await websocket.close(code=4403)
         return
     await websocket.accept()
@@ -995,10 +1030,26 @@ async def control_socket(websocket: WebSocket, user: dict, device_id: str, expos
         while True:
             message = await websocket.receive()
             if not await asyncio.to_thread(storage.user_can, user["username"], device_id, "control"):
+                await _emit_control_audit(
+                    audit_callback,
+                    "control_release",
+                    outcome="denied",
+                    reason="permission_revoked",
+                    severity="warning",
+                    metadata={"channel": "websocket"},
+                )
                 await websocket.close(code=4403)
                 return
             if message.get("text") is not None:
-                await handle_control_text(websocket, user, device_id, client_id, message["text"], lease)
+                await handle_control_text(
+                    websocket,
+                    user,
+                    device_id,
+                    client_id,
+                    message["text"],
+                    lease,
+                    audit_callback=audit_callback,
+                )
             elif message.get("bytes") is not None:
                 await handle_control_bytes(websocket, user, device_id, client_id, message["bytes"], lease)
     except WebSocketDisconnect:
@@ -1006,7 +1057,25 @@ async def control_socket(websocket: WebSocket, user: dict, device_id: str, expos
     except KeyError:
         await websocket.close(code=4403)
     finally:
-        release_control_lock(device_id, user["username"], force=False, client_id=client_id)
+        # The storage API is idempotent for HTTP callers, but an automatic
+        # release audit must only be emitted when this connection owned a live
+        # lock and actually removed it.
+        released = release_control_lock(
+            device_id,
+            user["username"],
+            force=False,
+            client_id=client_id,
+            only_if_owned=True,
+        )
+        if released:
+            await _emit_control_audit(
+                audit_callback,
+                "control_release",
+                outcome="success",
+                reason="connection_closed",
+                severity="info",
+                metadata={"channel": "websocket", "automatic": True},
+            )
         await manager.broadcast({"type": "control_lock", "device_id": device_id, "lock": storage.get_lock(device_id)})
 
 
@@ -1017,6 +1086,7 @@ async def handle_control_text(
     client_id: str,
     text: str,
     lease: ControlLeaseState | None = None,
+    audit_callback: ControlAuditCallback | None = None,
 ):
     try:
         data = json.loads(text)
@@ -1027,6 +1097,14 @@ async def handle_control_text(
     if msg_type == "acquire_control":
         force = bool(data.get("force") and user.get("role") == "admin")
         result, epoch = acquire_control_lock(device_id, user["username"], client_id, force=force)
+        await _emit_control_audit(
+            audit_callback,
+            "control_acquire",
+            outcome="success" if result.get("ok") else "denied",
+            reason="" if result.get("ok") else "control_occupied",
+            severity="info" if result.get("ok") else "warning",
+            metadata={"channel": "websocket", "force": force},
+        )
         if lease:
             if result.get("ok"):
                 lease.mark_verified(epoch)
@@ -1055,6 +1133,14 @@ async def handle_control_text(
         return
     if msg_type == "release_control":
         ok = release_control_lock(device_id, user["username"], force=user.get("role") == "admin", client_id=client_id)
+        await _emit_control_audit(
+            audit_callback,
+            "control_release",
+            outcome="success" if ok else "denied",
+            reason="" if ok else "not_lock_owner",
+            severity="info" if ok else "warning",
+            metadata={"channel": "websocket", "force": user.get("role") == "admin"},
+        )
         if lease:
             lease.clear()
         await websocket.send_json({"type": "control_released", "ok": ok})

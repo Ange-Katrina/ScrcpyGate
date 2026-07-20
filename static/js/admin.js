@@ -5,7 +5,7 @@ const adminI18n = window.ScrcpyGateI18n;
 const adminT = (key, values) => (
   adminI18n && typeof adminI18n.t === 'function' ? adminI18n.t(key, values) : String(key || '')
 );
-const state = { overview:null, users:[], devices:[], permissions:[], logs:[], runtimeLogs:[], video:{}, alas:null };
+const state = { overview:null, users:[], devices:[], permissions:[], logs:[], auditSummary:{}, runtimeLogs:[], video:{}, alas:null };
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
 const profileLabels = {smooth:'mirror.profile.smooth', balanced:'mirror.profile.balanced', sharp:'mirror.profile.sharp', low_latency:'mirror.profile.low_latency'};
 const profileHints = {smooth:'admin.profile_hint.smooth', balanced:'admin.profile_hint.balanced', sharp:'admin.profile_hint.sharp', low_latency:'admin.profile_hint.low_latency'};
@@ -88,6 +88,10 @@ let deviceStatusPollTimer = null;
 let deviceStatusPollGeneration = 0;
 let overviewRefreshTimer = null;
 let overviewRefreshGeneration = 0;
+let auditNextCursor = null;
+let auditHasMore = false;
+let auditDetailSequence = 0;
+let activeAuditFilters = null;
 const EDITOR_DRAWERS = ['device','user','alasConnection','alasAssignment','alasConfig'];
 function profileLabel(profile, labels={}){ return labels[profile] || (profileLabels[profile] ? adminT(profileLabels[profile]) : profile); }
 function profileHint(profile){ return profileHints[profile] ? adminT(profileHints[profile]) : ''; }
@@ -324,7 +328,31 @@ const API_ERROR_MESSAGES = Object.freeze({
   password_required:'admin.api_error.password_required'
 });
 function apiErrorMessage(detail){ const key=API_ERROR_MESSAGES[String(detail || '')]; return key ? adminT(key) : detail; }
-async function api(url, options={}){ const opts=Object.assign({}, options, {headers:Object.assign({}, options.headers || {})}); if(opts.body && typeof opts.body !== 'string'){ opts.headers['content-type']='application/json'; opts.body=JSON.stringify(opts.body); } if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken; const res=await fetch(url, opts); const text=await res.text(); let data={}; try{ data=text?JSON.parse(text):{}; }catch(_){ data={detail:text}; } if(!res.ok) throw new Error(apiErrorMessage(data.detail) || `HTTP ${res.status}`); return data; }
+async function api(url, options={}){
+  const opts=Object.assign({}, options, {headers:Object.assign({}, options.headers || {})});
+  const download=!!opts.download;
+  delete opts.download;
+  if(opts.body && typeof opts.body !== 'string'){
+    opts.headers['content-type']='application/json';
+    opts.body=JSON.stringify(opts.body);
+  }
+  if(!['GET','HEAD'].includes((opts.method||'GET').toUpperCase())) opts.headers['x-csrf-token']=csrfToken;
+  const res=await fetch(url, opts);
+  const text=await res.text();
+  let data={};
+  try{ data=text?JSON.parse(text):{}; }
+  catch(_){ data={detail:text}; }
+  if(!res.ok) throw new Error(apiErrorMessage(data.detail) || `HTTP ${res.status}`);
+  if(download){
+    const disposition=res.headers.get('content-disposition') || '';
+    const match=disposition.match(/filename="?([^";]+)"?/i);
+    return {
+      blob:new Blob([text],{type:res.headers.get('content-type') || 'application/octet-stream'}),
+      filename:match ? match[1] : ''
+    };
+  }
+  return data;
+}
 function isAbortError(error){ return !!error && (error.name === 'AbortError' || error.code === 20); }
 function reportRequestError(error, prefix=adminT('admin.actions.data_load_failed')){
   if(!isAbortError(error)) show(`${prefix}${error && error.message ? `：${error.message}` : ''}`);
@@ -373,6 +401,14 @@ function heartbeatField(label,key,value){ const row=document.createElement('div'
 function ts(value){ return value ? new Date(value * 1000).toLocaleString() : ''; }
 function relativeTs(value){ const timestamp=Number(value); if(!Number.isFinite(timestamp) || timestamp<=0) return ''; const seconds=Math.max(0,Math.round(Date.now()/1000-timestamp)); if(seconds<10) return adminT('admin.time.just_now'); if(seconds<60) return adminT('admin.time.seconds_ago',{value:seconds}); if(seconds<3600) return adminT('admin.time.minutes_ago',{value:Math.floor(seconds/60)}); if(seconds<86400) return adminT('admin.time.hours_ago',{value:Math.floor(seconds/3600)}); return new Date(timestamp*1000).toLocaleString([], {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function actionText(action){ const key=`admin.audit.${action}`; return adminI18n && typeof adminI18n.has === 'function' && adminI18n.has(key) ? adminT(key) : action; }
+function auditReasonText(reason){
+  const value=String(reason || '').trim();
+  if(!value) return '';
+  const httpStatus=value.match(/^http_(\d{3})$/);
+  if(httpStatus) return adminT('admin.audit_reason.http_status',{status:httpStatus[1]});
+  const key=`admin.audit_reason.${value}`;
+  return adminI18n && typeof adminI18n.has === 'function' && adminI18n.has(key) ? adminT(key) : value;
+}
 function activeSessions(){ return state.devices.filter(d => d.session && d.session.running).length; }
 function overviewDevices(){ return state.overview && Array.isArray(state.overview.devices) ? state.overview.devices : []; }
 function overviewUsers(){ return state.overview && Array.isArray(state.overview.users) ? state.overview.users : []; }
@@ -1813,15 +1849,103 @@ function openAlasConfigDrawer(trigger=document.activeElement){
 function renderRuntimeLogs(){
   $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n');
 }
-function renderAuditLogs(){
+function auditOutcomeLabel(value){
+  const normalized=String(value || 'unknown').toLowerCase();
+  const key=`admin.logs.outcome_${normalized}`;
+  return adminI18n && typeof adminI18n.has === 'function' && adminI18n.has(key) ? adminT(key) : normalized;
+}
+function auditSeverityLabel(value){
+  const normalized=String(value || 'info').toLowerCase();
+  const key=`admin.logs.severity_${normalized}`;
+  return adminI18n && typeof adminI18n.has === 'function' && adminI18n.has(key) ? adminT(key) : normalized;
+}
+function auditTone(log){
+  const outcome=String(log && log.outcome || 'unknown');
+  const severity=String(log && log.severity || 'info');
+  if(outcome==='error' || severity==='critical' || severity==='error') return 'danger';
+  if(outcome==='denied' || outcome==='failure' || severity==='warning') return 'warn';
+  return outcome==='success' ? 'ok' : '';
+}
+function auditTargetText(log){
+  const type=String(log && log.target_type || '').trim();
+  const id=String(log && log.target_id || '').trim();
+  if(type && id) return `${type} · ${id}`;
+  return id || type || adminT('admin.logs.no_target');
+}
+function auditEventKey(log){
+  return String(log && (log.event_id || log.id) || '');
+}
+function createAuditRow(log){
+  const tr=document.createElement('tr');
+  const eventId=auditEventKey(log);
+  if(eventId) tr.dataset.auditEventId=eventId;
+
+  const timeCell=td(ts(log.ts) || adminT('admin.logs.unknown_time'));
+  timeCell.className='audit-time-cell';
+
+  const eventCell=td('');
+  eventCell.className='audit-event-cell';
+  const action=document.createElement('strong');
+  action.textContent=actionText(log.action || 'event');
+  const severity=document.createElement('small');
+  severity.textContent=auditSeverityLabel(log.severity);
+  eventCell.append(action,severity);
+
+  const actorCell=td('');
+  actorCell.className='audit-actor-cell';
+  const actor=document.createElement('strong');
+  actor.textContent=String(log.username || adminT('admin.logs.unknown_actor'));
+  const target=document.createElement('small');
+  target.textContent=auditTargetText(log);
+  actorCell.append(actor,target);
+
+  const resultCell=td('');
+  resultCell.className='audit-result-cell';
+  resultCell.appendChild(chip(auditOutcomeLabel(log.outcome),auditTone(log)));
+
+  const requestCell=td('');
+  requestCell.className='audit-request-cell';
+  const requestCode=document.createElement('code');
+  requestCode.textContent=String(log.request_id || adminT('admin.logs.no_request_id'));
+  requestCell.appendChild(requestCode);
+
+  const detailButton=document.createElement('button');
+  detailButton.className='btn audit-detail-button';
+  detailButton.type='button';
+  detailButton.textContent=adminT('admin.ui.logs.view_detail');
+  detailButton.onclick=()=>{ void openAuditDetail(eventId,detailButton); };
+  detailButton.disabled=!eventId;
+  tr.append(timeCell,eventCell,actorCell,resultCell,requestCell,tableActionCell(detailButton));
+  return tr;
+}
+function renderAuditLogs(events=state.logs,append=false){
   const rows=$('logRows');
-  clear(rows);
-  [...state.logs].reverse().forEach(log=>{
+  if(!append) clear(rows);
+  if(!append && !events.length){
     const tr=document.createElement('tr');
-    tr.append(td(ts(log.ts)), td(log.username), td(actionText(log.action)), td(log.detail));
+    tr.className='audit-empty-row';
+    const cell=td(adminT('admin.logs.empty'));
+    cell.colSpan=6;
+    cell.className='audit-empty-cell';
+    tr.appendChild(cell);
     rows.appendChild(tr);
-  });
+  } else events.forEach(log=>rows.appendChild(createAuditRow(log)));
   applyTableLabels(rows);
+}
+function renderAuditSummary(){
+  const summary=state.auditSummary || {};
+  const outcomes=summary.by_outcome || {};
+  updateText($('auditSummaryTotal'),Number(summary.total || 0).toLocaleString());
+  updateText($('auditSummaryDenied'),Number(outcomes.denied || 0).toLocaleString());
+  updateText($('auditSummaryFailed'),Number(outcomes.failure || 0) + Number(outcomes.error || 0));
+  updateText($('auditSummaryHighRisk'),Number(summary.high_risk || 0).toLocaleString());
+}
+function renderAuditPagination(){
+  $('auditLoadMore').hidden=!auditHasMore;
+  $('auditLoadMore').disabled=!auditHasMore;
+  $('auditPaginationStatus').textContent=state.logs.length
+    ? adminT(auditHasMore?'admin.logs.page_more':'admin.logs.page_complete',{count:state.logs.length})
+    : adminT('admin.logs.empty');
 }
 function renderLogs(){ renderRuntimeLogs(); renderAuditLogs(); }
 function render(){ renderOverview(); renderDevices(); renderVideo(); renderUsers(); renderPermissions(); renderAlas(); renderLogs(); }
@@ -1891,9 +2015,24 @@ function applyAlasCatalog(data){
   state.alas={...(state.alas || {}),catalog:{...(data || {}),loaded:true},catalog_error:''};
   renderAlas();
 }
-function applyLogs(data){
-  state.logs=data.logs || [];
-  renderAuditLogs();
+function applyLogs(data,options={}){
+  const append=!!options.append;
+  const incoming=(Array.isArray(data.logs) ? data.logs : []).slice().reverse();
+  if(append){
+    const known=new Set(state.logs.map(auditEventKey));
+    const additions=incoming.filter(log=>!known.has(auditEventKey(log)));
+    state.logs.push(...additions);
+    renderAuditLogs(additions,true);
+  } else {
+    state.logs=incoming;
+    renderAuditLogs();
+  }
+  state.auditSummary=data.summary || state.auditSummary || {};
+  if(!append && options.filters) activeAuditFilters={...options.filters};
+  auditHasMore=!!(data.page && data.page.has_more);
+  auditNextCursor=data.page ? data.page.next_cursor : null;
+  renderAuditSummary();
+  renderAuditPagination();
   setLogLoadState('logs','ready',logReadyMessage('admin.logs.audit', state.logs.length));
 }
 function applyRuntimeLogs(data){
@@ -2104,12 +2243,151 @@ function loadAlasCatalog(options={}){
     throw error;
   });
 }
+function auditDateTimeToEpoch(value){
+  if(!value) return null;
+  const date=new Date(value);
+  return Number.isFinite(date.getTime()) ? Math.floor(date.getTime()/1000) : null;
+}
+function auditFilterValues(){
+  const filters={
+    actor:$('auditActor').value.trim(),
+    action:$('auditAction').value.trim(),
+    outcome:$('auditOutcome').value,
+    severity:$('auditSeverity').value,
+    request_id:$('auditRequestId').value.trim(),
+    from_ts:auditDateTimeToEpoch($('auditFrom').value),
+    to_ts:auditDateTimeToEpoch($('auditTo').value)
+  };
+  if(filters.from_ts!==null && filters.to_ts!==null && filters.from_ts>filters.to_ts) throw new Error(adminT('admin.logs.invalid_time_range'));
+  return filters;
+}
+function auditRequestUrl(filters,before=null){
+  const params=new URLSearchParams({limit:'100'});
+  Object.entries(filters).forEach(([key,value])=>{
+    if(value!==null && value!==undefined && String(value)!=='') params.set(key,String(value));
+  });
+  if(before!==null && before!==undefined && String(before)!=='') params.set('before',String(before));
+  return `/api/admin/logs?${params.toString()}`;
+}
 function loadLogs(options={}){
-  setLogLoadState('logs','loading',adminT('admin.logs.loading_audit'));
-  return requestResource('logs', signal=>api('/api/admin/logs',{signal}), applyLogs, options).catch(error=>{
+  const append=!!options.append;
+  if(append && (!auditHasMore || auditNextCursor===null || auditNextCursor===undefined)) return Promise.resolve();
+  let filters;
+  try{ filters=append && activeAuditFilters ? {...activeAuditFilters} : auditFilterValues(); }
+  catch(error){ return Promise.reject(error); }
+  const before=append ? auditNextCursor : null;
+  setLogLoadState('logs','loading',adminT(append?'admin.logs.loading_earlier':'admin.logs.loading_audit'));
+  return requestResource(
+    'logs',
+    signal=>api(auditRequestUrl(filters,before),{signal}),
+    data=>applyLogs(data,{append,filters}),
+    {...options,force:!!options.force || append}
+  ).catch(error=>{
     if(!isAbortError(error)) setLogLoadState('logs','error',adminT('admin.logs.audit_failed',{error:error.message || adminT('common.feedback.unknown_error')}));
     throw error;
   });
+}
+function resetAuditFilters(){
+  ['auditFrom','auditTo','auditActor','auditAction','auditRequestId'].forEach(id=>{ $(id).value=''; });
+  $('auditOutcome').value='';
+  $('auditSeverity').value='';
+  return loadLogs({force:true});
+}
+function setAuditDetailText(id,value){
+  $(id).textContent=value===null || value===undefined || value==='' ? '—' : String(value);
+}
+function renderAuditDetail(event){
+  const data=event || {};
+  setAuditDetailText('auditDetailTime',ts(data.ts));
+  setAuditDetailText('auditDetailEventId',data.event_id);
+  setAuditDetailText('auditDetailRequestId',data.request_id);
+  setAuditDetailText('auditDetailActor',data.username ? `${data.username} · ${data.actor_role || adminT('admin.logs.unknown_role')}` : '');
+  setAuditDetailText('auditDetailAction',data.action ? actionText(data.action) : '');
+  setAuditDetailText('auditDetailTarget',auditTargetText(data));
+  setAuditDetailText('auditDetailOutcome',data.outcome ? auditOutcomeLabel(data.outcome) : '');
+  setAuditDetailText('auditDetailSeverity',data.severity ? auditSeverityLabel(data.severity) : '');
+  setAuditDetailText('auditDetailSourceIp',data.source_ip);
+  setAuditDetailText('auditDetailSchemaVersion',data.schema_version);
+  setAuditDetailText('auditDetailReason',auditReasonText(data.reason));
+  setAuditDetailText('auditDetailDescription',data.detail);
+  setAuditDetailText('auditDetailUserAgent',data.user_agent);
+  $('auditDetailMetadata').textContent=JSON.stringify(data.metadata || {},null,2);
+}
+function closeAuditDetail(){
+  auditDetailSequence+=1;
+  const dialog=$('auditDetailDialog');
+  if(window.ScrcpyGateUI) window.ScrcpyGateUI.closeDialog(dialog,'close');
+  else {
+    if(dialog.open) dialog.close('close');
+    dialog.setAttribute('aria-hidden','true');
+    dialog.setAttribute('inert','');
+    dialog.hidden=true;
+  }
+}
+async function openAuditDetail(eventId,trigger=document.activeElement){
+  if(!eventId) return;
+  const sequence=++auditDetailSequence;
+  const dialog=$('auditDetailDialog');
+  renderAuditDetail(null);
+  $('auditDetailStatus').dataset.state='loading';
+  $('auditDetailStatus').setAttribute('role','status');
+  $('auditDetailStatus').textContent=adminT('admin.logs.detail_loading');
+  if(window.ScrcpyGateUI) window.ScrcpyGateUI.openDialog(dialog,trigger);
+  else {
+    dialog.hidden=false;
+    dialog.removeAttribute('inert');
+    dialog.setAttribute('aria-hidden','false');
+    dialog.showModal();
+  }
+  try{
+    const data=await api(`/api/admin/logs/${encodeURIComponent(eventId)}`);
+    if(sequence!==auditDetailSequence) return;
+    renderAuditDetail(data.event || {});
+    $('auditDetailStatus').dataset.state='ready';
+    $('auditDetailStatus').textContent=adminT('admin.logs.detail_loaded');
+  } catch(error){
+    if(sequence!==auditDetailSequence || isAbortError(error)) return;
+    $('auditDetailStatus').dataset.state='error';
+    $('auditDetailStatus').setAttribute('role','alert');
+    $('auditDetailStatus').textContent=adminT('admin.logs.detail_failed',{error:error.message || adminT('common.feedback.unknown_error')});
+  }
+}
+function triggerAuditDownload(download,format){
+  const anchor=document.createElement('a');
+  const url=URL.createObjectURL(download.blob);
+  anchor.href=url;
+  anchor.download=download.filename || `scrcpygate-audit.${format}`;
+  anchor.hidden=true;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+}
+async function exportAuditLogs(format){
+  const filters=auditFilterValues();
+  const download=await api('/api/admin/logs/export',{method:'POST',body:{...filters,format},download:true});
+  triggerAuditDownload(download,format);
+  show(adminT('admin.logs.export_ready',{format:format.toUpperCase()}));
+  return download;
+}
+async function checkAuditIntegrity(){
+  const status=$('auditIntegrityStatus');
+  try{
+    const result=await api('/api/admin/logs/integrity-check',{method:'POST',body:{}});
+    status.dataset.state=result.ok?'ok':'error';
+    status.setAttribute('role',result.ok?'status':'alert');
+    status.textContent=result.ok
+      ? adminT('admin.logs.integrity_ok',{count:Number(result.checked || 0)})
+      : adminT('admin.logs.integrity_failed',{error:result.error || adminT('common.feedback.unknown_error')});
+    show(status.textContent);
+    void loadLogs({force:true}).catch(error=>reportRequestError(error));
+    return result;
+  }catch(error){
+    status.dataset.state='error';
+    status.setAttribute('role','alert');
+    status.textContent=adminT('admin.logs.integrity_failed',{error:error.message || adminT('common.feedback.unknown_error')});
+    throw error;
+  }
 }
 function loadRuntimeLogs(options={}){
   setLogLoadState('runtimeLogs','loading',adminT('admin.logs.loading_runtime'));
@@ -2545,10 +2823,24 @@ function initializeConfirmDialog(){
     restoreConfirmationFocus(pending.trigger);
   });
 }
+function initializeAuditWorkspace(){
+  $('auditFilters').addEventListener('submit',event=>{
+    event.preventDefault();
+    withBusy($('applyAuditFilters'),()=>loadLogs({force:true}),adminT('admin.busy.loading')).catch(error=>show(error.message));
+  });
+  $('resetAuditFilters').onclick=()=>withBusy($('resetAuditFilters'),resetAuditFilters,adminT('admin.busy.loading')).catch(error=>show(error.message));
+  $('auditLoadMore').onclick=()=>withBusy($('auditLoadMore'),()=>loadLogs({append:true}),adminT('admin.busy.loading')).catch(error=>show(error.message));
+  $('auditDetailClose').onclick=closeAuditDetail;
+  $('auditDetailDialog').addEventListener('cancel',event=>{
+    event.preventDefault();
+    closeAuditDetail();
+  });
+}
 function initializeVideoSizeControls(){ const select=$('customProfileSizeSelect'); const width=$('customProfileWidth'); const height=$('customProfileHeight'); if(select) select.onchange=()=>syncCustomProfileSizeEditor('select'); if(width) width.oninput=()=>syncCustomProfileSizeEditor('width'); if(height) height.oninput=()=>syncCustomProfileSizeEditor('height'); syncCustomProfileSizeEditor(); }
 initializeAdminNavigation();
 initializeEditorDrawers();
 initializeConfirmDialog();
+initializeAuditWorkspace();
 initializeVideoSizeControls();
 initializeTabs();
 initializeAccessWorkspace();
@@ -2565,6 +2857,9 @@ bindAction('saveDevice', saveDevice, adminT('admin.busy.saving'));
 $('clearDeviceForm').onclick=()=>clearDeviceForm();
 bindAction('reloadRuntimeLogs', ()=>loadRuntimeLogs({force:true}), adminT('admin.busy.refreshing'));
 bindAction('reloadAuditLogs', ()=>loadLogs({force:true}), adminT('admin.busy.refreshing'));
+bindAction('auditExportCsv', ()=>exportAuditLogs('csv'), adminT('admin.busy.exporting'));
+bindAction('auditExportJson', ()=>exportAuditLogs('json'), adminT('admin.busy.exporting'));
+bindAction('auditIntegrityCheck', checkAuditIntegrity, adminT('admin.busy.checking'));
 $('savePermission').onclick=()=>withBusy($('savePermission'),savePermission,adminT('admin.busy.saving')).catch(error=>show(error.message)).finally(()=>renderPermissionDetail());
 bindAction('saveVideo', saveVideo, adminT('admin.busy.saving'));
 bindAction('addCustomProfile', async()=>addCustomProfile(), adminT('admin.busy.adding'));

@@ -770,7 +770,7 @@ class MirrorControlTests(unittest.TestCase):
             with (
                 patch.object(mirror.storage, "user_can", return_value=True),
                 patch.object(mirror.storage, "get_lock", return_value=None),
-                patch.object(mirror.storage, "release_lock", return_value=True) as release_lock,
+                patch.object(mirror, "release_control_lock", return_value=True) as release_lock,
                 patch.object(mirror.uuid, "uuid4", return_value="client-raw"),
                 patch.object(mirror, "handle_control_bytes", new=handle_bytes),
                 patch.object(mirror.manager, "broadcast", new=broadcast),
@@ -782,7 +782,36 @@ class MirrorControlTests(unittest.TestCase):
             args = handle_bytes.await_args.args
             self.assertEqual(args[:5], (websocket, user, "dev1", "client-raw", b"payload"))
             self.assertIsInstance(args[5], ControlLeaseState)
-            release_lock.assert_called_once_with("dev1", "alice", force=False, client_id="client-raw")
+            release_lock.assert_called_once_with(
+                "dev1",
+                "alice",
+                force=False,
+                client_id="client-raw",
+                only_if_owned=True,
+            )
+
+        asyncio.run(run())
+
+    def test_control_socket_does_not_audit_release_without_owned_lock(self):
+        async def run():
+            websocket = FakeControlWebSocket([{"bytes": b"payload"}])
+            user = {"username": "alice", "role": "user"}
+            audit = AsyncMock()
+            with (
+                patch.object(mirror.storage, "user_can", return_value=True),
+                patch.object(mirror.storage, "get_lock", return_value=None),
+                patch.object(mirror, "release_control_lock", return_value=False),
+                patch.object(mirror, "handle_control_bytes", new=AsyncMock()),
+                patch.object(mirror.manager, "broadcast", new=AsyncMock()),
+            ):
+                await mirror.control_socket(
+                    websocket,
+                    user,
+                    "dev1",
+                    audit_callback=audit,
+                )
+
+            audit.assert_not_awaited()
 
         asyncio.run(run())
 

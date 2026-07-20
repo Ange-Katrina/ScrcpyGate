@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=54474b070308">
-  <link rel="stylesheet" href="/static/css/admin.css?v=1dd440657dd3">
+  <link rel="stylesheet" href="/static/css/admin.css?v=ca2faed9198a">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
   <script src="/static/js/ui-core.js?v=ec67834375f9" defer></script>
 </head>
@@ -341,13 +341,39 @@
 
       <section id="logs" class="panel" aria-labelledby="adminTabLogs" tabindex="-1">
          <div class="panel-heading"><div><p class="eyebrow">{{ t('admin.ui.eyebrow.audit') }}</p><h2>{{ t('admin.ui.logs.title') }}</h2><p>{{ t('admin.ui.logs.description') }}</p></div></div>
+        <section class="workspace-section log-section audit-log-section" aria-labelledby="auditLogsTitle">
+          <div class="section-heading audit-section-heading">
+            <div><h3 id="auditLogsTitle">{{ t('admin.ui.logs.security_audit') }}</h3><p id="auditLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div>
+            <div class="audit-heading-actions" aria-label="{{ t('admin.ui.logs.audit_actions') }}">
+              <button id="auditIntegrityCheck" class="btn" type="button">{{ t('admin.ui.logs.check_integrity') }}</button>
+              <button id="auditExportCsv" class="btn" type="button">{{ t('admin.ui.logs.export_csv') }}</button>
+              <button id="auditExportJson" class="btn" type="button">{{ t('admin.ui.logs.export_json') }}</button>
+              <button id="reloadAuditLogs" class="btn primary" type="button">{{ t('admin.ui.logs.refresh_audit') }}</button>
+            </div>
+          </div>
+          <p id="auditIntegrityStatus" class="audit-integrity-status" data-state="idle" role="status" aria-live="polite">{{ t('admin.ui.logs.integrity_note') }}</p>
+          <div class="audit-summary" aria-label="{{ t('admin.ui.logs.summary_24h') }}">
+            <article><span>{{ t('admin.ui.logs.summary_total') }}</span><strong id="auditSummaryTotal">—</strong><small>{{ t('admin.ui.logs.last_24_hours') }}</small></article>
+            <article><span>{{ t('admin.ui.logs.summary_denied') }}</span><strong id="auditSummaryDenied">—</strong><small>{{ t('admin.ui.logs.denied_hint') }}</small></article>
+            <article><span>{{ t('admin.ui.logs.summary_failed') }}</span><strong id="auditSummaryFailed">—</strong><small>{{ t('admin.ui.logs.failed_hint') }}</small></article>
+            <article><span>{{ t('admin.ui.logs.summary_high_risk') }}</span><strong id="auditSummaryHighRisk">—</strong><small>{{ t('admin.ui.logs.high_risk_hint') }}</small></article>
+          </div>
+          <form id="auditFilters" class="audit-filter-form" autocomplete="off">
+            <div><label for="auditFrom">{{ t('admin.ui.logs.from_time') }}</label><input id="auditFrom" type="datetime-local" step="1"></div>
+            <div><label for="auditTo">{{ t('admin.ui.logs.to_time') }}</label><input id="auditTo" type="datetime-local" step="1"></div>
+            <div><label for="auditActor">{{ t('admin.ui.logs.actor') }}</label><input id="auditActor" type="search" placeholder="{{ t('admin.ui.logs.actor_placeholder') }}"></div>
+            <div><label for="auditAction">{{ t('admin.ui.logs.action') }}</label><input id="auditAction" type="search" placeholder="{{ t('admin.ui.logs.action_placeholder') }}" spellcheck="false"></div>
+            <div><label for="auditOutcome">{{ t('admin.ui.logs.outcome') }}</label><select id="auditOutcome"><option value="">{{ t('admin.ui.logs.all_outcomes') }}</option><option value="success">{{ t('admin.ui.logs.outcome_success') }}</option><option value="denied">{{ t('admin.ui.logs.outcome_denied') }}</option><option value="failure">{{ t('admin.ui.logs.outcome_failure') }}</option><option value="error">{{ t('admin.ui.logs.outcome_error') }}</option><option value="unknown">{{ t('admin.ui.logs.outcome_unknown') }}</option></select></div>
+            <div><label for="auditSeverity">{{ t('admin.ui.logs.severity') }}</label><select id="auditSeverity"><option value="">{{ t('admin.ui.logs.all_severities') }}</option><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></div>
+            <div class="audit-filter-request"><label for="auditRequestId">{{ t('admin.ui.logs.request_id') }}</label><input id="auditRequestId" type="search" placeholder="{{ t('admin.ui.logs.request_id_placeholder') }}" spellcheck="false"></div>
+            <div class="audit-filter-actions"><button id="applyAuditFilters" class="btn primary" type="submit">{{ t('admin.ui.logs.apply_filters') }}</button><button id="resetAuditFilters" class="btn" type="button">{{ t('admin.ui.logs.reset_filters') }}</button></div>
+          </form>
+          <div class="table-wrap audit-log-table"><table class="responsive-table" data-table="audit-logs"><thead><tr><th scope="col">{{ t('admin.ui.logs.time') }}</th><th scope="col">{{ t('admin.ui.logs.event') }}</th><th scope="col">{{ t('admin.ui.logs.actor_target') }}</th><th scope="col">{{ t('admin.ui.logs.result') }}</th><th scope="col">{{ t('admin.ui.logs.request_id') }}</th><th scope="col">{{ t('admin.ui.logs.detail') }}</th></tr></thead><tbody id="logRows"></tbody></table></div>
+          <div class="audit-pagination"><p id="auditPaginationStatus" role="status" aria-live="polite">{{ t('admin.ui.logs.no_page_loaded') }}</p><button id="auditLoadMore" class="btn" type="button" hidden>{{ t('admin.ui.logs.load_earlier') }}</button></div>
+        </section>
         <section class="workspace-section log-section" aria-labelledby="runtimeLogsTitle">
           <div class="section-heading"><div><h3 id="runtimeLogsTitle">{{ t('admin.logs.runtime') }}</h3><p id="runtimeLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div><button id="reloadRuntimeLogs" class="btn" type="button">{{ t('admin.ui.logs.refresh_runtime') }}</button></div>
           <pre id="runtimeLogs" class="runtime-logs" tabindex="0" aria-label="{{ t('admin.ui.logs.runtime_label') }}"></pre>
-        </section>
-        <section class="workspace-section log-section" aria-labelledby="auditLogsTitle">
-          <div class="section-heading"><div><h3 id="auditLogsTitle">{{ t('admin.ui.logs.recent_audit') }}</h3><p id="auditLogsStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.load_on_open') }}</p></div><button id="reloadAuditLogs" class="btn" type="button">{{ t('admin.ui.logs.refresh_audit') }}</button></div>
-          <div class="table-wrap audit-log-table"><table class="responsive-table" data-table="audit-logs"><thead><tr><th scope="col">{{ t('admin.ui.logs.time') }}</th><th scope="col">{{ t('admin.ui.logs.user') }}</th><th scope="col">{{ t('admin.ui.logs.action') }}</th><th scope="col">{{ t('admin.ui.logs.detail') }}</th></tr></thead><tbody id="logRows"></tbody></table></div>
         </section>
       </section>
     </main>
@@ -453,6 +479,29 @@
   <div class="drawer-actions"><button id="cancelAlasConfig" class="btn" type="button">{{ t('common.actions.cancel') }}</button><button id="loadConfig" class="btn" type="button">{{ t('admin.ui.drawers.config.reload') }}</button><button id="saveConfig" class="btn primary" type="button">{{ t('admin.ui.drawers.config.save') }}</button></div>
 </aside>
 
+<dialog id="auditDetailDialog" class="ui-dialog audit-detail-dialog" aria-labelledby="auditDetailTitle" aria-describedby="auditDetailStatus" aria-hidden="true" inert hidden>
+  <div class="audit-detail-heading"><div><p class="eyebrow">{{ t('admin.ui.logs.event_detail_eyebrow') }}</p><h2 id="auditDetailTitle">{{ t('admin.ui.logs.event_detail_title') }}</h2></div><button id="auditDetailClose" class="ui-icon-button" type="button" aria-label="{{ t('admin.ui.logs.close_detail') }}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/lucide.svg?v=cb7d1235489f#x"></use></svg></button></div>
+  <p id="auditDetailStatus" class="load-status" role="status" aria-live="polite">{{ t('admin.ui.logs.detail_waiting') }}</p>
+  <div class="audit-detail-body">
+    <dl class="audit-detail-grid">
+      <div><dt>{{ t('admin.ui.logs.time') }}</dt><dd id="auditDetailTime">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.event_id') }}</dt><dd id="auditDetailEventId">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.request_id') }}</dt><dd id="auditDetailRequestId">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.actor') }}</dt><dd id="auditDetailActor">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.action') }}</dt><dd id="auditDetailAction">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.target') }}</dt><dd id="auditDetailTarget">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.outcome') }}</dt><dd id="auditDetailOutcome">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.severity') }}</dt><dd id="auditDetailSeverity">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.source_ip') }}</dt><dd id="auditDetailSourceIp">—</dd></div>
+      <div><dt>{{ t('admin.ui.logs.schema_version') }}</dt><dd id="auditDetailSchemaVersion">—</dd></div>
+    </dl>
+    <section><h3>{{ t('admin.ui.logs.reason') }}</h3><p id="auditDetailReason">—</p></section>
+    <section><h3>{{ t('admin.ui.logs.detail') }}</h3><p id="auditDetailDescription">—</p></section>
+    <section><h3>{{ t('admin.ui.logs.user_agent') }}</h3><p id="auditDetailUserAgent" class="audit-detail-code">—</p></section>
+    <section><h3>{{ t('admin.ui.logs.metadata') }}</h3><pre id="auditDetailMetadata" class="audit-detail-metadata" tabindex="0">{}</pre></section>
+  </div>
+</dialog>
+
 <dialog id="confirmDialog" class="ui-dialog confirm-dialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
   <div class="confirm-dialog__icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/lucide.svg?v=cb7d1235489f#triangle-alert"></use></svg></div>
   <div><p class="eyebrow">{{ t('admin.ui.confirm.required') }}</p><h2 id="confirmDialogTitle">{{ t('admin.actions.confirm_danger') }}</h2><p id="confirmDialogMessage">{{ t('admin.actions.irreversible') }}</p></div>
@@ -461,6 +510,6 @@
 
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=1a0e085acbcc" defer></script>
+<script src="/static/js/admin.js?v=2c3584d888a7" defer></script>
 </body>
 </html>

@@ -1,12 +1,18 @@
 ﻿import json
+import logging
 import math
 import os
+import re
 import secrets
 import sqlite3
 import time
 import hashlib
 import hmac
+import ipaddress
+import uuid
 from pathlib import Path
+
+from .logging_config import sanitize_log_text, sanitize_log_value
 
 try:
     from werkzeug.security import check_password_hash as werkzeug_check_password_hash
@@ -23,6 +29,25 @@ PASSWORD_PBKDF2_ITERATIONS = int(os.environ.get("PASSWORD_PBKDF2_ITERATIONS", "3
 ACCOUNT_EXPIRING_WINDOW_SECONDS = 7 * 24 * 60 * 60
 MAX_ACCOUNT_EXPIRES_AT = 253402300799  # 9999-12-31T23:59:59Z
 EXPIRATION_UNSET = object()
+
+
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError, OverflowError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+AUDIT_SCHEMA_VERSION = 2
+AUDIT_MAX_ROWS = _bounded_env_int("AUDIT_MAX_ROWS", 100000, 1000, 5000000)
+AUDIT_PRUNE_BATCH = 1000
+AUDIT_OUTCOMES = {"success", "failure", "denied", "error", "unknown"}
+AUDIT_SEVERITIES = {"debug", "info", "warning", "error", "critical"}
+AUDIT_ACTOR_ROLES = {"admin", "user", "system", "anonymous", "unknown"}
+AUDIT_NAME_RE = re.compile(r"[^a-z0-9_.:-]+")
+AUDIT_LOGGER = logging.getLogger(__name__)
+SQLITE_INT_MAX = (1 << 63) - 1
 
 DEFAULT_SETTINGS = {
     "video_profile": "balanced",
@@ -169,6 +194,7 @@ def db_connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -242,6 +268,208 @@ def validate_password(password: str, username: str = "") -> str | None:
     if username and lowered == username.lower():
         return "Password must not match username"
     return None
+
+
+_AUDIT_COLUMN_DEFINITIONS = {
+    "event_id": "TEXT",
+    "request_id": "TEXT NOT NULL DEFAULT ''",
+    "actor_role": "TEXT NOT NULL DEFAULT 'unknown'",
+    "target_type": "TEXT NOT NULL DEFAULT ''",
+    "target_id": "TEXT NOT NULL DEFAULT ''",
+    "outcome": "TEXT NOT NULL DEFAULT 'unknown'",
+    "reason": "TEXT NOT NULL DEFAULT ''",
+    "severity": "TEXT NOT NULL DEFAULT 'info'",
+    "source_ip": "TEXT NOT NULL DEFAULT ''",
+    "user_agent": "TEXT NOT NULL DEFAULT ''",
+    "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+    "schema_version": "INTEGER NOT NULL DEFAULT 1",
+    "prev_hash": "TEXT NOT NULL DEFAULT ''",
+    "event_hash": "TEXT NOT NULL DEFAULT ''",
+    "dedupe_key": "TEXT",
+}
+_AUDIT_STATE_COLUMN_DEFINITIONS = {
+    "anchor_event_id": "INTEGER NOT NULL DEFAULT 0",
+    "anchor_event_hash": "TEXT NOT NULL DEFAULT ''",
+    "pruned_count": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+def _audit_clean_name(value: object, default: str, max_chars: int = 96) -> str:
+    cleaned = sanitize_log_text(value, max_chars).lower()
+    cleaned = AUDIT_NAME_RE.sub("_", cleaned).strip("_.:-")
+    return cleaned[:max_chars] or default
+
+
+def _audit_sqlite_int(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, min(parsed, SQLITE_INT_MAX))
+
+
+def _audit_clean_ip(value: object) -> str:
+    candidate = sanitize_log_text(value, 64)
+    if not candidate:
+        return ""
+    try:
+        return ipaddress.ip_address(candidate).compressed
+    except ValueError:
+        return ""
+
+
+def _audit_metadata_json(value: object) -> str:
+    if not isinstance(value, dict):
+        value = {}
+    safe = sanitize_log_value(value)
+    if not isinstance(safe, dict):
+        safe = {}
+    return json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _audit_hash_payload(row: dict | sqlite3.Row) -> dict:
+    return {
+        "event_id": str(row["event_id"] or ""),
+        "ts": int(row["ts"]),
+        "username": str(row["username"] or ""),
+        "actor_role": str(row["actor_role"] or ""),
+        "action": str(row["action"] or ""),
+        "target_type": str(row["target_type"] or ""),
+        "target_id": str(row["target_id"] or ""),
+        "outcome": str(row["outcome"] or ""),
+        "reason": str(row["reason"] or ""),
+        "severity": str(row["severity"] or ""),
+        "request_id": str(row["request_id"] or ""),
+        "source_ip": str(row["source_ip"] or ""),
+        "user_agent": str(row["user_agent"] or ""),
+        "detail": str(row["detail"] or ""),
+        "metadata_json": str(row["metadata_json"] or "{}"),
+        "schema_version": int(row["schema_version"] or 1),
+        "dedupe_key": str(row["dedupe_key"] or ""),
+    }
+
+
+def _audit_event_hash(previous_hash: str, row: dict | sqlite3.Row) -> str:
+    canonical = json.dumps(
+        _audit_hash_payload(row),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(f"{previous_hash}\n{canonical}".encode("utf-8")).hexdigest()
+
+
+def _migrate_audit_log(conn: sqlite3.Connection) -> None:
+    """Add the versioned audit schema and establish its chain exactly once."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_log)").fetchall()}
+    missing = [name for name in _AUDIT_COLUMN_DEFINITIONS if name not in columns]
+    for name in missing:
+        conn.execute(f"ALTER TABLE audit_log ADD COLUMN {name} {_AUDIT_COLUMN_DEFINITIONS[name]}")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_integrity_state (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            head_event_id INTEGER NOT NULL DEFAULT 0,
+            head_event_hash TEXT NOT NULL DEFAULT '',
+            event_count INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    state_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(audit_integrity_state)").fetchall()
+    }
+    for name, definition in _AUDIT_STATE_COLUMN_DEFINITIONS.items():
+        if name not in state_columns:
+            conn.execute(
+                f"ALTER TABLE audit_integrity_state ADD COLUMN {name} {definition}"
+            )
+
+    rows_missing_ids = conn.execute(
+        "SELECT id FROM audit_log WHERE event_id IS NULL OR event_id='' ORDER BY id"
+    ).fetchall()
+    for row in rows_missing_ids:
+        conn.execute(
+            "UPDATE audit_log SET event_id=? WHERE id=?",
+            (f"legacy-{row['id']}-{uuid.uuid4().hex}", row["id"]),
+        )
+
+    state = conn.execute(
+        "SELECT * FROM audit_integrity_state WHERE singleton=1"
+    ).fetchone()
+    needs_rebuild = bool(missing) or bool(rows_missing_ids) or state is None
+    if needs_rebuild:
+        if state is None:
+            first_row = conn.execute(
+                "SELECT id, prev_hash FROM audit_log ORDER BY id LIMIT 1"
+            ).fetchone()
+            anchor_event_hash = str(first_row["prev_hash"] or "") if first_row else ""
+            anchor_event_id = max(0, int(first_row["id"]) - 1) if anchor_event_hash and first_row else 0
+            pruned_count = anchor_event_id
+        else:
+            anchor_event_hash = str(state["anchor_event_hash"] or "")
+            anchor_event_id = int(state["anchor_event_id"] or 0)
+            pruned_count = int(state["pruned_count"] or 0)
+        previous_hash = anchor_event_hash
+        head_id = 0
+        count = 0
+        rows = conn.execute("SELECT * FROM audit_log ORDER BY id").fetchall()
+        for row in rows:
+            event_hash = _audit_event_hash(previous_hash, row)
+            conn.execute(
+                "UPDATE audit_log SET prev_hash=?, event_hash=? WHERE id=?",
+                (previous_hash, event_hash, row["id"]),
+            )
+            previous_hash = event_hash
+            head_id = int(row["id"])
+            count += 1
+        conn.execute(
+            """
+            INSERT INTO audit_integrity_state(
+                singleton, anchor_event_id, anchor_event_hash, head_event_id,
+                head_event_hash, event_count, pruned_count, updated_at
+            ) VALUES(1,?,?,?,?,?,?,?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                anchor_event_id=excluded.anchor_event_id,
+                anchor_event_hash=excluded.anchor_event_hash,
+                head_event_id=excluded.head_event_id,
+                head_event_hash=excluded.head_event_hash,
+                event_count=excluded.event_count,
+                pruned_count=excluded.pruned_count,
+                updated_at=excluded.updated_at
+            """,
+            (anchor_event_id, anchor_event_hash, head_id, previous_hash, count, pruned_count, now_ts()),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO audit_integrity_state(
+                singleton, head_event_id, head_event_hash, event_count, updated_at
+            ) VALUES(1,0,'',0,?)
+            """,
+            (now_ts(),),
+        )
+
+    state = conn.execute(
+        "SELECT * FROM audit_integrity_state WHERE singleton=1"
+    ).fetchone()
+    if state is not None and int(state["event_count"] or 0) > AUDIT_MAX_ROWS:
+        _prune_audit_prefix(conn, state, reserve_rows=0)
+
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_event_id ON audit_log(event_id)")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_dedupe_key
+        ON audit_log(dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key != ''
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_ts_id ON audit_log(ts DESC, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_actor_id ON audit_log(username, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_action_id ON audit_log(action, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_outcome_id ON audit_log(outcome, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_severity_id ON audit_log(severity, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_log(request_id, id DESC)")
 
 
 def init_db() -> bool:
@@ -321,6 +549,7 @@ def init_db() -> bool:
             """
         )
         _migrate_user_alas_configs(conn)
+        _migrate_audit_log(conn)
         user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "video_mode" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN video_mode TEXT NOT NULL DEFAULT 'normal'")
@@ -724,10 +953,204 @@ def migrate_legacy_data() -> bool:
     return admin_created
 
 
+def _audit_row_to_dict(row: sqlite3.Row | dict | None) -> dict | None:
+    if row is None:
+        return None
+    result = dict(row)
+    raw_metadata = result.pop("metadata_json", "{}") or "{}"
+    try:
+        metadata = json.loads(raw_metadata)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        metadata = {"_invalid": True}
+    result["metadata"] = metadata if isinstance(metadata, dict) else {"value": metadata}
+    return result
+
+
+def _prune_audit_prefix(
+    conn: sqlite3.Connection,
+    state: sqlite3.Row,
+    *,
+    reserve_rows: int = 1,
+) -> sqlite3.Row:
+    """Bound retained rows while preserving a verifiable chain anchor."""
+    max_rows = max(1, int(AUDIT_MAX_ROWS))
+    current_count = max(0, int(state["event_count"] or 0))
+    target_count = max(0, max_rows - max(0, int(reserve_rows)))
+    if current_count <= target_count:
+        return state
+    actual_count = int(conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0])
+    if actual_count != current_count:
+        AUDIT_LOGGER.critical(
+            "AUDIT_RETENTION_SKIPPED state_count=%s row_count=%s",
+            current_count,
+            actual_count,
+            extra={"event_name": "audit.retention_skipped"},
+        )
+        return state
+    excess = current_count - target_count
+    preferred_batch = min(max(1, int(AUDIT_PRUNE_BATCH)), max(1, max_rows // 10))
+    prune_count = min(current_count, max(excess, preferred_batch))
+    boundary = conn.execute(
+        "SELECT id, event_hash FROM audit_log ORDER BY id LIMIT 1 OFFSET ?",
+        (prune_count - 1,),
+    ).fetchone()
+    if boundary is None:
+        return state
+    conn.execute("DELETE FROM audit_log WHERE id <= ?", (int(boundary["id"]),))
+    conn.execute(
+        """
+        UPDATE audit_integrity_state
+        SET anchor_event_id=?, anchor_event_hash=?,
+            event_count=event_count-?, pruned_count=pruned_count+?, updated_at=?
+        WHERE singleton=1
+        """,
+        (
+            int(boundary["id"]),
+            str(boundary["event_hash"] or ""),
+            prune_count,
+            prune_count,
+            now_ts(),
+        ),
+    )
+    AUDIT_LOGGER.info(
+        "AUDIT_RETENTION_PRUNED count=%s",
+        prune_count,
+        extra={
+            "event_name": "audit.retention_pruned",
+            "event_fields": {"pruned_count": prune_count},
+        },
+    )
+    return conn.execute(
+        "SELECT * FROM audit_integrity_state WHERE singleton=1"
+    ).fetchone()
+
+
+def record_audit_event(
+    username: str = "",
+    action: str = "",
+    detail: str = "",
+    *,
+    actor: str | None = None,
+    actor_role: str = "unknown",
+    target_type: str = "",
+    target_id: str = "",
+    outcome: str = "success",
+    reason: str = "",
+    severity: str = "info",
+    request_id: str = "",
+    source_ip: str = "",
+    user_agent: str = "",
+    metadata: dict | None = None,
+    event_id: str = "",
+    dedupe_key: str | None = None,
+    ts: int | None = None,
+) -> dict | None:
+    """Append one bounded, redacted audit event without breaking business work."""
+    safe_action = _audit_clean_name(action, "event")
+    try:
+        safe_username = sanitize_log_text(actor if actor is not None else username, 128) or "?"
+        safe_role = _audit_clean_name(actor_role, "unknown", 24)
+        if safe_role not in AUDIT_ACTOR_ROLES:
+            safe_role = "unknown"
+        safe_outcome = _audit_clean_name(outcome, "unknown", 24)
+        if safe_outcome not in AUDIT_OUTCOMES:
+            safe_outcome = "unknown"
+        safe_severity = _audit_clean_name(severity, "info", 24)
+        if safe_severity not in AUDIT_SEVERITIES:
+            safe_severity = "info"
+        safe_target_type = _audit_clean_name(target_type, "", 64) if target_type else ""
+        safe_target_id = sanitize_log_text(target_id, 256)
+        safe_request_id = sanitize_log_text(request_id, 96)
+        if safe_request_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}", safe_request_id):
+            safe_request_id = ""
+        safe_event_id = sanitize_log_text(event_id, 128)
+        if not safe_event_id or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", safe_event_id):
+            safe_event_id = uuid.uuid4().hex
+        safe_dedupe_key = sanitize_log_text(dedupe_key, 160) if dedupe_key else None
+        event_ts = now_ts() if ts is None else max(0, int(ts))
+        event = {
+            "event_id": safe_event_id,
+            "ts": event_ts,
+            "username": safe_username,
+            "actor_role": safe_role,
+            "action": safe_action,
+            "target_type": safe_target_type,
+            "target_id": safe_target_id,
+            "outcome": safe_outcome,
+            "reason": sanitize_log_text(reason, 512),
+            "severity": safe_severity,
+            "request_id": safe_request_id,
+            "source_ip": _audit_clean_ip(source_ip),
+            "user_agent": sanitize_log_text(user_agent, 512),
+            "detail": sanitize_log_text(detail, 2048),
+            "metadata_json": _audit_metadata_json(metadata),
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "dedupe_key": safe_dedupe_key,
+        }
+
+        with db_connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if safe_dedupe_key:
+                existing = conn.execute(
+                    "SELECT * FROM audit_log WHERE dedupe_key=?", (safe_dedupe_key,)
+                ).fetchone()
+                if existing:
+                    conn.commit()
+                    return _audit_row_to_dict(existing)
+            state = conn.execute(
+                "SELECT * FROM audit_integrity_state WHERE singleton=1"
+            ).fetchone()
+            if state is None:
+                raise RuntimeError("audit integrity state is unavailable")
+            state = _prune_audit_prefix(conn, state)
+            previous_hash = str(state["head_event_hash"] or "")
+            event_hash = _audit_event_hash(previous_hash, event)
+            cursor = conn.execute(
+                """
+                INSERT INTO audit_log(
+                    event_id, ts, username, actor_role, action, target_type,
+                    target_id, outcome, reason, severity, request_id, source_ip,
+                    user_agent, detail, metadata_json, schema_version, prev_hash,
+                    event_hash, dedupe_key
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    event["event_id"], event["ts"], event["username"], event["actor_role"],
+                    event["action"], event["target_type"], event["target_id"], event["outcome"],
+                    event["reason"], event["severity"], event["request_id"], event["source_ip"],
+                    event["user_agent"], event["detail"], event["metadata_json"],
+                    event["schema_version"], previous_hash, event_hash, event["dedupe_key"],
+                ),
+            )
+            audit_id = int(cursor.lastrowid)
+            conn.execute(
+                """
+                UPDATE audit_integrity_state
+                SET head_event_id=?, head_event_hash=?, event_count=event_count+1, updated_at=?
+                WHERE singleton=1
+                """,
+                (audit_id, event_hash, now_ts()),
+            )
+            inserted = conn.execute("SELECT * FROM audit_log WHERE id=?", (audit_id,)).fetchone()
+            conn.commit()
+        return _audit_row_to_dict(inserted)
+    except Exception:
+        AUDIT_LOGGER.critical(
+            "AUDIT_WRITE_FAILED",
+            exc_info=True,
+            extra={"event_name": "audit.write_failed", "event_fields": {"action": safe_action}},
+        )
+        return None
+
+
 def audit(username: str, action: str, detail: str = "") -> None:
-    with db_connect() as conn:
-        conn.execute("INSERT INTO audit_log(ts,username,action,detail) VALUES(?,?,?,?)", (now_ts(), username or "?", action, detail or ""))
-        conn.commit()
+    record_audit_event(
+        username,
+        action,
+        detail,
+        outcome="unknown",
+        actor_role="unknown",
+    )
 
 
 def get_setting(key: str, default: str = "") -> str:
@@ -1673,4 +2096,177 @@ def recent_audit(limit: int = 100) -> list[dict]:
     limit = max(10, min(int(limit), 1000))
     with db_connect() as conn:
         rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-    return [dict(row) for row in reversed(rows)]
+    return [_audit_row_to_dict(row) for row in reversed(rows)]
+
+
+def query_audit_events(
+    *,
+    before_id: int | None = None,
+    actor: str = "",
+    action: str = "",
+    outcome: str = "",
+    severity: str = "",
+    request_id: str = "",
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    limit: int = 100,
+) -> dict:
+    """Return a stable keyset page ordered newest first."""
+    page_size = max(1, min(int(limit), 500))
+    clauses: list[str] = []
+    params: list[object] = []
+    if before_id is not None:
+        clauses.append("id < ?")
+        params.append(_audit_sqlite_int(before_id))
+    if actor:
+        clauses.append("username = ?")
+        params.append(sanitize_log_text(actor, 128))
+    if action:
+        clauses.append("action = ?")
+        params.append(_audit_clean_name(action, "event"))
+    if outcome:
+        clauses.append("outcome = ?")
+        params.append(_audit_clean_name(outcome, "unknown", 24))
+    if severity:
+        clauses.append("severity = ?")
+        params.append(_audit_clean_name(severity, "info", 24))
+    if request_id:
+        clauses.append("request_id = ?")
+        params.append(sanitize_log_text(request_id, 96))
+    if from_ts is not None:
+        clauses.append("ts >= ?")
+        params.append(_audit_sqlite_int(from_ts))
+    if to_ts is not None:
+        clauses.append("ts <= ?")
+        params.append(_audit_sqlite_int(to_ts))
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(page_size + 1)
+    with db_connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM audit_log{where} ORDER BY id DESC LIMIT ?", params
+        ).fetchall()
+    has_more = len(rows) > page_size
+    page = rows[:page_size]
+    items = [_audit_row_to_dict(row) for row in page]
+    return {
+        "items": items,
+        "has_more": has_more,
+        "next_before_id": int(page[-1]["id"]) if has_more and page else None,
+    }
+
+
+def get_audit_event(audit_id: int | str) -> dict | None:
+    with db_connect() as conn:
+        if isinstance(audit_id, int) or str(audit_id).isdecimal():
+            row = conn.execute(
+                "SELECT * FROM audit_log WHERE id=?",
+                (_audit_sqlite_int(audit_id),),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM audit_log WHERE event_id=?",
+                (sanitize_log_text(audit_id, 128),),
+            ).fetchone()
+    return _audit_row_to_dict(row)
+
+
+def audit_summary(*, from_ts: int | None = None, to_ts: int | None = None) -> dict:
+    clauses: list[str] = []
+    params: list[object] = []
+    if from_ts is not None:
+        clauses.append("ts >= ?")
+        params.append(max(0, int(from_ts)))
+    if to_ts is not None:
+        clauses.append("ts <= ?")
+        params.append(max(0, int(to_ts)))
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with db_connect() as conn:
+        totals = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total, MAX(id) AS latest_id,
+                   SUM(CASE WHEN outcome='denied' OR severity IN ('error','critical') THEN 1 ELSE 0 END) AS high_risk
+            FROM audit_log{where}
+            """,
+            params,
+        ).fetchone()
+        outcome_rows = conn.execute(
+            f"SELECT outcome, COUNT(*) AS count FROM audit_log{where} GROUP BY outcome",
+            params,
+        ).fetchall()
+        severity_rows = conn.execute(
+            f"SELECT severity, COUNT(*) AS count FROM audit_log{where} GROUP BY severity",
+            params,
+        ).fetchall()
+        action_rows = conn.execute(
+            f"""
+            SELECT action, COUNT(*) AS count FROM audit_log{where}
+            GROUP BY action ORDER BY count DESC, action LIMIT 10
+            """,
+            params,
+        ).fetchall()
+    return {
+        "total": int(totals["total"] or 0),
+        "latest_id": int(totals["latest_id"] or 0),
+        "high_risk": int(totals["high_risk"] or 0),
+        "by_outcome": {row["outcome"]: int(row["count"]) for row in outcome_rows},
+        "by_severity": {row["severity"]: int(row["count"]) for row in severity_rows},
+        "top_actions": [{"action": row["action"], "count": int(row["count"])} for row in action_rows],
+    }
+
+
+def verify_audit_integrity() -> dict:
+    """Verify the local SHA-256 chain and stored head (tamper evidence, not non-repudiation)."""
+    try:
+        with db_connect() as conn:
+            # Keep the chain head and rows on one WAL snapshot. Without an
+            # explicit transaction, a legitimate append between both SELECTs
+            # can look like a local tamper event.
+            conn.execute("BEGIN")
+            state = conn.execute(
+                "SELECT * FROM audit_integrity_state WHERE singleton=1"
+            ).fetchone()
+            if state is None:
+                return {"ok": False, "checked": 0, "error": "state_missing"}
+            previous_hash = str(state["anchor_event_hash"] or "")
+            checked = 0
+            head_id = 0
+            for row in conn.execute("SELECT * FROM audit_log ORDER BY id"):
+                if str(row["prev_hash"] or "") != previous_hash:
+                    return {
+                        "ok": False,
+                        "checked": checked,
+                        "error": "chain_link_mismatch",
+                        "audit_id": int(row["id"]),
+                    }
+                expected_hash = _audit_event_hash(previous_hash, row)
+                if not hmac.compare_digest(str(row["event_hash"] or ""), expected_hash):
+                    return {
+                        "ok": False,
+                        "checked": checked,
+                        "error": "event_hash_mismatch",
+                        "audit_id": int(row["id"]),
+                    }
+                previous_hash = expected_hash
+                head_id = int(row["id"])
+                checked += 1
+            if (
+                int(state["event_count"]) != checked
+                or int(state["head_event_id"]) != head_id
+                or not hmac.compare_digest(str(state["head_event_hash"] or ""), previous_hash)
+            ):
+                return {
+                    "ok": False,
+                    "checked": checked,
+                    "error": "chain_head_mismatch",
+                }
+            return {
+                "ok": True,
+                "checked": checked,
+                "head_event_id": head_id,
+                "head_event_hash": previous_hash,
+                "anchor_event_id": int(state["anchor_event_id"] or 0),
+                "pruned_count": int(state["pruned_count"] or 0),
+            }
+    except Exception:
+        AUDIT_LOGGER.critical("AUDIT_VERIFY_FAILED", exc_info=True)
+        return {"ok": False, "checked": 0, "error": "verification_failed"}

@@ -40,7 +40,15 @@ class AlasEmbedRouteTests(unittest.TestCase):
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["ALLOWED_HOSTS"] = "testserver,alas.test:22267"
         os.environ["SESSION_COOKIE_SECURE"] = "false"
-        reset_app_modules(["app.config", "app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"])
+        reset_app_modules([
+            "app.config",
+            "app.main",
+            "app.storage",
+            "app.alas",
+            "app.alas_embed",
+            "app.security",
+            "app.account_access",
+        ])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.main = importlib.import_module("app.main")
@@ -50,6 +58,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.client = TestClient(self.main.app)
 
     def tearDown(self):
+        self.client.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
         os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
         os.environ.pop("ALLOWED_HOSTS", None)
@@ -909,7 +918,15 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.assertTrue(captured["closed"])
         self.assertEqual(set(captured["closed"]), {1008})
 
-    def install_fake_websocket_upstream(self, incoming=None, connect_error=None, idle_delay=0.05):
+    def install_fake_websocket_upstream(
+        self,
+        incoming=None,
+        connect_error=None,
+        idle_delay=0.05,
+        *,
+        wait_for_client_send=False,
+        hold_open=False,
+    ):
         """安装测试用上游 WebSocket 连接器并记录转发行为。"""
         captured = {"targets": [], "sent": [], "closed": []}
         incoming_messages = list(incoming or [])
@@ -919,6 +936,8 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
             def __init__(self, target):
                 self.target = target
+                self.client_sent = asyncio.Event()
+                self.closed_event = asyncio.Event()
 
             async def __aenter__(self):
                 captured["targets"].append(self.target)
@@ -933,6 +952,14 @@ class AlasEmbedRouteTests(unittest.TestCase):
                 return self
 
             async def __anext__(self):
+                if hold_open and not incoming_messages:
+                    try:
+                        await asyncio.wait_for(self.closed_event.wait(), timeout=10.0)
+                    except asyncio.TimeoutError as exc:
+                        raise AssertionError("proxy did not close the policy-test upstream") from exc
+                    raise StopAsyncIteration
+                if wait_for_client_send:
+                    await self.client_sent.wait()
                 await asyncio.sleep(idle_delay)
                 if not incoming_messages:
                     raise StopAsyncIteration
@@ -943,9 +970,11 @@ class AlasEmbedRouteTests(unittest.TestCase):
 
             async def send(self, message):
                 captured["sent"].append(message)
+                self.client_sent.set()
 
             async def close(self, code=1000):
                 captured["closed"].append(code)
+                self.closed_event.set()
 
         self.main.alas_embed.websocket_connect = lambda target, open_timeout=10.0: FakeUpstream(target)
         self.main.alas.public_settings = lambda: {
@@ -979,7 +1008,10 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.login("admin", "password123456", "admin")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
-        captured = self.install_fake_websocket_upstream(incoming=["from-upstream"])
+        captured = self.install_fake_websocket_upstream(
+            incoming=["from-upstream"],
+            wait_for_client_send=True,
+        )
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=a&config=b&x=1") as websocket:
             websocket.send_text("from-client")
@@ -995,7 +1027,10 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.login("admin", "password123456", "admin")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
-        captured = self.install_fake_websocket_upstream(incoming=[b"from-upstream"])
+        captured = self.install_fake_websocket_upstream(
+            incoming=[b"from-upstream"],
+            wait_for_client_send=True,
+        )
 
         with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
             websocket.send_bytes(b"from-client")
@@ -1010,7 +1045,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", False, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"action":"start","config":"挂机-云"}')
@@ -1027,7 +1062,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, False)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"method":"settings.save","config_name":"挂机-云"}')
@@ -1043,7 +1078,10 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.login("admin", "password123456", "admin")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
-        captured = self.install_fake_websocket_upstream(incoming=["admin-ok"])
+        captured = self.install_fake_websocket_upstream(
+            incoming=["admin-ok"],
+            wait_for_client_send=True,
+        )
 
         with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
             websocket.send_text('{"action":"start","method":"settings.save"}')
@@ -1060,7 +1098,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"config":"其它"}')
@@ -1076,7 +1114,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"params":{"config":"其它"}}')
@@ -1093,7 +1131,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_bytes('{"config":"其它"}'.encode("utf-8"))
@@ -1110,7 +1148,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_bytes(b"\xff\xfe")
@@ -1126,7 +1164,10 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.login("admin", "password123456", "admin")
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
-        captured = self.install_fake_websocket_upstream(incoming=[b"admin-ok"])
+        captured = self.install_fake_websocket_upstream(
+            incoming=[b"admin-ok"],
+            wait_for_client_send=True,
+        )
 
         with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
             websocket.send_bytes(b"from-admin")
@@ -1143,7 +1184,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"event":"alas.config_list"}')
@@ -1160,7 +1201,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267/base")
         self.storage.set_user_alas_config("alice", "挂机-云", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=5.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=挂机-云") as websocket:
             websocket.send_text('{"menu":"Alas","task":"Alas","config":"挂机-云"}')
@@ -1356,7 +1397,7 @@ class AlasEmbedRouteTests(unittest.TestCase):
         self.storage.set_setting("alas_enabled", "true")
         self.storage.set_setting("alas_base_url", "http://alas.test:22267")
         self.storage.set_user_alas_config("alice", "3256475495", True, True)
-        captured = self.install_fake_websocket_upstream(idle_delay=1.0)
+        captured = self.install_fake_websocket_upstream(hold_open=True)
 
         with self.client.websocket_connect("/alas/embed/proxy/ws?config=3256475495") as websocket:
             websocket.send_text("{")
@@ -1516,7 +1557,10 @@ class AlasEmbedRouteTests(unittest.TestCase):
         callback = json.dumps(
             {"event": "callback", "task_id": "admin-unregistered", "data": "Manage"}
         )
-        captured = self.install_fake_websocket_upstream(incoming=["admin-ok"])
+        captured = self.install_fake_websocket_upstream(
+            incoming=["admin-ok"],
+            wait_for_client_send=True,
+        )
 
         with self.client.websocket_connect("/alas/embed/proxy/ws") as websocket:
             websocket.send_text(callback)

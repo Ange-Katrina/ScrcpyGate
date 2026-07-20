@@ -10,7 +10,7 @@ import threading
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -115,6 +115,7 @@ class AlasEmbedUrlTests(unittest.TestCase):
             with self.subTest(name=name):
                 client = ClientWebSocket(message)
                 upstream = UpstreamWebSocket()
+                audit = AsyncMock()
                 with patch.object(alas_embed, "websocket_connect", return_value=upstream):
                     asyncio.run(
                         alas_embed.proxy_websocket(
@@ -123,6 +124,7 @@ class AlasEmbedUrlTests(unittest.TestCase):
                             "ws",
                             decision,
                             authorization_check=lambda binding=current_binding: binding,
+                            audit_callback=audit,
                         )
                     )
 
@@ -130,6 +132,84 @@ class AlasEmbedUrlTests(unittest.TestCase):
                 self.assertEqual(upstream.sent, [])
                 self.assertIn(1008, upstream.close_codes)
                 self.assertIn(1008, client.close_codes)
+                audit.assert_awaited_once()
+                call = audit.await_args
+                self.assertEqual(call.args[0], "alas_embed_ws_denied")
+                expected_reason = "binding_revoked" if name == "revoked" else "run_permission_denied"
+                self.assertEqual(call.kwargs["reason"], expected_reason)
+                self.assertNotIn(message, repr(call))
+
+    def test_proxy_websocket_finishes_received_policy_frame_before_normal_upstream_eof(self):
+        class ClientWebSocket:
+            query_params = []
+
+            def __init__(self):
+                self.close_codes = []
+
+            async def accept(self):
+                pass
+
+            async def receive(self):
+                await asyncio.sleep(0.5)
+                return {"text": '{"config":"Other"}'}
+
+            async def close(self, code=1000):
+                self.close_codes.append(code)
+
+        class UpstreamWebSocket:
+            def __init__(self):
+                self.sent = []
+                self.close_codes = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                await asyncio.sleep(0.01)
+                raise StopAsyncIteration
+
+            async def send(self, message):
+                self.sent.append(message)
+
+            async def close(self, code=1000):
+                self.close_codes.append(code)
+
+        async def authorization_check():
+            await asyncio.sleep(0.05)
+            return {"config_name": "AliceMain", "can_run": True, "can_edit": True}
+
+        client = ClientWebSocket()
+        upstream = UpstreamWebSocket()
+        audit = AsyncMock()
+        decision = alas_embed.ProxyDecision(
+            allowed=True,
+            config_name="AliceMain",
+            filtered=True,
+            can_run=True,
+            can_edit=True,
+        )
+        with patch.object(alas_embed, "websocket_connect", return_value=upstream):
+            asyncio.run(
+                alas_embed.proxy_websocket(
+                    client,
+                    "http://alas.test:22267",
+                    "ws",
+                    decision,
+                    authorization_check=authorization_check,
+                    audit_callback=audit,
+                )
+            )
+
+        self.assertEqual(upstream.sent, [])
+        self.assertIn(1008, upstream.close_codes)
+        self.assertIn(1008, client.close_codes)
+        audit.assert_awaited_once()
 
     def test_proxy_websocket_serializes_bidirectional_authorization_refresh(self):
         async def exercise(binding_results):

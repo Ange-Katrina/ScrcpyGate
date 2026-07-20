@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
@@ -8,7 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,6 +20,7 @@ from starlette.requests import HTTPConnection
 from . import alas, alas_embed, i18n, security, storage
 from .account_access import account_connections, account_expiration_monitor
 from .adb_monitor import adb_monitor
+from .audit_dispatcher import AuditDispatcher
 from .devices import devices_payload, public_adb_payload, session_payload, sessions_payload
 from .logging_config import (
     bind_log_context,
@@ -61,6 +64,7 @@ log = logging.getLogger("webscrcpy.main")
 api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
 mirror_autostop_task: asyncio.Task | None = None
 account_expiration_task: asyncio.Task | None = None
+audit_dispatcher: AuditDispatcher | None = None
 STATIC_ASSET_VERSION_RE = re.compile(r"[a-f0-9]{12}")
 ADMIN_ALAS_OVERVIEW_CONCURRENCY = ALAS_OVERVIEW_MAX_WORKERS
 ALAS_EMBED_DENIED_MESSAGE_KEYS = {
@@ -107,6 +111,10 @@ SERVER_ERROR_MESSAGE_KEYS = {
     "ALAS API token is not configured": "server.status.alas_token_missing",
 }
 PASSWORD_MIN_LENGTH_ERROR_RE = re.compile(r"^Password must be at least (?P<min>\d+) characters$")
+AUDIT_EXPORT_MAX_ROWS = 10000
+AUDIT_EXPORT_MAX_SECONDS = 31 * 24 * 60 * 60
+AUDIT_READ_BARRIER_TIMEOUT = 0.5
+SQLITE_INT_MAX = (1 << 63) - 1
 
 
 def server_error_message(error: object) -> str:
@@ -149,34 +157,84 @@ class LocaleContextMiddleware:
             i18n.reset_current_locale(token)
 
 
+def _persist_audit_event_checked(**event):
+    result = storage.record_audit_event(**event)
+    if result is None:
+        raise RuntimeError("audit event persistence failed")
+    return result
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global account_expiration_task, mirror_autostop_task
+    global account_expiration_task, audit_dispatcher, mirror_autostop_task
     log.info("APP_STARTUP")
     storage.init_db()
-    await adb_monitor.start()
-    mirror_autostop_task = asyncio.create_task(mirror_autostop_loop())
-    account_expiration_task = asyncio.create_task(account_expiration_monitor(storage.revoke_expired_access))
+    dispatcher = AuditDispatcher(
+        _persist_audit_event_checked,
+        maxsize=security.env_int("AUDIT_QUEUE_SIZE", 512, 16, 65536),
+    )
+    audit_dispatcher = dispatcher
+    primary_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+
+    def note_cleanup_error(component: str, error: BaseException) -> None:
+        nonlocal cleanup_error
+        if cleanup_error is None:
+            cleanup_error = error
+        log_event(
+            log,
+            "app.cleanup_failed",
+            level=logging.ERROR,
+            component=component,
+            error_type=type(error).__name__,
+        )
+
     try:
+        dispatcher.start()
+        await adb_monitor.start()
+        mirror_autostop_task = asyncio.create_task(mirror_autostop_loop())
+        account_expiration_task = asyncio.create_task(
+            account_expiration_monitor(_revoke_expired_access_with_audit)
+        )
         yield
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
         log.info("APP_SHUTDOWN")
-        if mirror_autostop_task:
-            mirror_autostop_task.cancel()
+        tasks = (
+            ("mirror_autostop", mirror_autostop_task),
+            ("account_expiration", account_expiration_task),
+        )
+        mirror_autostop_task = None
+        account_expiration_task = None
+        for component, task in tasks:
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await mirror_autostop_task
+                await task
             except asyncio.CancelledError:
                 pass
-            mirror_autostop_task = None
-        if account_expiration_task:
-            account_expiration_task.cancel()
-            try:
-                await account_expiration_task
-            except asyncio.CancelledError:
-                pass
-            account_expiration_task = None
-        await manager.stop_all()
-        await adb_monitor.stop()
+            except BaseException as exc:
+                note_cleanup_error(component, exc)
+        try:
+            await manager.stop_all()
+        except BaseException as exc:
+            note_cleanup_error("mirror_manager", exc)
+        try:
+            await adb_monitor.stop()
+        except BaseException as exc:
+            note_cleanup_error("adb_monitor", exc)
+        audit_dispatcher = None
+        try:
+            stopped = await asyncio.to_thread(dispatcher.stop, 5.0)
+            if not stopped:
+                log.critical("AUDIT_QUEUE_STOP_TIMEOUT")
+        except BaseException as exc:
+            note_cleanup_error("audit_dispatcher", exc)
+        if cleanup_error is not None and primary_error is None:
+            raise cleanup_error
 
 
 app = FastAPI(
@@ -217,7 +275,173 @@ async def mirror_autostop_loop() -> None:
             continue
         stopped = await manager.stop_idle_sessions(minutes * 60)
         for device_id in stopped:
-            storage.audit("system", "mirror_auto_stop", f"{device_id}: no_viewers_for_{minutes}m")
+            await asyncio.to_thread(
+                storage.record_audit_event,
+                "system",
+                "mirror_auto_stop",
+                actor_role="system",
+                outcome="success",
+                target_type="device",
+                target_id=device_id,
+                metadata={"idle_minutes": minutes},
+            )
+
+
+def audit_request(
+    request: Request,
+    user: dict | str | None,
+    action: str,
+    *,
+    detail: str = "",
+    outcome: str = "success",
+    reason: str = "",
+    severity: str = "info",
+    target_type: str = "route",
+    target_id: str = "",
+    metadata: dict | None = None,
+    dedupe_key: str = "",
+) -> bool:
+    if isinstance(user, dict):
+        username = str(user.get("username") or "")
+        role = str(user.get("role") or "")
+    else:
+        username = str(user or "")
+        role = "system" if username == "system" else "unknown"
+    return security.queue_audit_event(
+        request,
+        username=username,
+        actor_role=role,
+        action=action,
+        detail=detail,
+        outcome=outcome,
+        reason=reason,
+        severity=severity,
+        target_type=target_type,
+        target_id=target_id,
+        metadata=metadata,
+        dedupe_key=dedupe_key,
+    )
+
+
+async def audit_websocket_event(
+    websocket: WebSocket,
+    user: dict | None,
+    action: str,
+    *,
+    outcome: str,
+    reason: str = "",
+    severity: str = "warning",
+    target_type: str = "websocket",
+    target_id: str = "",
+    metadata: dict | None = None,
+) -> None:
+    path = str(getattr(getattr(websocket, "url", None), "path", "") or "")
+    if path.startswith("/alas/embed/proxy"):
+        socket_name = "alas"
+    elif path == "/ws/events":
+        socket_name = "events"
+    elif path.endswith("/video"):
+        socket_name = "video"
+    elif path.endswith("/control"):
+        socket_name = "control"
+    else:
+        socket_name = "websocket"
+    event_metadata = {"channel": "websocket", "socket": socket_name}
+    event_metadata.update(metadata or {})
+    event = {
+        "username": str((user or {}).get("username") or "anonymous"),
+        "action": action,
+        "actor_role": str((user or {}).get("role") or "anonymous"),
+        "outcome": outcome,
+        "reason": reason,
+        "severity": severity,
+        "target_type": target_type,
+        "target_id": target_id,
+        "request_id": normalize_request_id(websocket.headers.get("x-request-id", "")),
+        "source_ip": security.client_ip(websocket),
+        "user_agent": str(websocket.headers.get("user-agent", "") or ""),
+        "metadata": event_metadata,
+    }
+    try:
+        dispatcher = audit_dispatcher
+        if dispatcher is not None:
+            dispatcher.submit(event)
+            return
+        await asyncio.to_thread(storage.record_audit_event, **event)
+    except Exception as exc:
+        log_event(
+            log,
+            "security.audit.persist_failed",
+            level=logging.CRITICAL,
+            error_type=type(exc).__name__,
+        )
+
+
+def _revoke_expired_access_with_audit() -> set[str]:
+    expired = storage.revoke_expired_access()
+    for username in expired:
+        user = storage.get_user(username)
+        expires_at = user["expires_at"] if user else None
+        storage.record_audit_event(
+            "system",
+            "account_expired",
+            actor_role="system",
+            outcome="success",
+            target_type="account",
+            target_id=username,
+            metadata={"expires_at": expires_at},
+            dedupe_key=f"account_expired:{username}:{expires_at}",
+        )
+    return expired
+
+
+def _should_audit_http_failure(request: Request, status_code: int) -> bool:
+    if status_code < 400 or request.url.path.startswith(("/static/", "/healthz")):
+        return False
+    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        return True
+    return request.url.path.startswith(("/admin", "/api/admin", "/alas/embed", "/api/alas"))
+
+
+async def _flush_request_audit_events(request: Request) -> None:
+    events = security.pop_audit_events(request)
+    dispatcher = audit_dispatcher
+    if dispatcher is not None:
+        for event in events:
+            dispatcher.submit(event)
+        return
+    for event in events:
+        try:
+            await asyncio.to_thread(storage.record_audit_event, **event)
+        except Exception as exc:
+            # record_audit_event is itself failure-isolated; keep this last guard so
+            # audit infrastructure can never change a completed business response.
+            log_event(
+                log,
+                "security.audit.persist_failed",
+                level=logging.CRITICAL,
+                error_type=type(exc).__name__,
+            )
+
+
+async def _await_audit_read_barrier() -> bool:
+    dispatcher = audit_dispatcher
+    if dispatcher is None:
+        return True
+    consistent = await asyncio.to_thread(
+        dispatcher.barrier,
+        AUDIT_READ_BARRIER_TIMEOUT,
+    )
+    if not consistent:
+        stats = dispatcher.stats()
+        log_event(
+            log,
+            "security.audit.read_barrier_timeout",
+            level=logging.WARNING,
+            queue_size=stats.get("queue_size", 0),
+            unfinished=stats.get("unfinished", 0),
+        )
+    return consistent
 
 
 @app.middleware("http")
@@ -307,6 +531,30 @@ async def security_middleware(request: Request, call_next):
                 outcome="success" if status_code < 400 else "failure",
                 duration_ms=round((time.monotonic() - started) * 1000, 2),
             )
+            if _should_audit_http_failure(request, status_code) and not security.has_pending_audit_events(request):
+                audit_request(
+                    request,
+                    None,
+                    "http_operation",
+                    outcome="failure" if status_code >= 500 else "denied",
+                    reason=f"http_{status_code}",
+                    severity="error" if status_code >= 500 else "warning",
+                    target_type="route",
+                    target_id=route,
+                    metadata={"http_status_code": status_code},
+                )
+        elif not security.has_pending_audit_events(request):
+            audit_request(
+                request,
+                None,
+                "http_operation",
+                outcome="failure",
+                reason="unhandled_exception",
+                severity="error",
+                target_type="route",
+                target_id=getattr(request.scope.get("route"), "path", None) or _safe_log_path(request.url.path),
+            )
+        await _flush_request_audit_events(request)
         reset_log_context(context_token)
 
 
@@ -317,6 +565,58 @@ def _safe_log_path(path: str) -> str:
     if normalized.startswith("/alas/embed/proxy"):
         return "/alas/embed/proxy/*"
     return normalized
+
+
+def _audit_filter_int(value: object, field: str) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid {field}") from exc
+    if parsed < 0 or parsed > SQLITE_INT_MAX:
+        raise HTTPException(status_code=400, detail=f"invalid {field}")
+    return parsed
+
+
+def _audit_filters(values: dict) -> dict:
+    return {
+        "actor": str(values.get("actor") or "").strip(),
+        "action": str(values.get("action") or "").strip(),
+        "outcome": str(values.get("outcome") or "").strip(),
+        "severity": str(values.get("severity") or "").strip(),
+        "request_id": str(values.get("request_id") or "").strip(),
+        "from_ts": _audit_filter_int(values.get("from_ts"), "from_ts"),
+        "to_ts": _audit_filter_int(values.get("to_ts"), "to_ts"),
+    }
+
+
+def _audit_csv_cell(value: object) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    else:
+        text = str(value if value is not None else "")
+    if text[:1] in {"=", "+", "-", "@"}:
+        return f"'{text}"
+    return text
+
+
+async def _collect_audit_export(filters: dict) -> list[dict]:
+    events: list[dict] = []
+    before_id = None
+    while len(events) < AUDIT_EXPORT_MAX_ROWS:
+        page = await asyncio.to_thread(
+            storage.query_audit_events,
+            before_id=before_id,
+            limit=min(500, AUDIT_EXPORT_MAX_ROWS - len(events)),
+            **filters,
+        )
+        items = page.get("items") or []
+        events.extend(items)
+        before_id = page.get("next_before_id")
+        if not page.get("has_more") or not items or before_id is None:
+            break
+    return events[:AUDIT_EXPORT_MAX_ROWS]
 
 
 def redirect_to_login(request: Request):
@@ -355,6 +655,14 @@ async def register_current_user_websocket(websocket: WebSocket, user: dict) -> b
     if security.get_current_user(websocket):
         return True
     await account_connections.unregister(username, websocket)
+    await audit_websocket_event(
+        websocket,
+        user,
+        "websocket_access",
+        outcome="denied",
+        reason="account_expired",
+        target_id=websocket.url.path,
+    )
     await websocket.close(code=4403, reason="account expired")
     return False
 
@@ -912,7 +1220,17 @@ async def login(request: Request):
     password = str(data.get("password", ""))
     rate = security.login_rate_limit_status(request, username)
     if rate["limited"]:
-        storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
+        audit_request(
+            request,
+            username or "anonymous",
+            "login_rate_limited",
+            outcome="denied",
+            reason="rate_limited",
+            severity="warning",
+            target_type="account",
+            target_id=username or "anonymous",
+            metadata={"retry_after": rate["retry_after"]},
+        )
         response = templates.TemplateResponse(
             request,
             "login.html",
@@ -924,9 +1242,28 @@ async def login(request: Request):
     user = storage.authenticate(username, password)
     if not user:
         rate = security.record_login_failure(request, username)
-        storage.audit(username or "anonymous", "login_failed", audit_detail(request))
+        audit_request(
+            request,
+            username or "anonymous",
+            "login_failed",
+            outcome="denied",
+            reason="invalid_credentials",
+            severity="warning",
+            target_type="account",
+            target_id=username or "anonymous",
+        )
         if rate["limited"]:
-            storage.audit(username or "anonymous", "login_rate_limited", audit_detail(request, f"retry_after={rate['retry_after']}"))
+            audit_request(
+                request,
+                username or "anonymous",
+                "login_rate_limited",
+                outcome="denied",
+                reason="rate_limited",
+                severity="warning",
+                target_type="account",
+                target_id=username or "anonymous",
+                metadata={"retry_after": rate["retry_after"]},
+            )
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -937,7 +1274,16 @@ async def login(request: Request):
         session = storage.create_session(user["username"])
     except ValueError:
         security.record_login_failure(request, username)
-        storage.audit(username or "anonymous", "login_failed", audit_detail(request))
+        audit_request(
+            request,
+            username or "anonymous",
+            "login_failed",
+            outcome="denied",
+            reason="invalid_credentials",
+            severity="warning",
+            target_type="account",
+            target_id=username or "anonymous",
+        )
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -945,7 +1291,13 @@ async def login(request: Request):
             status_code=401,
         )
     security.record_login_success(request, username)
-    storage.audit(user["username"], "login_success", audit_detail(request))
+    audit_request(
+        request,
+        user,
+        "login_success",
+        target_type="account",
+        target_id=user["username"],
+    )
     response = RedirectResponse("/", status_code=302)
     set_session_cookie(response, session["sid"])
     return response
@@ -961,7 +1313,7 @@ async def logout(request: Request):
     sess = security.get_current_session(request)
     if sess:
         storage.delete_session(sess["sid"])
-    storage.audit(user["username"], "logout", audit_detail(request))
+    audit_request(request, user, "logout", target_type="account", target_id=user["username"])
     response = RedirectResponse("/login", status_code=302)
     clear_session_cookie(response)
     return response
@@ -974,7 +1326,7 @@ async def index(request: Request):
         return redirect
     sess = security.get_current_session(request)
     user = security.require_user(request)
-    storage.audit(user["username"], "page_index", audit_detail(request))
+    audit_request(request, user, "page_index")
     return templates.TemplateResponse(request, "index.html", {"user": user, "csrf_token": sess["csrf_token"]})
 
 
@@ -985,7 +1337,7 @@ async def admin_page(request: Request):
         return redirect
     user = security.require_admin(request)
     sess = security.get_current_session(request)
-    storage.audit(user["username"], "page_admin", audit_detail(request))
+    audit_request(request, user, "page_admin")
     return templates.TemplateResponse(request, "admin.html", {"user": user, "csrf_token": sess["csrf_token"]})
 
 
@@ -1045,7 +1397,14 @@ async def api_save_video_preferences(request: Request):
     except VideoOptionError as exc:
         raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
     storage.set_user_video_preference(user["username"], options)
-    storage.audit(user["username"], "video_preference_save", json.dumps(public_video_options(options), ensure_ascii=False))
+    audit_request(
+        request,
+        user,
+        "video_preference_save",
+        target_type="account",
+        target_id=user["username"],
+        metadata={"video": public_video_options(options)},
+    )
     return {"ok": True, "preferences": public_video_options(options), "effective": public_video_options(options), "video_mode": "normal"}
 
 
@@ -1065,7 +1424,14 @@ async def api_change_password(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     removed = storage.delete_other_sessions(user["username"], sess["sid"] if sess else None)
-    storage.audit(user["username"], "password_change", audit_detail(request, f"other_sessions_removed={removed}"))
+    audit_request(
+        request,
+        user,
+        "password_change",
+        target_type="account",
+        target_id=user["username"],
+        metadata={"other_sessions_removed": removed},
+    )
     return {"ok": True, "other_sessions_removed": removed}
 
 
@@ -1075,6 +1441,16 @@ async def api_mirror_start(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
+        audit_request(
+            request,
+            user,
+            "mirror_start",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            target_type="device",
+            target_id=real_device_id,
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     try:
@@ -1084,7 +1460,6 @@ async def api_mirror_start(device_id: str, request: Request):
     if payload.get("save_preference"):
         storage.set_user_video_preference(user["username"], options)
     ok = await manager.start(real_device_id, options)
-    storage.audit(user["username"], "mirror_start", real_device_id)
     if not ok:
         sessions = await public_sessions_for_user(user)
         session = (await manager.snapshot()).get(real_device_id) or {}
@@ -1095,6 +1470,20 @@ async def api_mirror_start(device_id: str, request: Request):
             adb_status,
             i18n.translate("server.status.mirror_start_failed"),
         )
+        audit_request(
+            request,
+            user,
+            "mirror_start",
+            outcome="failure",
+            reason="stream_start_failed",
+            severity="error",
+            target_type="device",
+            target_id=real_device_id,
+            metadata={
+                "adb_state": adb_status.get("state", "unknown"),
+                "stream_mode": session.get("stream_mode", "none"),
+            },
+        )
         return {
             "ok": False,
             "error": failure["error"],
@@ -1103,10 +1492,25 @@ async def api_mirror_start(device_id: str, request: Request):
             "detail": failure["detail"],
             "sessions": sessions,
         }
+    audit_request(
+        request,
+        user,
+        "mirror_start",
+        target_type="device",
+        target_id=real_device_id,
+        metadata={"video": public_video_options(options)},
+    )
     visible_devices = storage.list_devices_for_user(user["username"], user["role"] == "admin")
     stopped = await manager.stop_other_no_client_sessions(real_device_id, [str(device["id"]) for device in visible_devices])
     if stopped:
-        storage.audit(user["username"], "mirror_switch_cleanup", f"keep={real_device_id}; stopped={','.join(stopped)}")
+        audit_request(
+            request,
+            user,
+            "mirror_switch_cleanup",
+            target_type="device",
+            target_id=real_device_id,
+            metadata={"stopped_count": len(stopped)},
+        )
     return {"ok": ok, "sessions": await public_sessions_for_user(user), "stopped": len(stopped)}
 
 
@@ -1116,6 +1520,16 @@ async def api_mirror_settings(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
+        audit_request(
+            request,
+            user,
+            "mirror_settings",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            target_type="device",
+            target_id=real_device_id,
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     try:
@@ -1141,6 +1555,17 @@ async def api_mirror_settings(device_id: str, request: Request):
                 adb_status,
                 i18n.translate("server.status.mirror_restart_failed"),
             )
+            audit_request(
+                request,
+                user,
+                "mirror_settings",
+                outcome="failure",
+                reason="stream_restart_failed",
+                severity="error",
+                target_type="device",
+                target_id=real_device_id,
+                metadata={"restart_required": restart_required},
+            )
             return {
                 "ok": False,
                 "restarted": False,
@@ -1151,7 +1576,14 @@ async def api_mirror_settings(device_id: str, request: Request):
                 "preferences": public_video_options(options),
                 "sessions": await public_sessions_for_user(user),
             }
-    storage.audit(user["username"], "mirror_settings", f"{real_device_id}:{json.dumps(public_video_options(options), ensure_ascii=False)}")
+    audit_request(
+        request,
+        user,
+        "mirror_settings",
+        target_type="device",
+        target_id=real_device_id,
+        metadata={"restart_required": restart_required, "video": public_video_options(options)},
+    )
     return {"ok": True, "restarted": restart_required, "preferences": public_video_options(options), "sessions": await public_sessions_for_user(user)}
 
 
@@ -1161,9 +1593,28 @@ async def api_mirror_stop(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
+        audit_request(
+            request,
+            user,
+            "mirror_stop",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            target_type="device",
+            target_id=real_device_id,
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     ok = await manager.stop(real_device_id)
-    storage.audit(user["username"], "mirror_stop", real_device_id)
+    audit_request(
+        request,
+        user,
+        "mirror_stop",
+        outcome="success" if ok else "failure",
+        reason="" if ok else "stop_failed",
+        severity="info" if ok else "error",
+        target_type="device",
+        target_id=real_device_id,
+    )
     return {"ok": ok, "sessions": await public_sessions_for_user(user)}
 
 
@@ -1173,9 +1624,26 @@ async def api_mirror_idle_stop(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "view"):
+        audit_request(
+            request,
+            user,
+            "mirror_idle_stop",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            target_type="device",
+            target_id=real_device_id,
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     ok = await manager.stop_if_no_clients(real_device_id, wait_seconds=2)
-    storage.audit(user["username"], "mirror_idle_stop", f"{real_device_id}: stopped={ok}")
+    audit_request(
+        request,
+        user,
+        "mirror_idle_stop",
+        target_type="device",
+        target_id=real_device_id,
+        metadata={"stopped": ok},
+    )
     return {"ok": True, "stopped": ok, "sessions": await public_sessions_for_user(user)}
 
 
@@ -1185,10 +1653,32 @@ async def api_control_acquire(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     if not storage.user_can(user["username"], real_device_id, "control"):
+        audit_request(
+            request,
+            user,
+            "control_acquire",
+            outcome="denied",
+            reason="device_permission_denied",
+            severity="warning",
+            target_type="device",
+            target_id=real_device_id,
+            metadata={"channel": "http"},
+        )
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
     payload = await parse_body(request)
     force = bool(payload.get("force") and user["role"] == "admin")
     result, _epoch = acquire_control_lock(real_device_id, user["username"], "http", force=force)
+    audit_request(
+        request,
+        user,
+        "control_acquire",
+        outcome="success" if result.get("ok") else "denied",
+        reason="" if result.get("ok") else "control_occupied",
+        severity="info" if result.get("ok") else "warning",
+        target_type="device",
+        target_id=real_device_id,
+        metadata={"channel": "http", "force": force},
+    )
     await manager.broadcast({"type": "control_lock", "device_id": real_device_id, "lock": storage.get_lock(real_device_id)})
     return result
 
@@ -1199,6 +1689,17 @@ async def api_control_release(device_id: str, request: Request):
     user = security.require_user(request)
     real_device_id = resolve_device_or_404(device_id)
     ok = release_control_lock(real_device_id, user["username"], force=user["role"] == "admin", client_id="http")
+    audit_request(
+        request,
+        user,
+        "control_release",
+        outcome="success" if ok else "denied",
+        reason="" if ok else "not_lock_owner",
+        severity="info" if ok else "warning",
+        target_type="device",
+        target_id=real_device_id,
+        metadata={"channel": "http", "force": user["role"] == "admin"},
+    )
     await manager.broadcast({"type": "control_lock", "device_id": real_device_id, "lock": storage.get_lock(real_device_id)})
     return {"ok": ok}
 
@@ -1253,7 +1754,17 @@ async def api_alas_toggle(request: Request):
     binding = require_alas_binding(user, config_name=requested or None, run=True)
     result = await asyncio.to_thread(alas.control_for_config, "toggle", binding["config_name"])
     if not result.get("ok"):
-        storage.audit(user["username"], "alas_toggle_failed", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
+        audit_request(
+            request,
+            user,
+            "alas_toggle",
+            outcome="failure",
+            reason="runtime_operation_failed",
+            severity="error",
+            target_type="alas_config",
+            target_id=binding["config_name"],
+            metadata={"status_code": result.get("status_code")},
+        )
         return {
             "ok": False,
             "error": server_error_message(result.get("error")) or i18n.translate("server.status.alas_operation_failed"),
@@ -1262,7 +1773,14 @@ async def api_alas_toggle(request: Request):
         }
     if isinstance(result.get("alas"), dict):
         result["alas"] = public_alas_status(result["alas"], binding)
-    storage.audit(user["username"], "alas_toggle", f"{binding['config_name']}:{json.dumps(result, ensure_ascii=False)[:300]}")
+    audit_request(
+        request,
+        user,
+        "alas_toggle",
+        target_type="alas_config",
+        target_id=binding["config_name"],
+        metadata={"action": result.get("action")},
+    )
     return {"ok": True, "action": result.get("action"), "config": binding["config_name"], "alas": result.get("alas")}
 
 
@@ -1281,10 +1799,16 @@ async def alas_embed_page(request: Request):
         config_name=requested or None,
     )
     if user.get("role") != "admin" and not binding:
-        storage.audit(
-            user["username"],
+        audit_request(
+            request,
+            user,
             "alas_embed_denied",
-            alas_embed_denial_detail(request, "missing_binding", "/alas/embed/"),
+            outcome="denied",
+            reason="missing_binding",
+            severity="warning",
+            target_type="alas_shell",
+            target_id="user",
+            detail=alas_embed_denial_detail(request, "missing_binding", "/alas/embed/"),
         )
         raise HTTPException(status_code=403, detail=alas_embed_denied_message("missing_binding"))
     if not binding:
@@ -1295,7 +1819,13 @@ async def alas_embed_page(request: Request):
     if user.get("role") == "admin":
         config_name = alas.sanitize_config_name(binding.get("config_name"))
         iframe_src = f"/alas/embed/proxy/?{urlencode({'config': config_name})}" if requested else "/alas/embed/proxy/"
-        storage.audit(user["username"], "alas_embed_open", f"admin:{config_name}" if requested else "admin")
+        audit_request(
+            request,
+            user,
+            "alas_embed_open",
+            target_type="alas_config" if requested else "alas_shell",
+            target_id=config_name if requested else "admin",
+        )
         return HTMLResponse(
             alas_embed.embed_shell_html(
                 i18n.translate("alas.shell.admin_title"),
@@ -1304,7 +1834,13 @@ async def alas_embed_page(request: Request):
             )
         )
     config_name = alas.sanitize_config_name(binding.get("config_name"))
-    storage.audit(user["username"], "alas_embed_open", config_name)
+    audit_request(
+        request,
+        user,
+        "alas_embed_open",
+        target_type="alas_config",
+        target_id=config_name,
+    )
     return HTMLResponse(
         alas_embed.embed_shell_html(
             i18n.translate("alas.shell.user_title", config=config_name),
@@ -1338,7 +1874,17 @@ async def alas_embed_proxy(request: Request, path: str = ""):
         reason_code = alas_embed_reason_code(decision.reason)
         denied_message = alas_embed_denied_message(decision.reason)
         log_alas_embed_denied(user, binding, "http", path or "/", reason_code)
-        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, reason_code, path or "/"))
+        audit_request(
+            request,
+            user,
+            "alas_embed_denied",
+            outcome="denied",
+            reason=reason_code,
+            severity="warning",
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            detail=alas_embed_denial_detail(request, reason_code, path or "/"),
+        )
         denied_html = alas_embed_denied_html_response(request, binding, decision.status_code, denied_message)
         if denied_html is not None:
             return denied_html
@@ -1347,20 +1893,46 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     raw_enabled = storage.get_setting("alas_enabled", "false")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
         log_alas_embed_denied(user, binding, "http", path or "/", "disabled")
-        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "disabled", path or "/"))
+        audit_request(
+            request,
+            user,
+            "alas_embed_denied",
+            outcome="denied",
+            reason="disabled",
+            severity="warning",
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            detail=alas_embed_denial_detail(request, "disabled", path or "/"),
+        )
         raise HTTPException(status_code=400, detail=i18n.translate("server.status.alas_control_disabled"))
     if not settings.get("base_url"):
         log_alas_embed_denied(user, binding, "http", path or "/", "unconfigured")
-        storage.audit(user["username"], "alas_embed_denied", alas_embed_denial_detail(request, "unconfigured", path or "/"))
+        audit_request(
+            request,
+            user,
+            "alas_embed_denied",
+            outcome="failure",
+            reason="unconfigured",
+            severity="error",
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            detail=alas_embed_denial_detail(request, "unconfigured", path or "/"),
+        )
         raise HTTPException(status_code=502, detail=i18n.translate("server.status.alas_runtime_not_configured"))
     try:
         return await alas_embed.proxy_http_request(request, settings.get("base_url"), path, decision, body=body)
     except HTTPException as exc:
         if exc.status_code == 502:
-            storage.audit(
-                user["username"],
+            audit_request(
+                request,
+                user,
                 "alas_embed_proxy_failed",
-                alas_embed_denial_detail(request, "upstream_unreachable", path or "/"),
+                outcome="failure",
+                reason="upstream_unreachable",
+                severity="error",
+                target_type="alas_proxy_route",
+                target_id=alas_embed_route_class(path),
+                detail=alas_embed_denial_detail(request, "upstream_unreachable", path or "/"),
             )
             raise HTTPException(
                 status_code=502,
@@ -1376,11 +1948,27 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     connection_id = uuid.uuid4().hex[:12]
     if not security.websocket_origin_allowed(websocket):
         log_alas_websocket_close(connection_id, None, "origin_denied", 4403)
+        await audit_websocket_event(
+            websocket,
+            None,
+            "websocket_access",
+            outcome="denied",
+            reason="origin_denied",
+            target_id="/alas/embed/proxy/*",
+        )
         await websocket.close(code=4403)
         return
     user = security.get_current_user(websocket)
     if not user:
         log_alas_websocket_close(connection_id, None, "authentication_required", 1008)
+        await audit_websocket_event(
+            websocket,
+            None,
+            "websocket_access",
+            outcome="denied",
+            reason="authentication_required",
+            target_id="/alas/embed/proxy/*",
+        )
         await websocket.close(code=1008)
         return
     query_params = {key: websocket.query_params.getlist(key) for key in websocket.query_params.keys()}
@@ -1398,7 +1986,16 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
             "edit" if reason_code == "edit_permission_denied" else "restricted"
         )
         log_alas_websocket_close(connection_id, user, reason_code, 1008, permission=permission)
-        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, reason_code, path or "/"))
+        await audit_websocket_event(
+            websocket,
+            user,
+            "alas_embed_ws_denied",
+            outcome="denied",
+            reason=reason_code,
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            metadata={"connection_id": connection_id, "permission": permission},
+        )
         await websocket.close(code=1008)
         return
     settings = alas.public_settings()
@@ -1406,12 +2003,32 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     raw_base_url = storage.get_setting("alas_base_url", "")
     if not settings.get("enabled") or str(raw_enabled).strip().lower() not in ("1", "true", "yes", "on"):
         log_alas_websocket_close(connection_id, user, "disabled", 1011, phase="configuration")
-        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "disabled", path or "/"))
+        await audit_websocket_event(
+            websocket,
+            user,
+            "alas_embed_ws_denied",
+            outcome="failure",
+            reason="disabled",
+            severity="error",
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            metadata={"connection_id": connection_id},
+        )
         await websocket.close(code=1011)
         return
     if not raw_base_url.strip():
         log_alas_websocket_close(connection_id, user, "unconfigured", 1011, phase="configuration")
-        storage.audit(user["username"], "alas_embed_ws_denied", alas_embed_denial_detail(websocket, "unconfigured", path or "/"))
+        await audit_websocket_event(
+            websocket,
+            user,
+            "alas_embed_ws_denied",
+            outcome="failure",
+            reason="unconfigured",
+            severity="error",
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            metadata={"connection_id": connection_id},
+        )
         await websocket.close(code=1011)
         return
 
@@ -1422,6 +2039,19 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
             storage.get_user_alas_binding,
             user.get("username", ""),
             decision.config_name,
+        )
+
+    async def proxy_audit(action: str, **fields):
+        metadata = dict(fields.pop("metadata", {}) or {})
+        metadata["connection_id"] = connection_id
+        await audit_websocket_event(
+            websocket,
+            user,
+            action,
+            target_type="alas_proxy_route",
+            target_id=alas_embed_route_class(path),
+            metadata=metadata,
+            **fields,
         )
 
     username = user.get("username", "")
@@ -1437,6 +2067,7 @@ async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
             role=user.get("role", ""),
             connection_id=connection_id,
             authorization_check=refresh_binding if decision.filtered else None,
+            audit_callback=proxy_audit,
         )
     finally:
         await account_connections.unregister(username, websocket)
@@ -1493,7 +2124,22 @@ async def admin_upsert_user(request: Request):
     ) or not storage.user_is_active(updated) or bool(previous and not storage.user_is_active(previous))
     if should_close_connections:
         await account_connections.close_user_connections(username)
-    storage.audit(admin["username"], "user_upsert", username)
+    audit_request(
+        request,
+        admin,
+        "user_upsert",
+        target_type="account",
+        target_id=username,
+        metadata={
+            "created": previous is None,
+            "password_changed": bool(password),
+            "role_before": previous["role"] if previous else None,
+            "role_after": updated["role"] if updated else role,
+            "expires_at_before": previous["expires_at"] if previous else None,
+            "expires_at_after": updated["expires_at"] if updated else None,
+            "connections_revoked": should_close_connections,
+        },
+    )
     return {"ok": True, "users": storage.list_users()}
 
 
@@ -1508,7 +2154,7 @@ async def admin_delete_user(username: str, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
     await account_connections.close_user_connections(username)
-    storage.audit(admin["username"], "user_delete", username)
+    audit_request(request, admin, "user_delete", target_type="account", target_id=username)
     return {"ok": True, "users": storage.list_users()}
 
 
@@ -1543,8 +2189,15 @@ async def admin_upsert_device(request: Request):
         device_id = storage.create_device(name, address, enabled)
     if admin["role"] == "admin":
         storage.set_permission(admin["username"], device_id, True, True)
-    storage.audit(admin["username"], "device_upsert", device_id)
     address_changed = bool(previous and str(previous["address"]) != address)
+    audit_request(
+        request,
+        admin,
+        "device_upsert",
+        target_type="device",
+        target_id=device_id,
+        metadata={"created": previous is None, "enabled": enabled, "address_changed": address_changed},
+    )
     if previous and not enabled and (bool(previous["enabled"]) or address_changed):
         await manager.remove_device(device_id, reason="device_disabled", notify_users=notify_users)
     elif address_changed:
@@ -1566,7 +2219,17 @@ async def admin_test_adb_device(device_id: str, request: Request):
     if not device:
         raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     result = await adb_monitor.reconnect_device(device_id)
-    storage.audit(admin["username"], "device_adb_test", f"{device_id}:{result.get('state')}")
+    audit_request(
+        request,
+        admin,
+        "device_adb_test",
+        outcome="success" if result.get("ok") else "failure",
+        reason="" if result.get("ok") else "adb_unavailable",
+        severity="info" if result.get("ok") else "warning",
+        target_type="device",
+        target_id=device_id,
+        metadata={"state": result.get("state", "unknown")},
+    )
     return result
 
 
@@ -1583,7 +2246,17 @@ async def admin_reconnect_adb_device(device_id: str, request: Request):
     if not storage.get_device(device_id):
         raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
     result = await adb_monitor.reconnect_device(device_id)
-    storage.audit(admin["username"], "device_adb_reconnect", f"{device_id}:{result.get('state')}")
+    audit_request(
+        request,
+        admin,
+        "device_adb_reconnect",
+        outcome="success" if result.get("ok") else "failure",
+        reason="" if result.get("ok") else "adb_unavailable",
+        severity="info" if result.get("ok") else "warning",
+        target_type="device",
+        target_id=device_id,
+        metadata={"state": result.get("state", "unknown")},
+    )
     return result
 
 
@@ -1602,7 +2275,7 @@ async def admin_delete_device(device_id: str, request: Request):
         adb_monitor.restore_device(device_id)
         raise
     await manager.remove_device(device_id, notify_users=notify_users)
-    storage.audit(admin["username"], "device_delete", device_id)
+    audit_request(request, admin, "device_delete", target_type="device", target_id=device_id)
     sessions = await manager.snapshot()
     return {"ok": True, "devices": devices_payload(storage.list_all_devices(), sessions, adb_monitor.snapshot())}
 
@@ -1627,7 +2300,14 @@ async def admin_set_permission(request: Request):
         storage.set_permission(username, device_id, can_view, can_control)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
-    storage.audit(admin["username"], "permission_set", f"{username}:{device_id}:{can_view}:{can_control}")
+    audit_request(
+        request,
+        admin,
+        "permission_set",
+        target_type="device_permission",
+        target_id=f"{username}:{device_id}",
+        metadata={"username": username, "can_view": can_view, "can_control": can_control},
+    )
     return {"ok": True, "permissions": storage.list_permissions()}
 
 
@@ -1767,7 +2447,14 @@ async def admin_save_video_settings(request: Request):
         storage.update_settings(build_video_updates)
     except VideoOptionError as exc:
         raise HTTPException(status_code=400, detail=video_option_error_message(exc)) from exc
-    storage.audit(admin["username"], "video_settings", json.dumps(payload, ensure_ascii=False)[:400])
+    audit_request(
+        request,
+        admin,
+        "video_settings",
+        target_type="system_settings",
+        target_id="video",
+        metadata={"changed_fields": sorted(str(key) for key in payload)[:64]},
+    )
     settings = storage.get_settings(keys)
     saved_profiles = profile_payloads(settings)
     saved_fullscreen_profile = fullscreen_profile_value(settings.get("video_fullscreen_profile"), saved_profiles)
@@ -1802,7 +2489,17 @@ async def admin_save_alas(request: Request):
         await asyncio.to_thread(alas.save_settings, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
-    storage.audit(admin["username"], "alas_settings", "updated")
+    audit_request(
+        request,
+        admin,
+        "alas_settings",
+        target_type="system_settings",
+        target_id="alas",
+        metadata={
+            "changed_fields": sorted(str(key) for key in payload if str(key).lower() != "token")[:32],
+            "token_updated": bool(payload.get("token")),
+        },
+    )
     return {"ok": True, **await asyncio.to_thread(admin_alas_payload)}
 
 
@@ -1819,7 +2516,17 @@ async def admin_toggle_alas(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config_name")) from exc
     result = await asyncio.to_thread(alas.control_for_config, "toggle", config_name)
-    storage.audit(admin["username"], "alas_admin_toggle", json.dumps(result, ensure_ascii=False)[:400])
+    audit_request(
+        request,
+        admin,
+        "alas_admin_toggle",
+        outcome="success" if result.get("ok") else "failure",
+        reason="" if result.get("ok") else "runtime_operation_failed",
+        severity="info" if result.get("ok") else "error",
+        target_type="alas_config",
+        target_id=config_name,
+        metadata={"action": result.get("action"), "status_code": result.get("status_code")},
+    )
     if result.get("error"):
         result["error"] = server_error_message(result["error"])
     if isinstance(result.get("alas"), dict) and result["alas"].get("error"):
@@ -1887,7 +2594,16 @@ async def admin_save_alas_config(request: Request):
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.config_json_object"))
     result = await asyncio.to_thread(alas.save_config, source, target, data, False)
-    storage.audit(admin["username"], "alas_config_save", target or source)
+    audit_request(
+        request,
+        admin,
+        "alas_config_save",
+        outcome="success" if result.get("ok", True) else "failure",
+        reason="" if result.get("ok", True) else "runtime_operation_failed",
+        severity="info" if result.get("ok", True) else "error",
+        target_type="alas_config",
+        target_id=target or source,
+    )
     return result
 
 
@@ -1920,7 +2636,14 @@ async def admin_set_alas_permission(request: Request):
         else:
             storage.delete_user_alas_config(username)
             detail = username
-        storage.audit(admin["username"], "alas_binding_delete", detail)
+        audit_request(
+            request,
+            admin,
+            "alas_binding_delete",
+            target_type="alas_binding",
+            target_id=detail,
+            metadata={"username": username, "config_name": config_name},
+        )
         return {"ok": True, **admin_alas_permissions_payload()}
     if not config_name:
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
@@ -1938,34 +2661,186 @@ async def admin_set_alas_permission(request: Request):
         raise HTTPException(status_code=409, detail=detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=server_error_message(exc)) from exc
-    storage.audit(admin["username"], "alas_binding_set", f"{username}:{config_name}:{can_run}:{can_edit}:{bool(is_default)}")
+    audit_request(
+        request,
+        admin,
+        "alas_binding_set",
+        target_type="alas_binding",
+        target_id=f"{username}:{config_name}",
+        metadata={"username": username, "can_run": can_run, "can_edit": can_edit, "is_default": bool(is_default)},
+    )
     return {"ok": True, **admin_alas_permissions_payload()}
 
 
 @app.get("/api/admin/logs")
-async def admin_logs(request: Request):
+async def admin_logs(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+    before: int | None = Query(default=None, ge=0, le=SQLITE_INT_MAX),
+    actor: str = "",
+    action: str = "",
+    outcome: str = "",
+    severity: str = "",
+    request_id: str = "",
+    from_ts: int | None = Query(default=None, ge=0, le=SQLITE_INT_MAX),
+    to_ts: int | None = Query(default=None, ge=0, le=SQLITE_INT_MAX),
+):
     security.require_admin(request)
-    return {"logs": storage.recent_audit(500)}
+    audit_consistent = await _await_audit_read_barrier()
+    filters = {
+        "actor": actor,
+        "action": action,
+        "outcome": outcome,
+        "severity": severity,
+        "request_id": request_id,
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+    }
+    page, summary = await asyncio.gather(
+        asyncio.to_thread(
+            storage.query_audit_events,
+            before_id=before,
+            limit=max(1, min(limit, 200)),
+            **filters,
+        ),
+        asyncio.to_thread(
+            storage.audit_summary,
+            from_ts=max(0, int(time.time()) - 86400),
+            to_ts=int(time.time()),
+        ),
+    )
+    response = JSONResponse(
+        {
+            "logs": list(reversed(page["items"])),
+            "page": {
+                "has_more": bool(page["has_more"]),
+                "next_cursor": page["next_before_id"],
+            },
+            "summary": summary,
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Audit-Consistent"] = "true" if audit_consistent else "false"
+    return response
+
+
+@app.post("/api/admin/logs/export")
+async def admin_export_logs(request: Request):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    audit_consistent = await _await_audit_read_barrier()
+    payload = await parse_body(request)
+    export_format = str(payload.get("format") or "csv").strip().lower()
+    if export_format not in {"csv", "json"}:
+        raise HTTPException(status_code=400, detail="invalid audit export format")
+    filters = _audit_filters(payload)
+    now = int(time.time())
+    to_ts = filters["to_ts"] if filters["to_ts"] is not None else now
+    from_ts = filters["from_ts"] if filters["from_ts"] is not None else max(0, to_ts - AUDIT_EXPORT_MAX_SECONDS)
+    if from_ts > to_ts or to_ts - from_ts > AUDIT_EXPORT_MAX_SECONDS:
+        raise HTTPException(status_code=400, detail="audit export range must not exceed 31 days")
+    filters["from_ts"] = from_ts
+    filters["to_ts"] = to_ts
+    events = await _collect_audit_export(filters)
+    chronological = list(reversed(events))
+    audit_request(
+        request,
+        admin,
+        "audit_export",
+        target_type="audit_log",
+        target_id=export_format,
+        metadata={"format": export_format, "exported_count": len(chronological), "from_ts": from_ts, "to_ts": to_ts},
+    )
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "Content-Disposition": f'attachment; filename="scrcpygate-audit.{export_format}"',
+        "X-Audit-Consistent": "true" if audit_consistent else "false",
+    }
+    if export_format == "json":
+        return JSONResponse(
+            {"events": chronological, "exported_count": len(chronological), "truncated": len(events) >= AUDIT_EXPORT_MAX_ROWS},
+            headers=headers,
+        )
+    columns = (
+        "ts", "event_id", "username", "actor_role", "action", "target_type", "target_id",
+        "outcome", "reason", "severity", "request_id", "source_ip", "detail", "metadata",
+    )
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for event in chronological:
+        writer.writerow({column: _audit_csv_cell(event.get(column)) for column in columns})
+    return Response(content="\ufeff" + stream.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/api/admin/logs/integrity-check")
+async def admin_verify_audit_integrity(request: Request):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    audit_consistent = await _await_audit_read_barrier()
+    result = await asyncio.to_thread(storage.verify_audit_integrity)
+    audit_request(
+        request,
+        admin,
+        "audit_integrity_check",
+        outcome="success" if result.get("ok") else "failure",
+        reason="" if result.get("ok") else str(result.get("error") or "verification_failed"),
+        severity="info" if result.get("ok") else "critical",
+        target_type="audit_log",
+        target_id="local_hash_chain",
+        metadata={"checked": result.get("checked", 0)},
+    )
+    response = JSONResponse(result)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Audit-Consistent"] = "true" if audit_consistent else "false"
+    return response
+
+
+@app.get("/api/admin/logs/{event_id}")
+async def admin_audit_event(event_id: str, request: Request):
+    security.require_admin(request)
+    audit_consistent = await _await_audit_read_barrier()
+    event = await asyncio.to_thread(storage.get_audit_event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="audit event not found")
+    response = JSONResponse({"event": event})
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Audit-Consistent"] = "true" if audit_consistent else "false"
+    return response
 
 
 @app.get("/api/admin/runtime-logs")
 async def admin_runtime_logs(request: Request, lines: int = 300):
     security.require_admin(request)
-    return {"logs": await asyncio.to_thread(tail_log, lines), "meta": logging_health()}
+    meta = logging_health()
+    meta["audit_queue"] = (
+        audit_dispatcher.stats()
+        if audit_dispatcher is not None
+        else {"running": False, "queue_size": 0, "dropped_total": 0}
+    )
+    return {"logs": await asyncio.to_thread(tail_log, lines), "meta": meta}
 
 
 @app.websocket("/ws/devices/{device_id}/video")
 async def ws_video(websocket: WebSocket, device_id: str):
     if not security.websocket_origin_allowed(websocket):
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/video")
         await websocket.close(code=4403)
         return
     user = await security.websocket_user(websocket)
     if not user:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="authentication_required", target_id="/ws/devices/*/video")
         await websocket.close(code=4401)
         return
     real_device_id = storage.resolve_device_ref(device_id)
     if not real_device_id:
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
+        return
+    if not storage.user_can(user["username"], real_device_id, "view"):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403)
         return
     username = user["username"]
     if not await register_current_user_websocket(websocket, user):
@@ -1979,21 +2854,45 @@ async def ws_video(websocket: WebSocket, device_id: str):
 @app.websocket("/ws/devices/{device_id}/control")
 async def ws_control(websocket: WebSocket, device_id: str):
     if not security.websocket_origin_allowed(websocket):
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/control")
         await websocket.close(code=4403)
         return
     user = await security.websocket_user(websocket)
     if not user:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="authentication_required", target_id="/ws/devices/*/control")
         await websocket.close(code=4401)
         return
     real_device_id = storage.resolve_device_ref(device_id)
     if not real_device_id:
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
+        return
+    if not storage.user_can(user["username"], real_device_id, "control"):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403)
         return
     username = user["username"]
     if not await register_current_user_websocket(websocket, user):
         return
+
+    async def control_audit(action: str, **fields):
+        await audit_websocket_event(
+            websocket,
+            user,
+            action,
+            target_type="device",
+            target_id=real_device_id,
+            **fields,
+        )
+
     try:
-        await control_socket(websocket, user, real_device_id, exposed_device_id=device_id)
+        await control_socket(
+            websocket,
+            user,
+            real_device_id,
+            exposed_device_id=device_id,
+            audit_callback=control_audit,
+        )
     finally:
         await account_connections.unregister(username, websocket)
 
@@ -2001,10 +2900,12 @@ async def ws_control(websocket: WebSocket, device_id: str):
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket):
     if not security.websocket_origin_allowed(websocket):
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/events")
         await websocket.close(code=4403)
         return
     user = await security.websocket_user(websocket)
     if not user:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="authentication_required", target_id="/ws/events")
         await websocket.close(code=4401)
         return
     username = user["username"]

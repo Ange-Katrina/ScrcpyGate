@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -39,7 +40,14 @@ class AuthRouteTests(unittest.TestCase):
         os.environ["LOGIN_RATE_LIMIT_WINDOW_SECONDS"] = "60"
         os.environ["LOGIN_LOCKOUT_SECONDS"] = "30"
         os.environ.pop("ALLOW_NULL_ORIGIN", None)
-        reset_app_modules(["app.main", "app.mirror", "app.devices", "app.storage", "app.security"])
+        reset_app_modules([
+            "app.main",
+            "app.mirror",
+            "app.devices",
+            "app.storage",
+            "app.security",
+            "app.account_access",
+        ])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.storage.upsert_user("admin", "AdminPassword123", "admin")
@@ -47,6 +55,7 @@ class AuthRouteTests(unittest.TestCase):
         self.client = TestClient(self.main.app)
 
     def tearDown(self):
+        self.client.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
         for key in (
             "WEB_SCRCPY_DATA_DIR",
@@ -59,7 +68,14 @@ class AuthRouteTests(unittest.TestCase):
             "ALLOW_NULL_ORIGIN",
         ):
             os.environ.pop(key, None)
-        reset_app_modules(["app.main", "app.mirror", "app.devices", "app.storage", "app.security"])
+        reset_app_modules([
+            "app.main",
+            "app.mirror",
+            "app.devices",
+            "app.storage",
+            "app.security",
+            "app.account_access",
+        ])
 
     def test_login_route_rate_limits_repeated_failures(self):
         payload = {"username": "admin", "password": "wrong-password"}
@@ -422,7 +438,12 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "必须保留至少一个永久有效的管理员账户")
 
     def test_websocket_registration_rechecks_session_after_registry_insert(self):
-        websocket = AsyncMock()
+        websocket = SimpleNamespace(
+            headers={},
+            client=None,
+            url=SimpleNamespace(path="/ws/events"),
+            close=AsyncMock(),
+        )
         user = {"username": "alice", "role": "user"}
         with patch.object(
             self.main.account_connections,

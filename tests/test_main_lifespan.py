@@ -81,6 +81,104 @@ class MainLifespanTests(unittest.TestCase):
         deprecations = [item for item in caught if issubclass(item.category, DeprecationWarning)]
         self.assertEqual(deprecations, [])
 
+    def test_dispatcher_is_stopped_when_startup_fails(self):
+        events = []
+
+        async def monitor_start():
+            raise RuntimeError("monitor start failed")
+
+        async def monitor_stop():
+            events.append("monitor_stop")
+
+        async def mirror_stop_all():
+            events.append("mirror_stop_all")
+
+        main = importlib.import_module("app.main")
+        dispatchers = []
+        real_dispatcher = main.AuditDispatcher
+
+        def make_dispatcher(*args, **kwargs):
+            instance = real_dispatcher(*args, **kwargs)
+            dispatchers.append(instance)
+            return instance
+
+        async def run_lifespan():
+            with self.assertRaises(RuntimeError):
+                async with main.lifespan(main.app):
+                    pass
+
+        with (
+            mock.patch.object(main.storage, "init_db"),
+            mock.patch.object(main, "AuditDispatcher", side_effect=make_dispatcher),
+            mock.patch.object(main.adb_monitor, "start", side_effect=monitor_start),
+            mock.patch.object(main.adb_monitor, "stop", side_effect=monitor_stop),
+            mock.patch.object(main.manager, "stop_all", side_effect=mirror_stop_all),
+        ):
+            asyncio.run(run_lifespan())
+
+        self.assertEqual(len(dispatchers), 1)
+        self.assertFalse(dispatchers[0].stats()["running"])
+        self.assertIsNone(main.audit_dispatcher)
+        self.assertEqual(events, ["mirror_stop_all", "monitor_stop"])
+
+    def test_cleanup_continues_after_manager_cancellation(self):
+        events = []
+
+        async def monitor_start():
+            events.append("monitor_start")
+
+        async def monitor_stop():
+            events.append("monitor_stop")
+
+        async def mirror_stop_all():
+            events.append("mirror_stop_all")
+            raise asyncio.CancelledError()
+
+        async def idle_loop(*_args):
+            await asyncio.Event().wait()
+
+        main = importlib.import_module("app.main")
+        dispatchers = []
+        real_dispatcher = main.AuditDispatcher
+
+        def make_dispatcher(*args, **kwargs):
+            instance = real_dispatcher(*args, **kwargs)
+            dispatchers.append(instance)
+            return instance
+
+        async def run_lifespan():
+            with self.assertRaises(asyncio.CancelledError):
+                async with main.lifespan(main.app):
+                    pass
+
+        with (
+            mock.patch.object(main.storage, "init_db"),
+            mock.patch.object(main, "AuditDispatcher", side_effect=make_dispatcher),
+            mock.patch.object(main.adb_monitor, "start", side_effect=monitor_start),
+            mock.patch.object(main.adb_monitor, "stop", side_effect=monitor_stop),
+            mock.patch.object(main.manager, "stop_all", side_effect=mirror_stop_all),
+            mock.patch.object(main, "mirror_autostop_loop", side_effect=idle_loop),
+            mock.patch.object(main, "account_expiration_monitor", side_effect=idle_loop),
+        ):
+            asyncio.run(run_lifespan())
+
+        self.assertEqual(events, ["monitor_start", "mirror_stop_all", "monitor_stop"])
+        self.assertFalse(dispatchers[0].stats()["running"])
+        self.assertIsNone(main.audit_dispatcher)
+
+    def test_production_audit_writer_counts_storage_rejection(self):
+        main = importlib.import_module("app.main")
+        dispatcher = main.AuditDispatcher(main._persist_audit_event_checked, maxsize=16)
+        with mock.patch.object(main.storage, "record_audit_event", return_value=None):
+            with self.assertLogs("webscrcpy.audit", level="CRITICAL"):
+                dispatcher.start()
+                try:
+                    self.assertTrue(dispatcher.submit({"action": "write_failure"}))
+                    self.assertTrue(dispatcher.flush(1))
+                finally:
+                    self.assertTrue(dispatcher.stop(1))
+        self.assertEqual(dispatcher.stats()["failures"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

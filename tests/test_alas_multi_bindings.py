@@ -34,7 +34,14 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="scrcpygate-alas-multi-"))
         os.environ["WEB_SCRCPY_DATA_DIR"] = str(self.tmp)
         os.environ["SESSION_COOKIE_SECURE"] = "false"
-        reset_app_modules(["app.main", "app.storage", "app.alas", "app.alas_embed", "app.security"])
+        reset_app_modules([
+            "app.main",
+            "app.storage",
+            "app.alas",
+            "app.alas_embed",
+            "app.security",
+            "app.account_access",
+        ])
         self.storage = importlib.import_module("app.storage")
         self.storage.init_db()
         self.main = importlib.import_module("app.main")
@@ -46,6 +53,7 @@ class AlasMultiBindingRouteTests(unittest.TestCase):
         self.client = TestClient(self.main.app)
 
     def tearDown(self):
+        self.client.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
         os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
         os.environ.pop("SESSION_COOKIE_SECURE", None)
