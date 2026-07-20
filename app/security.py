@@ -148,13 +148,24 @@ def is_trusted_proxy(remote: str) -> bool:
     return any(ip in net for net in trusted_proxy_nets())
 
 
+def canonical_ip(value: object) -> str:
+    candidate = str(value or "").strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    try:
+        return ipaddress.ip_address(candidate).compressed
+    except ValueError:
+        return ""
+
+
 def client_ip(request: Request) -> str:
     remote = request.client.host if request.client else ""
     if env_bool("TRUST_PROXY", False) and is_trusted_proxy(remote):
         forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-        if forwarded:
-            return forwarded
-    return remote
+        forwarded_ip = canonical_ip(forwarded)
+        if forwarded_ip:
+            return forwarded_ip
+    return canonical_ip(remote) or "unknown"
 
 
 def enforce_http_boundary(request: Request) -> None:

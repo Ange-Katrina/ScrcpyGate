@@ -24,6 +24,11 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_QUEUE_SIZE: ${LOG_QUEUE_SIZE:-2048}
+      LOG_MAX_BYTES: ${LOG_MAX_BYTES:-5242880}
+      LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-5}
+      LOG_FILE_ENABLED: ${LOG_FILE_ENABLED:-true}
       MIN_PASSWORD_LENGTH: ${MIN_PASSWORD_LENGTH:-12}
       PASSWORD_PBKDF2_ITERATIONS: ${PASSWORD_PBKDF2_ITERATIONS:-310000}
       LOGIN_RATE_LIMIT_ENABLED: ${LOGIN_RATE_LIMIT_ENABLED:-true}
@@ -49,4 +54,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    logging:
+      driver: "${SCRCPYGATE_LOG_DRIVER:-local}"
+      options:
+        max-size: "${SCRCPYGATE_LOG_MAX_SIZE:-20m}"
+        max-file: "${SCRCPYGATE_LOG_MAX_FILES:-5}"
     # Network ADB only does not need privileged mode. USB ADB requires extra device mapping and permissions.

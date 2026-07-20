@@ -26,6 +26,9 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertIn("  scrcpygate:", compose)
         self.assertIn("image: scrcpygate:local", compose)
         self.assertIn("container_name: scrcpygate", compose)
+        self.assertIn('driver: "${SCRCPYGATE_LOG_DRIVER:-local}"', compose)
+        self.assertIn('max-size: "${SCRCPYGATE_LOG_MAX_SIZE:-20m}"', compose)
+        self.assertIn('max-file: "${SCRCPYGATE_LOG_MAX_FILES:-5}"', compose)
 
         deploy = self.read("deploy.sh")
         self.assertNotIn("docker compose -f", deploy)

@@ -79,6 +79,18 @@ class SecurityCoreTests(unittest.TestCase):
         self.assertTrue(security.proxy_headers_allowed(headers, "127.0.0.1", "/ws/events"))
         self.assertFalse(security.proxy_headers_allowed(headers, "10.0.0.2", "/ws/events"))
 
+    def test_client_ip_accepts_only_canonical_addresses_from_trusted_proxy(self):
+        os.environ["TRUST_PROXY"] = "true"
+        os.environ["TRUSTED_PROXY_IPS"] = "127.0.0.1"
+        security = load_security()
+        request = FakeRequest()
+        request.client.host = "127.0.0.1"
+        request.headers["x-forwarded-for"] = "203.0.113.10"
+        self.assertEqual(security.client_ip(request), "203.0.113.10")
+
+        request.headers["x-forwarded-for"] = "203.0.113.10\r\nFORGED"
+        self.assertEqual(security.client_ip(request), "127.0.0.1")
+
     def test_login_rate_limit_blocks_repeated_failures(self):
         os.environ["LOGIN_RATE_LIMIT_MAX"] = "2"
         os.environ["LOGIN_RATE_LIMIT_WINDOW_SECONDS"] = "60"

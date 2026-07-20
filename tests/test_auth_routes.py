@@ -117,6 +117,29 @@ class AuthRouteTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 404)
 
+    def test_http_responses_expose_a_valid_correlation_id(self):
+        supplied = "request-12345678"
+        response = self.client.get("/healthz", headers={"x-request-id": supplied})
+        self.assertEqual(response.headers.get("x-request-id"), supplied)
+
+        generated = self.client.get("/healthz", headers={"x-request-id": "short"})
+        self.assertRegex(generated.headers.get("x-request-id", ""), r"^[a-f0-9]{32}$")
+
+    def test_runtime_logs_include_non_sensitive_handler_health(self):
+        session = self.storage.create_session("admin")
+        self.client.cookies.set("wsid", session["sid"])
+
+        response = self.client.get("/api/admin/runtime-logs?lines=20")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsInstance(payload["logs"], list)
+        self.assertTrue(payload["meta"]["configured"])
+        self.assertIn(payload["meta"]["format"], ("json", "text"))
+        self.assertIn("dropped_records", payload["meta"])
+        self.assertIn("file_configured", payload["meta"])
+        self.assertIn("file_active", payload["meta"])
+
     def test_unauthenticated_pages_and_get_apis_are_blocked(self):
         checks = {
             "/": {302},

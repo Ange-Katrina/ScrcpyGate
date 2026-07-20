@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlencode
@@ -18,7 +19,15 @@ from . import alas, alas_embed, i18n, security, storage
 from .account_access import account_connections, account_expiration_monitor
 from .adb_monitor import adb_monitor
 from .devices import devices_payload, public_adb_payload, session_payload, sessions_payload
-from .logging_config import setup_logging, tail_log
+from .logging_config import (
+    bind_log_context,
+    log_event,
+    logging_health,
+    normalize_request_id,
+    reset_log_context,
+    setup_logging,
+    tail_log,
+)
 from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
     BANDWIDTH_RECOMMENDATIONS,
@@ -213,46 +222,101 @@ async def mirror_autostop_loop() -> None:
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
+    request_id = normalize_request_id(request.headers.get("x-request-id", ""))
+    request.state.request_id = request_id
+    started = time.monotonic()
     request_locale = i18n.locale_from_request(request)
-    try:
-        security.enforce_http_boundary(request)
-    except HTTPException as exc:
-        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-    else:
-        response = await call_next(request)
     is_alas_proxy = request.url.path.startswith("/alas/embed/proxy")
     is_static_asset = request.url.path.startswith("/static/")
-    if is_static_asset:
-        versions = request.query_params.getlist("v")
-        if len(versions) == 1 and STATIC_ASSET_VERSION_RE.fullmatch(versions[0]):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        else:
-            response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
-    elif not is_alas_proxy:
-        response.headers.setdefault("Content-Language", request_locale)
-        vary_values = [item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()]
-        vary_names = {item.lower() for item in vary_values}
-        for value in ("Cookie", "Accept-Language"):
-            if value.lower() not in vary_names:
-                vary_values.append(value)
-                vary_names.add(value.lower())
-        response.headers["Vary"] = ", ".join(vary_values)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    if not is_alas_proxy:
-        response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "frame-ancestors 'self'" if is_alas_proxy else (
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-            "font-src 'self' data:; img-src 'self' data:; connect-src 'self' ws: wss:; "
-            "media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-        ),
+    source_ip = security.client_ip(request)
+    context_token = bind_log_context(
+        request_id=request_id,
+        source_ip=source_ip,
+        http_method=request.method,
     )
-    if security.secure_cookie_enabled():
-        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-    return response
+    response = None
+    try:
+        try:
+            security.enforce_http_boundary(request)
+        except HTTPException as exc:
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        else:
+            response = await call_next(request)
+        if is_static_asset:
+            versions = request.query_params.getlist("v")
+            if len(versions) == 1 and STATIC_ASSET_VERSION_RE.fullmatch(versions[0]):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+        elif not is_alas_proxy:
+            response.headers.setdefault("Content-Language", request_locale)
+            vary_values = [item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()]
+            vary_names = {item.lower() for item in vary_values}
+            for value in ("Cookie", "Accept-Language"):
+                if value.lower() not in vary_names:
+                    vary_values.append(value)
+                    vary_names.add(value.lower())
+            response.headers["Vary"] = ", ".join(vary_values)
+        response.headers["X-Request-ID"] = request_id
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        if not is_alas_proxy:
+            response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "frame-ancestors 'self'" if is_alas_proxy else (
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                "font-src 'self' data:; img-src 'self' data:; connect-src 'self' ws: wss:; "
+                "media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+            ),
+        )
+        if security.secure_cookie_enabled():
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+    except Exception:
+        route = getattr(request.scope.get("route"), "path", None) or _safe_log_path(request.url.path)
+        log_event(
+            log,
+            "http.request.failed",
+            level=logging.ERROR,
+            http_method=request.method,
+            http_route=route,
+            outcome="error",
+            duration_ms=round((time.monotonic() - started) * 1000, 2),
+        )
+        raise
+    finally:
+        if response is not None:
+            status_code = int(response.status_code)
+            route = getattr(request.scope.get("route"), "path", None) or _safe_log_path(request.url.path)
+            level = (
+                logging.WARNING
+                if status_code >= 400
+                else logging.DEBUG
+                if request.url.path == "/healthz" or is_static_asset or is_alas_proxy
+                else logging.INFO
+            )
+            log_event(
+                log,
+                "http.request",
+                level=level,
+                http_method=request.method,
+                http_route=route,
+                http_status_code=status_code,
+                outcome="success" if status_code < 400 else "failure",
+                duration_ms=round((time.monotonic() - started) * 1000, 2),
+            )
+        reset_log_context(context_token)
+
+
+def _safe_log_path(path: str) -> str:
+    normalized = str(path or "/").replace("\\", "/")
+    if normalized.startswith("/static/"):
+        return "/static/*"
+    if normalized.startswith("/alas/embed/proxy"):
+        return "/alas/embed/proxy/*"
+    return normalized
 
 
 def redirect_to_login(request: Request):
@@ -1887,7 +1951,7 @@ async def admin_logs(request: Request):
 @app.get("/api/admin/runtime-logs")
 async def admin_runtime_logs(request: Request, lines: int = 300):
     security.require_admin(request)
-    return {"logs": tail_log(lines)}
+    return {"logs": await asyncio.to_thread(tail_log, lines), "meta": logging_health()}
 
 
 @app.websocket("/ws/devices/{device_id}/video")
