@@ -34,7 +34,12 @@ EVENT_NAME_RE = re.compile(r"[^a-z0-9_.-]+")
 FIELD_NAME_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-URL_QUERY_RE = re.compile(r"(?P<base>(?:https?://|wss?://|/)[^\s?'\"]+)\?[^\s'\"]*")
+URL_USERINFO_RE = re.compile(r"(?i)\b(?P<scheme>(?:https?|wss?)://)[^/\s?#'\"]+@")
+COOKIE_HEADER_RE = re.compile(r"(?i)\b(?P<prefix>(?:set-cookie|cookie)\s*:\s*)[^\r\n]*")
+COOKIE_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?P<prefix>[\"']?(?:set[_-]?cookie|cookie)[\"']?\s*=\s*)"
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\r\n,}\]]+)"
+)
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)(?P<prefix>[\"']?(?:password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|"
     r"api[_-]?key|secret|authorization|cookie|csrf(?:[_-]?token)?|session[_-]?id|sid|"
@@ -46,9 +51,11 @@ ADB_ENDPOINT_RE = re.compile(
     r"(?<![\w:])(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b|\[[0-9A-Fa-f:]+\]:\d{1,5}"
 )
 ENDPOINT_ASSIGNMENT_RE = re.compile(
-    r"(?i)(?P<prefix>[\"']?(?:address|serial|endpoint|device[_-]?address)[\"']?\s*[:=]\s*)"
+    r"(?i)(?P<prefix>[\"']?(?:address|serial|endpoint|device(?:[_-]?(?:id|address))?|"
+    r"adb(?:[_-]?(?:address|endpoint|serial))?)[\"']?\s*[:=]\s*)"
     r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
 )
+TRUNCATED_MARKER = "...[truncated]"
 
 _SENSITIVE_FIELD_NAMES = {
     "password",
@@ -89,6 +96,7 @@ _listener: QueueListener | None = None
 _queue_handler: QueueHandler | None = None
 _output_handlers: list[logging.Handler] = []
 _dropped_records = 0
+_dropped_records_by_level: dict[str, int] = {}
 _atexit_registered = False
 
 
@@ -128,21 +136,59 @@ def _is_sensitive_field(name: object) -> bool:
     return normalized.endswith(("_password", "_passwd", "_token", "_secret", "_cookie", "_private_key"))
 
 
+def _header_name(value: object) -> str:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("latin-1", errors="replace")
+    return str(value or "")
+
+
+def _redact_query_segments(text: str) -> str:
+    """Redact query-like suffixes in one pass, without regex backtracking."""
+    parts: list[str] = []
+    cursor = 0
+    length = len(text)
+    while cursor < length:
+        question = text.find("?", cursor)
+        if question < 0:
+            parts.append(text[cursor:])
+            break
+        parts.append(text[cursor:question])
+        end = question + 1
+        while end < length and not text[end].isspace() and text[end] not in "'\"":
+            end += 1
+        parts.append("?<redacted>")
+        cursor = end
+    return "".join(parts)
+
+
 def sanitize_log_text(value: object, max_chars: int = 4096) -> str:
     """Return one bounded line safe for terminals, JSON logs, and admin display."""
-    text = str(value if value is not None else "")
+    limit = max(64, min(int(max_chars), 65536))
+    source_limit = min(65536, max(256, limit * 2))
+    if isinstance(value, str):
+        source_truncated = len(value) > source_limit
+        text = value[:source_limit]
+    elif isinstance(value, (bytes, bytearray, memoryview)):
+        source_truncated = len(value) > source_limit
+        text = bytes(value[:source_limit]).decode("utf-8", errors="replace")
+    else:
+        text = str(value if value is not None else "")
+        source_truncated = len(text) > source_limit
+        text = text[:source_limit]
     text = ANSI_ESCAPE_RE.sub("", text)
+    text = COOKIE_HEADER_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
     text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ")
     text = CONTROL_RE.sub(" ", text)
-    text = URL_QUERY_RE.sub(lambda match: f"{match.group('base')}?<redacted>", text)
+    text = URL_USERINFO_RE.sub(lambda match: f"{match.group('scheme')}<redacted>@", text)
+    text = _redact_query_segments(text)
+    text = COOKIE_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
     text = SENSITIVE_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
     text = BEARER_RE.sub(lambda match: f"{match.group(1)} <redacted>", text)
     text = ENDPOINT_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<adb-endpoint>", text)
     text = ADB_ENDPOINT_RE.sub("<adb-endpoint>", text)
     text = re.sub(r" {2,}", " ", text).strip()
-    limit = max(64, min(int(max_chars), 65536))
-    if len(text) > limit:
-        return f"{text[: max(0, limit - 14)]}…[truncated]"
+    if source_truncated or len(text) > limit:
+        return f"{text[: max(0, limit - len(TRUNCATED_MARKER))]}{TRUNCATED_MARKER}"
     return text
 
 
@@ -153,9 +199,9 @@ def sanitize_log_value(value: object, field_name: object = "", *, depth: int = 0
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
-    if depth >= 3:
-        return sanitize_log_text(value, 512)
     if isinstance(value, dict):
+        if depth >= 3:
+            return {"_truncated": True}
         result: dict[str, object] = {}
         for index, (raw_key, raw_value) in enumerate(value.items()):
             if index >= 32:
@@ -165,11 +211,25 @@ def sanitize_log_value(value: object, field_name: object = "", *, depth: int = 0
             result[key] = sanitize_log_value(raw_value, key, depth=depth + 1)
         return result
     if isinstance(value, (list, tuple, set, frozenset)):
-        items = list(value)
+        if depth >= 3:
+            return [TRUNCATED_MARKER]
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            header_name = _header_name(value[0])
+            if _is_sensitive_field(header_name):
+                return [sanitize_log_text(header_name, 160), "<redacted>"]
+        iterator = iter(value)
+        items: list[object] = []
+        for _index in range(33):
+            try:
+                items.append(next(iterator))
+            except StopIteration:
+                break
         sanitized = [sanitize_log_value(item, field_name, depth=depth + 1) for item in items[:32]]
         if len(items) > 32:
-            sanitized.append("…[truncated]")
+            sanitized.append(TRUNCATED_MARKER)
         return sanitized
+    if depth >= 3:
+        return sanitize_log_text(value, 512)
     return sanitize_log_text(value, 2048)
 
 
@@ -321,21 +381,58 @@ class ResilientQueueHandler(QueueHandler):
         return _sanitized_record_copy(record)
 
     def enqueue(self, record: logging.LogRecord) -> None:
-        global _dropped_records
+        maxsize = int(getattr(self.queue, "maxsize", 0) or 0)
+        if record.levelno < logging.ERROR and maxsize >= 8:
+            reserved = max(1, min(64, maxsize // 8))
+            if self.queue.qsize() >= maxsize - reserved:
+                _count_dropped_record(record)
+                return
         try:
             self.queue.put_nowait(record)
         except queue.Full:
-            with _drop_lock:
-                _dropped_records += 1
             if record.levelno >= logging.ERROR:
-                try:
-                    sys.stderr.write(
-                        f"{_rfc3339(record.created)} [ERROR] {sanitize_log_text(record.name, 120)}: "
-                        f"{sanitize_log_text(record.getMessage(), 1024)}\n"
-                    )
-                    sys.stderr.flush()
-                except Exception:
-                    pass
+                enqueued, evicted = self._enqueue_over_lower_priority(record)
+                if enqueued:
+                    if evicted is not None:
+                        _count_dropped_record(evicted)
+                    return
+            _count_dropped_record(record)
+
+    def _enqueue_over_lower_priority(
+        self, record: logging.LogRecord
+    ) -> tuple[bool, logging.LogRecord | None]:
+        log_queue = self.queue
+        if type(log_queue) is not queue.Queue:
+            return False, None
+        with log_queue.mutex:
+            if log_queue.maxsize <= 0 or log_queue._qsize() < log_queue.maxsize:
+                log_queue._put(record)
+                log_queue.unfinished_tasks += 1
+                log_queue.not_empty.notify()
+                return True, None
+            candidate_index = -1
+            candidate_level = record.levelno
+            for index, queued_record in enumerate(log_queue.queue):
+                if not isinstance(queued_record, logging.LogRecord):
+                    continue
+                queued_level = int(getattr(queued_record, "levelno", logging.NOTSET))
+                if queued_level < candidate_level:
+                    candidate_index = index
+                    candidate_level = queued_level
+            if candidate_index < 0:
+                return False, None
+            evicted = log_queue.queue[candidate_index]
+            del log_queue.queue[candidate_index]
+            log_queue._put(record)
+            return True, evicted
+
+
+def _count_dropped_record(record: logging.LogRecord) -> None:
+    global _dropped_records
+    level = str(logging.getLevelName(record.levelno)).lower()
+    with _drop_lock:
+        _dropped_records += 1
+        _dropped_records_by_level[level] = _dropped_records_by_level.get(level, 0) + 1
 
 
 class FlushableQueueListener(QueueListener):
@@ -484,6 +581,7 @@ def logging_health() -> dict[str, object]:
     listener_thread = getattr(_listener, "_thread", None)
     with _drop_lock:
         dropped = _dropped_records
+        dropped_by_level = dict(_dropped_records_by_level)
     queue_depth = 0
     queue_capacity = 0
     if _queue_handler is not None:
@@ -499,6 +597,7 @@ def logging_health() -> dict[str, object]:
         "queue_depth": queue_depth,
         "queue_capacity": queue_capacity,
         "dropped_records": dropped,
+        "dropped_records_by_level": dropped_by_level,
         "file_configured": bool(_configured_signature and _configured_signature[-1]),
         "file_active": any(isinstance(handler, SecureRotatingFileHandler) for handler in _output_handlers),
     }

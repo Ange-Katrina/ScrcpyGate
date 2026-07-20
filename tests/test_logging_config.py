@@ -4,8 +4,10 @@ import os
 import queue
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app import logging_config
 
@@ -29,6 +31,43 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertIn("token=<redacted>", safe)
         self.assertIn("?<redacted>", safe)
         self.assertIn("<adb-endpoint>", safe)
+
+    def test_sanitizer_redacts_complete_cookie_userinfo_and_named_adb_endpoints(self):
+        raw = (
+            "Cookie: theme=dark; remember=second-cookie-secret\r\n"
+            "url=https://user:embedded-secret@example.test/path "
+            "device=pixel-lab.internal:5555 "
+            "adb_endpoint=2001:db8::10:5555"
+        )
+
+        safe = logging_config.sanitize_log_text(raw)
+
+        for secret in (
+            "theme=dark",
+            "second-cookie-secret",
+            "user:embedded-secret",
+            "pixel-lab.internal:5555",
+            "2001:db8::10:5555",
+        ):
+            self.assertNotIn(secret, safe)
+        self.assertIn("Cookie: <redacted>", safe)
+        self.assertIn("https://<redacted>@example.test/path", safe)
+        self.assertEqual(safe.count("<adb-endpoint>"), 2)
+
+    def test_sanitizer_redacts_url_password_through_last_authority_at_sign(self):
+        safe = logging_config.sanitize_log_text("https://user:p@ss@example.test/path")
+
+        self.assertEqual(safe, "https://<redacted>@example.test/path")
+        self.assertNotIn("p@ss", safe)
+
+    def test_structured_sanitizer_redacts_asgi_raw_header_pairs(self):
+        safe = logging_config.sanitize_log_value(
+            [(b"accept", b"application/json"), (b"cookie", b"session=synthetic-secret")]
+        )
+
+        self.assertEqual(safe[0], ["accept", "application/json"])
+        self.assertEqual(safe[1], ["cookie", "<redacted>"])
+        self.assertNotIn("synthetic-secret", json.dumps(safe))
 
     def test_structured_redaction_recognizes_camel_case_secret_keys(self):
         safe = logging_config.sanitize_log_value(
@@ -220,6 +259,87 @@ class LoggingConfigTests(unittest.TestCase):
 
         self.assertEqual(log_queue.qsize(), 1)
         self.assertEqual(logging_config.logging_health()["dropped_records"], before + 1)
+
+    def test_full_queue_never_writes_synchronously_for_error_records(self):
+        log_queue = queue.Queue(maxsize=1)
+        handler = logging_config.ResilientQueueHandler(log_queue)
+        record = logging.LogRecord("webscrcpy.test", logging.ERROR, __file__, 1, "failed", (), None)
+        handler.enqueue(record)
+
+        with mock.patch.object(sys.stderr, "write", side_effect=AssertionError("blocking fallback")):
+            handler.enqueue(record)
+
+        self.assertEqual(log_queue.qsize(), 1)
+        self.assertEqual(log_queue.get_nowait().levelno, logging.ERROR)
+
+    def test_priority_enqueue_never_replaces_listener_sentinel(self):
+        log_queue = queue.Queue(maxsize=1)
+        handler = logging_config.ResilientQueueHandler(log_queue)
+        record = logging.LogRecord("webscrcpy.test", logging.ERROR, __file__, 1, "failed", (), None)
+        log_queue.put_nowait(None)
+
+        handler.enqueue(record)
+
+        self.assertEqual(log_queue.qsize(), 1)
+        self.assertIsNone(log_queue.get_nowait())
+
+    def test_queue_reserves_capacity_for_high_severity_records(self):
+        log_queue = queue.Queue(maxsize=8)
+        handler = logging_config.ResilientQueueHandler(log_queue)
+        info = logging.LogRecord("webscrcpy.test", logging.INFO, __file__, 1, "info", (), None)
+        error = logging.LogRecord("webscrcpy.test", logging.ERROR, __file__, 1, "error", (), None)
+
+        for _index in range(8):
+            handler.enqueue(info)
+        handler.enqueue(error)
+
+        queued = list(log_queue.queue)
+        self.assertEqual(len(queued), 8)
+        self.assertEqual(sum(record.levelno >= logging.ERROR for record in queued), 1)
+        self.assertGreaterEqual(logging_config.logging_health()["dropped_records_by_level"]["info"], 1)
+
+    def test_structured_sequences_only_consume_the_bounded_prefix(self):
+        class CountingSet(set):
+            yielded = 0
+
+            def __iter__(self):
+                for item in super().__iter__():
+                    type(self).yielded += 1
+                    yield item
+
+        values = CountingSet(range(1000))
+
+        safe = logging_config.sanitize_log_value(values)
+
+        self.assertEqual(CountingSet.yielded, 33)
+        self.assertEqual(len(safe), 33)
+        self.assertEqual(safe[-1], logging_config.TRUNCATED_MARKER)
+
+    def test_text_sanitizer_bounds_work_before_redaction(self):
+        raw = "prefix " + ("x" * 100000) + " token=never-reached"
+
+        safe = logging_config.sanitize_log_text(raw, 128)
+
+        self.assertEqual(len(safe), 128)
+        self.assertTrue(safe.endswith(logging_config.TRUNCATED_MARKER))
+        self.assertNotIn("never-reached", safe)
+
+    def test_relative_url_query_redaction_is_linear_for_slash_heavy_input(self):
+        started = time.perf_counter()
+
+        safe = logging_config.sanitize_log_text("/" * 65536, 65536)
+
+        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertEqual(len(safe), 65536)
+
+    def test_query_redaction_is_linear_for_repeated_absolute_url_prefixes(self):
+        raw = "http://a" * 8192
+        started = time.perf_counter()
+
+        safe = logging_config.sanitize_log_text(raw, 65536)
+
+        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertEqual(len(safe), 65536)
 
     def test_tail_log_reads_only_the_requested_bounded_tail(self):
         previous = os.environ.get("WEB_SCRCPY_DATA_DIR")
