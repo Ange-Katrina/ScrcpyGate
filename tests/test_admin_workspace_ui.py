@@ -1,3 +1,5 @@
+import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -194,6 +196,11 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             'id="runtimeLogReset"',
             'id="runtimeLogSummary"',
             'id="runtimeLogResultCount"',
+            'id="runtimeLogMeta"',
+            'id="runtimeLogMetaTitle"',
+            'id="runtimeLogMetaSummary"',
+            'id="runtimeLogMetaHealth"',
+            'id="runtimeLogMetaIssues"',
             'id="runtimeLogs" class="runtime-logs" role="list"',
             'id="runtimeRawLogs" class="runtime-raw-logs"',
             'id="exportRuntimeLogs"',
@@ -217,6 +224,21 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "function runtimeLogEventTitle",
             "function runtimeLogReasonText",
             "function runtimeLogTechnicalContext",
+            "function runtimeLogRawText",
+            "typeof payload.raw_text==='string'",
+            "function runtimeLogTextLineCount",
+            "function runtimeLogTimestampDate",
+            "function prioritizeRuntimeLogParts",
+            "Task exception was never retrieved",
+            "KeyboardInterrupt",
+            "error_type",
+            "function renderRuntimeLogMeta",
+            "meta.truncated",
+            "meta.audit_queue",
+            "queue_flush_completed",
+            "pending_queue",
+            "function revealRuntimeLogDetails",
+            "details.addEventListener('toggle'",
             "function createRuntimeLogEntry",
             "document.createDocumentFragment()",
             "attributes.textContent=JSON.stringify",
@@ -227,7 +249,7 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "function syncRuntimeLogMode",
             "$('runtimeSeverityFilter').disabled=rawMode",
             "const label=el.querySelector('[data-busy-label]') || el",
-            "? (state.runtimeLogs || []).join('\\n')",
+            "? state.runtimeRawText",
             ": JSON.stringify(filteredRuntimeLogEntries(),null,2)",
             "requestAnimationFrame",
             "runtime-log-entry--${severity}",
@@ -238,6 +260,9 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         for token in (
             ".runtime-log-toolbar",
             ".runtime-log-summary",
+            ".runtime-log-meta",
+            ".runtime-log-meta[data-state=\"warning\"]",
+            ".runtime-log-meta[data-state=\"danger\"]",
             ".runtime-log-viewer",
             ".runtime-log-entry--warning",
             ".runtime-log-entry--error",
@@ -248,6 +273,8 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             ".runtime-log-detail-code",
             ".runtime-logs.is-nowrap",
             ".runtime-raw-logs.is-nowrap",
+            "grid-column: 1 / -1",
+            "summary:focus-visible",
         ):
             self.assertIn(token, self.styles)
 
@@ -256,6 +283,43 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("className='stream-mode-toggle'", self.script)
         self.assertNotIn("letter-spacing: -", self.styles)
         self.assertNotIn("font-size: clamp(", self.styles)
+
+    def test_runtime_log_snapshot_contract_preserves_raw_text_and_legacy_time(self):
+        source = self.script
+        raw_start = source.index("function runtimeLogRawText")
+        raw_end = source.index("\nfunction normalizeRuntimeLogSeverity", raw_start)
+        count_start = source.index("function runtimeLogTextLineCount")
+        count_end = source.index("\nfunction normalizeRuntimeLogSeverity", count_start)
+        timestamp_start = source.index("function runtimeLogTimestampDate")
+        timestamp_end = source.index("\nfunction formatRuntimeLogTimestamp", timestamp_start)
+        format_start = source.index("function formatRuntimeLogTimestamp")
+        format_end = source.index("\nfunction runtimeLogAttribute", format_start)
+        program = f"""
+const adminT = (key) => key;
+eval({json.dumps(source[raw_start:raw_end] + source[count_start:count_end] + source[timestamp_start:timestamp_end] + source[format_start:format_end])});
+const exact = "2026-07-20 16:00:00,412\\r\\nSECOND\\n";
+const result = {{
+  exact: runtimeLogRawText({{raw_text: exact, logs: ["wrong"]}}),
+  fallback: runtimeLogRawText({{logs: ["one", "two"]}}),
+  lines: runtimeLogTextLineCount(exact),
+  formatted: formatRuntimeLogTimestamp("2026-07-20 16:00:00,412")
+}};
+process.stdout.write(JSON.stringify(result));
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["exact"], "2026-07-20 16:00:00,412\r\nSECOND\n")
+        self.assertEqual(result["fallback"], "one\ntwo")
+        self.assertEqual(result["lines"], 2)
+        self.assertIn("16:00:00", result["formatted"])
+        self.assertNotEqual(result["formatted"], "2026-07-20 16:00:00,412")
 
     def test_device_cards_show_authoritative_adb_state(self):
         for token in (

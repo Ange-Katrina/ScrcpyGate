@@ -8,7 +8,7 @@
   <script src="/static/js/theme-init.js?v=fd7b6ddc6cde"></script>
   <link rel="stylesheet" href="/static/css/ui-tokens.css?v=0b50d7eab843">
   <link rel="stylesheet" href="/static/css/ui-components.css?v=54474b070308">
-  <link rel="stylesheet" href="/static/css/admin.css?v=df8be9d64552">
+  <link rel="stylesheet" href="/static/css/admin.css?v=12d5cfe40c60">
   <script src="/static/js/i18n.js?v=fa6da4c7cff5" defer></script>
   <script src="/static/js/ui-core.js?v=ec67834375f9" defer></script>
 </head>
@@ -400,6 +400,13 @@
             <div id="runtimeLogSummary" class="runtime-log-summary" aria-label="{{ t('admin.logs.runtime_severity_summary') }}"></div>
             <p id="runtimeLogResultCount" class="runtime-log-result" role="status" aria-live="polite">{{ t('admin.logs.runtime_waiting') }}</p>
           </div>
+          <div id="runtimeLogMeta" class="runtime-log-meta" data-state="idle" role="status" aria-live="polite">
+            <strong id="runtimeLogMetaTitle" class="runtime-log-meta__title">{{ t('admin.logs.runtime_snapshot_waiting') }}</strong>
+            <span id="runtimeLogMetaSummary" class="runtime-log-meta__summary">{{ t('admin.logs.runtime_snapshot_waiting_hint') }}</span>
+            <span id="runtimeLogMetaHealth" class="runtime-log-meta__health"></span>
+            <ul id="runtimeLogMetaIssues" class="runtime-log-meta__issues"></ul>
+            <span class="runtime-log-meta__scope">{{ t('admin.logs.runtime_snapshot_scope') }}</span>
+          </div>
           <div class="runtime-log-viewer">
             <div class="runtime-log-columns" aria-hidden="true"><span>{{ t('admin.logs.runtime_time') }}</span><span>{{ t('admin.logs.runtime_level') }}</span><span>{{ t('admin.logs.runtime_source') }}</span><span>{{ t('admin.logs.runtime_message') }}</span></div>
             <div id="runtimeLogs" class="runtime-logs" role="list" tabindex="0" aria-label="{{ t('admin.ui.logs.runtime_label') }}"></div>
@@ -542,6 +549,6 @@
 
 <script type="application/json" id="scrcpygate-i18n">{{ i18n_payload() | tojson }}</script>
 <script type="application/json" id="scrcpygate-bootstrap">{{ {"csrf_token": csrf_token, "user": {"username": user.username, "role": user.role, "is_admin": user.role == "admin"}} | tojson }}</script>
-<script src="/static/js/admin.js?v=802f49c0733c" defer></script>
+<script src="/static/js/admin.js?v=f98ec6e95629" defer></script>
 </body>
 </html>

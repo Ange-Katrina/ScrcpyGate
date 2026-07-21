@@ -5,7 +5,7 @@ const adminI18n = window.ScrcpyGateI18n;
 const adminT = (key, values) => (
   adminI18n && typeof adminI18n.t === 'function' ? adminI18n.t(key, values) : String(key || '')
 );
-const state = { overview:null, users:[], devices:[], permissions:[], logs:[], auditSummary:{}, runtimeLogs:[], runtimeLogEntries:[], runtimeLogMeta:{}, video:{}, alas:null };
+const state = { overview:null, users:[], devices:[], permissions:[], logs:[], auditSummary:{}, runtimeLogs:[], runtimeRawText:'', runtimeRawLineCount:0, runtimeLogEntries:[], runtimeLogMeta:{}, video:{}, alas:null };
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
 const profileLabels = {smooth:'mirror.profile.smooth', balanced:'mirror.profile.balanced', sharp:'mirror.profile.sharp', low_latency:'mirror.profile.low_latency'};
 const profileHints = {smooth:'admin.profile_hint.smooth', balanced:'admin.profile_hint.balanced', sharp:'admin.profile_hint.sharp', low_latency:'admin.profile_hint.low_latency'};
@@ -1871,6 +1871,16 @@ function openAlasConfigDrawer(trigger=document.activeElement){
   openEditorDrawer('alasConfig',trigger);
   withBusy($('loadConfig'),loadConfig,adminT('admin.busy.reading')).catch(error=>{ if(!isAbortError(error)) show(error.message); });
 }
+function runtimeLogRawText(payload={}){
+  if(typeof payload.raw_text==='string') return payload.raw_text;
+  return (Array.isArray(payload.logs) ? payload.logs : []).join('\n');
+}
+function runtimeLogTextLineCount(value){
+  const text=String(value || '');
+  if(!text) return 0;
+  const trailing=/(?:\r\n|\r|\n)$/.test(text) ? 1 : 0;
+  return Math.max(0,text.split(/\r\n|\r|\n/).length-trailing);
+}
 function normalizeRuntimeLogSeverity(value, severityNumber){
   const number=Number(severityNumber);
   if(Number.isInteger(number) && number>=1 && number<=24){
@@ -2013,8 +2023,8 @@ function parseRuntimeLogFallback(rawLine){
 function isRuntimeLogContinuation(rawLine){
   const line=String(rawLine || '');
   if(!line.trim() || /^\s/.test(line)) return true;
-  return /^(?:Traceback \(most recent call last\):|During handling of the above exception|The above exception was the direct cause)/.test(line)
-    || /^(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning)|Caused by):/.test(line);
+  return /^(?:Traceback \(most recent call last\):|During handling of the above exception|The above exception was the direct cause|Task exception was never retrieved|future:|Exception ignored in:)/.test(line)
+    || /^(?:(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning))|KeyboardInterrupt|StopIteration|Caused by)(?::|\(|\s|$)/.test(line);
 }
 function runtimeLogEntriesFromPayload(data={}){
   if(Array.isArray(data.entries)) return data.entries.map(normalizeRuntimeLogEntry);
@@ -2034,14 +2044,24 @@ function runtimeLogEntriesFromPayload(data={}){
   });
   return entries;
 }
+function runtimeLogTimestampDate(value){
+  const raw=String(value || '').trim();
+  if(!raw) return null;
+  const numeric=Number(raw);
+  if(Number.isFinite(numeric) && /^\d+(?:\.\d+)?$/.test(raw)) return new Date(numeric < 1e12 ? numeric*1000 : numeric);
+  const legacy=raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:[.,](\d{1,6}))?(Z|[+-]\d{2}:?\d{2})?$/);
+  if(legacy){
+    const milliseconds=String(legacy[3] || '0').padEnd(3,'0').slice(0,3);
+    const zone=legacy[4] && /^[+-]\d{4}$/.test(legacy[4]) ? `${legacy[4].slice(0,3)}:${legacy[4].slice(3)}` : (legacy[4] || '');
+    return new Date(`${legacy[1]}T${legacy[2]}.${milliseconds}${zone}`);
+  }
+  return new Date(raw);
+}
 function formatRuntimeLogTimestamp(value){
   const raw=String(value || '').trim();
   if(!raw) return adminT('admin.logs.unknown_time');
-  const numeric=Number(raw);
-  const date=Number.isFinite(numeric) && /^\d+(?:\.\d+)?$/.test(raw)
-    ? new Date(numeric < 1e12 ? numeric*1000 : numeric)
-    : new Date(raw);
-  if(Number.isNaN(date.getTime())) return raw;
+  const date=runtimeLogTimestampDate(raw);
+  if(!date || Number.isNaN(date.getTime())) return raw;
   return date.toLocaleString([], {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 function runtimeLogAttribute(entry,...keys){
@@ -2119,16 +2139,33 @@ function runtimeLogHttpMessage(entry){
   if(duration!=='') result.push(adminT('admin.logs.runtime_duration',{duration:Number(duration).toLocaleString()}));
   return result.join(' · ');
 }
+function prioritizeRuntimeLogParts(parts,priorityParts,highSeverity=false){
+  const ordered=[];
+  [...priorityParts,...parts].forEach(part=>{
+    if(part && !ordered.includes(part)) ordered.push(part);
+  });
+  return ordered.slice(0,highSeverity ? 4 : 3);
+}
 function runtimeLogStructuredMessage(entry,category){
   const parts=[];
+  const priorityParts=[];
   const add=(labelKey,value,formatter)=>{
     const part=runtimeLogSummaryField(labelKey,value,formatter);
     if(part && !parts.includes(part)) parts.push(part);
   };
+  const prioritize=(labelKey,value,formatter)=>{
+    const part=runtimeLogSummaryField(labelKey,value,formatter);
+    if(part && !priorityParts.includes(part)) priorityParts.push(part);
+  };
   const device=runtimeLogAttribute(entry,'device_name','device_id','device','adb_device');
   const state=runtimeLogAttribute(entry,'state','status','stream_health','health');
   const reason=runtimeLogAttribute(entry,'reason');
-  const error=runtimeLogAttribute(entry,'error','last_error','detail','exception.message');
+  const error=runtimeLogAttribute(entry,'error','error_type','last_error','detail','exception.message');
+  const highSeverity=entry && (entry.severity==='error' || entry.severity==='critical');
+  if(highSeverity){
+    prioritize('error',error);
+    prioritize('reason',reason,runtimeLogReasonText);
+  }
   if(category==='device'){
     add('device',device);
     add('state',state,runtimeLogStateText);
@@ -2180,7 +2217,7 @@ function runtimeLogStructuredMessage(entry,category){
     add('reason',reason,runtimeLogReasonText);
     add('error',runtimeLogAttribute(entry,'error','error_type','exception.message'));
   }
-  return parts.slice(0,3).join(' · ');
+  return prioritizeRuntimeLogParts(parts,priorityParts,highSeverity).join(' · ');
 }
 function runtimeLogPlainMessage(entry,title){
   const message=String(entry.message || '').trim();
@@ -2198,7 +2235,7 @@ function runtimeLogPlainMessage(entry,title){
   return message || title || adminT('admin.logs.runtime_no_message');
 }
 function runtimeLogMessage(entry,category=runtimeLogCategory(entry),title=runtimeLogEventTitle(entry,category)){
-  const exceptionType=runtimeLogAttribute(entry,'exception.type');
+  const exceptionType=runtimeLogAttribute(entry,'exception.type','error_type');
   const exceptionMessage=runtimeLogAttribute(entry,'exception.message');
   if(exceptionType || exceptionMessage) return [exceptionType,exceptionMessage].filter(Boolean).join(': ');
   if(category==='http'){
@@ -2250,6 +2287,26 @@ function runtimeLogDetailAttributes(entry){
     if(!RUNTIME_LOG_CONTEXT_FIELD_KEYS.has(key)) attributes[key]=value;
   });
   return attributes;
+}
+function revealRuntimeLogDetails(details){
+  const scroller=details && details.closest('.runtime-logs');
+  const summary=details && details.querySelector('summary');
+  const body=details && details.querySelector('.runtime-log-detail-body');
+  if(!scroller || !summary || !body) return;
+  window.requestAnimationFrame(()=>{
+    const scrollerRect=scroller.getBoundingClientRect();
+    const summaryRect=summary.getBoundingClientRect();
+    const bodyRect=body.getBoundingClientRect();
+    const inset=12;
+    const availableHeight=Math.max(0,scrollerRect.height-summaryRect.height-(inset*2));
+    let delta=0;
+    if(bodyRect.height<=availableHeight && bodyRect.bottom>scrollerRect.bottom-inset){
+      delta=bodyRect.bottom-(scrollerRect.bottom-inset);
+    }else if(bodyRect.height>availableHeight && summaryRect.top>scrollerRect.top+inset){
+      delta=summaryRect.top-(scrollerRect.top+inset);
+    }
+    if(delta) scroller.scrollBy({top:delta,left:0,behavior:'auto'});
+  });
 }
 function createRuntimeLogEntry(entry,index){
   const article=document.createElement('article');
@@ -2324,9 +2381,76 @@ function createRuntimeLogEntry(entry,index){
       body.append(title,raw);
     }
     details.append(summary,body);
+    details.addEventListener('toggle',()=>{ if(details.open) revealRuntimeLogDetails(details); });
     article.appendChild(details);
   }
   return article;
+}
+function runtimeLogMetaNumber(value,fallback=0){
+  const number=Number(value);
+  return Number.isFinite(number) && number>=0 ? Math.floor(number) : fallback;
+}
+function runtimeLogMetaHas(meta,key){
+  return Object.prototype.hasOwnProperty.call(meta,key);
+}
+function renderRuntimeLogMeta(){
+  const panel=$('runtimeLogMeta');
+  if(!panel) return;
+  const title=$('runtimeLogMetaTitle');
+  const summary=$('runtimeLogMetaSummary');
+  const health=$('runtimeLogMetaHealth');
+  const issues=$('runtimeLogMetaIssues');
+  const meta=state.runtimeLogMeta && typeof state.runtimeLogMeta==='object' ? state.runtimeLogMeta : {};
+  clear(issues);
+  if(!Object.keys(meta).length){
+    panel.dataset.state='idle';
+    if(title) title.textContent=adminT('admin.logs.runtime_snapshot_waiting');
+    if(summary) summary.textContent=adminT('admin.logs.runtime_snapshot_waiting_hint');
+    if(health) health.textContent='';
+    return;
+  }
+  const returned=runtimeLogMetaNumber(meta.returned_entries,state.runtimeLogEntries.length);
+  const matching=runtimeLogMetaNumber(meta.matching_entries,returned);
+  const scanned=runtimeLogMetaNumber(meta.scanned_lines,state.runtimeLogs.length);
+  const rawLines=state.runtimeRawLineCount || state.runtimeLogs.length;
+  const unclassified=runtimeLogMetaNumber(meta.unclassified_lines,0);
+  const loggingConfigured=runtimeLogMetaHas(meta,'configured') ? meta.configured!==false : null;
+  const listenerAlive=runtimeLogMetaHas(meta,'listener_alive') ? meta.listener_alive!==false : null;
+  const fileConfigured=runtimeLogMetaHas(meta,'file_configured') ? meta.file_configured===true : null;
+  const fileActive=runtimeLogMetaHas(meta,'file_active') ? meta.file_active===true : null;
+  const loggingDropped=runtimeLogMetaNumber(meta.dropped_records,0);
+  const queueDepth=runtimeLogMetaNumber(meta.queue_depth,0);
+  const queueCapacity=runtimeLogMetaNumber(meta.queue_capacity,0);
+  const queueFlushCompleted=runtimeLogMetaHas(meta,'queue_flush_completed') ? meta.queue_flush_completed!==false : true;
+  const pendingQueue=runtimeLogMetaNumber(meta.pending_queue,0);
+  const auditQueue=meta.audit_queue && typeof meta.audit_queue==='object' ? meta.audit_queue : {};
+  const auditRunning=runtimeLogMetaHas(auditQueue,'running') ? auditQueue.running!==false : null;
+  const auditDepth=runtimeLogMetaNumber(auditQueue.queue_size,0);
+  const auditDropped=runtimeLogMetaNumber(auditQueue.dropped_total,0);
+  const issuesData=[];
+  if(meta.truncated || meta.line_limit_hit || meta.byte_limit_hit || meta.partial_first_line) issuesData.push({tone:'warning',text:adminT('admin.logs.runtime_snapshot_truncated')});
+  if(unclassified) issuesData.push({tone:'warning',text:adminT('admin.logs.runtime_snapshot_unclassified',{count:unclassified})});
+  if(!queueFlushCompleted || pendingQueue>0) issuesData.push({tone:'warning',text:adminT('admin.logs.runtime_snapshot_queue_pending',{count:pendingQueue})});
+  if(loggingDropped) issuesData.push({tone:'danger',text:adminT('admin.logs.runtime_snapshot_logging_dropped',{count:loggingDropped})});
+  if(auditDropped) issuesData.push({tone:'danger',text:adminT('admin.logs.runtime_snapshot_audit_dropped',{count:auditDropped})});
+  if(loggingConfigured===false || listenerAlive===false || (fileConfigured===true && fileActive===false)) issuesData.push({tone:'danger',text:adminT('admin.logs.runtime_snapshot_logging_unhealthy')});
+  if(auditRunning===false) issuesData.push({tone:'danger',text:adminT('admin.logs.runtime_snapshot_audit_unhealthy')});
+  const hasDanger=issuesData.some(item=>item.tone==='danger');
+  const hasWarning=issuesData.length>0;
+  panel.dataset.state=hasDanger ? 'danger' : hasWarning ? 'warning' : 'ok';
+  if(title) title.textContent=adminT(hasDanger ? 'admin.logs.runtime_snapshot_attention' : hasWarning ? 'admin.logs.runtime_snapshot_review' : 'admin.logs.runtime_snapshot_ready');
+  if(summary) summary.textContent=adminT('admin.logs.runtime_snapshot_counts',{returned,matching,scanned,raw:rawLines});
+  if(health){
+    const pipelineState=loggingConfigured===null && listenerAlive===null ? adminT('admin.logs.runtime_health_unknown') : (loggingConfigured!==false && listenerAlive!==false ? adminT('admin.logs.runtime_health_active') : adminT('admin.logs.runtime_health_inactive'));
+    const auditState=auditRunning===null ? adminT('admin.logs.runtime_health_unknown') : (auditRunning ? adminT('admin.logs.runtime_health_active') : adminT('admin.logs.runtime_health_inactive'));
+    health.textContent=adminT('admin.logs.runtime_snapshot_health',{pipeline:pipelineState,queue:queueCapacity ? `${queueDepth}/${queueCapacity}` : String(queueDepth),dropped:loggingDropped,audit:auditState,audit_queue:auditDepth,audit_dropped:auditDropped});
+  }
+  issuesData.forEach(item=>{
+    const itemNode=document.createElement('li');
+    itemNode.className=`runtime-log-meta__issue runtime-log-meta__issue--${item.tone}`;
+    itemNode.textContent=item.text;
+    issues.appendChild(itemNode);
+  });
 }
 function renderRuntimeLogSummary(){
   const summary=$('runtimeLogSummary');
@@ -2367,8 +2491,9 @@ function renderRuntimeLogs(){
   clear(target);
   $('runtimeLogSummary').hidden=rawMode;
   if(!rawMode) renderRuntimeLogSummary();
+  renderRuntimeLogMeta();
   $('runtimeLogResultCount').textContent=rawMode
-    ? adminT('admin.logs.runtime_raw_results',{count:state.runtimeLogs.length})
+    ? adminT('admin.logs.runtime_raw_results',{count:state.runtimeRawLineCount})
     : adminT('admin.logs.runtime_results',{visible:entries.length,total:state.runtimeLogEntries.length});
   if(rawMode) return;
   if(!entries.length){
@@ -2390,7 +2515,7 @@ function renderRuntimeLogs(){
 function exportRuntimeLogs(){
   const rawMode=$('runtimeRawToggle').checked;
   const content=rawMode
-    ? (state.runtimeLogs || []).join('\n')
+    ? state.runtimeRawText
     : JSON.stringify(filteredRuntimeLogEntries(),null,2);
   const extension=rawMode ? 'log' : 'json';
   const mediaType=rawMode ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8';
@@ -2610,10 +2735,13 @@ function applyLogs(data,options={}){
   setLogLoadState('logs','ready',logReadyMessage('admin.logs.audit', state.logs.length));
 }
 function applyRuntimeLogs(data){
-  state.runtimeLogs=data.logs || [];
-  state.runtimeLogEntries=runtimeLogEntriesFromPayload(data);
-  state.runtimeLogMeta=data.meta && typeof data.meta==='object' ? data.meta : {};
-  $('runtimeRawLogs').textContent=state.runtimeLogs.join('\n');
+  const payload=data && typeof data==='object' ? data : {};
+  state.runtimeLogs=Array.isArray(payload.logs) ? payload.logs : [];
+  state.runtimeRawText=runtimeLogRawText(payload);
+  state.runtimeRawLineCount=runtimeLogTextLineCount(state.runtimeRawText);
+  state.runtimeLogEntries=runtimeLogEntriesFromPayload(payload);
+  state.runtimeLogMeta=payload.meta && typeof payload.meta==='object' ? payload.meta : {};
+  $('runtimeRawLogs').textContent=state.runtimeRawText;
   renderRuntimeLogs();
   setLogLoadState('runtimeLogs','ready',logReadyMessage('admin.logs.runtime', state.runtimeLogEntries.length));
 }

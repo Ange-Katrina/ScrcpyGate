@@ -2264,6 +2264,62 @@ td.table-action-cell {
   background: var(--ui-color-surface);
 }
 
+.runtime-log-meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  margin: var(--ui-space-2) 0 var(--ui-space-3);
+  padding: 10px 12px;
+  border: 1px solid var(--ui-color-border);
+  border-left: 3px solid var(--ui-color-info);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.runtime-log-meta[data-state="ok"] {
+  border-left-color: var(--ui-color-success);
+  background: var(--ui-color-success-soft);
+}
+
+.runtime-log-meta[data-state="warning"] {
+  border-left-color: var(--ui-color-warning);
+  background: var(--ui-color-warning-soft);
+}
+
+.runtime-log-meta[data-state="danger"] {
+  border-left-color: var(--ui-color-danger);
+  background: var(--ui-color-danger-soft);
+}
+
+.runtime-log-meta__title {
+  color: var(--ui-color-text);
+  font-weight: var(--ui-weight-semibold);
+}
+
+.runtime-log-meta__summary,
+.runtime-log-meta__health,
+.runtime-log-meta__scope {
+  overflow-wrap: anywhere;
+}
+
+.runtime-log-meta__scope {
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+}
+
+.runtime-log-meta__issues {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.runtime-log-meta__issue--warning { color: var(--ui-color-warning); }
+.runtime-log-meta__issue--danger { color: var(--ui-color-danger); }
+
 .runtime-log-columns,
 .runtime-log-entry {
   display: grid;
@@ -2490,8 +2546,9 @@ td.table-action-cell {
 
 .runtime-log-details {
   min-width: 0;
-  grid-column: 4;
+  grid-column: 1 / -1;
   margin-top: var(--ui-space-2);
+  padding-bottom: var(--ui-space-2);
 }
 
 .runtime-log-details summary {
@@ -2503,6 +2560,13 @@ td.table-action-cell {
   font-size: 11px;
   font-weight: var(--ui-weight-medium);
   cursor: pointer;
+}
+
+.runtime-log-details summary:focus-visible,
+.audit-detail-integrity summary:focus-visible {
+  outline: 2px solid var(--ui-color-info);
+  outline-offset: 2px;
+  box-shadow: var(--ui-focus-ring);
 }
 
 .runtime-log-details summary:hover {
@@ -3192,6 +3256,26 @@ td.table-action-cell {
   .admin-content {
     padding: var(--ui-space-5) max(var(--ui-space-4), env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(var(--ui-space-4), env(safe-area-inset-left));
   }
+
+  .runtime-log-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runtime-log-field,
+  #runtimeLogReset {
+    grid-column: 1 / -1;
+  }
+
+  .runtime-log-wrap-control,
+  .runtime-log-raw-control {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  #runtimeLogReset {
+    width: 100%;
+  }
 }
 
 @media (max-width: 720px) {
@@ -3242,11 +3326,6 @@ td.table-action-cell {
     width: 100%;
   }
 
-  .runtime-log-toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: var(--ui-space-3);
-  }
-
   .runtime-log-heading-actions {
     width: 100%;
     display: grid;
@@ -3254,15 +3333,6 @@ td.table-action-cell {
   }
 
   .runtime-log-heading-actions .btn {
-    width: 100%;
-  }
-
-  .runtime-log-field {
-    grid-column: 1 / -1;
-  }
-
-  #runtimeLogReset {
-    grid-column: 1 / -1;
     width: 100%;
   }
 
@@ -3802,7 +3872,8 @@ td.table-action-cell {
   .permission-toggle,
   .runtime-log-wrap-control,
   .runtime-log-raw-control,
-  .runtime-log-details summary {
+  .runtime-log-details summary,
+  .audit-detail-integrity summary {
     min-height: 44px;
   }
 }

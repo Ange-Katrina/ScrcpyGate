@@ -140,7 +140,8 @@ class UiTemplateContractTests(unittest.TestCase):
                 "loadConfig", "configEditor", "saveConfig", "logs", "runtimeLogs", "logRows",
                 "runtimeLogFilters", "runtimeSeverityFilter", "runtimeLogSearch", "runtimeLogWrap",
                 "runtimeRawToggle", "runtimeLogReset", "runtimeLogSummary", "runtimeLogResultCount",
-                "runtimeRawLogs", "exportRuntimeLogs",
+                "runtimeRawLogs", "exportRuntimeLogs", "runtimeLogMeta", "runtimeLogMetaTitle",
+                "runtimeLogMetaSummary", "runtimeLogMetaHealth", "runtimeLogMetaIssues",
                 "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
         }
@@ -208,6 +209,26 @@ class UiTemplateContractTests(unittest.TestCase):
         self.assertIn("function resolve(key)", runtime)
         self.assertIn('return String(key || "")', runtime)
         self.assertIn("Object.prototype.hasOwnProperty.call(values, name)", runtime)
+
+    def test_runtime_event_titles_cover_emitted_failure_events_in_both_catalogs(self):
+        expected = {
+            "alas_config_catalog_failed",
+            "alas_overview_catalog_failed",
+            "alas_overview_status_failed",
+            "audit_queue_stop_timeout",
+            "mirror_reconfigure_stop_failed",
+            "mirror_remove_snapshot_failed",
+            "mirror_remove_stop_failed",
+            "video_client_terminate_failed",
+            "video_protocol_keyflag_without_idr",
+        }
+        for locale in ("zh-CN", "en-US"):
+            with self.subTest(locale=locale):
+                catalog = json.loads(self.read(f"static/i18n/{locale}.json"))
+                events = catalog["admin"]["logs"]["runtime_events"]
+                self.assertTrue(expected.issubset(events.keys()))
+                for key in expected:
+                    self.assertTrue(events[key].strip(), key)
 
     def test_theme_runtime_and_accessibility_tokens_are_present(self):
         init = self.read("static/js/theme-init.js")
