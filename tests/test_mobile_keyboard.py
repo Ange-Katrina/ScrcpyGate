@@ -241,6 +241,35 @@ console.log(JSON.stringify({landscapeLeft,landscapeCenter,portraitTop,portraitCe
         self.assertEqual(result["portraitTop"], {"x": 50, "y": 75})
         self.assertEqual(result["portraitCenter"], {"x": 50, "y": 100})
 
+    def test_contain_fit_ignores_letterbox_bars_and_maps_content_edges(self):
+        result = self.run_node(
+            r"""
+const landscapeVideo=new FakeTarget('video');
+const landscape=new ScrcpyInput(()=>{}, landscapeVideo, 200, 100, false);
+const landscapeBar=landscape.mapClientToDevice(50, 50);
+const landscapeTopLeft=landscape.mapClientToDevice(0, 75);
+const landscapeBottomRight=landscape.mapClientToDevice(100, 125);
+
+const portraitVideo=new FakeTarget('video');
+portraitVideo.getBoundingClientRect=()=>({left:0,top:0,right:200,bottom:100,width:200,height:100});
+const portrait=new ScrcpyInput(()=>{}, portraitVideo, 100, 200, false);
+const portraitBar=portrait.mapClientToDevice(50, 50);
+const portraitTopLeft=portrait.mapClientToDevice(75, 0);
+const portraitBottomRight=portrait.mapClientToDevice(125, 100);
+
+landscape.destroy();
+portrait.destroy();
+console.log(JSON.stringify({landscapeBar,landscapeTopLeft,landscapeBottomRight,portraitBar,portraitTopLeft,portraitBottomRight}));
+"""
+        )
+
+        self.assertIsNone(result["landscapeBar"])
+        self.assertEqual(result["landscapeTopLeft"], {"x": 0, "y": 0})
+        self.assertEqual(result["landscapeBottomRight"], {"x": 199, "y": 99})
+        self.assertIsNone(result["portraitBar"])
+        self.assertEqual(result["portraitTopLeft"], {"x": 0, "y": 0})
+        self.assertEqual(result["portraitBottomRight"], {"x": 99, "y": 199})
+
 
 class MobileKeyboardWorkspaceContractTests(unittest.TestCase):
     @classmethod

@@ -75,6 +75,7 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn(".device-card {\n    min-height: 48px", self.styles)
         self.assertIn("selectedButton.scrollIntoView({block:'nearest'})", self.script)
         self.assertIn("function syncVisualViewportMetrics()", self.script)
+        self.assertIn("(!mobileSidebarMedia.matches && !state.immersive)", self.script)
         self.assertIn("const viewport=window.visualViewport", self.script)
         self.assertIn("viewport.height", self.script)
         self.assertIn("viewport.offsetTop", self.script)
@@ -91,7 +92,7 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             'id="immersiveControls"',
             'id="immersiveControlBtn"',
             'id="immersiveAlasBtn"',
-            'id="immersiveStopBtn"',
+            'id="immersiveMirrorBtn"',
             'id="exitFullscreenBtn"',
             'aria-controls="immersiveControls"',
         ):
@@ -107,13 +108,17 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
             "FULLSCREEN_MIN_MAX_SIZE = 1280",
             "fullscreen_profile",
             "function videoLayoutSize(availW, availH, screenW, screenH, fit='contain', immersive=false)",
-            "if (immersive) return {width:safeW, height:safeH, objectFit:'cover'}",
+            "if (immersive) return {width:safeW, height:safeH, objectFit:'contain'}",
             "grid-template-columns: repeat(2, 44px)",
             "font-size: 10px",
             ".app.is-immersive .stage {\n    grid-template-columns: minmax(0, 1fr)",
             ".app.is-immersive .immersive-rail-toggle {\n    width: 44px",
             "overflow-x: hidden",
             ".app.is-immersive .immersive-action[data-tone=\"danger\"]",
+            ".app.is-immersive .immersive-action[data-tone=\"primary\"]",
+            ".app.is-immersive .immersive-mirror-action",
+            ".app.is-immersive .immersive-exit-action",
+            "overscroll-behavior: contain",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, self.styles + self.script)
@@ -134,10 +139,20 @@ class MirrorWorkspaceUiContractTests(unittest.TestCase):
         self.assertIn("right: env(safe-area-inset-right)", self.styles)
         self.assertIn("bindClick('immersiveControlBtn'", self.script)
         self.assertIn("bindClick('immersiveAlasBtn'", self.script)
+        self.assertIn("bindClick('immersiveMirrorBtn'", self.script)
+        self.assertIn("function immersiveMirrorMode(session=selectedSession())", self.script)
+        self.assertIn("function toggleImmersiveMirror(button)", self.script)
+        self.assertIn("stopping ? stopMirror : startMirror", self.script)
+        self.assertIn("mirror.dataset.tone=stopping ? 'danger' : 'primary'", self.script)
+        self.assertIn("mode === 'connect' ? 'refresh-cw' : 'play'", self.script)
+        self.assertIn('class="immersive-actions" role="group"', self.template)
         self.assertIn("loadAlasPanel().catch(()=>{})", self.script)
         self.assertIn("alas.disabled=!binding || !binding.can_run || loading || actionBusy('alas')", self.script)
         self.assertIn("alas.setAttribute('aria-busy', String(loading || actionBusy('alas')))", self.script)
-        self.assertIn(".app.is-immersive .nav-label {\n    display: block", self.styles)
+        self.assertIn(".app.is-immersive .nav-label {\n  display: block", self.styles)
+        self.assertIn("top: calc(var(--mirror-visual-viewport-offset-top, 0px) + env(safe-area-inset-top, 0px))", self.styles)
+        self.assertIn("height: calc(var(--mirror-visual-viewport-height, 100dvh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))", self.styles)
+        self.assertNotIn("immersiveStopBtn", self.template + self.script)
 
     def test_sidebar_identity_and_device_rows_use_compact_information_hierarchy(self):
         for token in (

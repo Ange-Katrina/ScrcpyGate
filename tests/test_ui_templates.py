@@ -110,7 +110,7 @@ class UiTemplateContractTests(unittest.TestCase):
                 "statusDetails", "controlOwnership", "fullscreenBtn", "notice", "stage", "screenArea", "videoWrap",
                 "phoneVideo", "empty", "emptyTitle", "emptyDescription", "backBtn", "homeBtn",
                 "recentBtn", "keyboardBtn", "immersiveRail", "immersiveRailToggle", "immersiveControls",
-                "immersiveControlBtn", "immersiveAlasBtn", "immersiveStopBtn", "exitFullscreenBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
+                "immersiveControlBtn", "immersiveAlasBtn", "immersiveMirrorBtn", "exitFullscreenBtn", "toolDrawerBackdrop", "workspaceDrawer", "workspaceDrawerTitle",
                 "toolDrawerCloseBtn", "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
             "admin.html": {

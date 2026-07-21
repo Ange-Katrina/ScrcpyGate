@@ -201,6 +201,94 @@ console.log(JSON.stringify({{screen:state.screen,reconfiguring:state.videoReconf
         self.assertFalse(layout_result["reconfiguring"])
         self.assertEqual(layout_result["resizeCalls"], [[1280, 720], "layout"])
 
+    def test_immersive_layout_keeps_portrait_and_landscape_streams_complete(self):
+        start = self.script.index("function videoLayoutSize(")
+        end = self.script.index("function layoutVideo()", start)
+        layout_source = self.script[start:end]
+        program = f"""
+{layout_source}
+const cases=[
+  [390,844,720,1280],
+  [844,390,720,1280],
+  [390,844,1280,720],
+  [844,390,1280,720],
+];
+const results=cases.map(([availW,availH,screenW,screenH])=>{{
+  const layout=videoLayoutSize(availW,availH,screenW,screenH,'original',true);
+  const scale=Math.min(layout.width/screenW,layout.height/screenH);
+  return {{...layout,contentWidth:screenW*scale,contentHeight:screenH*scale}};
+}});
+console.log(JSON.stringify(results));
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        results = json.loads(completed.stdout)
+
+        expected_content = [
+            (390, 693.3333333333),
+            (219.375, 390),
+            (390, 219.375),
+            (693.3333333333, 390),
+        ]
+        for result, viewport, content in zip(
+            results,
+            ((390, 844), (844, 390), (390, 844), (844, 390)),
+            expected_content,
+        ):
+            with self.subTest(viewport=viewport, content=content):
+                self.assertEqual(result["objectFit"], "contain")
+                self.assertEqual((result["width"], result["height"]), viewport)
+                self.assertLessEqual(result["contentWidth"], result["width"] + 0.01)
+                self.assertLessEqual(result["contentHeight"], result["height"] + 0.01)
+                self.assertAlmostEqual(result["contentWidth"], content[0], places=3)
+                self.assertAlmostEqual(result["contentHeight"], content[1], places=3)
+
+    def test_immersive_mirror_action_distinguishes_start_connect_and_stop(self):
+        start = self.script.index("function immersiveMirrorMode(")
+        end = self.script.index("function renderImmersiveActions(", start)
+        mode_source = self.script[start:end]
+        program = f"""
+const WebSocket={{CONNECTING:0,OPEN:1}};
+function socketLive(ws){{ return !!ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING); }}
+const state={{videoConnected:false,controlConnected:false,videoWs:null,controlWs:null,connectionPhase:'idle'}};
+function selectedSession(){{ return null; }}
+{mode_source}
+const modes=[];
+modes.push(immersiveMirrorMode(null));
+modes.push(immersiveMirrorMode({{running:true}}));
+state.videoConnected=true;
+modes.push(immersiveMirrorMode({{running:true}}));
+state.videoConnected=false;
+state.videoWs={{readyState:WebSocket.CONNECTING}};
+modes.push(immersiveMirrorMode({{running:true}}));
+modes.push(immersiveMirrorMode(null));
+state.videoWs=null;
+state.controlConnected=true;
+modes.push(immersiveMirrorMode(null));
+state.controlConnected=false;
+state.connectionPhase='reconnecting';
+modes.push(immersiveMirrorMode({{running:true}}));
+console.log(JSON.stringify(modes));
+"""
+        completed = subprocess.run(
+            ["node", "-e", program],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            json.loads(completed.stdout),
+            ["start", "connect", "stop", "stop", "start", "start", "stop"],
+        )
+
     def test_stale_fullscreen_quality_is_skipped_without_changing_profile(self):
         start = self.script.index("function queueQualityApply(payload, options={})")
         end = self.script.index("function saveOrApplyQuality(options={})", start)

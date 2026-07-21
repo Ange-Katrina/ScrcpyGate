@@ -574,7 +574,7 @@ function renderStatus(){
   if (stopBtn) stopBtn.disabled = stopDisabled;
   renderKeyboardControl();
   renderAlasPanel();
-  renderImmersiveActions(device, stopDisabled);
+  renderImmersiveActions(device, session, stopDisabled);
   document.querySelectorAll('[data-fit]').forEach(btn=>btn.classList.toggle('active', btn.dataset.fit === state.fit));
   renderQualityButtons();
   renderStageEmpty(device, session);
@@ -709,7 +709,14 @@ function renderAlasPanel(){
     }
   }
 }
-function renderImmersiveActions(device, stopDisabled){
+function immersiveMirrorMode(session=selectedSession()){
+  const running=!!(session && session.running);
+  const videoLive=state.videoConnected || socketLive(state.videoWs);
+  if (!running) return 'start';
+  if (running && !videoLive && !['connecting','reconnecting'].includes(state.connectionPhase)) return 'connect';
+  return 'stop';
+}
+function renderImmersiveActions(device, session, stopDisabled){
   const control=$('immersiveControlBtn');
   if (control) {
     const releasing=state.hasControl;
@@ -741,8 +748,33 @@ function renderImmersiveActions(device, stopDisabled){
     alas.setAttribute('aria-label', details);
     alas.title=details;
   }
-  const stop=$('immersiveStopBtn');
-  if (stop) stop.disabled=stopDisabled;
+  const mirror=$('immersiveMirrorBtn');
+  if (mirror) {
+    const mirrorBusy=actionBusy('mirror');
+    const currentMode=immersiveMirrorMode(session);
+    const pendingMode=mirror.dataset.pendingMode;
+    const mode=mirrorBusy && ['start','connect','stop'].includes(pendingMode) ? pendingMode : currentMode;
+    const stopping=mode === 'stop';
+    const label=state.starting
+      ? mirrorT('mirror.actions.starting_mirror')
+      : mirrorT(stopping ? 'mirror.ui.stop_mirror' : mode === 'connect' ? 'mirror.actions.connect_video' : 'mirror.ui.start_mirror');
+    const description=mirrorBusy
+      ? mirrorT(stopping ? 'mirror.busy.stopping' : 'mirror.busy.starting')
+      : label;
+    setButtonLabel(mirror, label);
+    mirror.dataset.mode=mode;
+    mirror.dataset.tone=stopping ? 'danger' : 'primary';
+    mirror.disabled=stopping
+      ? stopDisabled
+      : mirrorBusy || state.starting || state.qualityApplying || !deviceSelectable(device);
+    mirror.setAttribute('aria-label', description);
+    mirror.title=description;
+    if (mirrorBusy || state.starting) mirror.setAttribute('aria-busy','true');
+    else mirror.removeAttribute('aria-busy');
+    const use=mirror.querySelector('use');
+    const icon=stopping ? 'square' : mode === 'connect' ? 'refresh-cw' : 'play';
+    if (use) use.setAttribute('href', String(use.getAttribute('href') || '').replace(/#[^#]+$/, `#${icon}`));
+  }
 }
 function renderAccountPanel(){
   const box=$('accountInfo'); if(!box) return; box.textContent='';
@@ -1595,7 +1627,7 @@ function videoLayoutSize(availW, availH, screenW, screenH, fit='contain', immers
   const safeH=Math.max(1, Number(availH) || 1);
   const naturalW=Math.max(1, Number(screenW) || 1280);
   const naturalH=Math.max(1, Number(screenH) || 720);
-  if (immersive) return {width:safeW, height:safeH, objectFit:'cover'};
+  if (immersive) return {width:safeW, height:safeH, objectFit:'contain'};
   const aspect=naturalW / naturalH;
   let width=safeW;
   let height=width / aspect;
@@ -1631,7 +1663,7 @@ function scheduleLayout(){
 }
 function syncVisualViewportMetrics(){
   const root=document.documentElement;
-  if (!root || !window.visualViewport || !mobileSidebarMedia.matches) {
+  if (!root || !window.visualViewport || (!mobileSidebarMedia.matches && !state.immersive)) {
     if (root) {
       root.style.removeProperty('--mirror-visual-viewport-height');
       root.style.removeProperty('--mirror-visual-viewport-offset-top');
@@ -2092,6 +2124,22 @@ async function exitImmersiveMode(){
   return true;
 }
 function toggleImmersiveMode(trigger){ return state.immersive ? exitImmersiveMode() : enterImmersiveMode(trigger); }
+async function toggleImmersiveMirror(button){
+  const mode=immersiveMirrorMode();
+  const stopping=mode === 'stop';
+  if (button) button.dataset.pendingMode=mode;
+  try {
+    return await runBusyAction(
+      'mirror',
+      button,
+      mirrorT(stopping ? 'mirror.busy.stopping' : 'mirror.busy.starting'),
+      stopping ? stopMirror : startMirror,
+    );
+  } finally {
+    if (button) delete button.dataset.pendingMode;
+    scheduleRender();
+  }
+}
 function bindClick(id, handler){
   const element=$(id);
   if (element) element.onclick=(event)=>handler(event, element);
@@ -2149,7 +2197,7 @@ function initializeWorkspaceInteractions(){
   bindClick('immersiveRailToggle', ()=>syncImmersiveRail(!state.immersiveRailOpen));
   bindClick('immersiveControlBtn', (_, button)=>runBusyAction('control', button, mirrorT('mirror.busy.control'), toggleControl).catch(e=>show(e.message)));
   bindClick('immersiveAlasBtn', (_, button)=>runBusyAction('alas', button, mirrorT('mirror.busy.alas_update'), toggleAlas).catch(()=>{}));
-  bindClick('immersiveStopBtn', (_, button)=>runBusyAction('mirror', button, mirrorT('mirror.busy.stopping'), stopMirror).catch(e=>show(e.message)));
+  bindClick('immersiveMirrorBtn', (_, button)=>toggleImmersiveMirror(button).catch(e=>show(e.message)));
   bindClick('exitFullscreenBtn', ()=>exitImmersiveMode());
   bindClick('alasBtn', (_, button)=>{
     toggleToolPanel('alasTools', button);
