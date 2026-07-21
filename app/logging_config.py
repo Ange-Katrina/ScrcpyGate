@@ -9,6 +9,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
@@ -36,15 +37,20 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 URL_USERINFO_RE = re.compile(r"(?i)\b(?P<scheme>(?:https?|wss?)://)[^/\s?#'\"]+@")
 COOKIE_HEADER_RE = re.compile(r"(?i)\b(?P<prefix>(?:set-cookie|cookie)\s*:\s*)[^\r\n]*")
+AUTHORIZATION_FIELD_RE = re.compile(
+    r"(?i)\b(?P<prefix>[\"']?authorization[\"']?\s*[:=]\s*)[^\r\n]*"
+)
 COOKIE_ASSIGNMENT_RE = re.compile(
     r"(?i)(?P<prefix>[\"']?(?:set[_-]?cookie|cookie)[\"']?\s*=\s*)"
-    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\r\n,}\]]+)"
+    r"(?P<value>\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|[^\r\n,}\]]+)"
 )
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)(?P<prefix>[\"']?(?:password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|"
     r"api[_-]?key|secret|authorization|cookie|csrf(?:[_-]?token)?|session[_-]?id|sid|"
     r"private[_-]?key|database[_-]?url|connection[_-]?string|alas[_-]?token)[\"']?\s*[:=]\s*)"
-    r"(?P<value>(?:Bearer|Basic)\s+[^\s,;}\]]+|\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
+    r"(?P<value>(?:Bearer|Basic)\s+[^\s,;}\]]+|"
+    r'\"(?:\\.|[^\"\\])*\"|'
+    r"'(?:\\.|[^'\\])*'|[^\s,;}\]]+)"
 )
 BEARER_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+")
 ADB_ENDPOINT_RE = re.compile(
@@ -184,8 +190,18 @@ _RUNTIME_LOG_CONTEXT_RE = re.compile(
 )
 _RUNTIME_LOG_LEGACY_RE = re.compile(r"^(?P<logger>[^:]+):\s?(?P<message>.*)$")
 _RUNTIME_LOG_EXCEPTION_RE = re.compile(
-    r"^(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning)|Caused by):"
+    r"^(?:(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning))|"
+    r"KeyboardInterrupt|StopIteration|Caused by)(?::|\(|\s|$)"
 )
+_RUNTIME_LOG_EXCEPTION_CONTINUATION_PREFIXES = (
+    "Traceback (most recent call last):",
+    "During handling of the above exception",
+    "The above exception was the direct cause",
+    "Task exception was never retrieved",
+    "future:",
+    "Exception ignored in:",
+)
+_RUNTIME_LOG_ENTRY_MAX_CHARS = 16384
 _RUNTIME_LOG_JSON_MARKER_FIELDS = frozenset(
     {
         "timestamp",
@@ -306,6 +322,7 @@ def sanitize_log_text(value: object, max_chars: int = 4096) -> str:
         text = text[:source_limit]
     text = ANSI_ESCAPE_RE.sub("", text)
     text = COOKIE_HEADER_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
+    text = AUTHORIZATION_FIELD_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
     text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ")
     text = CONTROL_RE.sub(" ", text)
     text = URL_USERINFO_RE.sub(lambda match: f"{match.group('scheme')}<redacted>@", text)
@@ -316,6 +333,36 @@ def sanitize_log_text(value: object, max_chars: int = 4096) -> str:
     text = ENDPOINT_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<adb-endpoint>", text)
     text = ADB_ENDPOINT_RE.sub("<adb-endpoint>", text)
     text = re.sub(r" {2,}", " ", text).strip()
+    if source_truncated or len(text) > limit:
+        return f"{text[: max(0, limit - len(TRUNCATED_MARKER))]}{TRUNCATED_MARKER}"
+    return text
+
+
+def sanitize_log_multiline_text(value: object, max_chars: int = 16384) -> str:
+    """Sanitize a bounded traceback while retaining line breaks and indentation."""
+    limit = max(64, min(int(max_chars), 65536))
+    source_limit = min(65536, max(256, limit * 2))
+    if isinstance(value, str):
+        source_truncated = len(value) > source_limit
+        text = value[:source_limit]
+    elif isinstance(value, (bytes, bytearray, memoryview)):
+        source_truncated = len(value) > source_limit
+        text = bytes(value[:source_limit]).decode("utf-8", errors="replace")
+    else:
+        text = str(value if value is not None else "")
+        source_truncated = len(text) > source_limit
+        text = text[:source_limit]
+    text = ANSI_ESCAPE_RE.sub("", text)
+    text = COOKIE_HEADER_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
+    text = AUTHORIZATION_FIELD_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
+    text = CONTROL_RE.sub(" ", text)
+    text = URL_USERINFO_RE.sub(lambda match: f"{match.group('scheme')}<redacted>@", text)
+    text = _redact_query_segments(text)
+    text = COOKIE_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
+    text = SENSITIVE_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<redacted>", text)
+    text = BEARER_RE.sub(lambda match: f"{match.group(1)} <redacted>", text)
+    text = ENDPOINT_ASSIGNMENT_RE.sub(lambda match: f"{match.group('prefix')}<adb-endpoint>", text)
+    text = ADB_ENDPOINT_RE.sub("<adb-endpoint>", text)
     if source_truncated or len(text) > limit:
         return f"{text[: max(0, limit - len(TRUNCATED_MARKER))]}{TRUNCATED_MARKER}"
     return text
@@ -485,7 +532,9 @@ class SafeJsonFormatter(logging.Formatter):
             exc_type, exc_value, _traceback = record.exc_info
             attributes["exception.type"] = getattr(exc_type, "__name__", str(exc_type))
             attributes["exception.message"] = sanitize_log_text(exc_value, 2048)
-            attributes["exception.stacktrace"] = sanitize_log_text(self.formatException(record.exc_info), 16384)
+            attributes["exception.stacktrace"] = sanitize_log_multiline_text(
+                self.formatException(record.exc_info), 16384
+            )
         payload["attributes"] = attributes
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -510,7 +559,7 @@ class SafeTextFormatter(logging.Formatter):
                 getattr(exc_type, "__name__", str(exc_type)), 160
             )
             attributes["exception.message"] = sanitize_log_text(exc_value, 2048)
-            attributes["exception.stacktrace"] = sanitize_log_text(
+            attributes["exception.stacktrace"] = sanitize_log_multiline_text(
                 self.formatException(record.exc_info), 16384
             )
         suffix = RUNTIME_LOG_TEXT_FIELDS_MARKER + json.dumps(
@@ -759,29 +808,163 @@ def logging_health() -> dict[str, object]:
     }
 
 
-def tail_log(max_lines: int = 300) -> list[str]:
-    """Read only the bounded tail of the active cache file, never the whole log."""
+def _runtime_log_read_barrier(timeout: float = 0.5) -> tuple[bool, int]:
+    """Wait briefly for records already accepted by the queue, then flush outputs."""
+    queue_handler = _queue_handler
+    if queue_handler is None:
+        return True, 0
+    log_queue = queue_handler.queue
+    deadline = time.monotonic() + max(0.0, min(float(timeout), 2.0))
+    pending = 0
+    condition = getattr(log_queue, "all_tasks_done", None)
+    if condition is not None:
+        with condition:
+            while True:
+                pending = max(0, int(getattr(log_queue, "unfinished_tasks", 0) or 0))
+                if pending <= 0:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                condition.wait(timeout=min(remaining, 0.05))
+    else:
+        try:
+            pending = max(0, int(log_queue.qsize()))
+        except Exception:
+            pending = 0
+    for handler in tuple(_output_handlers):
+        try:
+            handler.flush()
+        except Exception:
+            pass
+    return pending <= 0, pending
+
+
+def _strip_log_line_ending(record: bytes) -> bytes:
+    if record.endswith(b"\r\n"):
+        return record[:-2]
+    if record.endswith((b"\r", b"\n")):
+        return record[:-1]
+    return record
+
+
+def _split_text_log_records(raw_text: str) -> list[str]:
+    """Split only CR/LF separators; Unicode line-separator characters are log content."""
+    records: list[str] = []
+    start = 0
+    index = 0
+    while index < len(raw_text):
+        char = raw_text[index]
+        if char == "\r":
+            index += 2 if index + 1 < len(raw_text) and raw_text[index + 1] == "\n" else 1
+            records.append(raw_text[start:index])
+            start = index
+            continue
+        if char == "\n":
+            index += 1
+            records.append(raw_text[start:index])
+            start = index
+            continue
+        index += 1
+    if start < len(raw_text):
+        records.append(raw_text[start:])
+    return records
+
+
+def _split_binary_log_records(raw_data: bytes) -> list[bytes]:
+    """Split bytes only on CR/LF so control separators remain log content."""
+    records: list[bytes] = []
+    start = 0
+    index = 0
+    while index < len(raw_data):
+        byte = raw_data[index]
+        if byte == 0x0D:
+            index += 2 if index + 1 < len(raw_data) and raw_data[index + 1] == 0x0A else 1
+            records.append(raw_data[start:index])
+            start = index
+            continue
+        if byte == 0x0A:
+            index += 1
+            records.append(raw_data[start:index])
+            start = index
+            continue
+        index += 1
+    if start < len(raw_data):
+        records.append(raw_data[start:])
+    return records
+
+
+def _tail_log_snapshot(max_lines: int = 300) -> tuple[list[str], str, dict[str, object]]:
+    """Read a bounded tail while retaining exact separators for the selected lines."""
     _refresh_paths()
     limit = max(20, min(int(max_lines), 2000))
     if not LOG_FILE.exists():
-        return []
+        return [], "", {
+            "byte_limit_hit": False,
+            "line_limit_hit": False,
+            "partial_first_line": False,
+        }
     max_read = _env_int("LOG_TAIL_MAX_BYTES", 2 * 1024 * 1024, 64 * 1024, 16 * 1024 * 1024)
-    block_size = 8192
+    block_size = 65536
     data = b""
+    position = 0
+    file_size = 0
+    previous = b""
     try:
         with LOG_FILE.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
-            position = handle.tell()
-            while position > 0 and data.count(b"\n") <= limit and len(data) < max_read:
+            file_size = handle.tell()
+            position = file_size
+            while position > 0 and len(_split_binary_log_records(data)) <= limit and len(data) < max_read:
                 read_size = min(block_size, position, max_read - len(data))
                 if read_size <= 0:
                     break
                 position -= read_size
                 handle.seek(position)
                 data = handle.read(read_size) + data
+            if position > 0:
+                handle.seek(position - 1)
+                previous = handle.read(1)
     except OSError:
-        return []
-    return [line.decode("utf-8", "replace") for line in data.splitlines()[-limit:]]
+        return [], "", {
+            "byte_limit_hit": False,
+            "line_limit_hit": False,
+            "partial_first_line": False,
+        }
+    bytes_read = len(data)
+    byte_limit_hit = position > 0 and len(data) >= max_read
+    records = _split_binary_log_records(data)
+    line_threshold_hit = len(records) > limit
+    partial_first_line = False
+    if position > 0 and data:
+        if previous == b"\r" and data.startswith(b"\n"):
+            data = data[1:]
+        elif previous not in {b"\r", b"\n"}:
+            partial_first_line = True
+            first_ending = re.search(br"\r\n|\r|\n", data)
+            data = data[first_ending.end() :] if first_ending else b""
+
+    records = _split_binary_log_records(data)
+    line_limit_hit = line_threshold_hit or len(records) > limit
+    selected = records[-limit:]
+    raw_text = b"".join(selected).decode("utf-8", "replace")
+    lines = [
+        _strip_log_line_ending(record).decode("utf-8", "replace")
+        for record in selected
+    ]
+    return lines, raw_text, {
+        "byte_limit_hit": byte_limit_hit,
+        "line_limit_hit": line_limit_hit,
+        "partial_first_line": partial_first_line,
+        "file_size_bytes": file_size,
+        "tail_bytes_read": bytes_read,
+    }
+
+
+def tail_log(max_lines: int = 300) -> list[str]:
+    """Read only the bounded tail of the active cache file, never the whole log."""
+    lines, _raw_text, _meta = _tail_log_snapshot(max_lines)
+    return lines
 
 
 def _runtime_log_severity_number(value: object) -> int | None:
@@ -1065,19 +1248,30 @@ def _parse_runtime_text_line(line: str) -> dict[str, object] | None:
 
 
 def _append_runtime_continuation(entry: dict[str, object], line: str) -> None:
-    continuation = sanitize_log_text(line, 4096)
-    if not continuation:
-        return
+    raw_line = str(line or "")
+    indentation_match = re.match(r"^[ \t]*", raw_line)
+    indentation = indentation_match.group(0) if indentation_match else ""
+    body = raw_line[len(indentation) :]
+    continuation = indentation + sanitize_log_text(
+        body, max(64, 4096 - min(len(indentation), 4032))
+    )
     current_message = str(entry.get("message") or "")
     combined_message = f"{current_message}\n{continuation}" if current_message else continuation
-    entry["message"] = combined_message[:16384]
     current_raw = str(entry.get("raw") or "")
     combined_raw = f"{current_raw}\n{continuation}" if current_raw else continuation
-    entry["raw"] = combined_raw[:16384]
     attributes = entry.get("attributes")
     if not isinstance(attributes, dict):
         attributes = {}
         entry["attributes"] = attributes
+    truncated = len(combined_message) > _RUNTIME_LOG_ENTRY_MAX_CHARS or len(combined_raw) > _RUNTIME_LOG_ENTRY_MAX_CHARS
+    if truncated:
+        content_limit = _RUNTIME_LOG_ENTRY_MAX_CHARS - len(TRUNCATED_MARKER)
+        entry["message"] = f"{combined_message[:content_limit]}{TRUNCATED_MARKER}"
+        entry["raw"] = f"{combined_raw[:content_limit]}{TRUNCATED_MARKER}"
+        attributes["log.truncated"] = True
+    else:
+        entry["message"] = combined_message
+        entry["raw"] = combined_raw
     try:
         current_count = max(0, int(attributes.get("log.continuation_lines", 0) or 0))
     except (TypeError, ValueError, OverflowError):
@@ -1090,13 +1284,9 @@ def _is_runtime_log_continuation(line: str) -> bool:
         return True
     if line[:1].isspace():
         return True
-    return line.startswith(
-        (
-            "Traceback (most recent call last):",
-            "During handling of the above exception",
-            "The above exception was the direct cause",
-        )
-    ) or bool(_RUNTIME_LOG_EXCEPTION_RE.match(line))
+    return line.startswith(_RUNTIME_LOG_EXCEPTION_CONTINUATION_PREFIXES) or bool(
+        _RUNTIME_LOG_EXCEPTION_RE.match(line)
+    )
 
 
 def parse_runtime_log_lines(lines: list[str]) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -1147,7 +1337,8 @@ def runtime_log_snapshot(
     """Return legacy raw lines plus filtered structured entries from a bounded tail."""
     limit = max(20, min(int(max_entries), 2000))
     severity_filter = normalize_runtime_log_filter(min_severity)
-    raw_lines = tail_log(2000)
+    queue_flush_completed, pending_queue = _runtime_log_read_barrier()
+    raw_lines, scanned_raw_text, tail_meta = _tail_log_snapshot(2000)
     entries, meta = parse_runtime_log_lines(raw_lines)
     if severity_filter:
         minimum_rank = RUNTIME_LOG_SEVERITY_RANK[severity_filter]
@@ -1160,12 +1351,25 @@ def runtime_log_snapshot(
     else:
         matching = entries
     returned = matching[-limit:]
+    selected_raw_lines = raw_lines[-limit:]
+    selected_raw_records = _split_text_log_records(scanned_raw_text)[-limit:]
+    raw_text = "".join(selected_raw_records)
+    line_limit_hit = bool(tail_meta.get("line_limit_hit")) or len(raw_lines) > limit or len(matching) > limit
+    byte_limit_hit = bool(tail_meta.get("byte_limit_hit"))
     meta.update(
         {
             "returned_entries": len(returned),
             "matching_entries": len(matching),
             "min_severity": severity_filter,
-            "truncated": len(matching) > limit or len(raw_lines) >= 2000,
+            "truncated": line_limit_hit or byte_limit_hit or bool(tail_meta.get("partial_first_line")),
+            "byte_limit_hit": byte_limit_hit,
+            "line_limit_hit": line_limit_hit,
+            "partial_first_line": bool(tail_meta.get("partial_first_line")),
+            "raw_text": raw_text,
+            "queue_flush_completed": queue_flush_completed,
+            "pending_queue": pending_queue,
+            "file_size_bytes": tail_meta.get("file_size_bytes", 0),
+            "tail_bytes_read": tail_meta.get("tail_bytes_read", 0),
         }
     )
-    return raw_lines[-limit:], returned, meta
+    return selected_raw_lines, returned, meta

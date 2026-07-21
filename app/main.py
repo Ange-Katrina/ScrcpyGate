@@ -2820,13 +2820,16 @@ async def admin_runtime_logs(request: Request, lines: int = 300, min_severity: s
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     meta = logging_health()
+    raw_text = runtime_meta.pop("raw_text", None)
+    if not isinstance(raw_text, str):
+        raw_text = "\n".join(raw_logs)
     meta.update(runtime_meta)
     meta["audit_queue"] = (
         audit_dispatcher.stats()
         if audit_dispatcher is not None
         else {"running": False, "queue_size": 0, "dropped_total": 0}
     )
-    response = JSONResponse({"logs": raw_logs, "entries": entries, "meta": meta})
+    response = JSONResponse({"logs": raw_logs, "entries": entries, "meta": meta, "raw_text": raw_text})
     response.headers["Cache-Control"] = "no-store"
     return response
 

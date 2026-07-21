@@ -151,6 +151,8 @@ class AuthRouteTests(unittest.TestCase):
         payload = response.json()
         self.assertIsInstance(payload["logs"], list)
         self.assertIsInstance(payload["entries"], list)
+        self.assertIsInstance(payload["raw_text"], str)
+        self.assertEqual(payload["raw_text"].splitlines(), payload["logs"])
         self.assertEqual(response.headers.get("cache-control"), "no-store")
         self.assertTrue(payload["meta"]["configured"])
         self.assertIn(payload["meta"]["format"], ("json", "text"))

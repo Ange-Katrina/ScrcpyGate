@@ -341,6 +341,42 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertLess(time.perf_counter() - started, 0.5)
         self.assertEqual(len(safe), 65536)
 
+    def test_sensitive_text_redaction_handles_escaped_values_and_digest_headers(self):
+        samples = (
+            '{"password":"abc\\\"def","other":"visible"}',
+            '{"cookie":"abc\\\"def","other":"visible"}',
+            "authorization: Digest username=alice,response=secret,nonce=opaque",
+            "authorization=Digest username=alice,response=secret",
+        )
+        for sample in samples:
+            with self.subTest(sample=sample):
+                safe = logging_config.sanitize_log_text(sample)
+                self.assertNotIn("abc", safe)
+                self.assertNotIn("secret", safe)
+                self.assertNotIn("alice", safe)
+                self.assertIn("<redacted>", safe)
+
+    def test_exception_stacktrace_keeps_newlines_and_indentation_after_redaction(self):
+        try:
+            raise RuntimeError("token=stacktrace-secret")
+        except RuntimeError:
+            record = logging.LogRecord(
+                "webscrcpy.runtime",
+                logging.ERROR,
+                __file__,
+                48,
+                "operation failed",
+                (),
+                sys.exc_info(),
+                "test_multiline_exception",
+            )
+        rendered = logging_config.SafeJsonFormatter().format(record)
+        payload = json.loads(rendered)
+        stacktrace = payload["attributes"]["exception.stacktrace"]
+        self.assertIn("\n", stacktrace)
+        self.assertIn("  File", stacktrace)
+        self.assertNotIn("stacktrace-secret", stacktrace)
+
     def test_tail_log_reads_only_the_requested_bounded_tail(self):
         previous = os.environ.get("WEB_SCRCPY_DATA_DIR")
         with tempfile.TemporaryDirectory(prefix="scrcpygate-log-tail-") as temporary:
@@ -359,6 +395,77 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertEqual(len(lines), 20)
         self.assertEqual(lines[0], "line-15")
         self.assertEqual(lines[-1], "line-34")
+
+    def test_internal_tail_snapshot_preserves_crlf_final_newline_and_reports_line_limit(self):
+        previous = os.environ.get("WEB_SCRCPY_DATA_DIR")
+        with tempfile.TemporaryDirectory(prefix="scrcpygate-log-raw-text-") as temporary:
+            os.environ["WEB_SCRCPY_DATA_DIR"] = temporary
+            path = Path(temporary) / "webscrcpy.log"
+            records = [f"line-{index}\r\n" for index in range(24)] + ["line-24"]
+            path.write_bytes("".join(records).encode("utf-8"))
+            try:
+                lines, raw_text, meta = logging_config._tail_log_snapshot(20)
+            finally:
+                if previous is None:
+                    os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
+                else:
+                    os.environ["WEB_SCRCPY_DATA_DIR"] = previous
+                logging_config._refresh_paths()
+
+        self.assertEqual(lines, [f"line-{index}" for index in range(5, 25)])
+        self.assertEqual(raw_text, "".join(records[-20:]))
+        self.assertFalse(raw_text.endswith(("\r", "\n")))
+        self.assertTrue(meta["line_limit_hit"])
+        self.assertFalse(meta["byte_limit_hit"])
+        self.assertFalse(meta["partial_first_line"])
+
+    def test_tail_snapshot_splits_only_crlf_and_keeps_other_control_separators(self):
+        previous = os.environ.get("WEB_SCRCPY_DATA_DIR")
+        with tempfile.TemporaryDirectory(prefix="scrcpygate-log-separators-") as temporary:
+            os.environ["WEB_SCRCPY_DATA_DIR"] = temporary
+            path = Path(temporary) / "webscrcpy.log"
+            path.write_bytes(b"first\x0bpart\x1ccontent\r\nsecond\n")
+            try:
+                lines, raw_text, _meta = logging_config._tail_log_snapshot(20)
+            finally:
+                if previous is None:
+                    os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
+                else:
+                    os.environ["WEB_SCRCPY_DATA_DIR"] = previous
+                logging_config._refresh_paths()
+
+        self.assertEqual(lines, ["first\x0bpart\x1ccontent", "second"])
+        self.assertEqual(raw_text, "first\x0bpart\x1ccontent\r\nsecond\n")
+
+    def test_byte_limited_tail_discards_incomplete_first_line_and_marks_snapshot(self):
+        previous_dir = os.environ.get("WEB_SCRCPY_DATA_DIR")
+        previous_limit = os.environ.get("LOG_TAIL_MAX_BYTES")
+        with tempfile.TemporaryDirectory(prefix="scrcpygate-log-byte-tail-") as temporary:
+            os.environ["WEB_SCRCPY_DATA_DIR"] = temporary
+            os.environ["LOG_TAIL_MAX_BYTES"] = str(64 * 1024)
+            path = Path(temporary) / "webscrcpy.log"
+            records = [f"line-{index}:" + (str(index) * 20000) + "\r\n" for index in range(10)]
+            path.write_bytes("".join(records).encode("utf-8"))
+            try:
+                raw_lines, entries, meta = logging_config.runtime_log_snapshot(20)
+            finally:
+                if previous_dir is None:
+                    os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
+                else:
+                    os.environ["WEB_SCRCPY_DATA_DIR"] = previous_dir
+                if previous_limit is None:
+                    os.environ.pop("LOG_TAIL_MAX_BYTES", None)
+                else:
+                    os.environ["LOG_TAIL_MAX_BYTES"] = previous_limit
+                logging_config._refresh_paths()
+
+        self.assertEqual(raw_lines, [record.rstrip("\r\n") for record in records[-3:]])
+        self.assertEqual(meta["raw_text"], "".join(records[-3:]))
+        self.assertEqual(len(entries), 3)
+        self.assertTrue(meta["byte_limit_hit"])
+        self.assertFalse(meta["line_limit_hit"])
+        self.assertTrue(meta["partial_first_line"])
+        self.assertTrue(meta["truncated"])
 
     def test_runtime_log_parser_keeps_mixed_formats_and_continuations(self):
         structured = json.dumps(
@@ -398,6 +505,48 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertEqual(meta["severity_counts"]["error"], 1)
         self.assertEqual(meta["severity_counts"]["warning"], 1)
         self.assertEqual(meta["severity_counts"]["unknown"], 1)
+
+    def test_runtime_log_parser_merges_asyncio_and_base_exception_continuations(self):
+        rows = [
+            "2026-07-20 16:00:01,500 [ERROR] asyncio: background task failed",
+            "Task exception was never retrieved",
+            "future: <Task finished exception=StopIteration()>",
+            "Traceback (most recent call last):",
+            '  File "/srv/app.py", line 10, in run',
+            "StopIteration",
+            "Exception ignored in: <function cleanup at 0x1>",
+            "KeyboardInterrupt",
+        ]
+
+        entries, meta = logging_config.parse_runtime_log_lines(rows)
+
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["severity"], "error")
+        self.assertIn("\nTask exception was never retrieved", entry["message"])
+        self.assertIn("\nfuture:", entry["message"])
+        self.assertIn('\n  File "/srv/app.py"', entry["message"])
+        self.assertIn("\nException ignored in:", entry["message"])
+        self.assertTrue(entry["message"].endswith("\nKeyboardInterrupt"))
+        self.assertEqual(entry["attributes"]["log.continuation_lines"], len(rows) - 1)
+        self.assertEqual(meta["severity_counts"]["error"], 1)
+
+    def test_runtime_log_continuation_truncation_is_explicit_and_keeps_indentation(self):
+        rows = [
+            "2026-07-20 16:00:01,500 [ERROR] worker: failed",
+            "  first indented frame",
+            *["    " + ("x" * 4092) for _index in range(6)],
+        ]
+
+        entries, _meta = logging_config.parse_runtime_log_lines(rows)
+
+        entry = entries[0]
+        self.assertIn("\n  first indented frame", entry["message"])
+        self.assertEqual(len(entry["message"]), logging_config._RUNTIME_LOG_ENTRY_MAX_CHARS)
+        self.assertTrue(entry["message"].endswith(logging_config.TRUNCATED_MARKER))
+        self.assertTrue(entry["raw"].endswith(logging_config.TRUNCATED_MARKER))
+        self.assertIs(entry["attributes"]["log.truncated"], True)
+        self.assertEqual(entry["attributes"]["log.continuation_lines"], len(rows) - 1)
 
     def test_runtime_log_parser_round_trips_native_json_context(self):
         record = logging.LogRecord(
@@ -743,7 +892,7 @@ class LoggingConfigTests(unittest.TestCase):
                     for index in range(1, 36)
                 ],
             ]
-            path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            path.write_bytes(("\n".join(rows) + "\n").encode("utf-8"))
             try:
                 raw_lines, entries, meta = logging_config.runtime_log_snapshot(20, "error")
                 minimum_raw, minimum_entries, minimum_meta = logging_config.runtime_log_snapshot(1)
@@ -766,6 +915,29 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertEqual(minimum_raw, rows[-20:])
         self.assertEqual(len(minimum_entries), 20)
         self.assertEqual(minimum_meta["returned_entries"], 20)
+        self.assertEqual(minimum_meta["raw_text"], "\n".join(rows[-20:]) + "\n")
+        self.assertTrue(minimum_meta["line_limit_hit"])
+        self.assertFalse(minimum_meta["byte_limit_hit"])
+
+    def test_runtime_log_read_barrier_reports_pending_queue_when_timeout_expires(self):
+        previous_handler = logging_config._queue_handler
+        previous_outputs = logging_config._output_handlers
+        log_queue = queue.Queue(maxsize=2)
+        log_queue.put_nowait(
+            logging.LogRecord("webscrcpy.pending", logging.INFO, __file__, 1, "pending", (), None)
+        )
+        logging_config._queue_handler = logging_config.ResilientQueueHandler(log_queue)
+        logging_config._output_handlers = []
+        try:
+            completed, pending = logging_config._runtime_log_read_barrier(0)
+        finally:
+            logging_config._queue_handler = previous_handler
+            logging_config._output_handlers = previous_outputs
+            log_queue.get_nowait()
+            log_queue.task_done()
+
+        self.assertFalse(completed)
+        self.assertEqual(pending, 1)
 
     def test_runtime_log_filter_rejects_unknown_levels(self):
         with self.assertRaises(ValueError):
