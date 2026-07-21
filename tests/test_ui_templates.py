@@ -138,6 +138,9 @@ class UiTemplateContractTests(unittest.TestCase):
                 "alasAssignmentSummary", "alasAssignmentUserName", "alasAssignmentUserMeta",
                 "alasAssignmentConfigSummary", "alasAssignmentConfigName", "alasAssignmentConfigMeta",
                 "loadConfig", "configEditor", "saveConfig", "logs", "runtimeLogs", "logRows",
+                "runtimeLogFilters", "runtimeSeverityFilter", "runtimeLogSearch", "runtimeLogWrap",
+                "runtimeRawToggle", "runtimeLogReset", "runtimeLogSummary", "runtimeLogResultCount",
+                "runtimeRawLogs", "exportRuntimeLogs",
                 "scrcpygate-i18n", "scrcpygate-bootstrap",
             },
         }

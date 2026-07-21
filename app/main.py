@@ -28,8 +28,8 @@ from .logging_config import (
     logging_health,
     normalize_request_id,
     reset_log_context,
+    runtime_log_snapshot,
     setup_logging,
-    tail_log,
 )
 from .mirror import acquire_control_lock, control_socket, manager, release_control_lock, video_socket
 from .video_options import (
@@ -2811,15 +2811,24 @@ async def admin_audit_event(event_id: str, request: Request):
 
 
 @app.get("/api/admin/runtime-logs")
-async def admin_runtime_logs(request: Request, lines: int = 300):
+async def admin_runtime_logs(request: Request, lines: int = 300, min_severity: str = ""):
     security.require_admin(request)
+    try:
+        raw_logs, entries, runtime_meta = await asyncio.to_thread(
+            runtime_log_snapshot, lines, min_severity
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     meta = logging_health()
+    meta.update(runtime_meta)
     meta["audit_queue"] = (
         audit_dispatcher.stats()
         if audit_dispatcher is not None
         else {"running": False, "queue_size": 0, "dropped_total": 0}
     )
-    return {"logs": await asyncio.to_thread(tail_log, lines), "meta": meta}
+    response = JSONResponse({"logs": raw_logs, "entries": entries, "meta": meta})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.websocket("/ws/devices/{device_id}/video")

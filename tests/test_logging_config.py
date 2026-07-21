@@ -360,6 +360,439 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertEqual(lines[0], "line-15")
         self.assertEqual(lines[-1], "line-34")
 
+    def test_runtime_log_parser_keeps_mixed_formats_and_continuations(self):
+        structured = json.dumps(
+            {
+                "timestamp": "2026-07-20T08:00:00.000Z",
+                "severity_text": "INFO",
+                "severity_number": 17,
+                "logger": "scrcpygate.test",
+                "event_name": "request_failed",
+                "body": "request failed",
+                "request_id": "request-12345678",
+                "attributes": {"token": "top-secret", "status_code": 500},
+            }
+        )
+        lines = [
+            "unstructured password=plain-secret",
+            structured,
+            "2026-07-20 16:00:01,500 [WARNING] legacy.worker: operation delayed",
+            "Traceback (most recent call last):",
+            '  File "/srv/app.py", line 10, in run',
+        ]
+
+        entries, meta = logging_config.parse_runtime_log_lines(lines)
+
+        self.assertEqual(len(entries), 3)
+        self.assertTrue(entries[0]["parse_failed"])
+        self.assertEqual(entries[0]["severity"], "unknown")
+        self.assertNotIn("plain-secret", entries[0]["message"])
+        self.assertEqual(entries[1]["severity"], "error")
+        self.assertEqual(entries[1]["attributes"]["token"], "<redacted>")
+        self.assertEqual(entries[2]["severity"], "warning")
+        self.assertIn("Traceback", entries[2]["message"])
+        self.assertIn("/srv/app.py", entries[2]["message"])
+        self.assertEqual(entries[2]["attributes"]["log.continuation_lines"], 2)
+        self.assertEqual(meta["scanned_lines"], 5)
+        self.assertEqual(meta["unclassified_lines"], 3)
+        self.assertEqual(meta["severity_counts"]["error"], 1)
+        self.assertEqual(meta["severity_counts"]["warning"], 1)
+        self.assertEqual(meta["severity_counts"]["unknown"], 1)
+
+    def test_runtime_log_parser_round_trips_native_json_context(self):
+        record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.INFO,
+            __file__,
+            42,
+            "request completed",
+            (),
+            None,
+            "test_runtime_json",
+        )
+        record.event_name = "http.request"
+        record.event_fields = {
+            "http_method": "GET",
+            "http_route": "/api/admin/runtime-logs",
+            "http_status_code": 200,
+            "duration_ms": 12.5,
+            "actor": "spoofed",
+        }
+        record._scrcpygate_context = {
+            "request_id": "request-12345678",
+            "trace_id": "trace-12345678",
+            "span_id": "span-12345678",
+            "actor": "alice",
+            "source_ip": "203.0.113.10",
+        }
+
+        rendered = logging_config.SafeJsonFormatter().format(record)
+        entries, _meta = logging_config.parse_runtime_log_lines([rendered])
+
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertFalse(entry["parse_failed"])
+        self.assertEqual(entry["request_id"], "request-12345678")
+        self.assertEqual(entry["attributes"]["trace_id"], "trace-12345678")
+        self.assertEqual(entry["attributes"]["span_id"], "span-12345678")
+        self.assertEqual(entry["attributes"]["actor"], "alice")
+        self.assertEqual(entry["attributes"]["source_ip"], "203.0.113.10")
+        self.assertEqual(entry["attributes"]["http_method"], "GET")
+        self.assertEqual(entry["attributes"]["http_route"], "/api/admin/runtime-logs")
+
+    def test_runtime_log_parser_round_trips_text_event_fields(self):
+        record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.WARNING,
+            __file__,
+            42,
+            "request completed",
+            (),
+            None,
+            "test_runtime_text",
+        )
+        record.event_name = "http.request"
+        record.event_fields = {
+            "http_method": "POST",
+            "http_route": "/api/action",
+            "http_status_code": 503,
+            "duration_ms": 87.25,
+            "nested": {"retry": True},
+            "actor": "spoofed",
+            "note": "contains scrcpygate_fields= marker",
+        }
+        record._scrcpygate_context = {
+            "request_id": "request-87654321",
+            "trace_id": "trace-text-1234",
+            "span_id": "span-text-1234",
+            "actor": "trusted",
+            "source_ip": "203.0.113.11",
+        }
+
+        rendered = logging_config.SafeTextFormatter().format(record)
+        entries, _meta = logging_config.parse_runtime_log_lines([rendered])
+        legacy_rendered = (
+            "2026-07-20 16:00:00,000 [INFO] webscrcpy.runtime "
+            'request_id=legacy-request event=http.request: legacy request {"http_method":"PATCH"}'
+        )
+        legacy_entries, _legacy_meta = logging_config.parse_runtime_log_lines([legacy_rendered])
+
+        empty_record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.INFO,
+            __file__,
+            43,
+            "",
+            (),
+            None,
+            "test_runtime_text_empty",
+        )
+        empty_record.event_name = "http.request"
+        empty_record.event_fields = {"http_method": "GET", "http_route": "/health"}
+        empty_record._scrcpygate_context = {"request_id": "request-empty"}
+        empty_rendered = logging_config.SafeTextFormatter().format(empty_record)
+        empty_entries, _empty_meta = logging_config.parse_runtime_log_lines([empty_rendered])
+
+        json_message_record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.INFO,
+            __file__,
+            44,
+            '{"kind":"message"}',
+            (),
+            None,
+            "test_runtime_text_json_message",
+        )
+        json_message_record.event_name = "message.event"
+        json_message_record.event_fields = {}
+        json_message_record._scrcpygate_context = {"request_id": "request-json-message"}
+        json_message_rendered = logging_config.SafeTextFormatter().format(json_message_record)
+        json_message_entries, _json_message_meta = logging_config.parse_runtime_log_lines(
+            [json_message_rendered]
+        )
+
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["format"], "text")
+        self.assertEqual(entry["message"], "request completed")
+        self.assertEqual(entry["request_id"], "request-87654321")
+        self.assertEqual(entry["attributes"]["http_method"], "POST")
+        self.assertEqual(entry["attributes"]["http_route"], "/api/action")
+        self.assertEqual(entry["attributes"]["http_status_code"], 503)
+        self.assertEqual(entry["attributes"]["duration_ms"], 87.25)
+        self.assertEqual(entry["attributes"]["nested"], {"retry": True})
+        self.assertEqual(entry["attributes"]["trace_id"], "trace-text-1234")
+        self.assertEqual(entry["attributes"]["span_id"], "span-text-1234")
+        self.assertEqual(entry["attributes"]["actor"], "trusted")
+        self.assertEqual(entry["attributes"]["source_ip"], "203.0.113.11")
+        self.assertEqual(entry["attributes"]["note"], "contains scrcpygate_fields= marker")
+        self.assertIn(logging_config.RUNTIME_LOG_TEXT_FIELDS_MARKER, rendered)
+        self.assertEqual(legacy_entries[0]["message"], "legacy request")
+        self.assertEqual(legacy_entries[0]["attributes"]["http_method"], "PATCH")
+        self.assertEqual(empty_entries[0]["message"], "")
+        self.assertEqual(empty_entries[0]["attributes"]["http_method"], "GET")
+        self.assertEqual(empty_entries[0]["attributes"]["http_route"], "/health")
+        self.assertEqual(json_message_entries[0]["message"], '{"kind":"message"}')
+        self.assertEqual(json_message_entries[0]["attributes"], {})
+
+    def test_text_field_marker_survives_many_marker_sequences_inside_attributes(self):
+        record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.INFO,
+            __file__,
+            45,
+            "marker stress",
+            (),
+            None,
+            "test_runtime_text_many_markers",
+        )
+        note = logging_config.RUNTIME_LOG_TEXT_FIELDS_MARKER * 40
+        record.event_name = "marker.event"
+        record.event_fields = {"note": note, "count": 40}
+        record._scrcpygate_context = {"request_id": "request-many-markers"}
+
+        rendered = logging_config.SafeTextFormatter().format(record)
+        entries, _meta = logging_config.parse_runtime_log_lines([rendered])
+
+        self.assertEqual(entries[0]["message"], "marker stress")
+        self.assertEqual(entries[0]["attributes"]["note"], note.strip())
+        self.assertEqual(entries[0]["attributes"]["count"], 40)
+
+    def test_legacy_trailing_json_requires_recognizable_log_fields(self):
+        business = '2026-07-20 16:00:00,000 [INFO] worker: payload {"kind":"business"}'
+        runtime = (
+            "2026-07-20 16:00:01,000 [INFO] worker: request complete "
+            '{"http_method":"GET","http_status_code":200}'
+        )
+
+        business_entries, _business_meta = logging_config.parse_runtime_log_lines([business])
+        runtime_entries, _runtime_meta = logging_config.parse_runtime_log_lines([runtime])
+
+        self.assertEqual(business_entries[0]["message"], 'payload {"kind":"business"}')
+        self.assertEqual(business_entries[0]["attributes"], {})
+        self.assertEqual(runtime_entries[0]["message"], "request complete")
+        self.assertEqual(runtime_entries[0]["attributes"]["http_method"], "GET")
+        self.assertEqual(runtime_entries[0]["attributes"]["http_status_code"], 200)
+
+    def test_event_fields_cannot_spoof_trusted_log_context(self):
+        record = logging.LogRecord(
+            "webscrcpy.runtime",
+            logging.INFO,
+            __file__,
+            46,
+            "trusted context",
+            (),
+            None,
+            "test_runtime_trusted_context",
+        )
+        record.event_name = "context.event"
+        record.event_fields = {
+            "request_id": "spoofed-request",
+            "trace_id": "spoofed-trace",
+            "span_id": "spoofed-span",
+            "actor": "spoofed-actor",
+            "source_ip": "198.51.100.200",
+            "service": "spoofed-service",
+            "observed_timestamp": "spoofed-time",
+            "outcome": "success",
+        }
+        record._scrcpygate_context = {
+            "request_id": "trusted-request",
+            "trace_id": "trusted-trace",
+            "span_id": "trusted-span",
+            "actor": "trusted-actor",
+            "source_ip": "203.0.113.20",
+        }
+
+        json_payload = json.loads(logging_config.SafeJsonFormatter().format(record))
+        text_rendered = logging_config.SafeTextFormatter().format(record)
+        text_entries, _meta = logging_config.parse_runtime_log_lines([text_rendered])
+        text_entry = text_entries[0]
+
+        self.assertEqual(json_payload["request_id"], "trusted-request")
+        self.assertEqual(json_payload["trace_id"], "trusted-trace")
+        self.assertEqual(json_payload["span_id"], "trusted-span")
+        self.assertEqual(json_payload["actor"], "trusted-actor")
+        self.assertEqual(json_payload["source_ip"], "203.0.113.20")
+        self.assertEqual(json_payload["service"], logging_config.SERVICE_NAME)
+        for key in logging_config._TRUSTED_LOG_FIELD_NAMES:
+            self.assertNotIn(key, json_payload["attributes"])
+        self.assertEqual(json_payload["attributes"]["outcome"], "success")
+        self.assertEqual(text_entry["request_id"], "trusted-request")
+        self.assertEqual(text_entry["attributes"]["trace_id"], "trusted-trace")
+        self.assertEqual(text_entry["attributes"]["span_id"], "trusted-span")
+        self.assertEqual(text_entry["attributes"]["actor"], "trusted-actor")
+        self.assertEqual(text_entry["attributes"]["source_ip"], "203.0.113.20")
+        self.assertNotIn("service", text_entry["attributes"])
+        self.assertNotIn("observed_timestamp", text_entry["attributes"])
+
+        legacy = (
+            "2026-07-20 16:00:00,000 [INFO] worker request_id=trusted-legacy "
+            'event=context.event: completed {"request_id":"spoofed-legacy","http_method":"GET"}'
+        )
+        legacy_entries, _legacy_meta = logging_config.parse_runtime_log_lines([legacy])
+        self.assertEqual(legacy_entries[0]["request_id"], "trusted-legacy")
+        self.assertNotIn("request_id", legacy_entries[0]["attributes"])
+        self.assertEqual(legacy_entries[0]["attributes"]["http_method"], "GET")
+
+    def test_text_formatter_preserves_structured_exception_fields(self):
+        try:
+            raise RuntimeError("token=text-exception-secret")
+        except RuntimeError:
+            record = logging.LogRecord(
+                "webscrcpy.runtime",
+                logging.ERROR,
+                __file__,
+                47,
+                "operation failed",
+                (),
+                sys.exc_info(),
+                "test_runtime_text_exception",
+            )
+        record.event_name = "operation.failed"
+        record.event_fields = {}
+        record._scrcpygate_context = {"request_id": "request-text-exception"}
+
+        rendered = logging_config.SafeTextFormatter().format(record)
+        entries, _meta = logging_config.parse_runtime_log_lines([rendered])
+        entry = entries[0]
+
+        self.assertNotIn("text-exception-secret", rendered)
+        self.assertEqual(entry["message"], "operation failed")
+        self.assertEqual(entry["attributes"]["exception.type"], "RuntimeError")
+        self.assertIn("<redacted>", entry["attributes"]["exception.message"])
+        self.assertIn("RuntimeError", entry["attributes"]["exception.stacktrace"])
+
+    def test_runtime_log_parser_infers_bounded_typed_legacy_message_fields(self):
+        structured = json.dumps(
+            {
+                "severity_text": "INFO",
+                "event_name": "adb_status",
+                "body": (
+                    "ADB_STATUS device=device-alias state=offline ok=False "
+                    "detail=network timeout count=3 ratio=1.25 token=top-secret"
+                ),
+                "attributes": {"state": "explicit-state"},
+            }
+        )
+        legacy = (
+            "2026-07-20 16:00:01,000 [INFO] webscrcpy.mirror: "
+            "VIDEO_CLIENT_ADD device=device-alias client=client-1 user=alice clients=3"
+        )
+
+        structured_entries, _structured_meta = logging_config.parse_runtime_log_lines([structured])
+        legacy_entries, _legacy_meta = logging_config.parse_runtime_log_lines([legacy])
+        entry = structured_entries[0]
+
+        self.assertEqual(entry["attributes"]["device"], "<adb-endpoint>")
+        self.assertEqual(entry["attributes"]["state"], "explicit-state")
+        self.assertIs(entry["attributes"]["ok"], False)
+        self.assertEqual(entry["attributes"]["detail"], "network timeout")
+        self.assertEqual(entry["attributes"]["count"], 3)
+        self.assertEqual(entry["attributes"]["ratio"], 1.25)
+        self.assertEqual(entry["attributes"]["token"], "<redacted>")
+        self.assertNotIn("top-secret", entry["message"])
+        self.assertEqual(legacy_entries[0]["event_name"], "video_client_add")
+        self.assertEqual(legacy_entries[0]["attributes"]["clients"], 3)
+        self.assertEqual(legacy_entries[0]["attributes"]["user"], "alice")
+
+    def test_runtime_log_message_field_inference_caps_work_and_output(self):
+        message = "BULK_EVENT " + " ".join(
+            f"field_{index}={index}" for index in range(1000)
+        )
+
+        entries, _meta = logging_config.parse_runtime_log_lines(
+            [
+                json.dumps(
+                    {
+                        "severity_text": "INFO",
+                        "body": message,
+                    }
+                )
+            ]
+        )
+        entry = entries[0]
+
+        self.assertEqual(entry["event_name"], "bulk_event")
+        self.assertEqual(len(entry["attributes"]), logging_config._RUNTIME_LOG_MAX_INFERRED_FIELDS)
+        self.assertEqual(entry["attributes"]["field_0"], 0)
+        self.assertEqual(entry["attributes"]["field_31"], 31)
+        self.assertNotIn("field_32", entry["attributes"])
+
+    def test_runtime_log_parser_marks_non_log_json_as_unclassified(self):
+        rendered = json.dumps({"foo": "bar", "token": "top-secret"})
+
+        entries, meta = logging_config.parse_runtime_log_lines([rendered])
+
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0]["parse_failed"])
+        self.assertEqual(entries[0]["format"], "unknown")
+        self.assertNotIn("top-secret", entries[0]["message"])
+        self.assertEqual(meta["format_counts"]["unknown"], 1)
+        self.assertEqual(meta["unclassified_lines"], 1)
+
+    def test_runtime_log_snapshot_scans_before_filtering_rare_errors(self):
+        previous = os.environ.get("WEB_SCRCPY_DATA_DIR")
+        with tempfile.TemporaryDirectory(prefix="scrcpygate-runtime-log-") as temporary:
+            os.environ["WEB_SCRCPY_DATA_DIR"] = temporary
+            path = Path(temporary) / "webscrcpy.log"
+            rows = [
+                "2026-07-20 16:00:00,000 [ERROR] worker: early failure",
+                *[
+                    f"2026-07-20 16:00:{index:02d},000 [INFO] worker: event-{index}"
+                    for index in range(1, 36)
+                ],
+            ]
+            path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            try:
+                raw_lines, entries, meta = logging_config.runtime_log_snapshot(20, "error")
+                minimum_raw, minimum_entries, minimum_meta = logging_config.runtime_log_snapshot(1)
+            finally:
+                if previous is None:
+                    os.environ.pop("WEB_SCRCPY_DATA_DIR", None)
+                else:
+                    os.environ["WEB_SCRCPY_DATA_DIR"] = previous
+                logging_config._refresh_paths()
+
+        self.assertEqual(len(raw_lines), 20)
+        self.assertNotIn("early failure", "\n".join(raw_lines))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["severity"], "error")
+        self.assertIn("early failure", entries[0]["message"])
+        self.assertEqual(meta["scanned_lines"], 36)
+        self.assertEqual(meta["matching_entries"], 1)
+        self.assertEqual(meta["returned_entries"], 1)
+        self.assertEqual(meta["min_severity"], "error")
+        self.assertEqual(minimum_raw, rows[-20:])
+        self.assertEqual(len(minimum_entries), 20)
+        self.assertEqual(minimum_meta["returned_entries"], 20)
+
+    def test_runtime_log_filter_rejects_unknown_levels(self):
+        with self.assertRaises(ValueError):
+            logging_config.normalize_runtime_log_filter("verbose")
+
+    def test_runtime_log_parser_does_not_merge_corrupt_rows_or_crash_on_bad_counts(self):
+        rows = [
+            "2026-07-20 16:01:00,000 [INFO] worker: started",
+            "corrupt row without a timestamp",
+            json.dumps(
+                {
+                    "severity_text": "ERROR",
+                    "body": "failed",
+                    "attributes": {"log.continuation_lines": "not-a-number"},
+                }
+            ),
+            "Traceback (most recent call last):",
+        ]
+
+        entries, meta = logging_config.parse_runtime_log_lines(rows)
+
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[1]["severity"], "unknown")
+        self.assertEqual(entries[2]["severity"], "error")
+        self.assertEqual(entries[2]["attributes"]["log.continuation_lines"], 1)
+        self.assertEqual(meta["severity_counts"]["unknown"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

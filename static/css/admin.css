@@ -2106,14 +2106,199 @@ td.table-action-cell {
   min-width: 0;
 }
 
+.runtime-log-heading .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.runtime-log-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+}
+
+.runtime-log-toolbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(240px, 1fr) repeat(3, max-content);
+  align-items: end;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-canvas);
+}
+
+.runtime-log-field {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-space-2);
+}
+
+.runtime-log-field > label {
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  font-weight: var(--ui-weight-medium);
+}
+
+.runtime-log-field select,
+.runtime-log-search-control input {
+  width: 100%;
+  min-width: 0;
+}
+
+.runtime-log-search-control {
+  position: relative;
+  min-width: 0;
+}
+
+.runtime-log-search-control .ui-icon {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--ui-color-text-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.runtime-log-search-control input {
+  padding-left: 36px;
+}
+
+.runtime-log-wrap-control,
+.runtime-log-raw-control {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  font-size: 13px;
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.runtime-log-wrap-control:hover,
+.runtime-log-raw-control:hover {
+  border-color: var(--ui-color-border-strong);
+  background: var(--ui-color-surface-raised);
+}
+
+.runtime-log-wrap-control input,
+.runtime-log-raw-control input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--ui-color-primary);
+}
+
+.runtime-log-overview {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  margin: var(--ui-space-3) 0 var(--ui-space-2);
+}
+
+.runtime-log-summary {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.runtime-log-stat {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.runtime-log-stat i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--ui-color-text-muted);
+}
+
+.runtime-log-stat strong {
+  color: var(--ui-color-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-log-stat--info i { background: var(--ui-color-info); }
+.runtime-log-stat--warning i { background: var(--ui-color-warning); }
+.runtime-log-stat--error i,
+.runtime-log-stat--critical i { background: var(--ui-color-danger); }
+
+.runtime-log-result {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.runtime-log-viewer {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+}
+
+.runtime-log-columns,
+.runtime-log-entry {
+  display: grid;
+  grid-template-columns: 128px 78px minmax(176px, 252px) minmax(0, 1fr);
+  column-gap: var(--ui-space-3);
+}
+
+.runtime-log-columns {
+  align-items: center;
+  min-height: 34px;
+  padding: 0 var(--ui-space-3) 0 15px;
+  border-bottom: 1px solid var(--ui-color-border);
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-semibold);
+}
+
 .runtime-logs {
+  min-height: 300px;
+  height: clamp(300px, 46vh, 520px);
+  margin: 0;
+  overflow: auto;
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.runtime-raw-logs {
   min-height: 300px;
   height: clamp(300px, 46vh, 520px);
   margin: 0;
   padding: var(--ui-space-3);
   overflow: auto;
-  border: 1px solid var(--ui-color-border);
-  border-radius: var(--ui-radius-lg);
   background: var(--ui-color-surface);
   color: var(--ui-color-text);
   font-family: var(--ui-font-mono);
@@ -2123,6 +2308,292 @@ td.table-action-cell {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.runtime-raw-logs.is-nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.runtime-log-entry {
+  position: relative;
+  align-items: start;
+  min-width: 0;
+  padding: 10px var(--ui-space-3) 10px var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-color-border);
+  border-left: 3px solid var(--ui-color-border-strong);
+}
+
+.runtime-log-entry:last-child {
+  border-bottom: 0;
+}
+
+.runtime-log-entry--info {
+  border-left-color: var(--ui-color-info);
+}
+
+.runtime-log-entry--warning {
+  border-left-color: var(--ui-color-warning);
+  background: color-mix(in srgb, var(--ui-color-warning-soft) 52%, var(--ui-color-surface));
+}
+
+.runtime-log-entry--error,
+.runtime-log-entry--critical {
+  border-left-color: var(--ui-color-danger);
+  background: color-mix(in srgb, var(--ui-color-danger-soft) 54%, var(--ui-color-surface));
+}
+
+.runtime-log-entry--critical {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--ui-color-danger) 70%, transparent);
+}
+
+.runtime-log-entry:focus-within {
+  z-index: 1;
+  box-shadow: var(--ui-focus-ring);
+}
+
+.runtime-log-time {
+  color: var(--ui-color-text-muted);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.runtime-log-level {
+  width: fit-content;
+  min-width: 60px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border: 1px solid var(--ui-color-border-strong);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-semibold);
+  line-height: 1.2;
+}
+
+.runtime-log-level--info {
+  border-color: color-mix(in srgb, var(--ui-color-info) 55%, var(--ui-color-border));
+  background: var(--ui-color-info-soft);
+  color: var(--ui-color-info);
+}
+
+.runtime-log-level--warning {
+  border-color: color-mix(in srgb, var(--ui-color-warning) 58%, var(--ui-color-border));
+  background: var(--ui-color-warning-soft);
+  color: var(--ui-color-warning);
+}
+
+.runtime-log-level--error,
+.runtime-log-level--critical {
+  border-color: color-mix(in srgb, var(--ui-color-danger) 62%, var(--ui-color-border));
+  background: var(--ui-color-danger-soft);
+  color: var(--ui-color-danger);
+}
+
+.runtime-log-level--critical {
+  border-width: 2px;
+}
+
+.runtime-log-source {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 5px;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
+.runtime-log-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-log-title {
+  color: var(--ui-color-text);
+  font-size: 13px;
+  font-weight: var(--ui-weight-semibold);
+}
+
+.runtime-log-category {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.runtime-log-category--http,
+.runtime-log-category--stream {
+  border-color: color-mix(in srgb, var(--ui-color-info) 50%, var(--ui-color-border));
+  background: var(--ui-color-info-soft);
+  color: var(--ui-color-info);
+}
+
+.runtime-log-category--device {
+  border-color: color-mix(in srgb, var(--ui-color-success) 50%, var(--ui-color-border));
+  background: var(--ui-color-success-soft);
+  color: var(--ui-color-success);
+}
+
+.runtime-log-category--control,
+.runtime-log-category--audit {
+  border-color: color-mix(in srgb, var(--ui-color-warning) 50%, var(--ui-color-border));
+  background: var(--ui-color-warning-soft);
+  color: var(--ui-color-warning);
+}
+
+.runtime-log-category--security {
+  border-color: color-mix(in srgb, var(--ui-color-danger) 52%, var(--ui-color-border));
+  background: var(--ui-color-danger-soft);
+  color: var(--ui-color-danger);
+}
+
+.runtime-log-category--alas {
+  border-color: color-mix(in srgb, var(--ui-color-primary) 50%, var(--ui-color-border));
+  background: var(--ui-color-primary-soft);
+  color: var(--ui-color-primary-text);
+}
+
+.runtime-log-message {
+  min-width: 0;
+  margin: 0;
+  color: var(--ui-color-text);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.runtime-logs.is-nowrap .runtime-log-message {
+  overflow-x: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.runtime-log-details {
+  min-width: 0;
+  grid-column: 4;
+  margin-top: var(--ui-space-2);
+}
+
+.runtime-log-details summary {
+  width: fit-content;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+}
+
+.runtime-log-details summary:hover {
+  color: var(--ui-color-text);
+}
+
+.runtime-log-detail-body {
+  min-width: 0;
+  margin-top: var(--ui-space-2);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-canvas);
+}
+
+.runtime-log-context-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-2) var(--ui-space-4);
+}
+
+.runtime-log-context-grid > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: var(--ui-space-2);
+}
+
+.runtime-log-context-grid dt,
+.runtime-log-context-grid dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.runtime-log-context-grid dt {
+  color: var(--ui-color-text-muted);
+}
+
+.runtime-log-context-grid dd {
+  color: var(--ui-color-text);
+  font-family: var(--ui-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.runtime-log-detail-body h4 {
+  margin: var(--ui-space-3) 0 var(--ui-space-2);
+  color: var(--ui-color-text-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-semibold);
+}
+
+.runtime-log-detail-body h4:first-child {
+  margin-top: 0;
+}
+
+.runtime-log-detail-code {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--ui-space-3);
+  overflow: auto;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.runtime-log-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-6);
+  color: var(--ui-color-text-muted);
+  text-align: center;
+}
+
+.runtime-log-empty strong {
+  color: var(--ui-color-text);
+  font-size: 14px;
+}
+
+.runtime-log-empty span {
+  font-size: 12px;
 }
 
 .audit-log-table {
@@ -2347,6 +2818,7 @@ td.table-action-cell {
   min-width: 0;
   min-height: 0;
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--ui-space-4);
   overflow-y: auto;
@@ -2357,6 +2829,7 @@ td.table-action-cell {
 .audit-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: max-content;
   gap: 1px;
   margin: 0;
   overflow: hidden;
@@ -2397,6 +2870,27 @@ td.table-action-cell {
 .audit-detail-body section:last-child {
   padding-bottom: 0;
   border-bottom: 0;
+}
+
+.audit-detail-integrity {
+  min-width: 0;
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface);
+}
+
+.audit-detail-integrity summary {
+  min-height: 24px;
+  color: var(--ui-color-text);
+  font-size: 12px;
+  font-weight: var(--ui-weight-semibold);
+  cursor: pointer;
+}
+
+.audit-detail-integrity > p {
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
 }
 
 .audit-detail-metadata {
@@ -2746,6 +3240,79 @@ td.table-action-cell {
 
   .audit-filter-actions .btn {
     width: 100%;
+  }
+
+  .runtime-log-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: var(--ui-space-3);
+  }
+
+  .runtime-log-heading-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runtime-log-heading-actions .btn {
+    width: 100%;
+  }
+
+  .runtime-log-field {
+    grid-column: 1 / -1;
+  }
+
+  #runtimeLogReset {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .runtime-log-overview {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--ui-space-2);
+  }
+
+  .runtime-log-result {
+    align-self: flex-start;
+  }
+
+  .runtime-log-columns {
+    display: none;
+  }
+
+  .runtime-log-entry {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--ui-space-2);
+    padding: var(--ui-space-3);
+  }
+
+  .runtime-log-time {
+    grid-column: 1;
+  }
+
+  .runtime-log-level {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .runtime-log-source,
+  .runtime-log-message,
+  .runtime-log-details {
+    grid-column: 1 / -1;
+  }
+
+  .runtime-log-source {
+    overflow: visible;
+  }
+
+  .runtime-log-title {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .runtime-log-context-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .form-grid {
@@ -3163,7 +3730,8 @@ td.table-action-cell {
     grid-column: 1 / -1;
   }
 
-  .runtime-logs {
+  .runtime-logs,
+  .runtime-raw-logs {
     min-height: 280px;
     height: 48vh;
   }
@@ -3231,7 +3799,10 @@ td.table-action-cell {
   .alas-view-tabs button,
   .access-view-tabs button,
   .permission-user-choice,
-  .permission-toggle {
+  .permission-toggle,
+  .runtime-log-wrap-control,
+  .runtime-log-raw-control,
+  .runtime-log-details summary {
     min-height: 44px;
   }
 }
@@ -3243,7 +3814,8 @@ td.table-action-cell {
   }
 
   textarea,
-  .runtime-logs {
+  .runtime-logs,
+  .runtime-raw-logs {
     min-height: 180px;
     height: min(46vh, 240px);
   }
@@ -3265,7 +3837,10 @@ td.table-action-cell {
   .admin-nav,
   .workspace-section,
   .device-card,
-  .table-wrap {
+  .table-wrap,
+  .runtime-log-toolbar,
+  .runtime-log-viewer,
+  .runtime-log-level {
     border-color: var(--ui-color-border-strong);
   }
 }

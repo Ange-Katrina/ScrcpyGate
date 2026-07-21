@@ -85,6 +85,135 @@ _SEVERITY_NUMBERS = {
     logging.ERROR: 17,
     logging.CRITICAL: 21,
 }
+RUNTIME_LOG_SEVERITIES = ("debug", "info", "warning", "error", "critical")
+RUNTIME_LOG_TEXT_FIELDS_MARKER = " scrcpygate_fields="
+_TRUSTED_LOG_FIELD_NAMES = frozenset(
+    {
+        "request_id",
+        "trace_id",
+        "span_id",
+        "actor",
+        "source_ip",
+        "service",
+        "observed_timestamp",
+    }
+)
+_LEGACY_RUNTIME_FIELD_NAMES = frozenset(
+    {
+        *_TRUSTED_LOG_FIELD_NAMES,
+        "action",
+        "component",
+        "connection_id",
+        "device_id",
+        "device_ref",
+        "duration_ms",
+        "error_type",
+        "http_method",
+        "http_route",
+        "http_status_code",
+        "outcome",
+        "queue_size",
+        "stream_mode",
+        "unfinished",
+        "username",
+    }
+)
+_LEGACY_RUNTIME_FIELD_PREFIXES = (
+    "account_",
+    "adb_",
+    "alas_",
+    "audit_",
+    "control_",
+    "exception_",
+    "http_",
+    "log_",
+    "mirror_",
+    "scrcpy_",
+    "security_",
+    "video_",
+)
+_RUNTIME_LOG_EVENT_TOKEN_RE = re.compile(
+    r"^(?P<event>[A-Z][A-Z0-9_.-]{1,79})(?:\s+(?P<fields>.*))?$"
+)
+_RUNTIME_LOG_KEY_VALUE_RE = re.compile(
+    r"(?<!\S)(?P<key>[A-Za-z][A-Za-z0-9_.-]{0,79})="
+)
+_RUNTIME_LOG_INTEGER_RE = re.compile(r"^[+-]?\d+$")
+_RUNTIME_LOG_FLOAT_RE = re.compile(
+    r"^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[eE][+-]?\d+)$|"
+    r"^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+))$"
+)
+_RUNTIME_LOG_MAX_INFERRED_FIELDS = 32
+RUNTIME_LOG_SEVERITY_RANK = {
+    "unknown": -1,
+    "debug": 0,
+    "info": 1,
+    "warning": 2,
+    "error": 3,
+    "critical": 4,
+}
+_RUNTIME_LOG_SEVERITY_NUMBERS = {
+    "unknown": 0,
+    "debug": 5,
+    "info": 9,
+    "warning": 13,
+    "error": 17,
+    "critical": 21,
+}
+_RUNTIME_LOG_SEVERITY_ALIASES = {
+    "trace": "debug",
+    "debug": "debug",
+    "notice": "info",
+    "info": "info",
+    "warn": "warning",
+    "warning": "warning",
+    "err": "error",
+    "error": "error",
+    "crit": "critical",
+    "critical": "critical",
+    "fatal": "critical",
+    "panic": "critical",
+}
+_RUNTIME_LOG_PREFIX_RE = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2}[T ][^\[]*?)\s+"
+    r"\[(?P<severity>[A-Za-z]+)\]\s+(?P<tail>.+)$"
+)
+_RUNTIME_LOG_CONTEXT_RE = re.compile(
+    r"^(?P<logger>\S+)\s+request_id=(?P<request_id>\S+)\s+"
+    r"event=(?P<event_name>[^:]+):\s?(?P<message>.*)$"
+)
+_RUNTIME_LOG_LEGACY_RE = re.compile(r"^(?P<logger>[^:]+):\s?(?P<message>.*)$")
+_RUNTIME_LOG_EXCEPTION_RE = re.compile(
+    r"^(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning)|Caused by):"
+)
+_RUNTIME_LOG_JSON_MARKER_FIELDS = frozenset(
+    {
+        "timestamp",
+        "time",
+        "ts",
+        "severity_text",
+        "severity_number",
+        "severity",
+        "level",
+        "logger",
+        "logger_name",
+        "event_name",
+        "event",
+        "body",
+        "message",
+    }
+)
+_RUNTIME_LOG_JSON_CONTEXT_FIELDS = (
+    "observed_timestamp",
+    "service",
+    "trace_id",
+    "span_id",
+    "actor",
+    "source_ip",
+)
+_RUNTIME_LOG_JSON_CONSUMED_FIELDS = _RUNTIME_LOG_JSON_MARKER_FIELDS | frozenset(
+    {"request_id", "attributes", *_RUNTIME_LOG_JSON_CONTEXT_FIELDS}
+)
 _log_context: contextvars.ContextVar[dict[str, object]] = contextvars.ContextVar(
     "scrcpygate_log_context", default={}
 )
@@ -255,6 +384,21 @@ def event_name_for_record(record: logging.LogRecord) -> str:
     return normalize_event_name(f"{record.name}.log")
 
 
+def _safe_event_fields(record: logging.LogRecord) -> dict[str, object]:
+    fields = sanitize_log_value(getattr(record, "event_fields", {}))
+    if not isinstance(fields, dict):
+        fields = {"value": fields}
+    return _without_trusted_log_fields(fields)
+
+
+def _without_trusted_log_fields(fields: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in fields.items()
+        if _normalized_field_name(key) not in _TRUSTED_LOG_FIELD_NAMES
+    }
+
+
 def bind_log_context(**values: object):
     current = dict(_log_context.get())
     for raw_key, value in values.items():
@@ -314,10 +458,7 @@ class SafeJsonFormatter(logging.Formatter):
         context = sanitize_log_value(getattr(record, "_scrcpygate_context", {}))
         if not isinstance(context, dict):
             context = {}
-        raw_fields = getattr(record, "event_fields", {})
-        fields = sanitize_log_value(raw_fields)
-        if not isinstance(fields, dict):
-            fields = {"value": fields}
+        fields = _safe_event_fields(record)
         event_name = event_name_for_record(record)
         payload: dict[str, object] = {
             "timestamp": _rfc3339(record.created),
@@ -351,16 +492,31 @@ class SafeJsonFormatter(logging.Formatter):
 
 class SafeTextFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        context = getattr(record, "_scrcpygate_context", {}) or {}
-        request_id = sanitize_log_text(context.get("request_id", "-"), 96)
+        context = sanitize_log_value(getattr(record, "_scrcpygate_context", {}) or {})
+        if not isinstance(context, dict):
+            context = {}
+        request_id = sanitize_log_text(context.pop("request_id", "-"), 96)
+        trusted_context: dict[str, object] = {}
+        for key in ("trace_id", "span_id", "actor", "source_ip"):
+            value = context.pop(key, None)
+            if value not in (None, ""):
+                trusted_context[key] = value
         event_name = event_name_for_record(record)
-        fields = sanitize_log_value(getattr(record, "event_fields", {}))
-        suffix = ""
-        if fields:
-            suffix = " " + json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-        message = sanitize_log_text(record.getMessage())
+        fields = _safe_event_fields(record)
+        attributes = {**context, **fields, **trusted_context}
         if record.exc_info:
-            message = sanitize_log_text(f"{message} {self.formatException(record.exc_info)}", 16384)
+            exc_type, exc_value, _traceback = record.exc_info
+            attributes["exception.type"] = sanitize_log_text(
+                getattr(exc_type, "__name__", str(exc_type)), 160
+            )
+            attributes["exception.message"] = sanitize_log_text(exc_value, 2048)
+            attributes["exception.stacktrace"] = sanitize_log_text(
+                self.formatException(record.exc_info), 16384
+            )
+        suffix = RUNTIME_LOG_TEXT_FIELDS_MARKER + json.dumps(
+            attributes, ensure_ascii=False, separators=(",", ":")
+        )
+        message = sanitize_log_text(record.getMessage())
         level_name = sanitize_log_text(record.levelname, 24)
         logger_name = sanitize_log_text(record.name, 160)
         return f"{_rfc3339(record.created)} [{level_name}] {logger_name} request_id={request_id} event={event_name}: {message}{suffix}"
@@ -626,3 +782,390 @@ def tail_log(max_lines: int = 300) -> list[str]:
     except OSError:
         return []
     return [line.decode("utf-8", "replace") for line in data.splitlines()[-limit:]]
+
+
+def _runtime_log_severity_number(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if 1 <= number <= 24 else None
+
+
+def normalize_runtime_log_severity(value: object = "", severity_number: object = None) -> str:
+    """Normalize OpenTelemetry or text log levels for the admin log viewer."""
+    number = _runtime_log_severity_number(severity_number)
+    if number is not None:
+        if number <= 8:
+            return "debug"
+        if number <= 12:
+            return "info"
+        if number <= 16:
+            return "warning"
+        if number <= 20:
+            return "error"
+        return "critical"
+    return _RUNTIME_LOG_SEVERITY_ALIASES.get(str(value or "").strip().lower(), "unknown")
+
+
+def normalize_runtime_log_filter(value: object = "") -> str:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return ""
+    normalized = _RUNTIME_LOG_SEVERITY_ALIASES.get(candidate, candidate)
+    if normalized not in RUNTIME_LOG_SEVERITIES:
+        raise ValueError("invalid runtime log severity")
+    return normalized
+
+
+def _runtime_log_scalar(value: str, field_name: str) -> object:
+    candidate = value.strip()
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in {"'", '"'}:
+        candidate = candidate[1:-1]
+    lowered = candidate.lower()
+    if lowered == "true":
+        parsed: object = True
+    elif lowered == "false":
+        parsed = False
+    elif lowered in {"none", "null"}:
+        parsed = None
+    elif len(candidate) <= 20 and _RUNTIME_LOG_INTEGER_RE.fullmatch(candidate):
+        try:
+            parsed = int(candidate)
+        except (TypeError, ValueError, OverflowError):
+            parsed = candidate
+    elif len(candidate) <= 32 and _RUNTIME_LOG_FLOAT_RE.fullmatch(candidate):
+        try:
+            numeric = float(candidate)
+        except (TypeError, ValueError, OverflowError):
+            parsed = candidate
+        else:
+            parsed = numeric if math.isfinite(numeric) else candidate
+    else:
+        parsed = candidate
+    return sanitize_log_value(parsed, field_name)
+
+
+def _runtime_log_message_fields(message: str) -> tuple[str, dict[str, object]]:
+    """Recover bounded fields from legacy `EVENT key=value` messages."""
+    event_match = _RUNTIME_LOG_EVENT_TOKEN_RE.fullmatch(message)
+    if not event_match:
+        return "", {}
+    event_name = normalize_event_name(event_match.group("event"))
+    field_text = event_match.group("fields") or ""
+    matches = []
+    for match in _RUNTIME_LOG_KEY_VALUE_RE.finditer(field_text):
+        matches.append(match)
+        if len(matches) > _RUNTIME_LOG_MAX_INFERRED_FIELDS:
+            break
+    if not matches or matches[0].start() != 0:
+        return event_name, {}
+    inferred: dict[str, object] = {}
+    usable = min(len(matches), _RUNTIME_LOG_MAX_INFERRED_FIELDS)
+    for index in range(usable):
+        match = matches[index]
+        key = FIELD_NAME_RE.sub("_", match.group("key")).strip("_")[:80]
+        if not key or _normalized_field_name(key) in _TRUSTED_LOG_FIELD_NAMES:
+            continue
+        value_end = matches[index + 1].start() if index + 1 < len(matches) else len(field_text)
+        raw_value = field_text[match.end() : value_end].strip()
+        inferred[key] = _runtime_log_scalar(raw_value, key)
+    return event_name, inferred
+
+
+def _terminal_json_object(candidate: str) -> tuple[int, dict[str, object]] | None:
+    """Find and decode one JSON object ending at the end of a bounded log line."""
+    if not candidate.endswith("}"):
+        return None
+    depth = 0
+    in_string = False
+    object_start = -1
+    for index in range(len(candidate) - 1, -1, -1):
+        char = candidate[index]
+        if char == '"':
+            backslashes = 0
+            cursor = index - 1
+            while cursor >= 0 and candidate[cursor] == "\\":
+                backslashes += 1
+                cursor -= 1
+            if backslashes % 2 == 0:
+                in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "}":
+            depth += 1
+        elif char == "{":
+            depth -= 1
+            if depth == 0:
+                object_start = index
+                break
+            if depth < 0:
+                return None
+    if object_start < 0 or depth != 0 or in_string:
+        return None
+    try:
+        payload = json.loads(candidate[object_start:])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return object_start, payload
+
+
+def _looks_like_legacy_runtime_fields(payload: dict[str, object]) -> bool:
+    for raw_key in payload:
+        key = _normalized_field_name(raw_key)
+        if key in _LEGACY_RUNTIME_FIELD_NAMES or key.startswith(_LEGACY_RUNTIME_FIELD_PREFIXES):
+            return True
+    return False
+
+
+def _runtime_log_entry(
+    *,
+    timestamp: object = "",
+    severity_text: object = "",
+    severity_number: object = None,
+    logger: object = "",
+    event_name: object = "",
+    message: object = "",
+    request_id: object = "",
+    attributes: object = None,
+    raw: object = "",
+    entry_format: str,
+    parse_failed: bool = False,
+) -> dict[str, object]:
+    severity = normalize_runtime_log_severity(severity_text, severity_number)
+    normalized_number = _runtime_log_severity_number(severity_number)
+    safe_message = sanitize_log_text(message, 16384)
+    inferred_event_name, inferred_attributes = _runtime_log_message_fields(safe_message)
+    safe_attributes = sanitize_log_value(attributes or {})
+    if not isinstance(safe_attributes, dict):
+        safe_attributes = {"value": safe_attributes}
+    merged_attributes = {**inferred_attributes, **safe_attributes}
+    return {
+        "timestamp": sanitize_log_text(timestamp, 96),
+        "severity": severity,
+        "severity_number": normalized_number or _RUNTIME_LOG_SEVERITY_NUMBERS[severity],
+        "logger": sanitize_log_text(logger, 160),
+        "event_name": sanitize_log_text(event_name or inferred_event_name, 160),
+        "message": safe_message,
+        "request_id": sanitize_log_text(request_id, 96),
+        "attributes": merged_attributes,
+        "raw": sanitize_log_text(raw, 16384),
+        "format": entry_format,
+        "parse_failed": bool(parse_failed),
+    }
+
+
+def _parse_runtime_json_line(line: str) -> dict[str, object] | None:
+    if not line.lstrip().startswith("{"):
+        return None
+    try:
+        payload = json.loads(line)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if not any(key in payload for key in _RUNTIME_LOG_JSON_MARKER_FIELDS):
+        return _runtime_log_entry(
+            message=line,
+            raw=line,
+            entry_format="unknown",
+            parse_failed=True,
+        )
+    raw_attributes = payload.get("attributes")
+    if isinstance(raw_attributes, dict):
+        attributes = _without_trusted_log_fields(dict(raw_attributes))
+    elif raw_attributes not in (None, ""):
+        attributes = {"log.attributes": raw_attributes}
+    else:
+        attributes = {}
+    for key in _RUNTIME_LOG_JSON_CONTEXT_FIELDS:
+        value = payload.get(key)
+        if value not in (None, ""):
+            attributes[key] = value
+    for key, value in payload.items():
+        if key not in _RUNTIME_LOG_JSON_CONSUMED_FIELDS:
+            attributes.setdefault(f"json.{key}", value)
+    return _runtime_log_entry(
+        timestamp=payload.get("timestamp") or payload.get("time") or payload.get("ts"),
+        severity_text=payload.get("severity_text") or payload.get("level") or payload.get("severity"),
+        severity_number=payload.get("severity_number"),
+        logger=payload.get("logger") or payload.get("logger_name"),
+        event_name=payload.get("event_name") or payload.get("event"),
+        message=payload.get("body") if payload.get("body") is not None else payload.get("message"),
+        request_id=payload.get("request_id"),
+        attributes=attributes,
+        raw=line,
+        entry_format="json",
+    )
+
+
+def _split_runtime_text_fields(message: str) -> tuple[str, dict[str, object]]:
+    candidate = message.rstrip()
+    terminal = _terminal_json_object(candidate)
+    if terminal is None:
+        return message, {}
+    object_start, payload = terminal
+    marker_start = object_start - len(RUNTIME_LOG_TEXT_FIELDS_MARKER)
+    if marker_start >= 0 and candidate[marker_start:object_start] == RUNTIME_LOG_TEXT_FIELDS_MARKER:
+        return candidate[:marker_start], payload
+    if (
+        object_start > 0
+        and candidate[object_start - 1].isspace()
+        and _looks_like_legacy_runtime_fields(payload)
+    ):
+        return candidate[:object_start].rstrip(), _without_trusted_log_fields(payload)
+    return message, {}
+
+
+def _parse_runtime_text_line(line: str) -> dict[str, object] | None:
+    prefix = _RUNTIME_LOG_PREFIX_RE.match(line)
+    if not prefix:
+        return None
+    tail = prefix.group("tail")
+    context = _RUNTIME_LOG_CONTEXT_RE.match(tail)
+    if context:
+        values = context.groupdict()
+        message, attributes = _split_runtime_text_fields(values["message"])
+        return _runtime_log_entry(
+            timestamp=prefix.group("timestamp"),
+            severity_text=prefix.group("severity"),
+            logger=values["logger"],
+            event_name=values["event_name"],
+            message=message,
+            request_id=values["request_id"],
+            attributes=attributes,
+            raw=line,
+            entry_format="text",
+        )
+    legacy = _RUNTIME_LOG_LEGACY_RE.match(tail)
+    if legacy:
+        values = legacy.groupdict()
+        message, attributes = _split_runtime_text_fields(values["message"])
+        return _runtime_log_entry(
+            timestamp=prefix.group("timestamp"),
+            severity_text=prefix.group("severity"),
+            logger=values["logger"].strip(),
+            message=message,
+            attributes=attributes,
+            raw=line,
+            entry_format="legacy",
+        )
+    return _runtime_log_entry(
+        timestamp=prefix.group("timestamp"),
+        severity_text=prefix.group("severity"),
+        message=tail,
+        raw=line,
+        entry_format="legacy",
+    )
+
+
+def _append_runtime_continuation(entry: dict[str, object], line: str) -> None:
+    continuation = sanitize_log_text(line, 4096)
+    if not continuation:
+        return
+    current_message = str(entry.get("message") or "")
+    combined_message = f"{current_message}\n{continuation}" if current_message else continuation
+    entry["message"] = combined_message[:16384]
+    current_raw = str(entry.get("raw") or "")
+    combined_raw = f"{current_raw}\n{continuation}" if current_raw else continuation
+    entry["raw"] = combined_raw[:16384]
+    attributes = entry.get("attributes")
+    if not isinstance(attributes, dict):
+        attributes = {}
+        entry["attributes"] = attributes
+    try:
+        current_count = max(0, int(attributes.get("log.continuation_lines", 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        current_count = 0
+    attributes["log.continuation_lines"] = current_count + 1
+
+
+def _is_runtime_log_continuation(line: str) -> bool:
+    if not line.strip():
+        return True
+    if line[:1].isspace():
+        return True
+    return line.startswith(
+        (
+            "Traceback (most recent call last):",
+            "During handling of the above exception",
+            "The above exception was the direct cause",
+        )
+    ) or bool(_RUNTIME_LOG_EXCEPTION_RE.match(line))
+
+
+def parse_runtime_log_lines(lines: list[str]) -> tuple[list[dict[str, object]], dict[str, object]]:
+    """Parse a bounded mixed-format log tail without dropping unknown content."""
+    entries: list[dict[str, object]] = []
+    unclassified_lines = 0
+    format_counts = {"json": 0, "text": 0, "legacy": 0, "unknown": 0}
+    for raw_line in lines:
+        line = str(raw_line or "")
+        entry = _parse_runtime_json_line(line) or _parse_runtime_text_line(line)
+        if entry is not None:
+            if entry.get("parse_failed"):
+                unclassified_lines += 1
+            entries.append(entry)
+            entry_format = str(entry.get("format") or "unknown")
+            format_counts[entry_format] = format_counts.get(entry_format, 0) + 1
+            continue
+        unclassified_lines += 1
+        if entries and _is_runtime_log_continuation(line):
+            _append_runtime_continuation(entries[-1], line)
+            continue
+        entries.append(
+            _runtime_log_entry(
+                message=line,
+                raw=line,
+                entry_format="unknown",
+                parse_failed=True,
+            )
+        )
+        format_counts["unknown"] += 1
+
+    severity_counts = {severity: 0 for severity in (*RUNTIME_LOG_SEVERITIES, "unknown")}
+    for entry in entries:
+        severity = str(entry.get("severity") or "unknown")
+        severity_counts[severity if severity in severity_counts else "unknown"] += 1
+    return entries, {
+        "scanned_lines": len(lines),
+        "parsed_entries": len(entries),
+        "unclassified_lines": unclassified_lines,
+        "severity_counts": severity_counts,
+        "format_counts": format_counts,
+    }
+
+
+def runtime_log_snapshot(
+    max_entries: int = 300, min_severity: object = ""
+) -> tuple[list[str], list[dict[str, object]], dict[str, object]]:
+    """Return legacy raw lines plus filtered structured entries from a bounded tail."""
+    limit = max(20, min(int(max_entries), 2000))
+    severity_filter = normalize_runtime_log_filter(min_severity)
+    raw_lines = tail_log(2000)
+    entries, meta = parse_runtime_log_lines(raw_lines)
+    if severity_filter:
+        minimum_rank = RUNTIME_LOG_SEVERITY_RANK[severity_filter]
+        matching = [
+            entry
+            for entry in entries
+            if RUNTIME_LOG_SEVERITY_RANK.get(str(entry.get("severity") or "unknown"), -1)
+            >= minimum_rank
+        ]
+    else:
+        matching = entries
+    returned = matching[-limit:]
+    meta.update(
+        {
+            "returned_entries": len(returned),
+            "matching_entries": len(matching),
+            "min_severity": severity_filter,
+            "truncated": len(matching) > limit or len(raw_lines) >= 2000,
+        }
+    )
+    return raw_lines[-limit:], returned, meta

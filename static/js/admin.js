@@ -5,7 +5,7 @@ const adminI18n = window.ScrcpyGateI18n;
 const adminT = (key, values) => (
   adminI18n && typeof adminI18n.t === 'function' ? adminI18n.t(key, values) : String(key || '')
 );
-const state = { overview:null, users:[], devices:[], permissions:[], logs:[], auditSummary:{}, runtimeLogs:[], video:{}, alas:null };
+const state = { overview:null, users:[], devices:[], permissions:[], logs:[], auditSummary:{}, runtimeLogs:[], runtimeLogEntries:[], runtimeLogMeta:{}, video:{}, alas:null };
 const NORMAL_PROFILE_NAMES = ['smooth','balanced','sharp','low_latency'];
 const profileLabels = {smooth:'mirror.profile.smooth', balanced:'mirror.profile.balanced', sharp:'mirror.profile.sharp', low_latency:'mirror.profile.low_latency'};
 const profileHints = {smooth:'admin.profile_hint.smooth', balanced:'admin.profile_hint.balanced', sharp:'admin.profile_hint.sharp', low_latency:'admin.profile_hint.low_latency'};
@@ -43,6 +43,29 @@ const ADB_STATUS_META = Object.freeze({
   disabled:{label:'admin.adb.disabled',tone:''},
   unknown:{label:'admin.adb.unknown',tone:'warn'}
 });
+const RUNTIME_LOG_LEVELS = Object.freeze(['debug','info','warning','error','critical']);
+const RUNTIME_LOG_LEVEL_RANK = Object.freeze({unknown:-1,debug:0,info:1,warning:2,error:3,critical:4});
+const RUNTIME_LOG_LEVEL_ALIASES = Object.freeze({trace:'debug',debug:'debug',notice:'info',info:'info',warn:'warning',warning:'warning',err:'error',error:'error',crit:'critical',critical:'critical',fatal:'critical',panic:'critical'});
+const RUNTIME_LOG_JSON_FIELDS = new Set(['timestamp','time','ts','severity_text','severity_number','severity','level','logger','logger_name','event_name','event','body','message','request_id','attributes','observed_timestamp','service','trace_id','span_id','actor','source_ip','raw','format','parse_failed']);
+const RUNTIME_LOG_TEXT_FIELDS_MARKER = ' scrcpygate_fields=';
+const RUNTIME_LOG_LEGACY_FIELD_HINTS = new Set([
+  'request_id','trace_id','span_id','actor','source_ip','service','observed_timestamp',
+  'http_method','http_route','http_status_code','duration_ms','elapsed_ms','status_code','outcome',
+  'device','device_id','address','state','ok','detail','reason','mode','health','error','error_type',
+  'client','user','username','config','connection','permission','task','path','route','channel',
+  'codec','width','height','bytes','drops','generation','queue_size','unfinished','component'
+]);
+const RUNTIME_LOG_CONTEXT_FIELD_KEYS = new Set(['request_id','trace_id','span_id','actor','source_ip','service','observed_timestamp']);
+const RUNTIME_LOG_EVENT_CATEGORY_RULES = Object.freeze([
+  ['http',/^(?:http\.|http_)/],
+  ['security',/^(?:security[._]|host_reject$|origin_reject$|proxy_header_reject$|alas_embed_denied$)/],
+  ['audit',/^audit[._]/],
+  ['device',/^(?:adb[._]|device[._])/],
+  ['control',/^(?:control[._]|event_permission[._]|lease[._])/],
+  ['alas',/^(?:alas[._]|pywebio[._])/],
+  ['stream',/^(?:mirror[._]|video[._]|scrcpy[._]|stream[._])/],
+  ['account',/^(?:account[._]|login[._]|auth[._])/]
+]);
 const resourceRequests = new Map();
 const resourceSequences = new Map();
 const loadedResources = new Set();
@@ -92,6 +115,7 @@ let auditNextCursor = null;
 let auditHasMore = false;
 let auditDetailSequence = 0;
 let activeAuditFilters = null;
+let runtimeLogRenderFrame = 0;
 const EDITOR_DRAWERS = ['device','user','alasConnection','alasAssignment','alasConfig'];
 function profileLabel(profile, labels={}){ return labels[profile] || (profileLabels[profile] ? adminT(profileLabels[profile]) : profile); }
 function profileHint(profile){ return profileHints[profile] ? adminT(profileHints[profile]) : ''; }
@@ -300,14 +324,15 @@ function getDeviceId(device){ return String((device && (device.device_id || devi
 function statusLabel(value){ const key=String(value || 'unknown').trim(); return adminT(STATUS_LABELS[key] || 'admin.status.unknown'); }
 function setBusy(el, busy, text=adminT('admin.actions.processing')){
   if(!el) return;
+  const label=el.querySelector('[data-busy-label]') || el;
   if(busy) {
-    el.dataset.readyText=el.textContent;
+    el.dataset.readyText=label.textContent;
     el.dataset.busyText=text;
   }
   el.disabled=!!busy;
   el.classList.toggle('busy', !!busy);
-  if(busy) el.textContent=text;
-  else if(!el.dataset.busyText || el.textContent===el.dataset.busyText) el.textContent=el.dataset.readyText;
+  if(busy) label.textContent=text;
+  else if(!el.dataset.busyText || label.textContent===el.dataset.busyText) label.textContent=el.dataset.readyText;
   if(!busy) delete el.dataset.busyText;
 }
 async function withBusy(el, fn, text=adminT('admin.actions.processing')){
@@ -318,7 +343,7 @@ async function withBusy(el, fn, text=adminT('admin.actions.processing')){
 function bindAction(id, fn, text){
   const el=$(id);
   if(!el) return;
-  el.onclick=()=>withBusy(el, fn, text).catch(e=>show(e.message));
+  el.onclick=()=>withBusy(el, fn, text).catch(e=>{ if(!isAbortError(e)) show(e.message); });
 }
 function show(message){ const n=$('notice'); n.textContent=message || adminT('admin.actions.failed'); n.classList.add('show'); clearTimeout(show.t); show.t=setTimeout(()=>n.classList.remove('show'),3200); }
 const API_ERROR_MESSAGES = Object.freeze({
@@ -1846,8 +1871,557 @@ function openAlasConfigDrawer(trigger=document.activeElement){
   openEditorDrawer('alasConfig',trigger);
   withBusy($('loadConfig'),loadConfig,adminT('admin.busy.reading')).catch(error=>{ if(!isAbortError(error)) show(error.message); });
 }
+function normalizeRuntimeLogSeverity(value, severityNumber){
+  const number=Number(severityNumber);
+  if(Number.isInteger(number) && number>=1 && number<=24){
+    if(number<=8) return 'debug';
+    if(number<=12) return 'info';
+    if(number<=16) return 'warning';
+    if(number<=20) return 'error';
+    return 'critical';
+  }
+  return RUNTIME_LOG_LEVEL_ALIASES[String(value || '').trim().toLowerCase()] || 'unknown';
+}
+function runtimeLogAttributes(value){
+  if(value && typeof value==='object' && !Array.isArray(value)) return value;
+  return value == null || value==='' ? {} : {value};
+}
+function runtimeLogEntryAttributes(entry){
+  const attributes={...runtimeLogAttributes(entry.attributes)};
+  ['observed_timestamp','service','trace_id','span_id','actor','source_ip'].forEach(key=>{
+    if(entry[key] !== undefined && entry[key] !== null && entry[key] !== '') attributes[key]=entry[key];
+  });
+  Object.entries(entry).forEach(([key,value])=>{
+    if(!RUNTIME_LOG_JSON_FIELDS.has(key) && attributes[`json.${key}`] === undefined) attributes[`json.${key}`]=value;
+  });
+  return attributes;
+}
+function normalizeRuntimeLogEventName(value){
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.-]+/g,'_').replace(/^[_.-]+|[_.-]+$/g,'');
+}
+function inferredRuntimeLogEventName(message){
+  const token=String(message || '').trim().split(/\s+/,1)[0].replace(/:$/,'');
+  return /^[A-Z][A-Z0-9_.-]{1,79}$/.test(token) ? normalizeRuntimeLogEventName(token) : '';
+}
+function runtimeLogFieldValue(value){
+  const candidate=String(value == null ? '' : value).trim();
+  if((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) return candidate.slice(1,-1);
+  if(candidate==='True' || candidate==='true') return true;
+  if(candidate==='False' || candidate==='false') return false;
+  if(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(candidate)){
+    const number=Number(candidate);
+    if(Number.isFinite(number)) return number;
+  }
+  return candidate;
+}
+function parseRuntimeLogMessageFields(message,eventName=''){
+  const candidate=String(message || '').slice(0,16384);
+  const fieldPattern=/(?:^|\s)([A-Za-z][A-Za-z0-9_.-]{0,79})=/g;
+  const matches=[];
+  let match;
+  while(matches.length<64 && (match=fieldPattern.exec(candidate))!==null){
+    matches.push({key:match[1],start:match.index,valueStart:match.index+match[0].length});
+  }
+  if(!matches.length) return {};
+  const prefix=candidate.slice(0,matches[0].start).trim().replace(/:$/,'');
+  const normalizedEvent=normalizeRuntimeLogEventName(eventName);
+  if(normalizedEvent && normalizeRuntimeLogEventName(prefix)!==normalizedEvent) return {};
+  if(!normalizedEvent && !/^[A-Z][A-Z0-9_.-]{1,79}$/.test(prefix)) return {};
+  const fields={};
+  matches.forEach((item,index)=>{
+    const end=index+1<matches.length ? matches[index+1].start : candidate.length;
+    const value=candidate.slice(item.valueStart,end).trim();
+    if(value!=='') fields[item.key]=runtimeLogFieldValue(value);
+  });
+  return fields;
+}
+function normalizeRuntimeLogEntry(entry={}){
+  const severity=normalizeRuntimeLogSeverity(entry.severity || entry.severity_text || entry.level,entry.severity_number);
+  const message=String(entry.message != null ? entry.message : entry.body || '');
+  const eventName=String(entry.event_name || entry.event || inferredRuntimeLogEventName(message));
+  const normalized={
+    timestamp:String(entry.timestamp || entry.time || entry.ts || ''),
+    severity,
+    severity_number:Number(entry.severity_number) || 0,
+    logger:String(entry.logger || entry.logger_name || ''),
+    event_name:eventName,
+    message,
+    request_id:String(entry.request_id || ''),
+    attributes:runtimeLogEntryAttributes(entry),
+    raw:String(entry.raw || ''),
+    format:String(entry.format || 'json'),
+    parse_failed:!!entry.parse_failed
+  };
+  normalized.attributes={...parseRuntimeLogMessageFields(normalized.message,normalized.event_name),...normalized.attributes};
+  return normalized;
+}
+function isRuntimeLogPayload(payload){
+  return ['timestamp','time','ts','severity_text','severity_number','severity','level','logger','logger_name','event_name','event','body','message']
+    .some(key=>Object.prototype.hasOwnProperty.call(payload,key));
+}
+function splitRuntimeTextFields(message){
+  const candidate=String(message || '').trimEnd();
+  let markerSearchEnd=candidate.length;
+  while(markerSearchEnd>0){
+    const markerStart=candidate.lastIndexOf(RUNTIME_LOG_TEXT_FIELDS_MARKER,markerSearchEnd-1);
+    if(markerStart<0) break;
+    try{
+      const attributes=JSON.parse(candidate.slice(markerStart+RUNTIME_LOG_TEXT_FIELDS_MARKER.length));
+      if(attributes && typeof attributes==='object' && !Array.isArray(attributes)) return {message:candidate.slice(0,markerStart),attributes};
+    }catch(_){ }
+    markerSearchEnd=markerStart;
+  }
+  let searchEnd=candidate.length;
+  for(let attempt=0;attempt<32;attempt+=1){
+    const start=candidate.lastIndexOf(' {',searchEnd-1);
+    if(start<0) break;
+    try{
+      const attributes=JSON.parse(candidate.slice(start+1));
+      if(attributes && typeof attributes==='object' && !Array.isArray(attributes)){
+        const keys=Object.keys(attributes);
+        const looksLikeLogFields=keys.some(key=>RUNTIME_LOG_LEGACY_FIELD_HINTS.has(key) || key.startsWith('code.') || key.startsWith('exception.') || key.startsWith('http.'));
+        if(looksLikeLogFields) return {message:candidate.slice(0,start),attributes:{...attributes,'log.legacy_fields_inferred':true}};
+      }
+    }catch(_){ }
+    searchEnd=start;
+  }
+  return {message:String(message || ''),attributes:{}};
+}
+function parseRuntimeLogFallback(rawLine){
+  const raw=String(rawLine || '');
+  if(raw.trimStart().startsWith('{')){
+    try{
+      const parsed=JSON.parse(raw);
+      if(parsed && typeof parsed==='object' && !Array.isArray(parsed)){
+        if(!isRuntimeLogPayload(parsed)) return normalizeRuntimeLogEntry({message:raw,raw,format:'unknown',parse_failed:true});
+        return normalizeRuntimeLogEntry({...parsed,raw,format:'json'});
+      }
+    }catch(_){ }
+  }
+  const prefix=raw.match(/^(\d{4}-\d{2}-\d{2}[T ][^\[]*?)\s+\[([A-Za-z]+)\]\s+(.+)$/);
+  if(!prefix) return null;
+  const tail=prefix[3];
+  const context=tail.match(/^(\S+)\s+request_id=(\S+)\s+event=([^:]+):\s?(.*)$/);
+  if(context){
+    const parsed=splitRuntimeTextFields(context[4]);
+    return normalizeRuntimeLogEntry({timestamp:prefix[1],severity:prefix[2],logger:context[1],request_id:context[2],event_name:context[3],message:parsed.message,attributes:parsed.attributes,raw,format:'text'});
+  }
+  const legacy=tail.match(/^([^:]+):\s?(.*)$/);
+  const parsed=splitRuntimeTextFields(legacy ? legacy[2] : tail);
+  return normalizeRuntimeLogEntry({timestamp:prefix[1],severity:prefix[2],logger:legacy ? legacy[1].trim() : '',message:parsed.message,attributes:parsed.attributes,raw,format:'legacy'});
+}
+function isRuntimeLogContinuation(rawLine){
+  const line=String(rawLine || '');
+  if(!line.trim() || /^\s/.test(line)) return true;
+  return /^(?:Traceback \(most recent call last\):|During handling of the above exception|The above exception was the direct cause)/.test(line)
+    || /^(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning)|Caused by):/.test(line);
+}
+function runtimeLogEntriesFromPayload(data={}){
+  if(Array.isArray(data.entries)) return data.entries.map(normalizeRuntimeLogEntry);
+  const entries=[];
+  (Array.isArray(data.logs) ? data.logs : []).forEach(rawLine=>{
+    const parsed=parseRuntimeLogFallback(rawLine);
+    if(parsed){ entries.push(parsed); return; }
+    const continuation=String(rawLine || '');
+    if(entries.length && isRuntimeLogContinuation(continuation)){
+      const current=entries[entries.length-1];
+      current.message=current.message ? `${current.message}\n${continuation}` : continuation;
+      current.raw=current.raw ? `${current.raw}\n${continuation}` : continuation;
+      current.attributes={...current.attributes,'log.continuation_lines':Number(current.attributes['log.continuation_lines'] || 0)+1};
+      return;
+    }
+    entries.push(normalizeRuntimeLogEntry({message:continuation,raw:continuation,format:'unknown',parse_failed:true}));
+  });
+  return entries;
+}
+function formatRuntimeLogTimestamp(value){
+  const raw=String(value || '').trim();
+  if(!raw) return adminT('admin.logs.unknown_time');
+  const numeric=Number(raw);
+  const date=Number.isFinite(numeric) && /^\d+(?:\.\d+)?$/.test(raw)
+    ? new Date(numeric < 1e12 ? numeric*1000 : numeric)
+    : new Date(raw);
+  if(Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString([], {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function runtimeLogAttribute(entry,...keys){
+  const attributes=runtimeLogAttributes(entry && entry.attributes);
+  for(const key of keys){
+    if(attributes[key] !== undefined && attributes[key] !== null && attributes[key] !== '') return attributes[key];
+  }
+  return '';
+}
+function runtimeLogCategory(entry){
+  const eventName=normalizeRuntimeLogEventName(entry && entry.event_name);
+  if(runtimeLogAttribute(entry,'http.method','http_method','http.route','http_route')!=='') return 'http';
+  for(const [category,pattern] of RUNTIME_LOG_EVENT_CATEGORY_RULES){
+    if(pattern.test(eventName)) return category;
+  }
+  const source=`${eventName} ${String(entry && entry.logger || '').toLowerCase()}`;
+  if(source.includes('alas') || source.includes('pywebio')) return 'alas';
+  if(source.includes('scrcpy') || source.includes('mirror') || source.includes('video')) return 'stream';
+  if(source.includes('adb') || source.includes('device')) return 'device';
+  if(source.includes('security')) return 'security';
+  return 'system';
+}
+function runtimeLogCategoryLabel(category){
+  return adminT(`admin.logs.runtime_categories.${category || 'system'}`);
+}
+function runtimeLogEventTitle(entry,category=runtimeLogCategory(entry)){
+  if(entry && entry.parse_failed) return adminT('admin.logs.runtime_unclassified');
+  const eventKey=normalizeRuntimeLogEventName(entry && entry.event_name).replace(/[^a-z0-9]+/g,'_');
+  const translationKey=`admin.logs.runtime_events.${eventKey}`;
+  if(eventKey && adminI18n && typeof adminI18n.has==='function' && adminI18n.has(translationKey)) return adminT(translationKey);
+  if(runtimeLogAttribute(entry,'exception.type','exception.message')!=='') return adminT('admin.logs.runtime_exception_title');
+  return adminT(`admin.logs.runtime_event_fallback.${category || 'system'}`);
+}
+function runtimeLogStateText(value){
+  const state=String(value == null ? '' : value).trim().toLowerCase();
+  if(!state) return '';
+  if(ADB_STATUS_META[state]) return adminT(ADB_STATUS_META[state].label);
+  if(STATUS_LABELS[state]) return statusLabel(state);
+  const key=`admin.logs.runtime_states.${state.replace(/[^a-z0-9]+/g,'_')}`;
+  return adminI18n && typeof adminI18n.has==='function' && adminI18n.has(key) ? adminT(key) : String(value);
+}
+function runtimeLogReasonText(value){
+  const reason=String(value == null ? '' : value).trim();
+  if(!reason) return '';
+  const key=`admin.logs.runtime_reasons.${reason.toLowerCase().replace(/[^a-z0-9]+/g,'_')}`;
+  return adminI18n && typeof adminI18n.has==='function' && adminI18n.has(key) ? adminT(key) : auditReasonText(reason);
+}
+function runtimeLogFormatBitrate(value){
+  const bits=Number(value);
+  if(!Number.isFinite(bits) || bits<0) return String(value);
+  if(bits>=1000000) return `${Number((bits/1000000).toFixed(2))} Mbps`;
+  if(bits>=1000) return `${Number((bits/1000).toFixed(1))} Kbps`;
+  return `${bits} bps`;
+}
+function runtimeLogSummaryField(labelKey,value,formatter){
+  if(value===undefined || value===null || value==='') return '';
+  const formatted=formatter ? formatter(value) : String(value);
+  return formatted==='' ? '' : adminT('admin.logs.runtime_field_value',{label:adminT(`admin.logs.runtime_fields.${labelKey}`),value:formatted});
+}
+function runtimeLogHttpMessage(entry){
+  const method=String(runtimeLogAttribute(entry,'http.method','http_method','method') || '').toUpperCase();
+  const route=String(runtimeLogAttribute(entry,'http.route','http.target','http_route','route','path') || '');
+  if(!method && !route) return '';
+  const status=runtimeLogAttribute(entry,'http.status_code','http_status_code','status_code','status');
+  const outcome=String(runtimeLogAttribute(entry,'outcome') || '').toLowerCase();
+  const duration=runtimeLogAttribute(entry,'duration_ms','http.duration_ms','elapsed_ms');
+  const result=[`${method || 'HTTP'} ${route || adminT('admin.logs.runtime_unknown_route')}`];
+  if(status!==''){
+    const number=Number(status);
+    const statusKey=Number.isFinite(number) && number>=500 ? 'failed' : Number.isFinite(number) && number>=400 ? 'denied' : 'success';
+    result.push(adminT(`admin.logs.runtime_http_${statusKey}`,{status}));
+  }else if(outcome){
+    result.push(auditOutcomeLabel(outcome));
+  }
+  if(duration!=='') result.push(adminT('admin.logs.runtime_duration',{duration:Number(duration).toLocaleString()}));
+  return result.join(' · ');
+}
+function runtimeLogStructuredMessage(entry,category){
+  const parts=[];
+  const add=(labelKey,value,formatter)=>{
+    const part=runtimeLogSummaryField(labelKey,value,formatter);
+    if(part && !parts.includes(part)) parts.push(part);
+  };
+  const device=runtimeLogAttribute(entry,'device_name','device_id','device','adb_device');
+  const state=runtimeLogAttribute(entry,'state','status','stream_health','health');
+  const reason=runtimeLogAttribute(entry,'reason');
+  const error=runtimeLogAttribute(entry,'error','last_error','detail','exception.message');
+  if(category==='device'){
+    add('device',device);
+    add('state',state,runtimeLogStateText);
+    add('detail',runtimeLogAttribute(entry,'detail','error'));
+    add('interval',runtimeLogAttribute(entry,'interval'),value=>adminT('admin.logs.runtime_seconds',{value}));
+    add('timeout',runtimeLogAttribute(entry,'timeout'),value=>adminT('admin.logs.runtime_seconds',{value}));
+  }else if(category==='stream' || category==='control'){
+    add('device',device);
+    add('mode',runtimeLogAttribute(entry,'mode','stream_mode'));
+    add('state',state,runtimeLogStateText);
+    add('user',runtimeLogAttribute(entry,'user','username','actor'));
+    add('viewers',runtimeLogAttribute(entry,'clients','viewers'));
+    add('reason',reason,runtimeLogReasonText);
+    const width=runtimeLogAttribute(entry,'width');
+    const height=runtimeLogAttribute(entry,'height');
+    if(width!=='' || height!=='') add('resolution',`${width || '?'} x ${height || '?'}`);
+    add('codec',runtimeLogAttribute(entry,'codec','codec_id'));
+    add('bitrate',runtimeLogAttribute(entry,'bitrate','video_bit_rate'),runtimeLogFormatBitrate);
+    add('drops',runtimeLogAttribute(entry,'drops'));
+    add('error',error);
+  }else if(category==='alas'){
+    add('config',runtimeLogAttribute(entry,'config','config_name'));
+    add('user',runtimeLogAttribute(entry,'user','username','actor'));
+    add('connection',runtimeLogAttribute(entry,'connection'));
+    add('action',runtimeLogAttribute(entry,'event','task'));
+    add('permission',runtimeLogAttribute(entry,'permission'));
+    add('reason',reason,runtimeLogReasonText);
+    add('error',error);
+  }else if(category==='security'){
+    add('path',runtimeLogAttribute(entry,'path','route','http_route'));
+    add('source_ip',runtimeLogAttribute(entry,'source_ip','remote'));
+    add('host',runtimeLogAttribute(entry,'host','origin'));
+    add('reason',reason,runtimeLogReasonText);
+    add('error',error);
+  }else if(category==='audit'){
+    add('action',runtimeLogAttribute(entry,'action'));
+    add('result',runtimeLogAttribute(entry,'outcome'),auditOutcomeLabel);
+    add('queue',runtimeLogAttribute(entry,'queue_size','unfinished'));
+    add('reason',reason,runtimeLogReasonText);
+    add('error',runtimeLogAttribute(entry,'error','error_type'));
+  }else if(category==='account'){
+    add('user',runtimeLogAttribute(entry,'user','username','actor'));
+    add('state',state,runtimeLogStateText);
+    add('reason',reason,runtimeLogReasonText);
+    add('error',error);
+  }else{
+    add('component',runtimeLogAttribute(entry,'component'));
+    add('result',runtimeLogAttribute(entry,'outcome'),auditOutcomeLabel);
+    add('reason',reason,runtimeLogReasonText);
+    add('error',runtimeLogAttribute(entry,'error','error_type','exception.message'));
+  }
+  return parts.slice(0,3).join(' · ');
+}
+function runtimeLogPlainMessage(entry,title){
+  const message=String(entry.message || '').trim();
+  if(!message) return adminT('admin.logs.runtime_no_additional_context');
+  const eventName=normalizeRuntimeLogEventName(entry.event_name);
+  if(normalizeRuntimeLogEventName(message)===eventName) return adminT('admin.logs.runtime_no_additional_context');
+  const inferred=inferredRuntimeLogEventName(message);
+  if(inferred && inferred===eventName){
+    const parsed=parseRuntimeLogMessageFields(message,eventName);
+    if(Object.keys(parsed).length) return adminT('admin.logs.runtime_context_available',{count:Object.keys(parsed).length});
+    const token=message.trim().split(/\s+/,1)[0];
+    const remainder=message.slice(message.indexOf(token)+token.length).trim();
+    if(remainder) return remainder;
+  }
+  return message || title || adminT('admin.logs.runtime_no_message');
+}
+function runtimeLogMessage(entry,category=runtimeLogCategory(entry),title=runtimeLogEventTitle(entry,category)){
+  const exceptionType=runtimeLogAttribute(entry,'exception.type');
+  const exceptionMessage=runtimeLogAttribute(entry,'exception.message');
+  if(exceptionType || exceptionMessage) return [exceptionType,exceptionMessage].filter(Boolean).join(': ');
+  if(category==='http'){
+    const http=runtimeLogHttpMessage(entry);
+    if(http) return http;
+  }
+  return runtimeLogStructuredMessage(entry,category) || runtimeLogPlainMessage(entry,title);
+}
+function runtimeLogSearchText(entry){
+  let attributes='';
+  try{ attributes=JSON.stringify(entry.attributes || {}); }catch(_){ }
+  const category=runtimeLogCategory(entry);
+  const title=runtimeLogEventTitle(entry,category);
+  return [entry.timestamp,entry.severity,category,runtimeLogCategoryLabel(category),title,runtimeLogMessage(entry,category,title),entry.logger,entry.event_name,entry.message,entry.request_id,attributes].join(' ').toLocaleLowerCase();
+}
+function runtimeLogMatches(entry,query,severity){
+  if(severity){
+    const rank=RUNTIME_LOG_LEVEL_RANK[entry.severity] ?? -1;
+    if(rank < RUNTIME_LOG_LEVEL_RANK[severity]) return false;
+  }
+  return !query || runtimeLogSearchText(entry).includes(query);
+}
+function runtimeLogContextRow(label,value){
+  const row=document.createElement('div');
+  const term=document.createElement('dt');
+  const detail=document.createElement('dd');
+  term.textContent=label;
+  detail.textContent=String(value || adminT('admin.logs.no_request_id'));
+  row.append(term,detail);
+  return row;
+}
+function runtimeLogTechnicalContext(entry){
+  const attributes=runtimeLogAttributes(entry.attributes);
+  return [
+    [adminT('admin.logs.runtime_event_code'),entry.event_name],
+    [adminT('admin.logs.runtime_logger'),entry.logger],
+    [adminT('admin.ui.logs.request_id'),entry.request_id],
+    [adminT('admin.logs.runtime_trace_id'),attributes.trace_id],
+    [adminT('admin.logs.runtime_span_id'),attributes.span_id],
+    [adminT('admin.logs.runtime_actor'),attributes.actor],
+    [adminT('admin.logs.runtime_source_ip'),attributes.source_ip],
+    [adminT('admin.logs.runtime_service'),attributes.service],
+    [adminT('admin.logs.runtime_format'),entry.format]
+  ].filter(([,value])=>value!==undefined && value!==null && value!=='');
+}
+function runtimeLogDetailAttributes(entry){
+  const attributes={};
+  Object.entries(runtimeLogAttributes(entry.attributes)).forEach(([key,value])=>{
+    if(!RUNTIME_LOG_CONTEXT_FIELD_KEYS.has(key)) attributes[key]=value;
+  });
+  return attributes;
+}
+function createRuntimeLogEntry(entry,index){
+  const article=document.createElement('article');
+  const severity=RUNTIME_LOG_LEVEL_RANK[entry.severity] === undefined ? 'unknown' : entry.severity;
+  const category=runtimeLogCategory(entry);
+  const title=runtimeLogEventTitle(entry,category);
+  const readableMessage=runtimeLogMessage(entry,category,title);
+  article.className=`runtime-log-entry runtime-log-entry--${severity}`;
+  article.setAttribute('role','listitem');
+  article.setAttribute('aria-label',`${auditSeverityLabel(severity)} · ${runtimeLogCategoryLabel(category)} · ${title}`);
+  article.dataset.runtimeLogKey=`${entry.timestamp}|${entry.request_id}|${index}`;
+  article.dataset.runtimeLogCategory=category;
+
+  const time=document.createElement('time');
+  time.className='runtime-log-time';
+  time.dateTime=entry.timestamp;
+  time.textContent=formatRuntimeLogTimestamp(entry.timestamp);
+
+  const level=document.createElement('span');
+  level.className=`runtime-log-level runtime-log-level--${severity}`;
+  level.textContent=severity==='unknown' ? adminT('admin.logs.severity_unknown') : auditSeverityLabel(severity);
+
+  const source=document.createElement('div');
+  source.className='runtime-log-source';
+  const categoryLabel=document.createElement('span');
+  categoryLabel.className=`runtime-log-category runtime-log-category--${category}`;
+  categoryLabel.textContent=runtimeLogCategoryLabel(category);
+  const logger=document.createElement('strong');
+  logger.className='runtime-log-title';
+  logger.textContent=title;
+  source.append(categoryLabel,logger);
+
+  const message=document.createElement('p');
+  message.className='runtime-log-message';
+  message.textContent=readableMessage;
+  article.append(time,level,source,message);
+
+  const detailAttributes=runtimeLogDetailAttributes(entry);
+  const attributeKeys=Object.keys(detailAttributes);
+  const technicalContext=runtimeLogTechnicalContext(entry);
+  const hasDetails=technicalContext.length>0 || attributeKeys.length>0 || !!entry.raw || entry.parse_failed;
+  if(hasDetails){
+    const details=document.createElement('details');
+    details.className='runtime-log-details';
+    const summary=document.createElement('summary');
+    summary.textContent=adminT('admin.logs.runtime_view_context');
+    const body=document.createElement('div');
+    body.className='runtime-log-detail-body';
+    if(technicalContext.length){
+      const context=document.createElement('dl');
+      context.className='runtime-log-context-grid';
+      technicalContext.forEach(([label,value])=>context.appendChild(runtimeLogContextRow(label,value)));
+      body.appendChild(context);
+    }
+    if(attributeKeys.length){
+      const title=document.createElement('h4');
+      title.textContent=adminT('admin.logs.runtime_attributes');
+      const attributes=document.createElement('pre');
+      attributes.className='runtime-log-detail-code';
+      attributes.tabIndex=0;
+      try{ attributes.textContent=JSON.stringify(detailAttributes,null,2); }
+      catch(_){ attributes.textContent=String(detailAttributes); }
+      body.append(title,attributes);
+    }
+    if(entry.raw){
+      const title=document.createElement('h4');
+      title.textContent=adminT(entry.parse_failed?'admin.logs.runtime_unclassified':'admin.logs.runtime_original');
+      const raw=document.createElement('pre');
+      raw.className='runtime-log-detail-code';
+      raw.tabIndex=0;
+      raw.textContent=entry.raw;
+      body.append(title,raw);
+    }
+    details.append(summary,body);
+    article.appendChild(details);
+  }
+  return article;
+}
+function renderRuntimeLogSummary(){
+  const summary=$('runtimeLogSummary');
+  if(!summary) return;
+  clear(summary);
+  const counts={debug:0,info:0,warning:0,error:0,critical:0,unknown:0};
+  state.runtimeLogEntries.forEach(entry=>{ counts[entry.severity in counts ? entry.severity : 'unknown']+=1; });
+  [...RUNTIME_LOG_LEVELS,'unknown'].forEach(severity=>{
+    if(severity==='unknown' && counts.unknown===0) return;
+    const item=document.createElement('span');
+    item.className=`runtime-log-stat runtime-log-stat--${severity}`;
+    const dot=document.createElement('i');
+    dot.setAttribute('aria-hidden','true');
+    const label=document.createElement('span');
+    label.textContent=severity==='unknown' ? adminT('admin.logs.severity_unknown') : auditSeverityLabel(severity);
+    const count=document.createElement('strong');
+    count.textContent=String(counts[severity]);
+    item.append(dot,label,count);
+    summary.appendChild(item);
+  });
+}
+function filteredRuntimeLogEntries(){
+  const severity=$('runtimeSeverityFilter').value;
+  const query=String($('runtimeLogSearch').value || '').trim().toLocaleLowerCase();
+  return state.runtimeLogEntries.filter(entry=>runtimeLogMatches(entry,query,severity)).slice().reverse();
+}
 function renderRuntimeLogs(){
-  $('runtimeLogs').textContent=(state.runtimeLogs || []).join('\n');
+  const target=$('runtimeLogs');
+  const rawTarget=$('runtimeRawLogs');
+  const columns=target.parentElement && target.parentElement.querySelector('.runtime-log-columns');
+  const rawMode=$('runtimeRawToggle').checked;
+  const entries=rawMode ? [] : filteredRuntimeLogEntries();
+  target.hidden=rawMode;
+  rawTarget.hidden=!rawMode;
+  if(columns) columns.hidden=rawMode;
+  target.classList.toggle('is-nowrap',!$('runtimeLogWrap').checked);
+  rawTarget.classList.toggle('is-nowrap',!$('runtimeLogWrap').checked);
+  clear(target);
+  $('runtimeLogSummary').hidden=rawMode;
+  if(!rawMode) renderRuntimeLogSummary();
+  $('runtimeLogResultCount').textContent=rawMode
+    ? adminT('admin.logs.runtime_raw_results',{count:state.runtimeLogs.length})
+    : adminT('admin.logs.runtime_results',{visible:entries.length,total:state.runtimeLogEntries.length});
+  if(rawMode) return;
+  if(!entries.length){
+    const empty=document.createElement('div');
+    empty.className='runtime-log-empty';
+    empty.setAttribute('role','status');
+    const title=document.createElement('strong');
+    title.textContent=state.runtimeLogEntries.length ? adminT('admin.logs.runtime_no_matches') : adminT('admin.logs.runtime_empty');
+    const hint=document.createElement('span');
+    hint.textContent=state.runtimeLogEntries.length ? adminT('admin.logs.runtime_no_matches_hint') : adminT('admin.logs.runtime_empty_hint');
+    empty.append(title,hint);
+    target.appendChild(empty);
+    return;
+  }
+  const fragment=document.createDocumentFragment();
+  entries.forEach((entry,index)=>fragment.appendChild(createRuntimeLogEntry(entry,index)));
+  target.appendChild(fragment);
+}
+function exportRuntimeLogs(){
+  const rawMode=$('runtimeRawToggle').checked;
+  const content=rawMode
+    ? (state.runtimeLogs || []).join('\n')
+    : JSON.stringify(filteredRuntimeLogEntries(),null,2);
+  const extension=rawMode ? 'log' : 'json';
+  const mediaType=rawMode ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8';
+  const blob=new Blob([content],{type:mediaType});
+  const url=URL.createObjectURL(blob);
+  const anchor=document.createElement('a');
+  anchor.href=url;
+  anchor.download=`scrcpygate-runtime-${new Date().toISOString().replace(/[:.]/g,'-')}.${extension}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+  show(adminT(rawMode?'admin.logs.runtime_raw_export_ready':'admin.logs.runtime_structured_export_ready'));
+}
+function syncRuntimeLogMode(){
+  const rawMode=$('runtimeRawToggle').checked;
+  $('runtimeSeverityFilter').disabled=rawMode;
+  $('runtimeLogSearch').disabled=rawMode;
+  $('runtimeLogReset').disabled=rawMode;
+  $('runtimeLogFilters').classList.toggle('is-raw-mode',rawMode);
+  renderRuntimeLogs();
+  if(!rawMode && loadedResources.has('runtimeLogs')){
+    loadRuntimeLogs({force:true}).catch(error=>{ if(!isAbortError(error)) show(error.message); });
+  }
+}
+function scheduleRuntimeLogRender(){
+  if(runtimeLogRenderFrame) cancelAnimationFrame(runtimeLogRenderFrame);
+  runtimeLogRenderFrame=requestAnimationFrame(()=>{
+    runtimeLogRenderFrame=0;
+    renderRuntimeLogs();
+  });
 }
 function auditOutcomeLabel(value){
   const normalized=String(value || 'unknown').toLowerCase();
@@ -2037,8 +2611,11 @@ function applyLogs(data,options={}){
 }
 function applyRuntimeLogs(data){
   state.runtimeLogs=data.logs || [];
+  state.runtimeLogEntries=runtimeLogEntriesFromPayload(data);
+  state.runtimeLogMeta=data.meta && typeof data.meta==='object' ? data.meta : {};
+  $('runtimeRawLogs').textContent=state.runtimeLogs.join('\n');
   renderRuntimeLogs();
-  setLogLoadState('runtimeLogs','ready',logReadyMessage('admin.logs.runtime', state.runtimeLogs.length));
+  setLogLoadState('runtimeLogs','ready',logReadyMessage('admin.logs.runtime', state.runtimeLogEntries.length));
 }
 function overviewRequestPromises(){ return ['overview','overviewAlas'].map(name=>resourceRequests.get(name)).filter(Boolean).map(record=>record.promise); }
 function trackOverviewRequest(promise){
@@ -2301,17 +2878,25 @@ function renderAuditDetail(event){
   setAuditDetailText('auditDetailTime',ts(data.ts));
   setAuditDetailText('auditDetailEventId',data.event_id);
   setAuditDetailText('auditDetailRequestId',data.request_id);
-  setAuditDetailText('auditDetailActor',data.username ? `${data.username} · ${data.actor_role || adminT('admin.logs.unknown_role')}` : '');
+  const actor=data.username || adminT('admin.logs.unknown_actor');
+  const actorRole=data.actor_role || adminT('admin.logs.unknown_role');
+  setAuditDetailText('auditDetailActor',`${actor} · ${actorRole}`);
   setAuditDetailText('auditDetailAction',data.action ? actionText(data.action) : '');
   setAuditDetailText('auditDetailTarget',auditTargetText(data));
   setAuditDetailText('auditDetailOutcome',data.outcome ? auditOutcomeLabel(data.outcome) : '');
   setAuditDetailText('auditDetailSeverity',data.severity ? auditSeverityLabel(data.severity) : '');
   setAuditDetailText('auditDetailSourceIp',data.source_ip);
   setAuditDetailText('auditDetailSchemaVersion',data.schema_version);
-  setAuditDetailText('auditDetailReason',auditReasonText(data.reason));
-  setAuditDetailText('auditDetailDescription',data.detail);
+  setAuditDetailText('auditDetailReason',auditReasonText(data.reason) || adminT('admin.logs.audit_reason_not_recorded'));
+  setAuditDetailText('auditDetailDescription',data.detail || adminT('admin.logs.audit_detail_not_recorded'));
   setAuditDetailText('auditDetailUserAgent',data.user_agent);
   $('auditDetailMetadata').textContent=JSON.stringify(data.metadata || {},null,2);
+  $('auditDetailIntegrity').textContent=JSON.stringify({
+    sequence_id:data.id ?? null,
+    previous_hash:data.prev_hash || null,
+    event_hash:data.event_hash || null,
+    dedupe_key:data.dedupe_key || null
+  },null,2);
 }
 function closeAuditDetail(){
   auditDetailSequence+=1;
@@ -2391,7 +2976,10 @@ async function checkAuditIntegrity(){
 }
 function loadRuntimeLogs(options={}){
   setLogLoadState('runtimeLogs','loading',adminT('admin.logs.loading_runtime'));
-  return requestResource('runtimeLogs', signal=>api('/api/admin/runtime-logs?lines=400',{signal}), applyRuntimeLogs, options).catch(error=>{
+  const params=new URLSearchParams({lines:'400'});
+  const severity=!$('runtimeRawToggle').checked && $('runtimeSeverityFilter') && $('runtimeSeverityFilter').value;
+  if(severity) params.set('min_severity',severity);
+  return requestResource('runtimeLogs', signal=>api(`/api/admin/runtime-logs?${params.toString()}`,{signal}), applyRuntimeLogs, options).catch(error=>{
     if(!isAbortError(error)) setLogLoadState('runtimeLogs','error',adminT('admin.logs.runtime_failed',{error:error.message || adminT('common.feedback.unknown_error')}));
     throw error;
   });
@@ -2855,6 +3443,25 @@ bindAction('reloadAll', loadAll, adminT('admin.busy.refreshing'));
 bindAction('saveUser', saveUser, adminT('admin.busy.saving'));
 bindAction('saveDevice', saveDevice, adminT('admin.busy.saving'));
 $('clearDeviceForm').onclick=()=>clearDeviceForm();
+$('runtimeLogFilters').onsubmit=event=>event.preventDefault();
+$('runtimeLogSearch').addEventListener('input',scheduleRuntimeLogRender);
+$('runtimeLogWrap').addEventListener('change',()=>{
+  $('runtimeLogs').classList.toggle('is-nowrap',!$('runtimeLogWrap').checked);
+  $('runtimeRawLogs').classList.toggle('is-nowrap',!$('runtimeLogWrap').checked);
+});
+$('runtimeRawToggle').addEventListener('change',syncRuntimeLogMode);
+$('runtimeSeverityFilter').addEventListener('change',()=>{
+  scheduleRuntimeLogRender();
+  loadRuntimeLogs({force:true}).catch(error=>{ if(!isAbortError(error)) show(error.message); });
+});
+$('runtimeLogReset').onclick=()=>{
+  $('runtimeSeverityFilter').value='';
+  $('runtimeLogSearch').value='';
+  $('runtimeLogWrap').checked=true;
+  scheduleRuntimeLogRender();
+  loadRuntimeLogs({force:true}).catch(error=>{ if(!isAbortError(error)) show(error.message); });
+};
+$('exportRuntimeLogs').onclick=exportRuntimeLogs;
 bindAction('reloadRuntimeLogs', ()=>loadRuntimeLogs({force:true}), adminT('admin.busy.refreshing'));
 bindAction('reloadAuditLogs', ()=>loadLogs({force:true}), adminT('admin.busy.refreshing'));
 bindAction('auditExportCsv', ()=>exportAuditLogs('csv'), adminT('admin.busy.exporting'));

@@ -143,6 +143,9 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             'id="auditExportJson"',
             'id="auditIntegrityCheck"',
             'id="auditDetailDialog"',
+            'id="auditDetailSourceIp"',
+            'id="auditDetailSchemaVersion"',
+            'id="auditDetailIntegrity"',
             'aria-labelledby="auditDetailTitle"',
             'aria-describedby="auditDetailStatus"',
             'aria-hidden="true" inert hidden',
@@ -162,6 +165,9 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             "anchor.download=download.filename",
             "function auditReasonText(reason)",
             "admin.audit_reason.http_status",
+            "admin.logs.audit_reason_not_recorded",
+            "admin.logs.audit_detail_not_recorded",
+            "previous_hash:data.prev_hash || null",
         ):
             self.assertIn(token, self.script)
         self.assertNotIn("innerHTML", self.script)
@@ -172,7 +178,76 @@ class AdminWorkspaceUiContractTests(unittest.TestCase):
             ".audit-log-table .responsive-table",
             ".audit-detail-dialog",
             ".audit-detail-grid",
+            "grid-auto-rows: max-content",
+            "min-height: max-content",
             "grid-template-columns: minmax(0, 1fr)",
+        ):
+            self.assertIn(token, self.styles)
+
+    def test_runtime_log_viewer_has_safe_filters_counts_and_structured_rows(self):
+        for token in (
+            'id="runtimeLogFilters"',
+            'id="runtimeSeverityFilter"',
+            'id="runtimeLogSearch"',
+            'id="runtimeLogWrap"',
+            'id="runtimeRawToggle"',
+            'id="runtimeLogReset"',
+            'id="runtimeLogSummary"',
+            'id="runtimeLogResultCount"',
+            'id="runtimeLogs" class="runtime-logs" role="list"',
+            'id="runtimeRawLogs" class="runtime-raw-logs"',
+            'id="exportRuntimeLogs"',
+            'id="reloadRuntimeLogs" class="btn" type="button"><svg',
+            'data-busy-label',
+        ):
+            self.assertIn(token, self.template)
+
+        for token in (
+            "function normalizeRuntimeLogSeverity",
+            "function runtimeLogEntryAttributes",
+            "function isRuntimeLogPayload",
+            "function splitRuntimeTextFields",
+            "RUNTIME_LOG_TEXT_FIELDS_MARKER",
+            "function parseRuntimeLogMessageFields",
+            "function parseRuntimeLogFallback",
+            "function isRuntimeLogContinuation",
+            "entries.length && isRuntimeLogContinuation(continuation)",
+            "if(!isAbortError(e)) show(e.message)",
+            "function runtimeLogCategory",
+            "function runtimeLogEventTitle",
+            "function runtimeLogReasonText",
+            "function runtimeLogTechnicalContext",
+            "function createRuntimeLogEntry",
+            "document.createDocumentFragment()",
+            "attributes.textContent=JSON.stringify",
+            "runtime-log-category--${category}",
+            "params.set('min_severity',severity)",
+            "function exportRuntimeLogs",
+            "const rawMode=$('runtimeRawToggle').checked",
+            "function syncRuntimeLogMode",
+            "$('runtimeSeverityFilter').disabled=rawMode",
+            "const label=el.querySelector('[data-busy-label]') || el",
+            "? (state.runtimeLogs || []).join('\\n')",
+            ": JSON.stringify(filteredRuntimeLogEntries(),null,2)",
+            "requestAnimationFrame",
+            "runtime-log-entry--${severity}",
+        ):
+            self.assertIn(token, self.script)
+        self.assertNotIn("innerHTML", self.script)
+
+        for token in (
+            ".runtime-log-toolbar",
+            ".runtime-log-summary",
+            ".runtime-log-viewer",
+            ".runtime-log-entry--warning",
+            ".runtime-log-entry--error",
+            ".runtime-log-level--critical",
+            ".runtime-log-category--security",
+            ".runtime-log-title",
+            ".runtime-log-context-grid",
+            ".runtime-log-detail-code",
+            ".runtime-logs.is-nowrap",
+            ".runtime-raw-logs.is-nowrap",
         ):
             self.assertIn(token, self.styles)
 

@@ -150,11 +150,19 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIsInstance(payload["logs"], list)
+        self.assertIsInstance(payload["entries"], list)
+        self.assertEqual(response.headers.get("cache-control"), "no-store")
         self.assertTrue(payload["meta"]["configured"])
         self.assertIn(payload["meta"]["format"], ("json", "text"))
         self.assertIn("dropped_records", payload["meta"])
         self.assertIn("file_configured", payload["meta"])
         self.assertIn("file_active", payload["meta"])
+        self.assertIn("severity_counts", payload["meta"])
+        self.assertIn("unclassified_lines", payload["meta"])
+        self.assertIn("returned_entries", payload["meta"])
+
+        invalid = self.client.get("/api/admin/runtime-logs?min_severity=verbose")
+        self.assertEqual(invalid.status_code, 422)
 
     def test_unauthenticated_pages_and_get_apis_are_blocked(self):
         checks = {
