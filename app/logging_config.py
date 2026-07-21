@@ -894,6 +894,14 @@ def _split_binary_log_records(raw_data: bytes) -> list[bytes]:
     return records
 
 
+def _binary_log_record_count(raw_data: bytes) -> int:
+    """Count CR/LF-delimited records without allocating slices during tail reads."""
+    if not raw_data:
+        return 0
+    separators = raw_data.count(b"\r") + raw_data.count(b"\n") - raw_data.count(b"\r\n")
+    return separators + (1 if raw_data[-1] not in {0x0D, 0x0A} else 0)
+
+
 def _tail_log_snapshot(max_lines: int = 300) -> tuple[list[str], str, dict[str, object]]:
     """Read a bounded tail while retaining exact separators for the selected lines."""
     _refresh_paths()
@@ -915,7 +923,7 @@ def _tail_log_snapshot(max_lines: int = 300) -> tuple[list[str], str, dict[str, 
             handle.seek(0, os.SEEK_END)
             file_size = handle.tell()
             position = file_size
-            while position > 0 and len(_split_binary_log_records(data)) <= limit and len(data) < max_read:
+            while position > 0 and _binary_log_record_count(data) <= limit and len(data) < max_read:
                 read_size = min(block_size, position, max_read - len(data))
                 if read_size <= 0:
                     break
