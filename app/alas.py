@@ -1,4 +1,4 @@
-﻿import json
+import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, ProxyHandler

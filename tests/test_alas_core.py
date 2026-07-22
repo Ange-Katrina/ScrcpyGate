@@ -5,7 +5,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

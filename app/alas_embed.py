@@ -481,19 +481,6 @@ def denied_page_html(message: str, redirect_url: str = "/alas/embed/", seconds: 
 </html>"""
 
 
-def _query_values(query, key):
-    """读取查询参数所有非空字符串值，兼容列表值与单值。"""
-    value = query.get(key)
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple)):
-        return [str(item).strip() for item in value if str(item).strip()]
-    stripped_value = str(value).strip()
-    if not stripped_value:
-        return []
-    return [stripped_value]
-
-
 def _path_switches_config(path: str, config_name: str) -> bool:
     """判断普通用户代理路径是否尝试切换到非绑定 ALAS 配置。"""
     decoded_path = unquote(str(path or "")).replace("\\", "/")
@@ -541,26 +528,6 @@ def _query_contains_management(query: dict) -> bool:
             if any(marker in text for marker in MANAGEMENT_MARKERS):
                 return True
     return False
-
-
-def _request_requires_explicit_config(method: str, path: str) -> bool:
-    """判断普通用户 HTTP 请求是否必须显式携带绑定配置。"""
-    upper_method = str(method or "GET").upper()
-    normalized_path = unquote(str(path or "")).replace("\\", "/").strip("/").lower()
-    first_segment = normalized_path.split("/", 1)[0] if normalized_path else ""
-    if upper_method not in SAFE_METHODS:
-        return True
-    if not normalized_path:
-        return False
-    if first_segment in STATIC_PATH_PREFIXES:
-        return False
-    return first_segment in BUSINESS_PATH_PREFIXES
-
-
-def _has_explicit_bound_config(query: dict, config_name: str) -> bool:
-    """判断请求查询参数是否显式指定了绑定配置。"""
-    values = config_query_values(query)
-    return bool(values) and all(value == config_name for value in values)
 
 
 def _iter_query_items(query_items) -> list[tuple[str, object]]:

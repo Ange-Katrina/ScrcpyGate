@@ -1,4 +1,4 @@
-﻿# Third-Party Components
+# Third-Party Components
 
 ScrcpyGate bundles a few third-party runtime assets so Docker deployments can run without downloading them at container startup.
 

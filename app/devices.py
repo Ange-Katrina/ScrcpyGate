@@ -1,4 +1,4 @@
-﻿from typing import Any
+from typing import Any
 
 from . import i18n, storage
 
