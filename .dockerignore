@@ -10,6 +10,8 @@
 /.playwright-cli/
 /.ruff_cache/
 /test-results/
+/playwright-report/
+/blob-report/
 /output/
 
 __pycache__/
