@@ -14,6 +14,7 @@ htmlcov/
 .env.*
 !.env.example
 data/
+.codex-mobile-data/
 *.db
 *.db-*
 webscrcpy.db
@@ -26,10 +27,13 @@ env/
 build/
 dist/
 node_modules/
+/.venv-codex-mobile/
+/.uv-cache-local/
 /test-results/
 /playwright-report/
 /blob-report/
 /.playwright-cli/
+/output/
 /output/playwright/
 
 .vscode/

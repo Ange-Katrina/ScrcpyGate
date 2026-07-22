@@ -2,8 +2,15 @@
 .gitignore
 .github/
 .agents/
+.codex-mobile-data/
 .uv-cache/
+.uv-cache-local/
 .uv-python/
+/.venv-codex-mobile/
+/.playwright-cli/
+/.ruff_cache/
+/test-results/
+/output/
 
 __pycache__/
 *.py[cod]
