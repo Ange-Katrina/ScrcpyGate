@@ -12,25 +12,32 @@ only networking and the lifecycle tooling differ.
 > costs one small file and gives you `up -d`, `pull`, `logs -f` and `restart: unless-stopped`
 > for free, so use it unless something prevents you.
 
-## 1. Build the image
+## 1. Select an image
 
-`docker run` does not build, so build once first — from a checkout of this repository:
+The published package is public and supports amd64 and arm64. Pull `edge`
+without signing in to try the latest verified `main` build:
+
+```sh
+IMAGE=ghcr.io/ange-katrina/scrcpygate:edge
+docker pull "$IMAGE"
+```
+
+For a repeatable deployment, set `IMAGE` to the immutable
+`ghcr.io/ange-katrina/scrcpygate@sha256:<digest>` reference from a successful
+[Builds run](https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml)
+and pull it. `latest` is created only by a stable version release, so it may not
+exist yet. A private fork's package requires a registry login with pull access.
+
+Alternatively, build from source:
 
 ```sh
 git clone https://github.com/Ange-Katrina/ScrcpyGate.git
 cd ScrcpyGate
-docker build -t scrcpygate:local .                 # slow network: add --build-arg PIP_INDEX_URL=<mirror>
+IMAGE=scrcpygate:local
+docker build -t "$IMAGE" .                       # slow network: add --build-arg PIP_INDEX_URL=<mirror>
 ```
 
-Alternatively pin a published image instead of building, if your host can pull it:
-
-```sh
-docker pull ghcr.io/<owner>/scrcpygate@sha256:<digest>
-```
-
-The GHCR package is **private** by default: sign in first with a personal access token that has
-`read:packages` (`docker login ghcr.io`), or switch the package visibility to public in the
-repository settings.
+Use the same shell for the commands below so `IMAGE` retains your selection.
 
 ## 2. Prepare the data directory
 
@@ -58,7 +65,7 @@ docker run -d --name scrcpygate --restart unless-stopped \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
   -e SESSION_COOKIE_SECURE=false \
   -v "$PWD/data:/app/data" \
-  scrcpygate:local
+  "$IMAGE"
 ```
 
 Then open `http://127.0.0.1:5000`. Change `-p` and `PUBLIC_BASE_URL` together before exposing the
@@ -82,7 +89,7 @@ docker run -d --name scrcpygate --restart unless-stopped --net=host \
   -e SESSION_COOKIE_SECURE=false \
   -e ADB_SERVER_SOCKET=tcp:127.0.0.1:5037 \
   -v "$PWD/data:/app/data" \
-  scrcpygate:local
+  "$IMAGE"
 ```
 
 Keep `WEB_SCRCPY_BIND` / `WEB_SCRCPY_PORT` consistent with `PUBLIC_BASE_URL`, because the app

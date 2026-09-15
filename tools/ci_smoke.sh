@@ -19,12 +19,16 @@ check_running() {
             [ "$(docker exec "$name" id -u)" != 0 ]
             docker exec "$name" python -c '
 import os, shutil, subprocess
+from pathlib import Path
 from adb_manager import ADBManager
 adb = ADBManager().adb_path
 assert adb == shutil.which("adb") and os.access(adb, os.X_OK)
 subprocess.run([adb, "version"], check=True, stdout=subprocess.DEVNULL)
 assert not os.path.exists("/app/tools")
 assert not os.path.exists("/app/tests")
+assert "Apache License" in Path("/app/LICENSE").read_text()
+for notice in ("THIRD_PARTY.md", "adb/linux/NOTICE.txt", "static/vendor/JMUXER_LICENSE", "static/icons/LUCIDE_LICENSE"):
+    assert Path("/app", notice).stat().st_size > 0
 '
             return 0
         fi

@@ -35,6 +35,10 @@
 已验证 digest。正式标签更新前失败时，已有正式标签保持原版本。
 真实设备投屏和实际 ALAS 服务联调仍需独立验证。
 
+镜像随附 `/app/LICENSE`、`/app/THIRD_PARTY.md` 和第三方组件声明，两种架构的
+启动检查都会验证这些文件。`tools/release_manifest.py` 记录应用与部署输入，
+包含两份 Compose 文件和许可证文档；它与 CI 生成的镜像 SPDX SBOM 分工不同。
+
 ## 首次配置 GitHub
 
 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，不需要在源码中保存 PAT 或服务器凭据。

@@ -17,6 +17,8 @@ scrcpy server · 原生 WebSocket · Raw v2 分帧 · FastAPI · 前端无需打
 
 [English](README.md) · 简体中文
 
+[贡献指南](CONTRIBUTING.md) · [漏洞报告](SECURITY.md)
+
 </div>
 
 ---

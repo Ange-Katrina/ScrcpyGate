@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem using sanitized information.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a suspected vulnerability, use private reporting in SECURITY.md.
+        Do not attach a complete .env, database, or raw runtime logs. Remove passwords,
+        tokens, cookies, private domains, and device addresses from all examples.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Provide the commit SHA or Docker image digest.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Docker Compose (bridge)
+        - Docker Compose (host network)
+        - docker run
+        - Python / Uvicorn
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the host OS and architecture, browser version, and minimal steps using synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Include only the sanitized error message needed to understand the problem.
+    validations:
+      required: true

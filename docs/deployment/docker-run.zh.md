@@ -10,24 +10,31 @@ Compose 的机器：用纯 `docker run` 复现那两份 compose 文件。这里�
 > 走这条路意味着升级、开机自启与回滚都要你自己负责。Compose 只是一份小文件，却免费给你
 > `up -d`、`pull`、`logs -f` 和 `restart: unless-stopped` —— 除非有硬性限制，否则建议用 Compose。
 
-## 1. 构建镜像
+## 1. 选择镜像
 
-`docker run` 不会构建，先用本仓库的 checkout 构建一次：
+本项目镜像包已公开，支持 amd64 和 arm64。无需登录即可拉取最新已验证的 `main` 构建：
+
+```sh
+IMAGE=ghcr.io/ange-katrina/scrcpygate:edge
+docker pull "$IMAGE"
+```
+
+需要固定部署版本时，把 `IMAGE` 设置为成功的
+[Builds 运行](https://github.com/Ange-Katrina/ScrcpyGate/actions/workflows/Builds.yml)
+摘要中的 `ghcr.io/ange-katrina/scrcpygate@sha256:<digest>`，再拉取该引用。
+`latest` 只在正式版本发布时创建，目前可能尚不存在。私有 fork 的镜像包则需要
+使用有拉取权限的账号登录镜像仓库。
+
+也可以从源码构建：
 
 ```sh
 git clone https://github.com/Ange-Katrina/ScrcpyGate.git
 cd ScrcpyGate
-docker build -t scrcpygate:local .                 # 网络慢时加 --build-arg PIP_INDEX_URL=<镜像源>
+IMAGE=scrcpygate:local
+docker build -t "$IMAGE" .                       # 网络慢时加 --build-arg PIP_INDEX_URL=<镜像源>
 ```
 
-如果你的机器能拉取发布镜像，也可以直接钉住它而不构建：
-
-```sh
-docker pull ghcr.io/<owner>/scrcpygate@sha256:<digest>
-```
-
-GHCR 包默认是**私有**的：先用带 `read:packages` 的个人访问令牌登录（`docker login ghcr.io`），
-或者在仓库设置里把该包改成 public。
+请在同一个 Shell 中执行后续命令，以保留 `IMAGE` 的选择。
 
 ## 2. 准备数据目录
 
@@ -53,7 +60,7 @@ docker run -d --name scrcpygate --restart unless-stopped \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
   -e SESSION_COOKIE_SECURE=false \
   -v "$PWD/data:/app/data" \
-  scrcpygate:local
+  "$IMAGE"
 ```
 
 然后打开 `http://127.0.0.1:5000`。对外提供服务前，`-p` 与 `PUBLIC_BASE_URL` 要一起改；在反向代理 /
@@ -75,7 +82,7 @@ docker run -d --name scrcpygate --restart unless-stopped --net=host \
   -e SESSION_COOKIE_SECURE=false \
   -e ADB_SERVER_SOCKET=tcp:127.0.0.1:5037 \
   -v "$PWD/data:/app/data" \
-  scrcpygate:local
+  "$IMAGE"
 ```
 
 `WEB_SCRCPY_BIND` / `WEB_SCRCPY_PORT` 必须与 `PUBLIC_BASE_URL` 保持一致：这个模式下应用是真的绑在那里。

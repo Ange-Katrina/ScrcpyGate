@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Ange-Katrina/ScrcpyGate/security/advisories/new
+    about: Do not post exploit details or sensitive deployment information in public issues.

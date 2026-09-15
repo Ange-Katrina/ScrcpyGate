@@ -17,6 +17,8 @@ scrcpy server · native WebSocket · Raw v2 framing · FastAPI · no frontend bu
 
 [English](README.md) · [简体中文](README.zh.md)
 
+[Contributing](CONTRIBUTING.md) · [Report a vulnerability](SECURITY.md)
+
 </div>
 
 ---

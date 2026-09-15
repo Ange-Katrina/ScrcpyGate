@@ -27,6 +27,7 @@ RUN python -m venv /app/venv && \
 
 COPY app/ app/
 COPY static/ static/
+COPY LICENSE THIRD_PARTY.md ./
 COPY adb_manager.py scrcpy.py scrcpy-server docker-entrypoint.sh ./
 COPY adb/linux/ adb/linux/
 
