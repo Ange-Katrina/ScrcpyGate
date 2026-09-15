@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>ALAS 管理 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item active" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理" aria-current="page"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>ALAS 管理</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+
+          <div class="page-heading alas-head">
+            <div>
+              <h1>ALAS 管理</h1>
+              <p>管理配置归属、设备关联与运行状态</p>
+            </div>
+            <div class="alas-head-actions">
+              <button class="btn-ghost icon-only" id="alasRefreshAllBtn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i></button>
+              <a class="btn-ghost" id="alasOpenPageBtn" href="#" target="_blank" rel="noopener" aria-disabled="true"><i data-lucide="external-link"></i><span>打开 ALAS</span></a>
+              <button class="btn-ghost" id="alasConnBtn" type="button"><i data-lucide="settings"></i><span>连接设置</span></button>
+            </div>
+          </div>
+
+          <section class="alas-status-strip" aria-label="ALAS 状态摘要">
+            <div class="alas-status-item"><span class="alas-status-dot" id="alasStatusDot"></span><div><span>Runtime</span><strong id="alasStatusRuntime">未检查</strong></div></div>
+            <div class="alas-status-item"><div><span>服务状态</span><strong id="alasStatusService">未加载</strong></div></div>
+            <div class="alas-status-item"><div><span>配置目录</span><strong id="alasStatusConfigs">0 个配置</strong></div></div>
+            <div class="alas-status-item warning" id="alasStatusConflictWrap"><div><span>需要处理</span><strong id="alasStatusConflict">0 个归属冲突</strong></div></div>
+            <div class="alas-status-item"><div><span>最近同步</span><strong id="alasStatusSync">从未</strong></div></div>
+          </section>
+
+          <div class="alas-tabs" role="tablist" aria-label="ALAS 管理视图">
+            <button class="alas-tab active" type="button" role="tab" aria-selected="true" data-view="users" id="alasViewTabUsers">用户与归属<span class="alas-tab-count" id="alasTabUsersBadge">0</span></button>
+            <button class="alas-tab" type="button" role="tab" aria-selected="false" data-view="configs" id="alasViewTabConfigs">配置目录<span class="alas-tab-count" id="alasTabConfigsBadge">0</span></button>
+            <button class="alas-tab" type="button" role="tab" aria-selected="false" data-view="features" id="alasViewTabFeatures">隐藏范围<span class="alas-tab-count" id="alasTabFeaturesBadge">0</span></button>
+          </div>
+
+          <!-- ============ 用户与归属视图 ============ -->
+          <section class="alas-workspace" id="alasViewUsers">
+            <aside class="alas-master">
+              <div class="alas-pane-head"><div><h2>用户</h2><p id="alasUsersTotal">等待数据服务</p></div></div>
+              <div class="alas-search"><i data-lucide="search"></i><input id="alasUserSearch" class="alas-input" type="search" placeholder="搜索用户名"></div>
+              <div class="alas-filter-row">
+                <select id="alasUserFilter" class="alas-select" aria-label="关联状态">
+                  <option value="all">全部用户</option>
+                  <option value="linked">已关联</option>
+                  <option value="unlinked">未关联</option>
+                  <option value="conflict">归属冲突</option>
+                </select>
+              </div>
+              <div class="alas-conflict-banner" id="alasConflictBanner" hidden>
+                <i data-lucide="alert-triangle"></i><span id="alasConflictBannerText">发现 1 条配置归属冲突</span>
+                <button class="text-link" type="button" id="alasConflictBannerBtn">筛选</button>
+              </div>
+              <div class="alas-list" id="alasUserList"></div>
+            </aside>
+            <section class="alas-detail" id="alasUserDetail">
+              <div class="alas-detail-head">
+                <div class="alas-detail-title">
+                  <span class="alas-avatar" id="alasUserDetailAvatar">A</span>
+                  <div><h2 id="alasUserDetailName" data-i18n-skip>—</h2><p id="alasUserDetailMeta">—</p></div>
+                </div>
+                <button class="btn-primary alas-btn-sm" id="alasAddRelBtn" type="button"><i data-lucide="plus"></i>新增关联</button>
+              </div>
+              <div class="alas-alert" id="alasUserAlert" hidden>
+                <span class="alas-alert-copy"><i data-lucide="triangle-alert"></i><span id="alasUserAlertText">存在历史归属冲突</span></span>
+                <button class="btn-ghost alas-btn-ghost-sm" type="button" id="alasUserAlertBtn">处理冲突</button>
+              </div>
+              <div class="alas-admin-note" id="alasAdminNote" hidden><i data-lucide="circle-check"></i><span>管理员自动获得全部 ALAS 配置权限，无需单独建立配置关联</span></div>
+              <div class="alas-expired-note" id="alasExpiredNote" hidden><i data-lucide="triangle-alert"></i><span id="alasExpiredNoteText">账户到期后其 ALAS 配置已自动停止</span></div>
+              <div class="alas-section-head"><h3>配置关联</h3><span id="alasRelCount">0 个配置</span></div>
+              <div class="alas-assignment-list" id="alasRelList"></div>
+              <div class="alas-detail-foot">
+                <button class="btn-primary" id="alasSavePermBtn" type="button"><i data-lucide="save"></i><span>保存用户 ALAS 权限</span></button>
+                <span class="alas-foot-hint">权限修改仅在点击保存后生效</span>
+              </div>
+            </section>
+          </section>
+
+          <!-- ============ 配置目录视图 ============ -->
+          <section class="alas-workspace" id="alasViewConfigs" hidden>
+            <aside class="alas-master">
+              <div class="alas-pane-head"><div><h2>配置目录</h2><p>Runtime 与归属记录</p></div><button class="alas-row-action" id="alasSyncBtn" type="button" title="刷新目录" aria-label="刷新目录"><i data-lucide="refresh-cw"></i></button></div>
+              <div class="alas-search"><i data-lucide="search"></i><input id="alasCfgSearch" class="alas-input" type="search" placeholder="搜索配置名称"></div>
+              <div class="alas-list alas-config-list" id="alasCfgList"></div>
+            </aside>
+            <section class="alas-detail" id="alasCfgDetail">
+              <div class="alas-detail-head">
+                <div class="alas-detail-title">
+                  <span class="alas-avatar bot"><i data-lucide="bot"></i></span>
+                  <div><h2 id="alasCfgDetailName" data-i18n-skip>—</h2><div class="alas-chips" id="alasCfgDetailChips"></div></div>
+                </div>
+                <a class="btn-ghost" id="alasCfgOpenAlas" href="#" target="_blank" rel="noopener"><i data-lucide="external-link"></i><span>在 ALAS 中打开</span></a>
+              </div>
+              <div class="alas-config-grid">
+                <div class="alas-config-fact"><span>所属用户</span><strong id="alasCfgOwner">—</strong></div>
+                <div class="alas-config-fact"><span>绑定设备</span><strong id="alasCfgDevice">—</strong></div>
+                <div class="alas-config-fact"><span>默认配置</span><strong id="alasCfgDefault">—</strong></div>
+                <div class="alas-config-fact"><span>运行权限</span><strong id="alasCfgRun">—</strong></div>
+                <div class="alas-config-fact"><span>编辑权限</span><strong id="alasCfgEdit">—</strong></div>
+                <div class="alas-config-fact"><span>最近错误</span><strong id="alasCfgError">无错误</strong></div>
+              </div>
+              <div class="alas-task-band"><span>当前任务</span><strong id="alasCfgRunTask" data-i18n-skip>—</strong></div>
+              <div class="alas-cfg-foot">
+                <span class="alas-cfg-note">配置内容由 ALAS 页面管理</span>
+                <div class="alas-cfg-actions">
+                  <button class="row-btn" id="alasCfgRefreshState" type="button"><i data-lucide="refresh-cw"></i><span>刷新状态</span></button>
+                  <button class="row-btn" id="alasCfgAssignBtn" type="button" hidden><i data-lucide="user-plus"></i><span>分配配置</span></button>
+                  <button class="btn-primary" id="alasCfgPrimaryBtn" type="button">启动配置</button>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <!-- ============ 隐藏范围（只读）视图 ============ -->
+          <section class="alas-workspace alas-workspace-single" id="alasViewFeatures" hidden>
+            <section class="alas-detail alas-features">
+              <div class="alas-detail-head">
+                <div class="alas-detail-title">
+                  <span class="alas-avatar"><i data-lucide="toggle-right"></i></span>
+                  <div><h2>隐藏范围</h2><p>写死在代码里，只读；改范围请改对应的常量</p></div>
+                </div>
+              </div>
+              <p class="alas-features-hint"><b>隐藏范围已改为代码写死</b>，这里只做只读展示：普通用户看不到哪些 ALAS 页面/游戏任务由 <code>app/alas_visibility.py</code> 的 <code>HIDDEN_ALAS_ENTRY_RULES</code> 与 <code>app/alas.py</code> 的 <code>HIDDEN_ALAS_TASKS</code> 决定（ALAS 2.0 适配时改这两处）。下面按 ALAS 任务树分组，仅供对照。</p>
+              <div class="alas-feature-groups" id="alasFeatureList"></div>
+              <div class="alas-features-foot">
+                <span id="alasFeatureCount">—</span>
+                <span class="alas-foot-hint">标记「已隐藏」的游戏任务对普通用户不可见</span>
+              </div>
+            </section>
+
+            <section class="alas-detail alas-visibility" id="alasVisibilityCard">
+              <div class="alas-detail-head">
+                <div class="alas-detail-title">
+                  <span class="alas-avatar"><i data-lucide="shield-user"></i></span>
+                  <div><h2>管理员工具与后台页</h2><p>只挡普通用户：管理员始终看到完整的 ALAS 页面</p></div>
+                </div>
+              </div>
+              <div class="alas-visibility-body" id="alasVisibilityBody">
+                <p class="alas-features-hint">下面按 <b>ALAS 里的页面和功能</b> 列出边界（<b>只读</b>）：标记为受限的入口，普通用户看不到、直接访问也会被拒（服务端 403）。写死在这里，改范围请改 <code>app/alas_visibility.py</code>。</p>
+                <div class="alas-visibility-warning">
+                  <i data-lucide="triangle-alert" aria-hidden="true"></i>
+                  <span>这些规则是普通用户的分权边界：放开条目会把对应的导航入口、管理员工具或模拟器设置暴露给普通用户，改动前请确认影响。</span>
+                </div>
+                <div class="alas-visibility-entries" id="alasVisibilityEntries"></div>
+                <div class="alas-features-foot">
+                  <span id="alasVisibilityStatus" role="status" aria-live="polite">加载中…</span>
+                  <span class="alas-foot-hint">写死的清单，页面只读</span>
+                </div>
+              </div>
+            </section>
+          </section>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+
+  <div class="alas-drawer-mask" id="alasConnMask" hidden></div>
+  <aside class="alas-drawer" id="alasConnDrawer" aria-label="ALAS 连接设置" aria-hidden="true">
+    <div class="alas-drawer-head">
+      <div><h2>ALAS 连接设置</h2><p>Runtime 地址与访问凭据</p></div>
+      <button class="alas-row-action" type="button" data-close-drawer="alasConnDrawer" aria-label="关闭连接设置" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-drawer-body">
+      <div class="alas-toggle-row">
+        <div><strong>启用 ALAS 服务</strong><div class="alas-chips"><span class="chip" id="alasServiceChip">当前已启用</span></div></div>
+        <label class="alas-switch"><input type="checkbox" id="alasServiceEnabled"><span class="alas-switch-track"></span></label>
+      </div>
+      <div class="alas-toggle-row">
+        <div><strong>在工作台显示 ALAS</strong><div class="alas-chips"><span class="chip" id="alasWorkbenchChip">工作台显示</span></div></div>
+        <label class="alas-switch"><input type="checkbox" id="alasWorkbenchVisible"><span class="alas-switch-track"></span></label>
+      </div>
+      <div class="alas-field">
+        <label for="alasRuntimeUrl">Runtime URL</label>
+        <div class="alas-input-row">
+          <input class="alas-input" type="url" id="alasRuntimeUrl" value="" spellcheck="false" autocomplete="off">
+          <button class="btn-ghost alas-btn-ghost-sm" id="alasCheckConnBtn" type="button"><i data-lucide="plug"></i><span>检查连接</span></button>
+        </div>
+        <div class="alas-conn-result-row">
+          <span class="inline-chip alas-none" id="alasConnResultChip">未检查</span>
+          <span class="alas-field-hint">最近检查：<span id="alasLastCheckText">—</span></span>
+        </div>
+      </div>
+      <div class="alas-field">
+        <label for="alasTokenInput">API Token</label>
+        <div class="alas-input-row">
+          <input class="alas-input" type="password" id="alasTokenInput" placeholder="输入新 Token 以更新，留空保持不变" spellcheck="false" autocomplete="new-password">
+        </div>
+        <span class="alas-field-hint">已保存的 Token 不会回显；在此输入新值并点击“保存连接设置”即可更新</span>
+        <div class="alas-inline-warning" id="alasTokenKeyWarning" hidden role="status" aria-live="polite">
+          <i data-lucide="triangle-alert" aria-hidden="true"></i>
+          <span id="alasTokenKeyWarningText">服务端未配置 ALAS Token 加密密钥，保存 Token 会被拒绝；请注入 ALAS_TOKEN_ENCRYPTION_KEY 或运行 python -m app.cli generate-alas-key</span>
+        </div>
+        <div class="alas-token-row">
+          <span class="inline-chip alas-none" id="alasTokenChip">缺失</span>
+          <button class="text-link alas-link-danger" id="alasTokenClearBtn" type="button">清除已保存 Token</button>
+        </div>
+      </div>
+    </div>
+    <div class="alas-drawer-actions">
+      <button class="btn-ghost" type="button" data-close-drawer="alasConnDrawer">取消</button>
+      <button class="btn-primary" id="alasSaveConnBtn" type="button"><i data-lucide="check"></i><span>保存连接设置</span></button>
+    </div>
+  </aside>
+
+  <div class="alas-drawer-mask" id="alasLinkMask" hidden></div>
+  <aside class="alas-drawer alas-link-drawer" id="alasLinkDrawer" aria-label="配置关联" aria-hidden="true" inert>
+    <div class="alas-drawer-head">
+      <div><h2 id="alasLinkTitle">新增关联</h2><p id="alasLinkSubtitle">为用户连接设备与 ALAS 配置</p></div>
+      <button class="alas-row-action" type="button" data-close-drawer="alasLinkDrawer" aria-label="关闭配置关联" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-drawer-body">
+      <div class="alas-link-intro">
+        <span class="alas-link-intro-icon"><i data-lucide="link-2"></i></span>
+        <div><strong>建立可用的 ALAS 入口</strong><span>依次选择用户、设备和 Runtime 配置，其他权限保持推荐默认值。</span></div>
+      </div>
+      <div class="alas-link-fields">
+        <div class="alas-field">
+          <div class="alas-link-field-head"><label for="alasLinkUser">用户</label><span>管理员无需关联</span></div>
+          <select class="alas-input alas-select" id="alasLinkUser"></select>
+        </div>
+        <div class="alas-field">
+          <div class="alas-link-field-head"><label for="alasLinkDevice">设备</label><span>用于工作台访问上下文</span></div>
+          <select class="alas-input alas-select" id="alasLinkDevice"></select>
+        </div>
+        <div class="alas-field">
+          <div class="alas-link-field-head"><label for="alasLinkConfig">Runtime 配置</label><span>一个配置绑定一台设备</span></div>
+          <select class="alas-input alas-select" id="alasLinkConfig"></select>
+        </div>
+      </div>
+      <div class="alas-link-summary" id="alasLinkSummary" hidden><i data-lucide="check-circle-2"></i><span id="alasLinkSummaryText">关联信息已完整</span></div>
+      <div class="alas-alert" id="alasLinkDeviceWarn" hidden>
+        <span class="alas-alert-copy"><i data-lucide="alert-triangle"></i><span id="alasLinkDeviceWarnText">所选配置已绑定其他设备，保存时不会静默覆盖。</span></span>
+      </div>
+      <div class="alas-link-view-notice" id="alasLinkViewNotice" hidden>
+        <div class="alas-link-view-copy"><i data-lucide="shield-check"></i><div><strong>补充设备观看权限</strong><span id="alasLinkViewText">该用户尚不能观看所选设备，可在保存关联时一并授予。</span></div></div>
+        <label class="alas-switch"><input type="checkbox" id="alasLinkGrantView"><span class="alas-switch-track"></span></label>
+      </div>
+      <details class="alas-link-advanced" id="alasLinkAdvanced">
+        <summary><span class="alas-link-advanced-title"><i data-lucide="sliders-horizontal"></i>权限设置</span><span class="alas-link-advanced-meta"><span id="alasLinkPermissionSummary">运行与编辑</span><i data-lucide="chevron-down"></i></span></summary>
+        <div class="alas-link-options">
+          <div class="alas-toggle-row"><div><strong>运行与编辑</strong><p>允许用户启动、停止并编辑该配置。</p></div><label class="alas-switch"><input type="checkbox" id="alasLinkRun" checked><span class="alas-switch-track"></span></label><input type="checkbox" id="alasLinkEdit" checked hidden></div>
+          <div class="alas-toggle-row"><div><strong>设为默认</strong><p>从该设备进入 ALAS 时优先使用此配置。</p></div><label class="alas-switch"><input type="checkbox" id="alasLinkDefault"><span class="alas-switch-track"></span></label></div>
+        </div>
+      </details>
+    </div>
+    <div class="alas-drawer-actions">
+      <button class="btn-ghost" type="button" data-close-drawer="alasLinkDrawer">取消</button>
+      <button class="btn-primary" id="alasLinkSaveBtn" type="button" disabled><i data-lucide="check"></i><span>创建关联</span></button>
+    </div>
+  </aside>
+
+  <div class="alas-modal-mask" id="alasModalMask" hidden></div>
+  <div class="alas-modal" id="alasConfirmModal" role="dialog" aria-modal="true" aria-labelledby="alasConfirmTitle" aria-hidden="true" hidden>
+    <div class="alas-modal-head">
+      <h3 id="alasConfirmTitle">确认操作</h3>
+      <button class="alas-drawer-close" type="button" id="alasModalClose" aria-label="关闭弹窗" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-modal-body" id="alasConfirmBody"></div>
+    <div class="alas-modal-foot">
+      <button class="btn-ghost" id="alasConfirmCancel" type="button">取消</button>
+      <button class="btn-primary" id="alasConfirmOk" type="button">确认</button>
+    </div>
+  </div>
+
+  <div class="alas-toast-wrap" id="alasToastWrap" aria-live="polite"></div>
+
+
+</body></html>

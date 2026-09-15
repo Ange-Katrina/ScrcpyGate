@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="ScrcpyGate">
+  <!-- Same mark as the login page: --brand-blue rounded square + Lucide "monitor" glyph. -->
+  <rect width="128" height="128" rx="28" fill="#007aff"/>
+  <g transform="translate(16 16) scale(4)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="20" height="14" x="2" y="3" rx="2"/>
+    <path d="M8 21h8M12 17v4"/>
+  </g>
+</svg>

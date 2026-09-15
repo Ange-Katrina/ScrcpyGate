@@ -1,0 +1,57 @@
+.git/
+.gitignore
+.github/
+.agents/
+.codex-mobile-data/
+.uv-cache/
+.uv-cache-local/
+.uv-python/
+/.venv-codex-mobile/
+/.phase4-browser-data/
+/.ruff_cache/
+/output/
+
+# Never send deployment state, credentials, runtime data, or rollback archives
+# to the Docker daemon. The Dockerfile copies only the explicit application
+# inputs below, but the build context itself must be treated as sensitive.
+.env
+.env.*
+!.env.example
+data/
+browser-data/
+backups/
+*.db
+*.db-*
+webscrcpy.db
+initial_admin_password.txt
+*.log
+
+# Repository docs and maintenance tools are not production image inputs.
+docs/
+tools/
+static_analysis_semgrep_*/
+
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+venv/
+.venv/
+env/
+build/
+dist/
+node_modules/
+
+.vscode/
+.idea/
+*.tmp
+*.temp
+
+logs/
+log/
+/.trae/

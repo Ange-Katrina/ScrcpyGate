@@ -1,0 +1,109 @@
+/* 账户到期提醒弹窗（static/shared/expiry-notice.js）的样式。
+   每页都会加载 page-runtime.css，但这份弹窗自带类名与配色，避免依赖管理端外壳样式。 */
+
+.expiry-notice-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.expiry-notice-card {
+  width: min(420px, 100%);
+  border-radius: 16px;
+  padding: 20px 22px 18px;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  animation: expiry-notice-in 160ms ease-out;
+}
+
+@keyframes expiry-notice-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.expiry-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.expiry-notice-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.expiry-notice-mask[data-expiry-notice-state="expired"] .expiry-notice-icon {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.expiry-notice-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.expiry-notice-body {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: #334155;
+  word-break: break-word;
+}
+
+.expiry-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.expiry-notice-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #007aff;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.expiry-notice-btn:hover { background: #0069db; }
+.expiry-notice-btn:active { transform: translateY(1px); }
+.expiry-notice-btn:focus-visible { outline: 2px solid #007aff; outline-offset: 2px; }
+
+html.dark .expiry-notice-card {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: rgba(226, 232, 240, 0.12);
+}
+html.dark .expiry-notice-body { color: #cbd5e1; }
+html.dark .expiry-notice-icon { color: #fbbf24; background: rgba(251, 191, 36, 0.16); }
+html.dark .expiry-notice-mask[data-expiry-notice-state="expired"] .expiry-notice-icon {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expiry-notice-card { animation: none; }
+}

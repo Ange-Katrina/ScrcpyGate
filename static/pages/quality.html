@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>画质与传输 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item active" href="/quality" data-dom-id="admin-quality-link" title="画质与传输" aria-current="page"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>画质与传输</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+          <div class="page-heading">
+            <h1>画质与传输</h1>
+            <p>画质档位、传输链路与会话策略</p>
+          </div>
+
+          <div class="quality-segments sg-segments" role="tablist" aria-label="画质与传输分区">
+            <button class="quality-seg sg-seg active" type="button" role="tab" id="seg-quality" data-seg="quality" aria-selected="true" aria-controls="seg-panel-quality"><i data-lucide="sliders-horizontal"></i><span>画质档位</span></button>
+            <button class="quality-seg sg-seg" type="button" role="tab" id="seg-transport" data-seg="transport" aria-selected="false" aria-controls="seg-panel-transport" tabindex="-1"><i data-lucide="route"></i><span>传输链路</span></button>
+            <button class="quality-seg sg-seg" type="button" role="tab" id="seg-session" data-seg="session" aria-selected="false" aria-controls="seg-panel-session" tabindex="-1"><i data-lucide="hourglass"></i><span>会话策略</span></button>
+          </div>
+
+          <div class="quality-grid" id="seg-panel-quality" data-seg-panel="quality" role="tabpanel" aria-labelledby="seg-quality">
+            <div class="preset-col">
+              <section class="panel" id="presets" aria-labelledby="presets-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="presets-title">画质预设<span class="panel-subtitle">点卡片选中预览，点「应用」载入参数，保存后生效</span></h2>
+                </div>
+                <div class="preset-section">
+                  <h3 class="preset-section-title"><i data-lucide="bookmark"></i>内置预设</h3>
+                  <div class="preset-list" id="builtin-preset-list">
+                    <div class="preset-empty" id="builtin-preset-empty"><i data-lucide="bookmark-x"></i><span>暂无内置预设数据</span><small>预设由后端服务提供</small></div>
+                  </div>
+                </div>
+                <div class="preset-section">
+                  <div class="preset-section-head">
+                    <h3 class="preset-section-title"><i data-lucide="layers"></i>自定义预设<span class="preset-count" id="custom-preset-count">0</span></h3>
+                    <button class="preset-add-btn" id="btn-add-preset" type="button"><i data-lucide="plus"></i>新增</button>
+                  </div>
+                  <div class="preset-list" id="custom-preset-list"></div>
+                  <div class="preset-empty" id="custom-preset-empty" hidden>
+                    <i data-lucide="layers"></i>
+                    <span>暂无自定义预设</span>
+                    <button class="row-btn open" id="btn-add-preset-empty" type="button"><i data-lucide="plus"></i>新增自定义预设</button>
+                  </div>
+                </div>
+                <div class="preset-section">
+                  <div class="preset-section-head">
+                    <h3 class="preset-section-title"><i data-lucide="fullscreen"></i>全屏默认画质</h3>
+                  </div>
+                  <select class="select-control" id="sel-fullscreen" aria-label="全屏默认画质">
+                    <option value="">未配置</option>
+                  </select>
+                  <div class="preset-desc">进入全屏观看时的默认画质档位</div>
+                </div>
+                  <div class="panel-footer"><span>选择预设后可调整参数，点击底部保存后生效</span><span class="panel-badge" id="preset-selected-badge">未选择预设</span></div>
+              </section>
+            </div>
+
+            <div class="main-col">
+              <section class="panel" id="params" aria-labelledby="params-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="params-title">参数配置</h2>
+                  <span class="panel-subtitle" id="param-source-label">正在加载</span>
+                  <span class="readonly-chip" id="emergency-readonly-note" hidden><i data-lucide="lock"></i>应急兼容 · 只读</span>
+                </div>
+                <div class="quality-skeleton" id="form-skeleton" aria-hidden="true">
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-ctl"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-ctl-sm"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-ctl-sm"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-ctl"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-sw"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-sw"></div></div>
+                  <div class="sk-row"><div class="skeleton sk-title"></div><div class="skeleton sk-sw"></div></div>
+                </div>
+                <div class="param-list" id="param-real" hidden>
+                  <div class="param-group">
+                    <div class="param-group-title"><i data-lucide="sliders-horizontal"></i>基础画质</div>
+                    <div class="param-row" id="row-resolution">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="monitor"></i>输出尺寸</div>
+                        <div class="param-desc">决定画面像素尺寸，更高分辨率消耗更多带宽</div>
+                      </div>
+                      <div class="param-control">
+                        <select class="select-control" id="sel-resolution" aria-label="输出尺寸">
+                          <option value="1280x720">1280 × 720</option>
+                          <option value="1920x1080">1920 × 1080</option>
+                          <option value="custom">自定义</option>
+                        </select>
+                        <label class="field-check"><input type="checkbox" class="sg-switch-input" id="chk-custom-wh">自定义宽度和高度</label>
+                        <div class="custom-wh" id="custom-wh-box" hidden>
+                        <label>宽 <input class="num-control" type="number" id="inp-width" min="320" max="1920" step="1" value=""></label>
+                        <label>高 <input class="num-control" type="number" id="inp-height" min="240" max="1920" step="1" value=""></label>
+                          <span class="unit">px</span>
+                        </div>
+                        <div class="param-field-error" id="err-resolution"><i data-lucide="circle-alert"></i><span>宽度需在 320-1920、高度需在 240-1920 之间，最长边至少 640px</span></div>
+                      </div>
+                    </div>
+                    <div class="param-row" id="row-fps">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="gauge"></i>帧率</div>
+                        <div class="param-desc">每秒画面刷新次数，越高越流畅但更耗资源</div>
+                      </div>
+                      <div class="param-control">
+                        <input class="num-control" type="number" id="inp-fps" min="15" max="240" step="1" value="">
+                        <span class="unit">fps</span>
+                        <div class="param-field-error" id="err-fps"><i data-lucide="circle-alert"></i><span>帧率需在 15-240 fps 之间</span></div>
+                      </div>
+                    </div>
+                    <div class="param-row" id="row-bitrate">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="activity"></i>码率</div>
+                        <div class="param-desc">视频编码比特率，越高画质越好占用带宽越大</div>
+                      </div>
+                      <div class="param-control">
+                        <input class="num-control" type="number" id="inp-bitrate" min="0.5" max="10" step="0.5" value="">
+                        <span class="unit">Mbps</span>
+                        <div class="param-field-error" id="err-bitrate"><i data-lucide="circle-alert"></i><span>码率需在 0.5-10 Mbps 之间</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="param-group">
+                    <div class="param-group-title"><i data-lucide="users"></i>用户画质控制</div>
+                    <div class="param-row" id="row-default-preset">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="star"></i>普通用户默认预设</div>
+                        <div class="param-desc">用户未保存预设或保存的预设失效时自动使用；仅显示启用且允许普通投屏的预设</div>
+                      </div>
+                      <div class="param-control param-control-col">
+                        <select class="select-control" id="sel-default-preset" aria-label="普通用户默认预设">
+                          <option value="">正在加载</option>
+                        </select>
+                        <div class="param-desc" id="default-preset-note">应急兼容仅在所有普通预设失效时自动使用，且不可修改。</div>
+                      </div>
+                    </div>
+                    <div class="param-row" id="row-bandwidth">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="gauge"></i>带宽预设</div>
+                        <div class="param-desc">点击档位后保存，将自动调整全部画质预设的码率、分辨率与帧率，避免占满上行带宽</div>
+                      </div>
+                      <div class="param-control param-control-col">
+                        <div class="bw-tier-list" id="bw-tier-list"></div>
+                        <div class="bw-tier-note" id="bw-tier-note"></div>
+                      </div>
+                    </div>
+                    <div class="param-row" id="row-max-size-limit">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="maximize"></i>分辨率上限</div>
+                        <div class="param-desc">限制所有预设与用户参数的分辨率（最长边像素）；低于 720p 时全屏默认画质档不可用</div>
+                      </div>
+                      <div class="param-control">
+                        <select class="select-control" id="sel-max-size-limit" aria-label="分辨率上限"></select>
+                      </div>
+                    </div>
+                    <div class="param-row" id="row-user-tuning">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="pencil-ruler"></i>参数微调</div>
+                        <div class="param-desc">关闭后工作台仅显示预设卡片，隐藏码率 / 分辨率 / 帧率微调入口</div>
+                      </div>
+                      <div class="param-control">
+                        <label class="field-check"><input type="checkbox" class="sg-switch-input" id="chk-user-tuning">允许普通用户微调</label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="quality-grid quality-grid-single" id="seg-panel-transport" data-seg-panel="transport" role="tabpanel" aria-labelledby="seg-transport" hidden>
+            <div class="main-col">
+              <section class="panel" id="transport" aria-labelledby="transport-panel-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="transport-panel-title">传输链路</h2>
+                  <span class="panel-subtitle">选择默认协议，并控制哪些协议可用</span>
+                </div>
+                <div class="transport-modes" id="transport-modes">
+                  <div class="mode-card" data-mode="rawV2">
+                    <div class="mode-card-head">
+                      <span class="mode-icon"><i data-lucide="zap"></i></span>
+                      <span class="mode-name">Raw v2</span>
+                      <span class="mode-tag mode-default-tag" id="mode-default-tag-rawv2" hidden>默认</span>
+                    </div>
+                    <p class="mode-desc">原生传输协议，显著降低编码延迟</p>
+                    <div class="mode-switch">
+                      <span class="mode-state" id="mode-state-rawv2">未检查</span>
+                      <button class="switch sg-switch" id="sw-rawv2" type="button" role="switch" aria-checked="false" aria-label="Raw v2 传输模式" data-key="rawV2" data-hint="hint-rawv2"><i></i></button>
+                    </div>
+                    <div class="mode-actions">
+                      <button class="mode-default-btn" id="btn-default-rawv2" type="button" data-mode="rawV2"><i data-lucide="check"></i><span>设为默认</span></button>
+                    </div>
+                    <div class="toggle-hint" id="hint-rawv2"><i data-lucide="info"></i><span>关闭后默认传输模式将不再可选 Raw v2</span></div>
+                  </div>
+                  <div class="mode-card" data-mode="protocol">
+                    <div class="mode-card-head">
+                      <span class="mode-icon alt"><i data-lucide="arrow-left-right"></i></span>
+                      <span class="mode-name">protocol</span>
+                      <span class="mode-tag mode-default-tag" id="mode-default-tag-proto" hidden>默认</span>
+                    </div>
+                    <p class="mode-desc">由管理员手动启用，启用后可切换使用</p>
+                    <div class="mode-switch">
+                      <span class="mode-state" id="mode-state-proto">未检查</span>
+                      <button class="switch sg-switch" id="sw-proto" type="button" role="switch" aria-checked="false" aria-label="protocol 备用模式" data-key="protoAvail" data-hint="hint-proto"><i></i></button>
+                    </div>
+                    <div class="mode-actions">
+                      <button class="mode-default-btn" id="btn-default-proto" type="button" data-mode="protocol"><i data-lucide="check"></i><span>设为默认</span></button>
+                    </div>
+                    <div class="toggle-hint" id="hint-proto"><i data-lucide="info"></i><span>启用后可在默认传输模式中选择 protocol</span></div>
+                  </div>
+                  <div class="mode-card" data-mode="legacy">
+                    <div class="mode-card-head">
+                      <span class="mode-icon alt"><i data-lucide="repeat"></i></span>
+                      <span class="mode-name">legacy</span>
+                      <span class="mode-tag mode-default-tag" id="mode-default-tag-legacy" hidden>默认</span>
+                    </div>
+                    <p class="mode-desc">兼容旧版传输，由管理员手动启用</p>
+                    <div class="mode-switch">
+                      <span class="mode-state" id="mode-state-legacy">未检查</span>
+                      <button class="switch sg-switch" id="sw-legacy" type="button" role="switch" aria-checked="false" aria-label="legacy 备用模式" data-key="legacyAvail" data-hint="hint-legacy"><i></i></button>
+                    </div>
+                    <div class="mode-actions">
+                      <button class="mode-default-btn" id="btn-default-legacy" type="button" data-mode="legacy"><i data-lucide="check"></i><span>设为默认</span></button>
+                    </div>
+                    <div class="toggle-hint" id="hint-legacy"><i data-lucide="info"></i><span>启用后可在默认传输模式中选择 legacy</span></div>
+                  </div>
+                </div>
+                <div class="param-list">
+                  <div class="param-group">
+                    <div class="param-row" id="row-h264">
+                      <div class="param-copy">
+                        <div class="param-label"><i data-lucide="cpu"></i>H.264 编码状态</div>
+                        <div class="param-desc">硬件 H.264 编码由服务端固定启用，当前版本不支持在此修改</div>
+                      </div>
+                      <div class="param-control">
+                        <span class="readonly-chip" id="ro-h264"><i data-lucide="lock"></i>已启用 · 只读</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <select class="select-control" id="sel-default-mode" aria-label="默认传输模式" hidden>
+                  <option value="rawV2">Raw v2（始终可用）</option>
+                  <option value="protocol">protocol</option>
+                  <option value="legacy">legacy</option>
+                </select>
+              </section>
+
+              <section class="panel" id="status" aria-labelledby="status-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="status-title">传输状态</h2>
+                  <div class="panel-tools">
+                    <button class="refresh-btn" id="btn-client-detail" type="button"><i data-lucide="list"></i>客户端详情</button>
+                    <button class="refresh-btn" id="btn-refresh-status" type="button"><i data-lucide="refresh-cw"></i>刷新</button>
+                  </div>
+                </div>
+                <div class="status-skeleton" id="status-skeleton" aria-hidden="true">
+                  <div class="sk-card"><div class="skeleton" style="width:64%;height:11px"></div><div class="skeleton" style="width:42%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:56%;height:11px"></div><div class="skeleton" style="width:46%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:66%;height:11px"></div><div class="skeleton" style="width:40%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:60%;height:11px"></div><div class="skeleton" style="width:44%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:58%;height:11px"></div><div class="skeleton" style="width:48%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:62%;height:11px"></div><div class="skeleton" style="width:42%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:66%;height:11px"></div><div class="skeleton" style="width:50%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:58%;height:11px"></div><div class="skeleton" style="width:46%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:62%;height:11px"></div><div class="skeleton" style="width:44%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:64%;height:11px"></div><div class="skeleton" style="width:48%;height:18px;margin-top:10px"></div></div>
+                  <div class="sk-card"><div class="skeleton" style="width:60%;height:11px"></div><div class="skeleton" style="width:46%;height:18px;margin-top:10px"></div></div>
+                </div>
+              <div class="status-grid" id="status-real" hidden>
+                  <div class="status-hero">
+                    <div class="metric-card hero">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="radio"></i>当前健康状态</span></div>
+                      <div class="metric-value"><span class="status-chip idle" id="m-status"><span class="mini-dot"></span>未检查</span></div>
+                      <div class="metric-sub" id="m-status-sub">等待服务端数据</div>
+                    </div>
+                    <div class="metric-card hero">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="send"></i>当前传输模式</span></div>
+                      <div class="metric-value"><span id="m-mode">—</span></div>
+                      <div class="metric-sub">默认协议</div>
+                    </div>
+                    <div class="metric-card hero">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="clock"></i>最近关键帧时间</span></div>
+                      <div class="metric-value"><span id="m-keyframe">—</span><span class="m-unit" id="m-keyframe-unit" hidden>s 前</span></div>
+                      <div class="metric-sub">关键帧间隔</div>
+                    </div>
+                    <div class="metric-card hero">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="timer"></i>连续运行时间</span></div>
+                      <div class="metric-value"><span id="m-uptime">—</span></div>
+                      <div class="metric-sub">自本次会话开始</div>
+                    </div>
+                  </div>
+                  <button class="status-toggle" id="btn-toggle-diagnostics" type="button" aria-expanded="false" aria-controls="status-diagnostics"><i data-lucide="activity"></i><span>详细诊断</span><span class="status-toggle-hint">12 项指标</span><i data-lucide="chevron-down" class="status-toggle-chevron"></i></button>
+                  <div class="status-detail" id="status-diagnostics" hidden>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="layers"></i>配置版本</span></div>
+                      <div class="metric-value"><span id="m-gen">—</span></div>
+                      <div class="metric-sub">自上次保存</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="hash"></i>帧序号</span></div>
+                      <div class="metric-value"><span id="m-frame-seq">—</span></div>
+                      <div class="metric-sub">当前接收帧计数</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="circle-x"></i>解析失败</span></div>
+                      <div class="metric-value"><span id="m-parse-fail">0</span><span class="m-unit">次</span></div>
+                      <div class="metric-sub">本轮会话累计</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="package-x"></i>解析器丢弃</span></div>
+                      <div class="metric-value"><span id="m-discard">—</span><span class="m-unit">帧</span></div>
+                      <div class="metric-sub">解析器主动丢弃</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="refresh-cw"></i>重同步次数</span></div>
+                      <div class="metric-value"><span id="m-resync">—</span><span class="m-unit">次</span></div>
+                      <div class="metric-sub">解析器重同步累计</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="gauge"></i>缓存峰值</span></div>
+                      <div class="metric-value"><span id="m-cache-peak">—</span><span class="m-unit">KB</span></div>
+                      <div class="metric-sub">接收缓冲最大深度</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="users"></i>客户端数量</span></div>
+                      <div class="metric-value"><span id="m-client-count">—</span><span class="m-unit">个</span></div>
+                      <div class="metric-sub">当前观看端</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="server"></i>队列帧数</span></div>
+                      <div class="metric-value"><span id="m-queue">—</span><span class="m-unit">帧</span></div>
+                      <div class="metric-sub"><span id="m-queue-state">未检查</span></div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="database"></i>队列字节数</span></div>
+                      <div class="metric-value"><span id="m-queue-bytes">—</span><span class="m-unit">KB</span></div>
+                      <div class="metric-sub">未检查</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="trending-down"></i>丢帧数量</span></div>
+                      <div class="metric-value"><span id="m-drop">—</span><span class="m-unit">帧</span></div>
+                      <div class="metric-sub" id="m-drop-sub">未检查</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="circle-alert"></i>最近错误</span></div>
+                      <div class="metric-value" id="m-error-value">—</div>
+                      <div class="metric-sub" id="m-error-sub">未检查</div>
+                    </div>
+                    <div class="metric-card">
+                      <div class="metric-top"><span class="metric-label"><i data-lucide="heart-pulse"></i>恢复状态</span></div>
+                      <div class="metric-value" id="m-recover-value">—</div>
+                      <div class="metric-sub" id="m-recover-sub">未检查</div>
+                    </div>
+                  </div>
+                </div>
+                 <div class="panel-footer">
+                   <span id="status-data-note">正在加载指标</span>
+                  <span id="status-pending-wrap" hidden><span class="pending-chip"><i data-lucide="clock"></i>待重启</span></span>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <section id="seg-panel-session" data-seg-panel="session" role="tabpanel" aria-labelledby="seg-session" hidden>
+            <section class="panel" id="session-panel" aria-labelledby="session-title">
+              <div class="panel-header">
+                <h2 class="panel-title" id="session-title">会话策略</h2>
+                <span class="panel-subtitle">观看离开或超时后自动结束投屏</span>
+              </div>
+              <div class="param-list">
+                <div class="param-group">
+                  <div class="param-group-title"><i data-lucide="hourglass"></i>会话时限</div>
+                  <div class="param-row" id="row-idle-stop">
+                    <div class="param-copy">
+                      <div class="param-label"><i data-lucide="timer"></i>无观看端自动停止时间</div>
+                      <div class="param-desc">最后一个观看端离开后，超过该时长自动停止投屏；0 表示仅保留 5 秒重连宽限</div>
+                    </div>
+                    <div class="param-control">
+                      <input class="num-control" type="number" id="inp-idle-stop" min="0" max="1440" step="1" value="15">
+                      <select class="unit-select" id="sel-idle-unit" aria-label="无观看端自动停止时间单位">
+                        <option value="min" selected>分钟</option>
+                      </select>
+                      <div class="param-field-error" id="err-idle-stop"><i data-lucide="circle-alert"></i><span>分钟需在 0-1440 之间，0 为仅保留 5 秒重连宽限</span></div>
+                    </div>
+                  </div>
+                  <div class="param-row" id="row-session-limit">
+                    <div class="param-copy">
+                      <div class="param-label"><i data-lucide="timer-reset"></i>连续投屏时间上限</div>
+                      <div class="param-desc">单次投屏会话允许的最长持续时间，到达后自动结束；0 表示不限制</div>
+                    </div>
+                    <div class="param-control">
+                      <input class="num-control" type="number" id="inp-session-limit" min="0" max="10080" step="1" value="0">
+                      <select class="unit-select" id="sel-session-unit" aria-label="连续投屏时间上限单位">
+                        <option value="h" selected>小时</option>
+                        <option value="min">分钟</option>
+                      </select>
+                      <div class="param-field-error" id="err-session-limit"><i data-lucide="circle-alert"></i><span>小时需在 0-168、分钟需在 0-10080 之间，0 为不限制</span></div>
+                    </div>
+                  </div>
+                  <div class="param-row" id="row-viewer-hidden-stop">
+                    <div class="param-copy">
+                      <div class="param-label"><i data-lucide="panel-top-close"></i>切换标签页后停止观看</div>
+                      <div class="param-desc" id="desc-viewer-hidden-stop">页面隐藏后停止当前浏览器观看；到期前固定保留 60 秒提醒，可设置 5 至 10 分钟</div>
+                    </div>
+                    <div class="param-control viewer-stop-control">
+                      <label class="viewer-stop-check" for="chk-viewer-hidden-stop">
+                        <input type="checkbox" id="chk-viewer-hidden-stop" class="sg-switch-input" aria-describedby="desc-viewer-hidden-stop">
+                        <span>启用</span>
+                      </label>
+                      <input class="num-control" type="number" id="inp-viewer-hidden-stop" min="5" max="10" step="1" value="5" aria-label="切换标签页后停止观看时长">
+                      <span class="unit">分钟</span>
+                      <div class="param-field-error" id="err-viewer-hidden-stop"><i data-lucide="circle-alert"></i><span>时长需为 5 至 10 分钟的整数</span></div>
+                    </div>
+                  </div>
+                  <div class="param-row" id="row-viewer-blur-stop">
+                    <div class="param-copy">
+                      <div class="param-label"><i data-lucide="focus"></i>窗口失去焦点后停止观看</div>
+                      <div class="param-desc" id="desc-viewer-blur-stop">页面可见但窗口失去焦点后停止当前浏览器观看；默认关闭，避免系统弹窗等场景误停</div>
+                    </div>
+                    <div class="param-control viewer-stop-control">
+                      <label class="viewer-stop-check" for="chk-viewer-blur-stop">
+                        <input type="checkbox" id="chk-viewer-blur-stop" class="sg-switch-input" aria-describedby="desc-viewer-blur-stop">
+                        <span>启用</span>
+                      </label>
+                      <input class="num-control" type="number" id="inp-viewer-blur-stop" min="5" max="10" step="1" value="5" aria-label="窗口失去焦点后停止观看时长">
+                      <span class="unit">分钟</span>
+                      <span class="viewer-stop-follow" id="viewer-blur-stop-follow" hidden>跟随切换标签页</span>
+                      <div class="param-field-error" id="err-viewer-blur-stop"><i data-lucide="circle-alert"></i><span>时长需为 5 至 10 分钟的整数</span></div>
+                    </div>
+                  </div>
+                  <div class="param-row" id="row-viewer-stop-sync">
+                    <div class="param-copy">
+                      <div class="param-label"><i data-lucide="link-2"></i>同步两个停止设置</div>
+                      <div class="param-desc" id="desc-viewer-stop-sync">开启后以“切换标签页后停止观看”为主设置，同步两项的启用状态和时长；关闭后保留最后同步值</div>
+                    </div>
+                    <div class="param-control viewer-stop-control">
+                      <label class="viewer-stop-check" for="chk-viewer-stop-sync">
+                        <input type="checkbox" id="chk-viewer-stop-sync" class="sg-switch-input" aria-describedby="desc-viewer-stop-sync">
+                        <span>同步</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <div class="quality-dock">
+            <div class="quality-restart-bar" id="restart-bar" hidden>
+              <div class="restart-copy"><i data-lucide="rotate-cw"></i><span id="restart-copy-text">传输模式已变更，当前会话需要手动重启传输才能生效</span></div>
+              <div class="restart-actions">
+                <button class="q-btn q-btn-primary" id="btn-restart-now" type="button"><i data-lucide="zap"></i><span>立即重启</span></button>
+                <button class="q-btn" id="btn-restart-later" type="button">稍后手动处理</button>
+              </div>
+            </div>
+            <!-- 默认画质预设（原「当前生效」）放在待保存变更摘要卡片正上方：
+                 先看现在生效的是什么，再看这次改了什么，最后才是保存按钮。 -->
+            <div class="quality-overview" role="status" aria-live="polite">
+              <div class="active-config">
+                <div class="active-config-label"><i data-lucide="check-circle"></i>默认画质预设</div>
+                <div class="active-config-value" id="active-config-text">正在加载</div>
+              </div>
+            </div>
+            <div class="quality-actions">
+              <div class="change-box">
+                <div class="change-head"><i data-lucide="list-checks"></i>待保存变更摘要<span class="change-scope" id="change-scope" hidden></span><span class="change-count" id="change-count">0</span></div>
+                <div class="change-list" id="change-list" hidden></div>
+                <div class="change-empty" id="change-empty">暂无未保存的变更</div>
+              </div>
+              <div class="quality-actions-btns">
+                <button class="q-btn" id="btn-reset" type="button"><i data-lucide="rotate-ccw"></i>重置为默认设置</button>
+                <button class="q-btn q-btn-primary" id="btn-save" type="button"><i data-lucide="check"></i>保存设置</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="q-modal-mask" id="modal-preset-add" role="dialog" aria-modal="true" aria-labelledby="preset-add-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="preset-add-title">新增自定义预设</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <form class="q-modal-body" id="form-preset-add" novalidate>
+        <div class="q-field" id="qfield-add-name">
+          <label class="q-field-label" for="add-name">预设名称</label>
+          <input class="q-input" id="add-name" type="text" maxlength="20" placeholder="如：日常流畅">
+          <div class="q-field-error">请输入预设名称</div>
+        </div>
+        <div class="q-row-2">
+          <div class="q-field" id="qfield-add-fps">
+            <label class="q-field-label" for="add-fps">帧率 (fps)</label>
+            <input class="q-input" id="add-fps" type="number" min="15" max="240" step="1" value="60">
+            <div class="q-field-error">帧率需在 15-240 之间</div>
+          </div>
+          <div class="q-field" id="qfield-add-bitrate">
+            <label class="q-field-label" for="add-bitrate">码率 (Mbps)</label>
+            <input class="q-input" id="add-bitrate" type="number" min="0.5" max="10" step="0.5" value="8">
+            <div class="q-field-error">码率需在 0.5-10 之间</div>
+          </div>
+        </div>
+        <div class="q-field" id="qfield-add-res">
+          <label class="q-field-label" for="add-res">输出分辨率</label>
+          <select class="q-select" id="add-res">
+            <option value="1280x720">1280 × 720</option>
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="custom">自定义</option>
+          </select>
+          <div class="q-row-2" id="add-res-custom" hidden>
+            <div class="q-field" id="qfield-add-w">
+              <label class="q-field-label" for="add-w">宽度 (px)</label>
+              <input class="q-input" id="add-w" type="number" min="320" max="1920" step="1" value="1920">
+              <div class="q-field-error">宽度需在 320-1920 之间</div>
+            </div>
+            <div class="q-field" id="qfield-add-h">
+              <label class="q-field-label" for="add-h">高度 (px)</label>
+              <input class="q-input" id="add-h" type="number" min="240" max="1920" step="1" value="1080">
+              <div class="q-field-error">高度需在 240-1920 之间</div>
+            </div>
+          </div>
+          <div class="q-field-error" id="qfield-add-res-err">请选择或输入有效的分辨率</div>
+        </div>
+        <label class="q-check-row"><input type="checkbox" id="add-fullscreen-only"><span>仅用于全屏</span><small>开启后不会出现在普通投屏选择中</small></label>
+      </form>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-primary" type="button" id="btn-confirm-add"><i data-lucide="plus"></i>创建预设</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-preset-edit" role="dialog" aria-modal="true" aria-labelledby="preset-edit-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="preset-edit-title">编辑自定义预设</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <form class="q-modal-body" id="form-preset-edit" novalidate>
+        <div class="q-field" id="qfield-edit-name">
+          <label class="q-field-label" for="edit-name">预设名称</label>
+          <input class="q-input" id="edit-name" type="text" maxlength="20">
+          <div class="q-field-error">请输入预设名称</div>
+        </div>
+        <div class="q-row-2">
+          <div class="q-field" id="qfield-edit-fps">
+            <label class="q-field-label" for="edit-fps">帧率 (fps)</label>
+            <input class="q-input" id="edit-fps" type="number" min="15" max="240" step="1">
+            <div class="q-field-error">帧率需在 15-240 之间</div>
+          </div>
+          <div class="q-field" id="qfield-edit-bitrate">
+            <label class="q-field-label" for="edit-bitrate">码率 (Mbps)</label>
+            <input class="q-input" id="edit-bitrate" type="number" min="0.5" max="10" step="0.5">
+            <div class="q-field-error">码率需在 0.5-10 之间</div>
+          </div>
+        </div>
+        <div class="q-field" id="qfield-edit-res">
+          <label class="q-field-label" for="edit-res">输出分辨率</label>
+          <select class="q-select" id="edit-res">
+            <option value="1280x720">1280 × 720</option>
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="custom">自定义</option>
+          </select>
+          <div class="q-row-2" id="edit-res-custom" hidden>
+            <div class="q-field" id="qfield-edit-w">
+              <label class="q-field-label" for="edit-w">宽度 (px)</label>
+              <input class="q-input" id="edit-w" type="number" min="320" max="1920" step="1">
+              <div class="q-field-error">宽度需在 320-1920 之间</div>
+            </div>
+            <div class="q-field" id="qfield-edit-h">
+              <label class="q-field-label" for="edit-h">高度 (px)</label>
+              <input class="q-input" id="edit-h" type="number" min="240" max="1920" step="1">
+              <div class="q-field-error">高度需在 240-1920 之间</div>
+            </div>
+          </div>
+          <div class="q-field-error" id="qfield-edit-res-err">请选择或输入有效的分辨率</div>
+        </div>
+        <label class="q-check-row"><input type="checkbox" id="edit-fullscreen-only"><span>仅用于全屏</span><small>开启后不会出现在普通投屏选择中</small></label>
+      </form>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-primary" type="button" id="btn-confirm-edit"><i data-lucide="check"></i>保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-preset-del" role="dialog" aria-modal="true" aria-labelledby="preset-del-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="preset-del-title">删除自定义预设</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="q-modal-body">
+        <p class="q-modal-target" id="preset-del-target"></p>
+        <div class="q-modal-warn"><i data-lucide="triangle-alert"></i><span>删除后无法恢复，请确认是否继续？</span></div>
+      </div>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-danger" type="button" id="btn-confirm-del"><i data-lucide="trash-2"></i>确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-transport" role="dialog" aria-modal="true" aria-labelledby="transport-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="transport-title">切换传输模式</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="q-modal-body">
+        <p class="q-modal-target">切换传输模式将中断当前投屏会话并重新建立连接</p>
+        <div class="q-modal-warn"><i data-lucide="info"></i><span>确认后，系统将应用新的传输模式并提示手动重启传输。</span></div>
+      </div>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-primary" type="button" id="btn-confirm-transport"><i data-lucide="zap"></i>确认切换</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-reset" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="reset-title">重置为默认设置</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="q-modal-body">
+        <p class="q-modal-target">将从服务端重新加载默认配置为当前配置与保存基线，<b>未保存的修改将被丢弃</b>。</p>
+        <div class="q-modal-warn"><i data-lucide="triangle-alert"></i><span>此操作会覆盖当前表单中的全部参数。</span></div>
+      </div>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-danger" type="button" id="btn-confirm-reset"><i data-lucide="rotate-ccw"></i>确认重置</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-bandwidth" role="dialog" aria-modal="true" aria-labelledby="bandwidth-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="bandwidth-title">切换带宽档位</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="q-modal-body">
+        <p class="q-modal-target" id="bw-confirm-title">切换带宽档位</p>
+        <ul class="bw-confirm-list" id="bw-confirm-list"></ul>
+        <div class="q-modal-warn"><i data-lucide="triangle-alert"></i><span>保存后，服务端会按推荐值覆盖全部内置预设的码率、分辨率与帧率；自定义预设不受影响。</span></div>
+      </div>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>取消</button>
+        <button class="q-btn q-btn-primary" type="button" id="btn-confirm-bandwidth"><i data-lucide="check"></i>确认切换</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="q-modal-mask" id="modal-clients" role="dialog" aria-modal="true" aria-labelledby="clients-title">
+    <div class="q-modal">
+      <div class="q-modal-head"><h3 class="q-modal-title" id="clients-title">客户端队列与丢帧详情</h3><button class="q-modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="q-modal-body">
+        <p class="q-modal-target">当前会话各观看端的连接、队列与丢帧情况，约 3s 自动更新</p>
+        <div class="client-list" id="client-list"></div>
+        <div class="client-error-panel" id="client-error-panel" hidden>
+          <div class="client-error-head"><i data-lucide="triangle-alert"></i>异常客户端恢复</div>
+          <div class="client-error-item" id="client-error-item"></div>
+        </div>
+      </div>
+      <div class="q-modal-foot">
+        <button class="q-btn" type="button" data-close>关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-root" id="toast-root" aria-live="polite"></div>
+
+
+
+
+
+</body></html>

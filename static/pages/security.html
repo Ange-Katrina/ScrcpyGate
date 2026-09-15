@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>安全机制 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item active" href="/security" data-dom-id="admin-security-link" title="安全机制" aria-current="page"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>安全机制</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+
+          <div class="page-heading sec-head">
+            <div class="page-heading-copy">
+              <h1>安全机制</h1>
+              <p>登录爆破防护的开关、阈值与时长；用不到的部署可以整体关闭</p>
+            </div>
+          </div>
+
+          <p class="sec-hint">保存后立即生效；未自定义的项目沿用环境变量默认值。「停用」表示登录不再有任何限制（不计数、不要求人机验证、不封禁）。</p>
+
+          <div class="sec-layout">
+            <div class="sec-col">
+              <section class="panel sec-card" data-card="switch" aria-labelledby="sec-switch-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="sec-switch-title">总开关<span class="panel-subtitle" id="security-guard-summary">加载中…</span></h2>
+                </div>
+                <div class="guard-body">
+                  <div class="guard-row" data-field="enabled">
+                    <div class="guard-copy"><b>登录保护</b><span>失败计数、人机验证与封禁的总开关；关闭后登录不再有任何限制</span></div>
+                    <button type="button" class="guard-switch sg-switch" role="switch" aria-checked="true" id="security-guard-enabled" data-field="enabled" aria-label="登录保护"><i></i></button>
+                  </div>
+                  <div class="guard-row" data-field="captcha_enabled">
+                    <div class="guard-copy"><b>人机验证</b><span>失败后要求完成滑块 + 工作量证明；关闭则只保留失败计数与封禁</span></div>
+                    <button type="button" class="guard-switch sg-switch" role="switch" aria-checked="true" id="security-guard-captcha" data-field="captcha_enabled" aria-label="人机验证"><i></i></button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel sec-card" data-card="advanced" aria-labelledby="sec-advanced-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="sec-advanced-title">高级<span class="panel-subtitle">一般无需修改</span></h2>
+                </div>
+                <div class="guard-body">
+                  <div class="guard-row" data-field="captcha_ttl_seconds">
+                    <div class="guard-copy"><b>验证码有效期</b><span>签发的挑战在多少秒内有效</span></div>
+                    <div class="guard-field"><input type="number" min="10" max="3600" step="10" id="security-guard-captcha-ttl" data-field="captcha_ttl_seconds" aria-label="验证码有效期秒数"><span class="guard-unit">秒</span></div>
+                  </div>
+                  <div class="guard-row" data-field="captcha_issue_interval_seconds">
+                    <div class="guard-copy"><b>挑战签发间隔</b><span>同一 IP 两次签发挑战的最小间隔；设为 0 表示不限流</span></div>
+                    <div class="guard-field"><input type="number" min="0" max="60" step="1" id="security-guard-issue-interval" data-field="captcha_issue_interval_seconds" aria-label="挑战签发间隔秒数"><span class="guard-unit">秒</span></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div class="sec-col">
+              <section class="panel sec-card" data-card="limits" aria-labelledby="sec-limits-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="sec-limits-title">阈值与时长<span class="panel-subtitle">失败累计后触发验证与封禁</span></h2>
+                  <div class="guard-presets" role="group" aria-label="常用强度预设">
+                    <button type="button" class="guard-preset" data-preset="off" aria-pressed="false">停用</button>
+                    <button type="button" class="guard-preset" data-preset="lenient" aria-pressed="false">宽松</button>
+                    <button type="button" class="guard-preset" data-preset="standard" aria-pressed="false">标准</button>
+                    <button type="button" class="guard-preset" data-preset="strict" aria-pressed="false">严格</button>
+                  </div>
+                </div>
+                <div class="guard-body">
+                  <div class="guard-row" data-field="captcha_after_failures">
+                    <div class="guard-copy"><b>触发人机验证</b><span>连续失败多少次后开始要求验证码</span></div>
+                    <div class="guard-field"><input type="number" min="1" max="100" step="1" id="security-guard-captcha-after" data-field="captcha_after_failures" aria-label="触发人机验证的失败次数"><span class="guard-unit">次</span></div>
+                  </div>
+                  <div class="guard-row" data-field="lockout_threshold">
+                    <div class="guard-copy"><b>封禁阈值</b><span>统计窗口内失败多少次后暂时封禁来源 IP</span></div>
+                    <div class="guard-field"><input type="number" min="1" max="100" step="1" id="security-guard-lockout-threshold" data-field="lockout_threshold" aria-label="封禁阈值次数"><span class="guard-unit">次</span></div>
+                  </div>
+                  <div class="guard-row" data-field="failure_window_seconds">
+                    <div class="guard-copy"><b>统计窗口</b><span>失败次数在这个时间窗内累计</span></div>
+                    <div class="guard-field"><input type="number" min="1" max="1440" step="1" id="security-guard-window-minutes" data-field="failure_window_seconds" aria-label="统计窗口分钟数"><span class="guard-unit">分钟</span></div>
+                  </div>
+                  <div class="guard-row" data-field="lockout_seconds">
+                    <div class="guard-copy"><b>封禁时长</b><span>达到阈值后拒绝该 IP 登录的时长（期间正确密码也拒绝）</span></div>
+                    <div class="guard-field"><input type="number" min="1" max="1440" step="1" id="security-guard-lockout-minutes" data-field="lockout_seconds" aria-label="封禁时长分钟数"><span class="guard-unit">分钟</span></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel sec-card" data-card="locked" aria-labelledby="sec-locked-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="sec-locked-title">当前封禁<span class="panel-subtitle" id="security-locked-count">等待数据</span></h2>
+                </div>
+                <div class="guard-body">
+                  <ul class="guard-locked" id="security-locked-list" aria-label="当前封禁与失败计数">
+                    <li class="table-empty"><i data-lucide="shield"></i><span>等待数据</span></li>
+                  </ul>
+                </div>
+              </section>
+
+              <section class="panel sec-card" data-card="login-sessions" aria-labelledby="sec-login-sessions-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="sec-login-sessions-title">登录会话<span class="panel-subtitle" id="login-sessions-count">等待数据</span></h2>
+                </div>
+                <div class="guard-body">
+                  <p class="sec-hint">按会话结束登录：被踢出的浏览器立即失效（包括它正在投屏的页面）。列表只显示会话标识，不显示登录令牌。</p>
+                  <ul class="guard-locked" id="login-sessions-list" aria-label="登录会话列表">
+                    <li class="table-empty"><i data-lucide="users"></i><span>等待数据</span></li>
+                  </ul>
+                  <button class="guard-btn ghost" type="button" id="login-sessions-refresh">刷新</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <!-- 保存动作放到底部（Apple Copy：卡片动作在内容之后，而不是压在标题栏上），
+               状态文字跟着按钮走，未修改/已保存的反馈和保存按钮始终在同一行。 -->
+          <div class="sec-foot" role="group" aria-label="保存安全设置">
+            <span class="guard-status" id="security-guard-status" role="status" aria-live="polite">未修改</span>
+            <span class="sec-foot-spacer" aria-hidden="true"></span>
+            <button class="guard-btn ghost" type="button" id="security-guard-reset">恢复默认</button>
+            <button class="guard-btn primary" type="button" id="security-guard-save" disabled>保存</button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</body></html>

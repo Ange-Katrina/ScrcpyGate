@@ -1,0 +1,284 @@
+name: Builds
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: scrcpygate
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Audit runtime dependencies
+        run: pip-audit -r requirements.txt --progress-spinner off
+
+      - name: Compile Python files
+        run: python -m compileall -q app adb_manager.py scrcpy.py
+
+      - name: Run focused lint checks
+        run: python -m ruff check app adb_manager.py scrcpy.py
+
+      - name: Validate deployment files
+        run: |
+          sh -n deploy.sh
+          docker compose config --quiet
+
+      - name: Scan for credential-shaped values
+        run: |
+          pattern='-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|(ALAS_TOKEN|ALAS_GYRE_TOKEN|ALAS_GYRE_API_TOKEN|SESSION_SECRET|INITIAL_ADMIN_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+'
+          set +e
+          matches="$(grep -RIlE \
+            --exclude-dir=.git \
+            --exclude-dir=__pycache__ \
+            --exclude-dir=.pytest_cache \
+            --exclude-dir=.mypy_cache \
+            --exclude-dir=.ruff_cache \
+            -- "$pattern" .)"
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then
+            echo "Credential scan failed to execute."
+            exit "$status"
+          fi
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches"
+            echo "Credential-shaped value found; matched contents are intentionally hidden."
+            exit 1
+          fi
+
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-24.04
+    needs: checks
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Prepare image metadata
+        env:
+          BUILD_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          BUILD_REF_TYPE: ${{ github.ref_type }}
+          BUILD_REF_NAME: ${{ github.ref_name }}
+          BUILD_EVENT_NAME: ${{ github.event_name }}
+          BUILD_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          OWNER_LOWER="$(printf '%s' "$BUILD_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REPO="ghcr.io/${OWNER_LOWER}/${{ env.IMAGE_NAME }}"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+
+          if [ "$BUILD_REF_TYPE" = "tag" ]; then
+            VERSION="$BUILD_REF_NAME"
+          elif [ "$BUILD_EVENT_NAME" = "pull_request" ]; then
+            VERSION="pr-${BUILD_PR_NUMBER}-${SHORT_SHA}"
+          else
+            BRANCH="$(printf '%s' "$BUILD_REF_NAME" | tr '/_' '--' | tr -cd '[:alnum:].-')"
+            VERSION="${BRANCH}-${SHORT_SHA}"
+          fi
+
+          {
+            echo "IMAGE_REPO=${IMAGE_REPO}"
+            echo "VERSION=${VERSION}"
+            echo "TAGS<<EOF"
+            echo "${IMAGE_REPO}:${VERSION}"
+            if [ "$BUILD_REF_TYPE" = "tag" ] && printf '%s' "$BUILD_REF_NAME" | grep -Eq '^v'; then
+              echo "${IMAGE_REPO}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        # 跨架构构建 arm64 需要 binfmt 注册（GitHub amd64 runner 默认没有）。
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: ./Dockerfile
+          # PR 只建 amd64：docker exporter 不支持多架构 manifest，而下面要 load 进 runner
+          # 跑 smoke-run。推送时才出 amd64+arm64 多架构镜像。
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          # PR 上把镜像 load 进 runner 的 docker，否则下面的 smoke-run 找不到镜像。
+          load: ${{ github.event_name == 'pull_request' }}
+          # 供应链可追溯性：只在真正推送时生成证明/SBOM（PR 构建没有 registry 输出）。
+          provenance: ${{ github.event_name != 'pull_request' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-run the built image
+        # 只有本机 docker 才能验证「镜像起得来 + /healthz 真的 200」；
+        # 之前 CI 只 build 不 run，Dockerfile/entrypoint 回归要等部署才发现。
+        # PR 用本地 load 进来的 tag（多架构 manifest 不能 load）；push 到分支/标签时镜像
+        # 已经推进 GHCR，就直接按刚得到的 digest 拉下来试跑 —— 否则一个起不来的镜像会被
+        # 悄悄发布出去（这一步同时也是「多架构 manifest 真的可拉取」的验证）。
+        env:
+          SMOKE_IMAGE_REF: ${{ github.event_name == 'pull_request' && format('{0}:{1}', env.IMAGE_REPO, env.VERSION) || format('{0}@{1}', env.IMAGE_REPO, steps.build.outputs.digest) }}
+        run: |
+          docker run --rm -d --name scrcpygate-smoke \
+            -e SESSION_COOKIE_SECURE=false \
+            -e ENABLE_API_DOCS=false \
+            -e ALLOWED_HOSTS=127.0.0.1,localhost \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:15077 \
+            -p 15077:5000 "$SMOKE_IMAGE_REF"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:15077/healthz >/dev/null; then
+              echo "healthz OK"
+              docker rm -f scrcpygate-smoke >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "image did not become healthy; container logs:"
+          docker logs scrcpygate-smoke || true
+          docker rm -f scrcpygate-smoke >/dev/null || true
+          exit 1
+
+      - name: Set up Trivy
+        # 不用 aquasecurity/trivy-action：它是复合动作，内部写死 `setup-trivy@v0.2.2`，
+        # 而该 tag 已被上游删除 → 整个作业在 GitHub 的 "Set up job" 阶段就失败
+        # （Unable to resolve action 'aquasecurity/setup-trivy@v0.2.2'）。
+        # 现在自己 pin setup-trivy（它的内部引用全是 SHA，不会再被移动/删除的 tag 影响），
+        # 然后直接跑 trivy CLI。
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
+        with:
+          version: v0.74.0
+
+      - name: Scan the image for OS vulnerabilities
+        # 分界线：Python 依赖由上面的 pip-audit 管，这里只管镜像里 apk 装的 OS 包
+        # （android-tools / curl / openssl…）。只拦「有修复版本的 CRITICAL」，
+        # 基线干净后可以把 severity 提到 HIGH,CRITICAL。
+        env:
+          # 推送后镜像是私有的 GHCR 包，trivy 用同一份凭据拉取。
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          TRIVY_IMAGE_REF: ${{ github.event_name == 'pull_request' && format('{0}:{1}', env.IMAGE_REPO, env.VERSION) || format('{0}@{1}', env.IMAGE_REPO, steps.build.outputs.digest) }}
+        run: |
+          trivy image \
+            --scanners vuln \
+            --vuln-type os \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --no-progress \
+            --format table \
+            "$TRIVY_IMAGE_REF"
+
+      - name: Build summary
+        if: always()
+        env:
+          SUMMARY_EVENT_NAME: ${{ github.event_name }}
+          SUMMARY_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "## ScrcpyGate Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: ${{ env.IMAGE_REPO }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ env.VERSION }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Digest: ${SUMMARY_DIGEST:-（PR 未推送）}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Event: $SUMMARY_EVENT_NAME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SUMMARY_EVENT_NAME" = "pull_request" ]; then
+            echo "- Push: skipped for pull request" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Push: GHCR" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: Deploy release to the target host
+    runs-on: ubuntu-24.04
+    needs: docker
+    # 只在 v* 标签上发布；目标机用仓库变量配置，SSH 私钥走 secret。
+    if: >-
+      github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/v')
+      && vars.SCRCPYGATE_DEPLOY_HOST != ''
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Deploy by digest over SSH
+        # 目标机上跑 tools/deploy_release.sh：写 SCRCPYGATE_IMAGE=<repo>@<digest> → 拉取 →
+        # 重建 → 健康门；不健康就自动回滚到上一版并按退出码 2 让这次发布失败。
+        env:
+          DEPLOY_HOST: ${{ vars.SCRCPYGATE_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.SCRCPYGATE_DEPLOY_USER }}
+          DEPLOY_DIR: ${{ vars.SCRCPYGATE_DEPLOY_DIR }}
+          HEALTH_URL: ${{ vars.SCRCPYGATE_DEPLOY_HEALTH_URL }}
+          DEPLOY_SSH_KEY: ${{ secrets.SCRCPYGATE_DEPLOY_SSH_KEY }}
+          IMAGE_REF: ${{ format('{0}@{1}', env.IMAGE_REPO, needs.docker.outputs.digest) }}
+        run: |
+          set -eu
+          : "${DEPLOY_USER:=root}"
+          : "${DEPLOY_DIR:=/root/web-scrcpy-fastapi-v2-deploy}"
+          : "${HEALTH_URL:=http://127.0.0.1:5000/healthz}"
+          [ -n "${DEPLOY_SSH_KEY:-}" ] || { echo "缺少 secret SCRCPYGATE_DEPLOY_SSH_KEY"; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          scp -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            tools/deploy_release.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/deploy_release.sh"
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sh /tmp/deploy_release.sh --image '$IMAGE_REF' --compose-dir '$DEPLOY_DIR' --health-url '$HEALTH_URL'"
+          echo "已部署 $IMAGE_REF"

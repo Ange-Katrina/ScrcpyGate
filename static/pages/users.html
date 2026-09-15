@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>用户与权限 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item active" href="/users" data-dom-id="admin-users-link" title="用户与权限" aria-current="page"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>用户与权限</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+          <div class="page-heading">
+            <h1>用户与权限</h1>
+            <p>用户、角色、设备与 ALAS 权限管理</p>
+          </div>
+
+          <div class="main-col">
+            <section class="panel" id="users-toolbar-panel" aria-label="用户筛选工具栏">
+              <div class="users-toolbar">
+                <label class="toolbar-search"><i data-lucide="search"></i><input type="search" id="users-search" placeholder="搜索用户名" aria-label="搜索用户名"></label>
+                <span class="select-wrap"><select id="users-role-filter" aria-label="按角色筛选"><option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option></select><i data-lucide="chevron-down"></i></span>
+                <span class="select-wrap"><select id="users-status-filter" aria-label="按账户状态筛选"><option value="all">全部状态</option><option value="normal">正常</option><option value="expiring">即将到期</option><option value="expired">已到期</option><option value="disabled">已停用</option></select><i data-lucide="chevron-down"></i></span>
+                <div class="toolbar-spacer"></div>
+                <button class="btn-primary-lg" type="button" id="add-user-btn"><i data-lucide="plus"></i>新增用户</button>
+              </div>
+            </section>
+
+            <section class="panel account-policy" id="account-policy-panel" aria-labelledby="account-policy-title">
+              <div class="panel-header">
+                <h2 class="panel-title" id="account-policy-title">账户到期策略<span class="panel-subtitle">即将到期的判定与到期后的自动处理</span></h2>
+                <span class="page-info" id="account-policy-state">读取中…</span>
+              </div>
+              <div class="account-policy-grid">
+                <div class="policy-field">
+                  <label class="field-label" for="account-policy-reminder">到期提醒提前天数</label>
+                  <input class="field-input" id="account-policy-reminder" type="number" min="0" max="90" step="1" inputmode="numeric" aria-describedby="account-policy-reminder-hint">
+                  <span class="policy-hint" id="account-policy-reminder-hint">列表与仪表盘在这段时间内标记为「即将到期」，0 表示不提前提醒。</span>
+                </div>
+                <div class="policy-field">
+                  <label class="policy-switch-row" for="account-policy-stop">
+                    <input type="checkbox" id="account-policy-stop">
+                    <span class="policy-switch-label">账户到期后自动停止其 ALAS 配置</span>
+                  </label>
+                  <span class="policy-hint">开启后：账户到期（会话与控制锁被回收）时，其仍能运行的 ALAS 配置会被自动停止。</span>
+                </div>
+                <div class="policy-actions">
+                  <button class="btn-primary" type="button" id="account-policy-save"><i data-lucide="save"></i><span>保存策略</span></button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel" id="users" aria-labelledby="users-title">
+              <div class="panel-header">
+                <h2 class="panel-title" id="users-title">用户列表<span class="panel-subtitle" id="users-subtitle">等待数据</span></h2>
+              </div>
+              <div class="user-table-wrap">
+                <table class="user-table">
+                  <thead>
+                    <tr><th style="width:15%">用户</th><th style="width:8%">角色</th><th style="width:9%">账户状态</th><th style="width:13%">到期时间 / 剩余</th><th style="width:9%">设备权限</th><th style="width:9%">ALAS 配置</th><th style="width:13%">观看时长 / 最近</th><th style="width:11%">上次登录</th><th style="width:8%">登录 IP</th><th style="width:20%;text-align:right">操作</th></tr>
+                  </thead>
+                  <tbody id="users-tbody">
+                    <tr aria-hidden="true"><td><div class="user-cell"><span class="sk avatar"></span><div style="min-width:0;flex:1"><span class="sk line" style="width:110px;height:12px"></span><span class="sk line" style="width:76px;height:9px;margin-top:6px"></span></div></div></td><td><span class="sk chip"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:70px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span></div></td></tr>
+                    <tr aria-hidden="true"><td><div class="user-cell"><span class="sk avatar"></span><div style="min-width:0;flex:1"><span class="sk line" style="width:110px;height:12px"></span><span class="sk line" style="width:76px;height:9px;margin-top:6px"></span></div></div></td><td><span class="sk chip"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:70px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span></div></td></tr>
+                    <tr aria-hidden="true"><td><div class="user-cell"><span class="sk avatar"></span><div style="min-width:0;flex:1"><span class="sk line" style="width:110px;height:12px"></span><span class="sk line" style="width:76px;height:9px;margin-top:6px"></span></div></div></td><td><span class="sk chip"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:70px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span></div></td></tr>
+                    <tr aria-hidden="true"><td><div class="user-cell"><span class="sk avatar"></span><div style="min-width:0;flex:1"><span class="sk line" style="width:110px;height:12px"></span><span class="sk line" style="width:76px;height:9px;margin-top:6px"></span></div></div></td><td><span class="sk chip"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:70px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span></div></td></tr>
+                    <tr aria-hidden="true"><td><div class="user-cell"><span class="sk avatar"></span><div style="min-width:0;flex:1"><span class="sk line" style="width:110px;height:12px"></span><span class="sk line" style="width:76px;height:9px;margin-top:6px"></span></div></div></td><td><span class="sk chip"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:70px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><span class="sk line" style="width:56px;height:12px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span><span class="sk chip" style="width:42px"></span></div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="users-footer">
+                <span class="page-info" id="users-count">等待数据 · 每页 5 条</span>
+                <div class="pager" id="users-pager" role="navigation" aria-label="分页"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== 新增用户弹窗 ===== -->
+  <div class="modal-mask" id="modal-add-user" role="dialog" aria-modal="true" aria-labelledby="add-title">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head"><h3 class="modal-title" id="add-title">新增用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <form class="modal-body" id="add-form" novalidate>
+        <div class="field" id="f-add-username">
+          <label class="field-label" for="add-username"><b>用户名</b></label>
+          <input class="field-input" id="add-username" type="text" placeholder="输入用户名" autocomplete="off">
+          <div class="field-error" id="er-add-username"></div>
+        </div>
+        <div class="field" id="f-add-password">
+          <label class="field-label" for="add-password"><b>初始密码</b></label>
+          <input class="field-input" id="add-password" type="password" placeholder="至少 12 位" autocomplete="new-password">
+          <div class="field-error" id="er-add-password"></div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="add-role">角色</label>
+          <select class="field-select" id="add-role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <div class="field expiry-editor" id="f-add-expiry">
+          <label class="field-label" for="add-expiry"><b>到期时间</b></label>
+          <input class="field-input" id="add-expiry" type="date">
+          <label class="field-check expiry-permanent"><input type="checkbox" id="add-permanent">永久有效（不设置到期时间）</label>
+          <div class="expiry-quick" aria-label="快速设置到期时间"><button type="button" class="btn-ghost" data-expiry-days="1">+1 天</button><button type="button" class="btn-ghost" data-expiry-days="7">+7 天</button><button type="button" class="btn-ghost" data-expiry-days="30">+30 天</button><button type="button" class="btn-ghost" data-expiry-days="90">+90 天</button><button type="button" class="btn-ghost" data-expiry-days="180">+180 天</button><button type="button" class="btn-ghost" data-expiry-days="365">+365 天</button><span class="expiry-custom"><span class="expiry-custom-field"><span class="expiry-custom-affix" aria-hidden="true">+</span><input class="expiry-custom-input" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="自定义天数" aria-label="自定义增加天数"></span><button type="button" class="expiry-custom-add">添加</button></span></div>
+          <p class="expiry-delta" id="add-expiry-delta" role="status" aria-live="polite"></p>
+          <div class="field-error" id="er-add-expiry"></div>
+        </div>
+        <label class="field-check"><input type="checkbox" id="add-force">强制下次登录修改密码</label>
+        <section class="add-permissions" aria-labelledby="add-permissions-title">
+          <div class="add-permissions-head">
+            <div><h4 id="add-permissions-title">初始权限</h4><p>可以留空，创建后仍可在权限管理中补充。</p></div>
+            <span class="optional-chip">可选</span>
+          </div>
+          <div class="perm-note" id="add-admin-permissions" hidden><i data-lucide="shield"></i><span>管理员自动拥有全部设备与 ALAS 权限，无需单独设置。</span></div>
+          <div id="add-user-permissions">
+            <div class="add-permission-group">
+              <div class="add-permission-title"><span><i data-lucide="smartphone"></i>设备权限</span><small id="add-device-count">已选择 0 台</small></div>
+              <div class="add-device-list" id="add-device-list"></div>
+            </div>
+            <details class="add-alas-details" id="add-alas-details">
+              <summary><span><i data-lucide="bot"></i>同时关联 ALAS</span><small id="add-alas-summary">未关联</small><i data-lucide="chevron-down"></i></summary>
+              <div class="add-alas-fields">
+                <label class="field" for="add-alas-config"><span class="field-label">Runtime 配置</span><select class="field-select" id="add-alas-config"><option value="">不关联</option></select></label>
+                <label class="field" for="add-alas-device"><span class="field-label">关联设备</span><select class="field-select" id="add-alas-device" disabled><option value="">先选择可观看设备</option></select></label>
+              </div>
+              <p class="add-alas-hint">关联后默认允许运行与编辑；ALAS 必须绑定到该用户可观看的设备。</p>
+              <div class="field-error add-permission-error" id="er-add-permissions"></div>
+            </details>
+          </div>
+        </section>
+      </form>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary-lg" type="button" id="add-save"><i data-lucide="plus"></i>创建用户</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 编辑用户弹窗 ===== -->
+  <div class="modal-mask" id="modal-edit-user" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div class="modal-card">
+      <div class="modal-head"><h3 class="modal-title" id="edit-title">编辑用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <form class="modal-body" id="edit-form" novalidate>
+        <div class="field"><label class="field-label"><b>用户名</b></label><div class="field-readonly" id="edit-username">—</div></div>
+        <div class="field">
+          <label class="field-label" for="edit-role">角色</label>
+          <select class="field-select" id="edit-role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <div class="hint-warn" id="edit-role-hint" style="display:none"><i data-lucide="alert-circle"></i><span>管理员将获得全部设备与 ALAS 权限</span></div>
+        <div class="field expiry-editor" id="f-edit-expiry">
+          <label class="field-label" for="edit-expiry"><b>到期时间</b></label>
+          <input class="field-input" id="edit-expiry" type="date">
+          <label class="field-check expiry-permanent"><input type="checkbox" id="edit-permanent">永久有效（不设置到期时间）</label>
+          <div class="expiry-quick" aria-label="快速设置到期时间"><button type="button" class="btn-ghost" data-expiry-days="1">+1 天</button><button type="button" class="btn-ghost" data-expiry-days="7">+7 天</button><button type="button" class="btn-ghost" data-expiry-days="30">+30 天</button><button type="button" class="btn-ghost" data-expiry-days="90">+90 天</button><button type="button" class="btn-ghost" data-expiry-days="180">+180 天</button><button type="button" class="btn-ghost" data-expiry-days="365">+365 天</button><span class="expiry-custom"><span class="expiry-custom-field"><span class="expiry-custom-affix" aria-hidden="true">+</span><input class="expiry-custom-input" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="自定义天数" aria-label="自定义增加天数"></span><button type="button" class="expiry-custom-add">添加</button></span></div>
+          <p class="expiry-delta" id="edit-expiry-delta" role="status" aria-live="polite"></p>
+          <div class="field-error" id="er-edit-expiry"></div>
+        </div>
+        <label class="permission-switch account-state-switch"><span>账户状态</span><input type="checkbox" id="edit-enabled"><span class="permission-track"></span><strong id="edit-enabled-label">已启用</strong></label>
+      </form>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary-lg" type="button" id="edit-save"><i data-lucide="check"></i>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 删除用户确认弹窗 ===== -->
+  <div class="modal-mask" id="modal-delete-user" role="dialog" aria-modal="true" aria-labelledby="del-title">
+    <div class="modal-card">
+      <div class="modal-head"><h3 class="modal-title" id="del-title">删除用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="modal-body">
+        <p class="delete-target">即将删除用户 <b id="del-user-name"></b></p>
+        <div class="delete-warn">删除后该用户将无法登录，此操作不可撤销</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-danger-lg" type="button" id="del-confirm"><i data-lucide="trash-2"></i>确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 重置密码弹窗 ===== -->
+  <div class="modal-mask" id="modal-reset-password" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+    <div class="modal-card">
+      <div class="modal-head"><h3 class="modal-title" id="reset-title">重置密码</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <form class="modal-body" id="reset-form" novalidate>
+        <div class="field" id="f-reset-password">
+          <label class="field-label" for="reset-password"><b>新密码</b></label>
+          <input class="field-input" id="reset-password" type="password" placeholder="至少 12 位" autocomplete="new-password">
+          <div class="field-error" id="er-reset-password"></div>
+        </div>
+        <label class="field-check"><input type="checkbox" id="reset-force">强制用户下次登录修改密码</label>
+      </form>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary-lg" type="button" id="reset-save"><i data-lucide="check"></i>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 设备选择弹窗（添加设备权限） ===== -->
+  <div class="modal-mask" id="modal-device-picker" role="dialog" aria-modal="true" aria-labelledby="picker-dev-title">
+    <div class="modal-card">
+      <div class="modal-head"><h3 class="modal-title" id="picker-dev-title">添加设备权限</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="modal-body">
+        <div class="pick-list" id="device-pick-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary-lg" type="button" id="device-pick-confirm"><i data-lucide="plus"></i>确定添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ALAS 配置选择弹窗（添加配置权限） ===== -->
+  <div class="modal-mask" id="modal-config-picker" role="dialog" aria-modal="true" aria-labelledby="picker-cfg-title">
+    <div class="modal-card">
+      <div class="modal-head"><h3 class="modal-title" id="picker-cfg-title">添加 ALAS 配置权限</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="modal-body">
+        <div class="pick-list" id="config-pick-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary-lg" type="button" id="config-pick-confirm"><i data-lucide="plus"></i>确定添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 权限管理抽屉 ===== -->
+  <div class="drawer-mask" id="drawer-mask"></div>
+  <div class="perm-drawer" id="perm-drawer" role="dialog" aria-modal="true" aria-labelledby="perm-drawer-title">
+    <div class="drawer-head">
+      <h3 class="drawer-title" id="perm-drawer-title">权限管理</h3>
+      <button class="modal-close" type="button" id="perm-close" aria-label="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="drawer-body" id="perm-body">
+      <div class="perm-user-head">
+        <span class="perm-avatar" id="perm-avatar">?</span>
+        <div class="perm-user-copy">
+          <b id="perm-name">—</b>
+          <span id="perm-handle">@—</span>
+          <span class="role-chip user" id="perm-role">普通用户</span>
+        </div>
+      </div>
+      <section class="perm-section">
+        <div class="perm-section-head">
+          <h4 class="perm-section-title"><i data-lucide="smartphone"></i>已绑定设备<span class="perm-count" id="perm-device-count">0</span></h4>
+          <div class="perm-section-actions" id="perm-device-actions"></div>
+        </div>
+        <div id="perm-device-batch"></div>
+        <div class="perm-list" id="perm-devices"></div>
+      </section>
+      <section class="perm-section">
+        <div class="perm-section-head">
+          <h4 class="perm-section-title"><i data-lucide="bot"></i>ALAS 配置权限<span class="perm-count" id="perm-cfg-count">0</span></h4>
+          <div class="perm-section-actions" id="perm-cfg-actions"></div>
+        </div>
+        <div class="perm-list" id="perm-configs"></div>
+      </section>
+      <section class="perm-section watch-history-section">
+        <div class="perm-section-head">
+          <h4 class="perm-section-title"><i data-lucide="clock-3"></i>观看记录<span class="perm-count" id="watch-session-count">0</span></h4>
+          <span class="watch-total" id="watch-total">总时长 0 秒</span>
+        </div>
+        <div class="watch-history-list" id="watch-history-list"></div>
+      </section>
+      <section class="perm-section">
+        <div class="change-box">
+          <div class="change-head">权限变更摘要</div>
+          <div class="change-list" id="perm-changes"></div>
+          <div class="change-empty" id="perm-changes-empty">暂无待保存的变更</div>
+        </div>
+      </section>
+    </div>
+    <div class="drawer-foot">
+      <span class="drawer-foot-left">变更在点击「保存」后生效</span>
+      <div class="drawer-foot-actions">
+        <button class="btn-ghost" type="button" id="perm-cancel">取消</button>
+        <button class="btn-primary-lg" type="button" id="perm-save"><i data-lucide="check"></i>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-root" id="toast-root" aria-live="polite"></div>
+
+
+
+
+
+</body></html>

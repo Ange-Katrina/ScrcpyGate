@@ -1,0 +1,312 @@
+name: Upstream Canary
+
+# 上游 scrcpy 发新版时的监测 + canary 镜像流水线。
+#
+# 背景：ScrcpyGate 把 Android 侧 `scrcpy-server` 直接打进镜像（见 THIRD_PARTY.md），
+# 而控制消息布局是按 scrcpy 3.1 固定的（触控/滚屏/重置视频）。所以上游发新版时
+# **不能**直接把它当成正式镜像推 `latest` —— 那样等于把一个没人验证过的二进制
+# 发给所有部署。这条流水线只做两件事：
+#   1. 每周检查上游最新 release，和仓库内置版本比对；
+#   2. 上游更新时，用官方资产 `scrcpy-server-v<版本>`（按上游 SHA256SUMS.txt 校验）
+#      构建 canary 镜像并推 `scrcpy-<版本>-canary` / `canary` / `sha-<短sha>`，
+#      然后在仓库里开/更新一个 issue 提醒人工验证。**`latest` 与正式版本标签一动不动。**
+#
+# 人工验证通过后，维护者替换仓库里的 `scrcpy-server`、更新 THIRD_PARTY.md 的
+# Version/SHA-256，正式镜像由既有的 Builds.yml 按 `v*` 标签发布。
+
+on:
+  schedule:
+    # 每周一 02:00 UTC（北京时间 10:00）
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      scrcpy_version:
+        description: "要出 canary 的上游版本号（留空 = 上游最新；例如 3.2）"
+        required: false
+        default: ""
+      force:
+        description: "即使该 canary 标签已存在也重新构建"
+        type: boolean
+        default: false
+  push:
+    # 只看这条工作流自己的改动：改完立刻自测一次「检测 + 跳过」路径。
+    paths:
+      - ".github/workflows/Upstream-Canary.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-canary
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: scrcpygate
+  UPSTREAM_REPO: Genymobile/scrcpy
+
+jobs:
+  canary:
+    name: Upstream canary image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+      issues: write
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+      target: ${{ steps.decide.outputs.target }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Resolve bundled and upstream versions
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_VERSION: ${{ inputs.scrcpy_version }}
+        run: |
+          set -eu
+
+          # 仓库内置版本 + 记录里的哈希：两者必须一致，否则说明有人换了二进制没改文档。
+          BUNDLED="$(sed -n '/^## scrcpy-server$/,/^## /p' THIRD_PARTY.md \
+            | sed -n 's/^- Version: `v\{0,1\}\([0-9][0-9.]*\)`.*/\1/p' | head -1)"
+          DOCUMENTED_SHA="$(sed -n '/^## scrcpy-server$/,/^## /p' THIRD_PARTY.md \
+            | sed -n 's/^- SHA-256: `\([0-9a-f]\{64\}\)`.*/\1/p' | head -1)"
+          [ -n "$BUNDLED" ] || { echo "无法从 THIRD_PARTY.md 解析内置 scrcpy-server 版本"; exit 1; }
+          [ -n "$DOCUMENTED_SHA" ] || { echo "无法从 THIRD_PARTY.md 解析内置 scrcpy-server 哈希"; exit 1; }
+          ACTUAL_SHA="$(sha256sum scrcpy-server | awk '{print $1}')"
+          if [ "$ACTUAL_SHA" != "$DOCUMENTED_SHA" ]; then
+            echo "仓库里的 scrcpy-server 与 THIRD_PARTY.md 记录的哈希不一致"
+            echo "  文档: $DOCUMENTED_SHA"
+            echo "  实际: $ACTUAL_SHA"
+            exit 1
+          fi
+
+          UPSTREAM="$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest" \
+            | jq -r '.tag_name' | sed 's/^v//')"
+          [ -n "$UPSTREAM" ] || { echo "无法获取上游最新版本"; exit 1; }
+
+          TARGET="${REQUESTED_VERSION:-$UPSTREAM}"
+          TARGET="${TARGET#v}"
+
+          # sort -V：TARGET 比 BUNDLED 新才算「上游有更新」。
+          NEWEST="$(printf '%s\n%s\n' "$BUNDLED" "$TARGET" | sort -V | tail -1)"
+          if [ "$TARGET" = "$BUNDLED" ]; then
+            ACTION="up-to-date"
+          elif [ "$NEWEST" = "$TARGET" ]; then
+            ACTION="canary"
+          else
+            ACTION="older"
+          fi
+
+          echo "内置版本: v$BUNDLED  上游最新: v$UPSTREAM  目标: v$TARGET  判定: $ACTION"
+          {
+            echo "bundled=$BUNDLED"
+            echo "upstream=$UPSTREAM"
+            echo "target=$TARGET"
+            echo "action=$ACTION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report nothing to do
+        if: steps.decide.outputs.action != 'canary'
+        env:
+          ACTION: ${{ steps.decide.outputs.action }}
+        run: |
+          {
+            echo "## Upstream Canary"
+            echo ""
+            if [ "$ACTION" = "up-to-date" ]; then
+              echo "仓库内置 scrcpy-server v${{ steps.decide.outputs.bundled }} 已经是上游最新版本，无需 canary。"
+            else
+              echo "请求的目标版本 v${{ steps.decide.outputs.target }} 不高于内置的 v${{ steps.decide.outputs.bundled }}，跳过。"
+            fi
+            echo ""
+            echo "正式镜像仍由 Builds.yml 在 \`v*\` 标签上发布。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare image metadata
+        if: steps.decide.outputs.action == 'canary'
+        id: meta
+        env:
+          BUILD_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          TARGET: ${{ steps.decide.outputs.target }}
+        run: |
+          OWNER_LOWER="$(printf '%s' "$BUILD_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REPO="ghcr.io/${OWNER_LOWER}/${{ env.IMAGE_NAME }}"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          {
+            echo "IMAGE_REPO=${IMAGE_REPO}"
+            echo "SHORT_SHA=${SHORT_SHA}"
+            echo "TAGS<<EOF"
+            echo "${IMAGE_REPO}:scrcpy-${TARGET}-canary"
+            echo "${IMAGE_REPO}:canary"
+            echo "${IMAGE_REPO}:sha-${SHORT_SHA}"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        if: steps.decide.outputs.action == 'canary'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+
+      - name: Set up Docker Buildx
+        if: steps.decide.outputs.action == 'canary'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Login to GHCR
+        if: steps.decide.outputs.action == 'canary'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether the canary tag already exists
+        if: steps.decide.outputs.action == 'canary'
+        id: exists
+        env:
+          FORCE: ${{ inputs.force }}
+          TARGET: ${{ steps.decide.outputs.target }}
+        run: |
+          set -eu
+          EXISTS="false"
+          if docker buildx imagetools inspect "${IMAGE_REPO}:scrcpy-${TARGET}-canary" >/dev/null 2>&1; then
+            EXISTS="true"
+          fi
+          if [ "$EXISTS" = "true" ] && [ "$FORCE" != "true" ]; then
+            echo "canary 标签已存在，跳过构建（需要重建请手动触发并勾选 force）"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "exists=${EXISTS} force=${FORCE:-false}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch and verify the upstream server asset
+        if: steps.decide.outputs.action == 'canary' && steps.exists.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ steps.decide.outputs.target }}
+        run: |
+          set -eu
+          ASSET="scrcpy-server-v${TARGET}"
+          BASE="https://github.com/${UPSTREAM_REPO}/releases/download/v${TARGET}"
+          curl -fsSL -o "/tmp/${ASSET}" "${BASE}/${ASSET}"
+          curl -fsSL -o /tmp/SHA256SUMS.txt "${BASE}/SHA256SUMS.txt"
+
+          # 用上游自己的 SHA256SUMS.txt 校验下载物，避免拿到被替换的资产。
+          EXPECTED="$(awk -v name="${ASSET}" '$2 == name || $2 == "*"name {print $1}' /tmp/SHA256SUMS.txt | head -1)"
+          [ -n "$EXPECTED" ] || { echo "SHA256SUMS.txt 里没有 ${ASSET}"; cat /tmp/SHA256SUMS.txt; exit 1; }
+          ACTUAL="$(sha256sum "/tmp/${ASSET}" | awk '{print $1}')"
+          [ "$EXPECTED" = "$ACTUAL" ] || { echo "校验失败: 期望 $EXPECTED 实际 $ACTUAL"; exit 1; }
+          echo "上游资产校验通过: ${ASSET} ${ACTUAL}"
+
+          cp "/tmp/${ASSET}" scrcpy-server
+          chmod 0644 scrcpy-server
+          ls -l scrcpy-server
+
+      - name: Build and push canary image
+        if: steps.decide.outputs.action == 'canary' && steps.exists.outputs.skip != 'true'
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ env.TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-run the canary image
+        # 新 server 能不能起来是唯一能自动判定的事；投屏/控制行为必须人工验证。
+        if: steps.decide.outputs.action == 'canary' && steps.exists.outputs.skip != 'true'
+        env:
+          SMOKE_IMAGE_REF: ${{ format('{0}@{1}', env.IMAGE_REPO, steps.build.outputs.digest) }}
+        run: |
+          docker run --rm -d --name scrcpygate-canary-smoke \
+            -e SESSION_COOKIE_SECURE=false \
+            -e ENABLE_API_DOCS=false \
+            -e ALLOWED_HOSTS=127.0.0.1,localhost \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:15078 \
+            -p 15078:5000 "$SMOKE_IMAGE_REF"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:15078/healthz >/dev/null; then
+              echo "canary healthz OK"
+              docker rm -f scrcpygate-canary-smoke >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "canary 镜像没能在 60s 内变健康；容器日志："
+          docker logs scrcpygate-canary-smoke || true
+          docker rm -f scrcpygate-canary-smoke >/dev/null || true
+          exit 1
+
+      - name: Open or refresh the verification issue
+        if: steps.decide.outputs.action == 'canary' && steps.exists.outputs.skip != 'true'
+        # 仓库没开 Issues 时不要让整条流水线失败：镜像已经推上去了，摘要里也有同样信息。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ steps.decide.outputs.target }}
+          BUNDLED: ${{ steps.decide.outputs.bundled }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          TITLE="上游 scrcpy v${TARGET} 已发布：canary 镜像待人工验证"
+          BODY="$(cat <<EOF
+          流水线发现上游 scrcpy v${TARGET} 比仓库内置的 v${BUNDLED} 新，已构建 canary 镜像：
+
+          - \`${IMAGE_REPO}:scrcpy-${TARGET}-canary\`
+          - \`${IMAGE_REPO}:canary\`
+          - digest: \`${DIGEST}\`
+
+          自动验证的范围只有「镜像能起来 + \`/healthz\` 200」。**投屏与触控/键盘/滚屏等控制
+          行为必须人工验证**：控制消息布局是按 scrcpy 3.1 固定的（见 \`app/mirror_websocket.py\`）。
+
+          验证通过后请：
+          1. 用该版本官方资产替换仓库里的 \`scrcpy-server\`；
+          2. 更新 \`THIRD_PARTY.md\` 的 Version / SHA-256，并同步 \`scrcpy.py\` 里的协议版本说明；
+          3. 打 \`v*\` 标签，由 Builds.yml 发布正式镜像（\`latest\` 只在正式发布时移动）。
+
+          验证不通过就直接关闭本 issue，并记录不兼容点。
+          EOF
+          )"
+          EXISTING="$(gh issue list --state open --search "\"上游 scrcpy v${TARGET} 已发布\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+
+      - name: Build summary
+        if: always()
+        env:
+          ACTION: ${{ steps.decide.outputs.action }}
+          BUNDLED: ${{ steps.decide.outputs.bundled }}
+          UPSTREAM: ${{ steps.decide.outputs.upstream }}
+          TARGET: ${{ steps.decide.outputs.target }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SKIPPED: ${{ steps.exists.outputs.skip }}
+        run: |
+          {
+            echo "## Upstream Canary"
+            echo ""
+            echo "- 状态: ${{ job.status }}"
+            echo "- 内置 scrcpy-server: v${BUNDLED:-?}"
+            echo "- 上游最新: v${UPSTREAM:-?}"
+            echo "- 本次目标: v${TARGET:-?}（判定: ${ACTION:-?}）"
+            if [ "${ACTION:-}" = "canary" ] && [ "${SKIPPED:-}" != "true" ]; then
+              echo "- canary 标签: \`${IMAGE_REPO}:scrcpy-${TARGET}-canary\`、\`${IMAGE_REPO}:canary\`"
+              echo "- digest: \`${DIGEST}\`"
+              echo "- 注意: \`latest\` **未改动**；投屏/控制行为需人工验证。"
+            elif [ "${SKIPPED:-}" = "true" ]; then
+              echo "- 该 canary 标签已存在，本次跳过（勾选 force 可重建）。"
+            else
+              echo "- 无需构建。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,182 @@
+/* Dashboard activity and alert presentation. Kept separate from the page shell. */
+.alert-title-line,
+.timeline-title-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.alert-title,
+.timeline-copy strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.alert-flags {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 48%;
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.alert-severity,
+.alert-state,
+.timeline-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 21px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.alert-severity.red,
+.timeline-result.fail {
+  color: var(--admin-danger);
+  background: var(--admin-danger-soft);
+  border-color: rgba(239, 83, 80, .28);
+}
+.alert-severity.orange,
+.timeline-result.denied,
+.timeline-result.blocked,
+.timeline-result.timeout {
+  color: var(--admin-warn);
+  background: var(--admin-warn-soft);
+  border-color: rgba(255, 159, 10, .28);
+}
+.alert-state.pending {
+  color: var(--admin-warn);
+  background: var(--admin-warn-soft);
+  border-color: rgba(255, 159, 10, .24);
+}
+.alert-state.handled,
+.timeline-result.success {
+  color: var(--admin-success);
+  background: var(--admin-success-soft);
+  border-color: rgba(52, 199, 89, .24);
+}
+.timeline-result.unknown {
+  color: var(--admin-muted);
+  background: var(--admin-field);
+  border-color: var(--admin-border);
+}
+.timeline-result.pending {
+  color: var(--admin-brand);
+  background: var(--admin-brand-soft);
+  border-color: var(--admin-brand);
+}
+@media (max-width: 640px) {
+  .alert-flags { max-width: 100%; justify-content: flex-start; }
+}
+.page-heading-tools { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; flex-wrap:wrap; }
+.dash-refresh-status { color:var(--admin-muted); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.dash-refresh-button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 11px; border:1px solid var(--admin-border); border-radius:8px; color:var(--admin-text); background:var(--admin-field); font:inherit; font-size:12px; cursor:pointer; transition:background-color var(--motion-fast) var(--ease-fade),border-color var(--motion-fast) var(--ease-fade); }
+.dash-refresh-button:hover { background:var(--admin-hover); border-color:var(--admin-elev-border); }
+.dash-refresh-button:disabled { opacity:.6; cursor:wait; }
+.dash-refresh-button [data-lucide] { width:14px; height:14px; }
+.dash-refresh-button.is-loading [data-lucide] { animation:dash-refresh-spin .8s linear infinite; }
+@keyframes dash-refresh-spin { to { transform:rotate(360deg); } }
+.alert-list { list-style:none; margin:0; padding:6px 14px 10px; }
+.alert-item { display:grid; grid-template-columns:8px minmax(0,1fr) auto; align-items:start; gap:9px; width:100%; padding:9px 0; text-decoration:none; border:0; border-radius:8px; color:inherit; background:transparent; text-align:left; cursor:pointer; }
+.alert-item:hover .alert-title { color:var(--admin-brand); }
+.alert-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex:0 0 auto; }
+.alert-copy,.timeline-copy { min-width:0; }
+.alert-title,.alert-meta,.timeline-copy strong,.timeline-copy span { overflow-wrap:anywhere; word-break:break-word; }
+.alert-time,.timeline-time { white-space:nowrap; align-self:start; }
+.dash-detail-mask { position:fixed; inset:0; z-index:90; display:flex; align-items:flex-start; justify-content:center; padding:clamp(16px,8vh,72px) 16px 28px; overflow:auto; background:rgba(0,0,0,.42); opacity:0; visibility:hidden; transition:opacity 180ms ease,visibility 0s linear 180ms; }
+.dash-detail-mask.open { opacity:1; visibility:visible; transition:opacity 180ms ease,visibility 0s linear 0s; }
+dialog.dash-detail-mask { box-sizing:border-box; width:100%; max-width:none; height:100%; max-height:none; margin:0; border:0; background:transparent; }
+dialog.dash-detail-mask:not([open]) { display:none; }
+dialog.dash-detail-mask::backdrop { background:rgba(0,0,0,.42); }
+.dash-detail-mask.dash-detail-legacy { display:flex; }
+.dash-detail-card { width:min(100%,620px); margin:auto 0; border:1px solid var(--admin-elev-border); border-radius:16px; background:var(--admin-elev); box-shadow:0 24px 64px var(--c-shadow); transform:translateY(8px); opacity:0; transition:transform 220ms var(--ease-standard),opacity 180ms ease; }
+.dash-detail-mask.open .dash-detail-card { transform:none; opacity:1; }
+.dash-detail-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:15px 18px 12px; border-bottom:1px solid var(--admin-line); }
+.dash-detail-head h2 { margin:0; font-size:15px; color:var(--admin-text); }
+.dash-detail-body { padding:14px 18px 18px; }
+.dash-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; }
+.dash-detail-field { min-width:0; }
+.dash-detail-field small { display:block; margin-bottom:3px; color:var(--admin-faint); font-size:10.5px; }
+.dash-detail-field b,.dash-detail-field pre { display:block; margin:0; color:var(--admin-text); font-size:12px; line-height:1.5; overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+.dash-detail-field.full { grid-column:1/-1; }
+.dash-detail-foot { display:flex; align-items:center; justify-content:flex-end; gap:8px; padding:11px 18px 15px; border-top:1px solid var(--admin-line); }
+.dash-detail-close { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:0; border-radius:8px; color:var(--admin-muted); background:transparent; cursor:pointer; }
+.dash-detail-close:hover { background:var(--admin-hover); color:var(--admin-text); }
+/* 设备行快捷操作的确认弹窗 / ALAS 配置选择：复用详情弹窗骨架，只做窄卡片与列表 */
+.dash-confirm-card { width:min(100%,440px); }
+.dash-confirm-text { margin:0; color:var(--admin-muted); font-size:12.5px; line-height:1.65; }
+.dash-confirm-text b { color:var(--admin-text); }
+.dash-resolve-btn.is-danger { background:var(--btn-cut); }
+.dash-confirm-card .dash-resolve-btn:disabled { opacity:.55; cursor:wait; }
+.dash-alas-list { display:flex; flex-direction:column; gap:6px; margin:12px 0 0; padding:0; list-style:none; }
+.dash-alas-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 10px; border:1px solid var(--admin-line); border-radius:10px; }
+.dash-alas-copy { display:inline-flex; align-items:center; gap:8px; min-width:0; }
+.dash-alas-copy b { color:var(--admin-text); font-size:12.5px; font-weight:600; overflow-wrap:anywhere; }
+.dash-alas-row .status-chip { flex:0 0 auto; }
+/* 有操作在跑时把行内菜单触发按钮置灰，避免重复提交（刷新回来后自然恢复） */
+body.dash-row-busy #dash-devices-tbody .menu-open-btn { opacity:.5; pointer-events:none; }
+/* 行内菜单里的危险项：刻意不用 .menu-item.danger —— 那个类曾是「全局退出登录」的委托选择器 */
+.menu-pop .menu-item.is-danger { color:var(--btn-cut); }
+.menu-pop .menu-item.is-danger:hover { background:var(--btn-cut-bg); }
+.alert-severity [data-lucide], .alert-state [data-lucide], .timeline-result [data-lucide] { width:12px; height:12px; flex:0 0 auto; stroke-width:2; }
+.timeline-result.pending [data-lucide] { animation:dash-refresh-spin .8s linear infinite; }
+.alert-dot.red { background:var(--btn-cut); }
+.alert-dot.orange { background:var(--trend-warn); }
+.alert-copy { min-width:0; }
+.alert-title { display:-webkit-box; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:12.5px; line-height:18px; font-weight:600; color:var(--admin-text); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.alert-meta { display:-webkit-box; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:11px; line-height:16px; color:var(--admin-muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.alert-time { color:var(--admin-muted); font-size:11px; line-height:16px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.alert-list > li + li, .timeline > li + li { border-top:1px solid var(--admin-line); }
+.alert-group + .alert-group { border-top:1px solid var(--admin-line); }
+.alert-group .alert-list { padding-top:2px; }
+/* 分段控件：业务待处理 / 服务异常一次只显示一组，与安全机制页的预置控件同款。 */
+.alert-seg { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin:2px 14px 4px; padding:3px; border:1px solid var(--admin-border); border-radius:999px; background:var(--admin-field); }
+.alert-seg-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:0; height:26px; padding:0 10px; border:0; border-radius:999px; color:var(--admin-muted); background:transparent; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer; transition:color var(--motion-fast) var(--ease-fade),background-color var(--motion-fast) var(--ease-fade); }
+.alert-seg-btn:hover { color:var(--admin-text); }
+.alert-seg-btn.active { color:var(--admin-text); background:var(--admin-surface); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+.alert-seg-btn:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.alert-seg-btn [data-lucide] { width:13px; height:13px; flex:0 0 auto; }
+.alert-seg-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.alert-group-count { display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 5px; border-radius:999px; background:var(--admin-hover); color:var(--admin-muted); font-size:10px; font-variant-numeric:tabular-nums; }
+.alert-seg-btn.active .alert-group-count { color:var(--admin-text); }
+.attention-item { display:grid; grid-template-columns:8px minmax(0,1fr) auto; align-items:start; gap:9px; width:100%; padding:9px 0; border-radius:8px; color:inherit; text-decoration:none; }
+.attention-item:hover .alert-title { color:var(--admin-brand); }
+.attention-item:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.attention-go { display:inline-flex; align-items:center; margin-top:3px; color:var(--admin-faint); }
+.attention-go [data-lucide] { width:14px; height:14px; }
+.panel-health { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--admin-muted); font-variant-numeric:tabular-nums; }
+.panel-health[data-state="warning"] { color:var(--admin-warn); }
+.panel-health[data-state="danger"] { color:var(--admin-danger); }
+.timeline { list-style:none; margin:0; padding:6px 14px 10px; }
+.timeline-item { display:grid; grid-template-columns:8px minmax(0,1fr) auto; align-items:start; gap:9px; width:100%; padding:9px 0; border:0; border-radius:8px; color:inherit; background:transparent; font:inherit; text-align:left; cursor:pointer; }
+.timeline-item:hover .timeline-copy strong { color:var(--admin-brand); }
+.timeline-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex:0 0 auto; }
+.timeline-dot.green { background:var(--admin-success); }
+.timeline-dot.blue { background:var(--admin-brand); }
+.timeline-dot.gray { background:var(--admin-faint); }
+.timeline-dot.orange { background:var(--trend-warn); }
+.timeline-dot.red { background:var(--btn-cut); }
+.timeline-copy { min-width:0; }
+.timeline-copy strong { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:12.5px; line-height:18px; font-weight:600; color:var(--admin-text); transition:color var(--motion-fast) var(--ease-fade); }
+.timeline-meta { display:-webkit-box; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:11px; line-height:16px; color:var(--admin-muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.timeline-time { color:var(--admin-muted); font-size:11px; line-height:16px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.page-heading-tools { justify-content:space-between; }
+.alert-item, .timeline-item { grid-template-columns:8px minmax(0,1fr); }
+.alert-time, .timeline-time { grid-column:2; margin-top:-2px; }
+.dash-refresh-button:focus-visible,
+.alert-item:focus-visible,
+.timeline-item:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+@media (prefers-reduced-motion: reduce) {
+  .dash-detail-mask, .dash-detail-card, .dash-refresh-button, .timeline-copy strong { transition:none; }
+  .dash-refresh-button.is-loading [data-lucide], .timeline-result.pending [data-lucide] { animation:none; }
+}

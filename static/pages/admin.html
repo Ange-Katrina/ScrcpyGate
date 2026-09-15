@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>管理台 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item active" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘" aria-current="page"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><b>管理后台</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+          <div class="page-heading">
+            <div class="page-heading-copy">
+              <h1>管理后台</h1>
+              <p>设备、用户与系统运行状态总览</p>
+            </div>
+            <div class="page-heading-tools">
+              <span class="dash-refresh-status" id="dash-refresh-status" role="status" aria-live="off">等待数据</span>
+              <button class="dash-refresh-button" id="dash-refresh-button" type="button" aria-label="刷新仪表盘" title="刷新仪表盘"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            </div>
+            <p class="sr-only" id="dash-live-announcer" role="status" aria-live="polite" aria-atomic="true"></p>
+          </div>
+
+          <section class="stats-grid" aria-label="核心统计">
+            <a class="stat-card" href="/devices" aria-label="设备可用性，跳转设备管理">
+              <div class="stat-top"><span>设备可用性</span><span class="stat-icon blue"><i data-lucide="smartphone"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="dash-devices-value">—</strong><span class="stat-unit good" id="dash-devices-unit">等待数据</span></div>
+              <p class="stat-note" id="dash-devices-note">设备接口返回后显示在线状态</p>
+            </a>
+            <a class="stat-card" href="/mirror" aria-label="投屏会话，跳转投屏工作区">
+              <div class="stat-top"><span>投屏会话</span><span class="stat-icon cyan"><i data-lucide="monitor-play"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="dash-sessions-value">—</strong><span class="stat-unit" id="dash-sessions-unit">等待数据</span></div>
+              <p class="stat-note" id="dash-sessions-note">会话接口返回后显示实时连接</p>
+            </a>
+            <a class="stat-card" href="/alas" aria-label="ALAS 服务，跳转 ALAS 管理">
+              <!-- backport: frontend repo — ALAS icon tone must follow the live state -->
+              <div class="stat-top"><span>ALAS 服务</span><span class="stat-icon green" id="dash-alas-icon"><i data-lucide="bot"></i></span></div>
+              <div class="stat-main"><span class="stat-state" id="dash-alas-value">—</span></div>
+              <p class="stat-note" id="dash-alas-note">ALAS 接口返回后显示服务状态</p>
+            </a>
+            <a class="stat-card" href="/logs" aria-label="待处理事项，跳转日志审计">
+              <div class="stat-top"><span>待处理事项</span><span class="stat-icon orange"><i data-lucide="bell"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="dash-attention-value">—</strong><span class="stat-unit" id="dash-attention-unit">等待数据</span></div>
+              <p class="stat-note" id="dash-attention-note">告警接口返回后显示待处理事项</p>
+            </a>
+          </section>
+
+          <div class="workspace-grid">
+            <div class="main-col">
+            <section class="panel" id="devices" aria-labelledby="devices-title">
+              <div class="panel-header">
+                <h2 class="panel-title" id="devices-title">设备列表<span class="panel-subtitle" id="dash-devices-count">等待数据</span></h2>
+                <div class="panel-tools">
+                  <label class="search-box"><i data-lucide="search"></i><input type="search" placeholder="搜索" aria-label="搜索设备"></label>
+                  <button class="btn-primary" type="button"><i data-lucide="plus"></i>添加设备</button>
+                </div>
+              </div>
+              <div class="table-toolbar" role="tablist" aria-label="按状态筛选设备">
+                <div class="filter-tabs">
+                  <button class="filter-tab active" type="button" data-filter="all" role="tab" aria-selected="true">全部<span class="count" data-count-filter="all">—</span></button>
+                  <button class="filter-tab" type="button" data-filter="online" role="tab">在线<span class="count" data-count-filter="online">—</span></button>
+                  <button class="filter-tab" type="button" data-filter="offline" role="tab">离线<span class="count" data-count-filter="offline">—</span></button>
+                  <button class="filter-tab" type="button" data-filter="unknown" role="tab">未检查<span class="count" data-count-filter="unknown">—</span></button>
+                  <button class="filter-tab" type="button" data-filter="mirroring" role="tab">投屏中<span class="count" data-count-filter="mirroring">—</span></button>
+                  <button class="filter-tab" type="button" data-filter="alas-err" role="tab">ALAS 异常<span class="count" data-count-filter="alas-err">—</span></button>
+                </div>
+              </div>
+              <div class="device-table-wrap" tabindex="0" role="region" aria-label="设备列表">
+                <table class="device-table">
+                  <caption class="sr-only">设备状态列表</caption>
+                  <thead>
+                    <tr><th scope="col" style="width:26%">设备名称</th><th scope="col" style="width:12%">投屏状态</th><th scope="col" style="width:8%">观看端</th><th scope="col" style="width:9%">控制权</th><th scope="col" style="width:13%">ALAS 状态</th><th scope="col" style="width:14%">上次心跳</th><th scope="col" style="width:18%;text-align:right">操作</th></tr>
+                  </thead>
+                  <tbody id="dash-devices-tbody">
+                    <tr id="dash-devices-empty"><td colspan="7"><div class="table-empty"><i data-lucide="database"></i><span>等待设备接口数据</span></div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel" id="sessions" aria-labelledby="sessions-title">
+              <div class="panel-header">
+                  <h2 class="panel-title" id="sessions-title">活跃投屏<span class="panel-subtitle" id="dash-sessions-count">等待数据</span></h2>
+                <a class="text-link" href="/mirror">查看全部 →</a>
+              </div>
+              <div class="sessions-wrap" tabindex="0" role="region" aria-label="会话列表">
+                <table class="sessions-table">
+                  <caption class="sr-only">活跃投屏会话列表</caption>
+                  <thead>
+                    <tr><th scope="col" style="width:30%">设备</th><th scope="col" style="width:18%">观看端</th><th scope="col" style="width:18%">控制权</th><th scope="col" style="width:18%">已投屏</th><th scope="col" style="width:16%;text-align:right">操作</th></tr>
+                  </thead>
+                  <tbody id="dash-sessions-tbody">
+                    <tr id="dash-sessions-empty"><td colspan="5"><div class="table-empty"><i data-lucide="radio"></i><span>等待会话接口数据</span></div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            </div>
+
+            <div class="right-stack">
+              <section class="panel" id="alerts" aria-labelledby="alerts-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="alerts-title">待处理事项<span class="panel-badge" id="dash-alert-badge">—</span></h2>
+                </div>
+                <div class="alert-seg" id="dash-alert-seg" role="tablist" aria-label="待处理事项视图切换">
+                  <button class="alert-seg-btn active" type="button" role="tab" id="dash-tab-attention" aria-selected="true" aria-controls="dash-attention-panel" data-alert-view="attention"><i data-lucide="circle-alert" aria-hidden="true"></i><span class="alert-seg-label">业务待处理</span><span class="alert-group-count" id="dash-attention-group-count">—</span></button>
+                  <button class="alert-seg-btn" type="button" role="tab" id="dash-tab-service" aria-selected="false" aria-controls="dash-alert-panel" data-alert-view="service" tabindex="-1"><i data-lucide="server-crash" aria-hidden="true"></i><span class="alert-seg-label">服务异常</span><span class="alert-group-count" id="dash-service-count">—</span></button>
+                </div>
+                <div class="alert-group" id="dash-attention-panel" role="tabpanel" aria-labelledby="dash-tab-attention">
+                  <ul class="alert-list" id="dash-attention-list" aria-label="业务待处理"><li class="table-empty"><i data-lucide="hourglass"></i><span>等待概览数据</span></li></ul>
+                </div>
+                <div class="alert-group" id="dash-alert-panel" role="tabpanel" aria-labelledby="dash-tab-service" hidden>
+                  <ul class="alert-list" id="dash-alert-list" aria-label="服务异常告警"><li class="table-empty"><i data-lucide="bell-off"></i><span>等待告警接口数据</span></li></ul>
+                </div>
+                <div class="panel-footer"><span id="dash-alert-count">等待数据</span><span class="panel-health" id="dash-logging-health" role="status" aria-live="off">日志队列等待数据</span><a class="text-link" href="/logs">查看全部异常</a></div>
+              </section>
+
+
+              <section class="panel" id="activity" aria-labelledby="activity-title">
+                <div class="panel-header">
+                  <h2 class="panel-title" id="activity-title">最近活动</h2>
+                  <a class="text-link" href="/logs">查看全部</a>
+                </div>
+                <ul class="timeline" id="dash-activity-list" aria-label="最近活动"><li class="table-empty"><i data-lucide="history"></i><span>等待活动接口数据</span></li></ul>
+              </section>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="dash-detail-mask" id="dash-detail-mask" closedby="any" aria-modal="true" aria-hidden="true" inert aria-labelledby="dash-detail-title" aria-describedby="dash-detail-description">
+    <div class="dash-detail-card">
+      <div class="dash-detail-head"><h2 id="dash-detail-title">事件详情</h2><button class="dash-detail-close" type="button" id="dash-detail-close" aria-label="关闭详情"><i data-lucide="x"></i></button></div>
+      <div class="dash-detail-body"><p class="sr-only" id="dash-detail-description">查看选中告警或活动的完整字段。</p><div class="dash-detail-grid" id="dash-detail-grid"></div></div>
+      <div class="dash-detail-foot"><a class="dash-log-btn" id="dash-detail-log" href="/logs" hidden><i data-lucide="scroll-text"></i><span>查看日志</span></a><button class="dash-resolve-btn" type="button" id="dash-detail-resolve" hidden><i data-lucide="check"></i><span>标记为已处理</span></button></div>
+    </div>
+  </dialog>
+
+  <dialog class="dash-detail-mask" id="dash-confirm-mask" closedby="any" aria-modal="true" aria-hidden="true" inert aria-labelledby="dash-confirm-title" aria-describedby="dash-confirm-text">
+    <div class="dash-detail-card dash-confirm-card">
+      <div class="dash-detail-head"><h2 id="dash-confirm-title">确认操作</h2><button class="dash-detail-close" type="button" id="dash-confirm-close" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="dash-detail-body"><p class="dash-confirm-text" id="dash-confirm-text"></p></div>
+      <div class="dash-detail-foot"><button class="dash-log-btn" type="button" id="dash-confirm-cancel">取消</button><button class="dash-resolve-btn" type="button" id="dash-confirm-ok">确定</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="dash-detail-mask" id="dash-alas-mask" closedby="any" aria-modal="true" aria-hidden="true" inert aria-labelledby="dash-alas-title" aria-describedby="dash-alas-subtitle">
+    <div class="dash-detail-card dash-confirm-card">
+      <div class="dash-detail-head"><h2 id="dash-alas-title">启停 ALAS 配置</h2><button class="dash-detail-close" type="button" id="dash-alas-close" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="dash-detail-body"><p class="dash-confirm-text" id="dash-alas-subtitle"></p><ul class="dash-alas-list" id="dash-alas-list"></ul></div>
+      <div class="dash-detail-foot"><button class="dash-log-btn" type="button" id="dash-alas-done">完成</button></div>
+    </div>
+  </dialog>
+
+</body></html>

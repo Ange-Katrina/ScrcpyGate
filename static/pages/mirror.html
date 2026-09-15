@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>镜像工作区 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+  <script src="/static/shared/api.js"></script>
+  <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body>
+  <main class="app" data-viewport-mode="app-shell">
+    <header class="topnav">
+      <div class="topnav-left">
+        <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+        <span class="app-icon"><i data-lucide="monitor"></i></span>
+        <span class="app-name">ScrcpyGate</span>
+        <span class="topnav-sep"></span>
+        <nav class="topnav-nav" aria-label="页面导航">
+          <a class="topnav-link active" href="/mirror" aria-current="page">投屏工作台</a>
+        </nav>
+      </div>
+      <div class="topnav-actions">
+        <button class="tool-btn" id="themeToggle" aria-label="切换主题" title="切换主题"><i data-lucide="sun-moon"></i></button>
+        <button class="tool-btn" id="notify-btn" aria-label="通知" title="通知" aria-haspopup="true" aria-expanded="false"><i data-lucide="bell"></i><span class="notify-dot" id="notify-dot" hidden></span></button>
+        <div class="topnav-user">
+          <span class="user-avatar">U</span>
+          <span class="user-meta"><strong>用户名</strong><small>管理员</small></span>
+        </div>
+      </div>
+    </header>
+    <div class="notify-pop" id="notify-pop" role="dialog" aria-label="通知中心">
+      <div class="notify-head">
+        <b>通知</b>
+        <button class="notify-mark" type="button" id="notify-mark-all" disabled><i data-lucide="check-check"></i>全部已读</button>
+      </div>
+      <div class="notify-list" id="notify-list">
+        <div class="notify-empty"><i data-lucide="bell-off"></i><span>暂无通知</span><small>新的通知将在出现时显示</small></div>
+      </div>
+    </div>
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="sidebarToggle" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="menu-item" href="#" id="visual-item" title="画面" aria-haspopup="dialog" aria-controls="vp-panel">
+          <i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画面</b><small>画质与显示</small></span>
+        </a>
+        <a class="menu-item" href="#" id="alas-item" title="ALAS" aria-haspopup="dialog" aria-controls="ap-panel">
+          <i data-lucide="bot"></i><span class="menu-text"><b>ALAS</b><small>配置与运行</small></span>
+        </a>
+        <a class="menu-item" href="#" id="record-item" data-admin-only title="投屏记录" aria-haspopup="dialog" aria-controls="tl-panel">
+          <i data-lucide="activity"></i><span class="menu-text"><b>投屏记录</b><small>实时事件时间线</small></span>
+        </a>
+        <a class="menu-item" href="#" title="账户" id="acct-item" aria-haspopup="dialog" aria-controls="up-panel">
+          <i data-lucide="user-round"></i><span class="menu-text"><b>账户</b><small>密码与资料</small></span>
+        </a>
+      </nav>
+      <nav class="sidebar-nav" aria-label="管理导航">
+        <a id="mirror-admin-link" data-dom-id="mirror-admin-link" data-admin-only class="menu-item" href="/admin" title="后台管理">
+          <i data-lucide="monitor"></i><span class="menu-text"><b>后台管理</b><small>设备与系统</small></span>
+        </a>
+      </nav>
+      <div class="sidebar-divider dev-divider"></div>
+      <section class="device-panel" id="device-panel" aria-label="设备管理面板">
+        <button class="device-entry" type="button" title="设备管理" aria-label="设备管理"><i data-lucide="smartphone"></i></button>
+        <div class="device-head">
+          <div class="device-title"><b>设备</b><span id="device-count">—</span></div>
+          <div class="view-switch" id="view-switch" role="group" aria-label="视图模式" hidden>
+            <button class="view-switch-btn active" type="button" data-view="single" aria-pressed="true" aria-label="单画面视图" title="单画面"><i data-lucide="square"></i></button>
+            <button class="view-switch-btn" type="button" data-view="grid" aria-pressed="false" aria-label="宫格视图（全部设备）" title="宫格：一次显示全部设备"><i data-lucide="layout-grid"></i></button>
+          </div>
+        </div>
+        <div class="device-list" id="device-list" data-scroll-region="devices">
+          <div class="device-empty" id="device-empty">
+            <div class="device-empty-card loading">
+              <div class="dev-empty-icon"><i data-lucide="smartphone"></i></div>
+              <b>等待设备数据</b>
+              <small>正在连接数据服务…</small>
+            </div>
+          </div>
+        </div>
+        <div class="device-scrollbar" id="device-scrollbar" aria-hidden="true"></div>
+      </section>
+      <div class="sidebar-divider logout-divider"></div>
+      <nav class="sidebar-nav logout-nav" aria-label="退出">
+        <a class="menu-item logout" data-logout href="/login" title="退出登录">
+          <i data-lucide="log-out"></i><span class="menu-text"><b>退出</b><small>退出当前账户</small></span>
+        </a>
+      </nav>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+    <div class="workspace overflow-y-auto" id="workspace" data-scroll-region="primary">
+      <div class="status-pill" id="status-pill" role="region" tabindex="0" aria-label="设备状态">
+        <span class="pill-block" id="pill-device"><span class="pill-label" id="mirror-device-label">设备连接</span><b id="mirror-device-name">未选择</b><i class="dot off" id="mirror-device-dot"></i><span id="mirror-device-status">等待数据</span></span>
+        <span class="pill-sep"></span>
+        <span class="pill-block" id="pill-viewers"><span class="pill-label" id="mirror-viewers-label">观看端</span><span class="pill-viewers" id="mirror-viewers-block"><i data-lucide="eye"></i><span id="mirror-viewers">—</span></span></span>
+        <span class="pill-sep" id="cd-sep" hidden></span>
+        <span class="pill-block" id="cd-block" hidden><span class="pill-label" id="cd-label">剩余</span><b class="cd-time" id="cd-time">45:00</b></span>
+        <span class="pill-sep" id="mirror-alas-sep" hidden></span>
+        <span class="pill-block" id="mirror-alas-status-block" hidden><span class="pill-label" id="mirror-alas-label">ALAS</span><i class="dot off" id="mirror-alas-dot"></i><span id="mirror-alas-status">检查中</span></span>
+        <span class="pill-sep"></span>
+        <span class="pill-block" id="pill-quality"><span class="pill-label" id="mirror-quality-label">画质</span><b id="mirror-quality-name">未加载</b><span class="pill-sub" id="mirror-quality-meta">—</span></span>
+      </div>
+
+      <section class="mirror-panel" id="mirror-panel" aria-label="设备观看画面">
+        <div class="video-box" id="video-box">
+          <div class="conn-overlay" data-cstate="idle">
+            <span class="conn-icon"><i data-lucide="monitor-play"></i></span>
+            <h2>尚未开始观看</h2>
+            <p>选择左侧设备后开始观看实时画面</p>
+            <div class="conn-actions"><button class="start-button" id="start-watch" disabled><i data-lucide="play"></i>开始观看</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="connecting">
+            <span class="spinner" aria-hidden="true"></span>
+            <h2>正在连接</h2>
+            <p>正在连接所选设备，请稍候…</p>
+            <div class="conn-actions"><button class="ghost-button" id="cancel-watch" type="button">取消</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="waiting">
+            <span class="conn-icon"><i data-lucide="hourglass"></i></span>
+            <h2>正在等待画面</h2>
+            <p>设备已连接，等待视频流就绪…</p>
+            <div class="conn-actions"><button class="ghost-button" id="cancel-watch2" type="button">取消</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="keyframe">
+            <span class="conn-icon"><i data-lucide="frame"></i></span>
+            <h2>等待关键帧</h2>
+            <p>正在等待首个关键帧，画面即将出现…</p>
+          </div>
+          <div class="conn-overlay" data-cstate="resuming">
+            <span class="spinner" aria-hidden="true"></span>
+            <h2>正在恢复</h2>
+            <p>连接中断，正在自动恢复播放…</p>
+            <div class="conn-actions"><button class="ghost-button" type="button" id="resume-retry">重试连接</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="offline">
+            <span class="conn-icon"><i data-lucide="plug-zap"></i></span>
+            <h2>设备离线</h2>
+            <p>所选设备已断开连接，请检查设备状态</p>
+            <div class="conn-actions"><button class="start-button" type="button" id="offline-retry"><i data-lucide="rotate-cw"></i>重试连接</button><button class="ghost-button" type="button" id="offline-pick">选择其他设备</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="noperm">
+            <span class="conn-icon"><i data-lucide="lock"></i></span>
+            <h2>无设备权限</h2>
+            <p>你没有该设备的控制权限，请联系管理员授权</p>
+            <div class="conn-actions"><button class="start-button" type="button" id="noperm-apply"><i data-lucide="send"></i>申请权限</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="fail">
+            <span class="conn-icon"><i data-lucide="triangle-alert"></i></span>
+            <h2>连接失败</h2>
+            <p>无法建立连接，可能是网络或设备问题</p>
+            <div class="conn-actions"><button class="start-button" type="button" id="fail-retry"><i data-lucide="rotate-cw"></i>重试</button><button class="ghost-button" type="button" id="fail-log">查看日志</button></div>
+          </div>
+          <div class="conn-overlay" data-cstate="expired">
+            <span class="conn-icon"><i data-lucide="calendar-x"></i></span>
+            <h2>账号已到期</h2>
+            <p>观看权限已到期，续期后可继续使用</p>
+            <div class="conn-actions"><button class="start-button" type="button" id="expired-renew"><i data-lucide="calendar-plus"></i>前往续期</button></div>
+          </div>
+          <div class="video-surface" id="video-surface" data-player="raw-v2">
+            <canvas id="raw-v2-surface" tabindex="0" aria-label="Raw v2 实时画面，获取控制后点击画面可使用物理键盘"></canvas>
+            <div class="stream-unavailable" id="stream-unavailable" role="status" aria-live="polite" aria-atomic="true">
+              <span class="stream-unavailable-icon" aria-hidden="true"><i data-lucide="video-off"></i></span>
+              <span class="stream-unavailable-title">等待真实视频流</span>
+              <small>Raw v2 播放器将在连接成功后接管此画面</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="countdown-banner" id="countdown-banner">
+          <span id="cd-banner-text">将在 5 分钟后停止观看</span>
+          <button type="button" id="extend-btn">延长 10 分钟</button>
+          <button type="button" class="cd-close" id="cd-close" aria-label="关闭提醒">×</button>
+        </div>
+      </section>
+
+      <section class="mirror-grid" id="mirror-grid" aria-label="全部设备宫格" hidden>
+        <div class="mg-toolbar">
+          <span class="mg-hint" id="mg-hint">点击「开始截图」后按所选帧率抓取画面，最多同时预览 {0} 路</span>
+          <div class="mg-controls" role="group" aria-label="宫格显示设置">
+            <div class="mg-control" id="mg-zoom" title="画面缩放（百分比）">
+              <i data-lucide="move-horizontal" aria-hidden="true"></i>
+              <input class="mg-zoom-range" id="mg-zoom-range" type="range" min="25" max="150" step="5" value="80" aria-label="宫格画面缩放百分比">
+              <span class="mg-zoom-value" id="mg-zoom-value">80%</span>
+            </div>
+            <span class="mg-control-sep" aria-hidden="true"></span>
+            <div class="mg-control mg-menu-wrap" id="mg-fps">
+              <span class="mg-control-label">帧率</span>
+              <button class="mg-menu-trigger" id="mg-fps-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="mg-fps-menu" aria-label="截图帧率"><span id="mg-fps-value">1 fps</span><i data-lucide="chevron-down" aria-hidden="true"></i></button>
+              <div class="mg-menu" id="mg-fps-menu" role="menu" aria-label="截图帧率">
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="1" aria-checked="true"><i data-lucide="check" aria-hidden="true"></i><span>1 fps</span></button>
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="2" aria-checked="false"><i data-lucide="check" aria-hidden="true"></i><span>2 fps</span></button>
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="5" aria-checked="false"><i data-lucide="check" aria-hidden="true"></i><span>5 fps</span></button>
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="10" aria-checked="false"><i data-lucide="check" aria-hidden="true"></i><span>10 fps</span></button>
+              </div>
+            </div>
+            <span class="mg-control-sep" aria-hidden="true"></span>
+            <div class="mg-control mg-menu-wrap" id="mg-orientation">
+              <span class="mg-control-label">画面方向</span>
+              <button class="mg-menu-trigger" id="mg-orientation-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="mg-orientation-menu" aria-label="宫格画面方向"><span id="mg-orientation-value">统一竖屏</span><i data-lucide="chevron-down" aria-hidden="true"></i></button>
+              <div class="mg-menu" id="mg-orientation-menu" role="menu" aria-label="宫格画面方向">
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="portrait" aria-checked="true"><i data-lucide="check" aria-hidden="true"></i><span>统一竖屏</span></button>
+                <button class="mg-menu-item" type="button" role="menuitemradio" data-value="device" aria-checked="false"><i data-lucide="check" aria-hidden="true"></i><span>跟随设备</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="mg-toolbar-actions">
+            <button class="mg-refresh mg-primary" id="mg-start-all" type="button"><i data-lucide="play"></i><span>全部截图</span></button>
+            <button class="mg-refresh" id="mg-stop-all" type="button"><i data-lucide="square"></i><span>全部停止</span></button>
+            <button class="mg-refresh" id="mg-refresh-streams" type="button"><i data-lucide="rotate-cw"></i><span>刷新截图</span></button>
+            <button class="mg-refresh" id="mg-refresh" type="button"><i data-lucide="refresh-cw"></i><span>刷新设备</span></button>
+          </div>
+        </div>
+        <div class="mg-grid" id="mg-grid"></div>
+        <div class="mg-grid-foot">
+          <button class="mg-add-device" id="mg-add-device" type="button" title="添加 ADB 设备"><i data-lucide="plus" aria-hidden="true"></i><span>添加 ADB 设备</span></button>
+          <span class="mg-grid-foot-note" id="mg-grid-foot-note">宫格固定 12 个坑位，空坑位可直接添加设备</span>
+        </div>
+      </section>
+
+      <div class="ctrl-dock" id="ctrl-dock" role="toolbar" aria-label="观看控制">
+          <span class="dock-grip" id="dock-grip" aria-hidden="true"><i data-lucide="grip-vertical"></i></span>
+          <button class="cb-btn cb-session" id="cb-watch" type="button" title="开始投屏" aria-label="开始投屏" disabled><i data-lucide="play"></i><span id="cb-watch-label">开始投屏</span></button>
+          <button class="cb-btn cb-acquire" id="cb-acquire" type="button" title="获取控制" aria-label="获取控制"><i data-lucide="mouse-pointer-click"></i><span id="cb-acquire-label">获取控制</span></button>
+          <button class="cb-btn cb-keyboard" id="cb-keyboard" type="button" title="键盘输入" aria-label="开启键盘输入" aria-pressed="false" disabled><i data-lucide="keyboard"></i><span id="cb-keyboard-label">键盘</span></button>
+          <span class="cb-occupied" id="cb-occupied" title="该设备正被其他用户控制"><i data-lucide="lock"></i><span id="occupied-user">其他用户占用中</span></span>
+           <span class="ctrl-sep" id="mirror-alas-dock-sep-before"></span>
+           <button class="cb-btn cb-alas" id="cb-alas" type="button" title="启动 ALAS" aria-label="启动 ALAS" aria-pressed="false" disabled><i data-lucide="bot"></i><span id="cb-alas-label">ALAS</span><small id="cb-alas-state">未加载</small></button>
+           <span class="ctrl-sep" id="mirror-alas-dock-sep-after"></span>
+          <button class="cb-btn" id="cb-back" type="button" title="返回" aria-label="返回" disabled><i data-lucide="arrow-left"></i><span>返回</span></button>
+          <button class="cb-btn" id="cb-home" type="button" title="主页" aria-label="主页" disabled><i data-lucide="house"></i><span>主页</span></button>
+          <button class="cb-btn" id="cb-tasks" type="button" title="多任务" aria-label="多任务" disabled><i data-lucide="square-stack"></i><span>多任务</span></button>
+          <button class="cb-btn cb-fullscreen" id="cb-fullscreen" type="button" title="全屏显示" aria-label="全屏显示" aria-pressed="false" disabled><i data-lucide="maximize"></i><span>全屏</span><small id="cb-fullscreen-state">窗口</small></button>
+          <div class="cb-more" id="cb-more">
+            <button class="cb-btn" id="cb-more-btn" type="button" title="更多" aria-label="更多" aria-haspopup="true" aria-expanded="false" aria-controls="cb-pop" disabled><i data-lucide="ellipsis"></i><span>更多</span></button>
+            <div class="cb-pop" id="cb-pop" role="menu" aria-label="更多操作">
+              <!-- 本浏览器偏好（localStorage）：全屏后是否自动获取控制。刻意不参与后台菜单编排，
+                   始终保持在同一位置，避免把「用户偏好」和「角色可见性」混在一起。 -->
+              <button class="cb-item" id="cb-pop-auto-control" type="button" role="menuitemcheckbox" aria-checked="true" aria-label="全屏后默认获取控制（已开启）" data-static disabled><i data-lucide="shield-check"></i><span>全屏后默认获取控制</span><small id="cb-pop-auto-control-state">开</small></button>
+              <button class="cb-item" id="cb-pop-shot" type="button" role="menuitem" disabled><i data-lucide="camera"></i><span>截图</span><small id="cb-pop-shot-state">复制</small></button>
+              <button class="cb-item" id="cb-pop-keyboard" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="开启备用键盘" disabled><i data-lucide="keyboard"></i><span>键盘输入</span><small id="cb-pop-keyboard-state">备用</small></button>
+            </div>
+          </div>
+      </div>
+      <button class="fullscreen-dock-toggle" id="fullscreen-dock-toggle" type="button" aria-label="收起菜单" title="收起菜单" aria-controls="ctrl-dock" aria-expanded="true" aria-hidden="true" tabindex="-1"><i data-lucide="chevron-down"></i></button>
+      <div class="control-takeover-layer" id="control-takeover-layer" aria-hidden="true">
+        <div class="control-takeover-scrim" id="control-takeover-scrim"></div>
+        <section class="control-takeover-dialog" id="control-takeover-dialog" role="dialog" aria-modal="true" aria-labelledby="control-takeover-title" aria-describedby="control-takeover-copy" aria-hidden="true" inert>
+          <header class="control-takeover-head">
+            <span class="control-takeover-icon" aria-hidden="true"><i data-lucide="mouse-pointer-click"></i></span>
+            <div class="control-takeover-heading">
+              <h2 id="control-takeover-title">确认接管控制</h2>
+              <p>当前控制权由其他用户持有</p>
+            </div>
+            <button class="control-takeover-close" id="control-takeover-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+          </header>
+          <div class="control-takeover-body">
+            <p id="control-takeover-copy">接管后，其他用户将立即失去控制权，但仍可继续观看视频。</p>
+          </div>
+          <p class="control-takeover-status" id="control-takeover-status" role="status" aria-live="polite" hidden></p>
+          <footer class="control-takeover-actions">
+            <button class="control-takeover-btn" id="control-takeover-cancel" type="button">取消</button>
+            <button class="control-takeover-btn primary" id="control-takeover-confirm" type="button"><i data-lucide="mouse-pointer-click"></i>确认接管</button>
+          </footer>
+        </section>
+      </div>
+      <div class="vp-backdrop" id="tl-backdrop" aria-hidden="true"></div>
+    <aside class="vp-panel" id="tl-panel" role="dialog" aria-modal="true" aria-label="投屏实时记录" aria-hidden="true" inert>
+      <header class="tl-head">
+        <div class="tl-title">
+          <b>投屏实时记录</b>
+          <small id="tl-sub">管理员专用 · 只保存在本机浏览器 · 服务端事件见 <a href="/logs" target="_blank" rel="noopener">运行日志</a></small>
+        </div>
+        <button class="vp-close" id="tl-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+      </header>
+      <div class="tl-stats" id="tl-stats"></div>
+      <div class="tl-toolbar">
+        <button class="tl-btn" id="tl-copy" type="button"><i data-lucide="clipboard-copy"></i>复制</button>
+        <button class="tl-btn" id="tl-export" type="button"><i data-lucide="download"></i>导出 JSON</button>
+        <button class="tl-btn" id="tl-clear" type="button"><i data-lucide="trash-2"></i>清空</button>
+        <label class="tl-auto"><input type="checkbox" id="tl-autoscroll" checked><span>自动滚动</span></label>
+      </div>
+      <ol class="tl-list" id="tl-list">
+        <li class="tl-empty">还没有记录。开始投屏后，这里会按时间顺序显示连接、关键帧等待、跳号丢帧、解码器重建、延迟回跳等事件，便于排查「黑一下 / 卡住 / 自己停了」这类问题。</li>
+      </ol>
+    </aside>
+    <div class="vp-backdrop" id="vp-backdrop" aria-hidden="true"></div>
+      <aside class="vp-panel" id="vp-panel" role="dialog" aria-modal="true" aria-label="画面设置" aria-hidden="true" inert>
+        <span class="vp-grabber" aria-hidden="true"></span>
+        <header class="vp-head">
+          <div class="vp-head-copy"><h2>画面</h2><p>显示与画质设置</p></div>
+          <button class="vp-close" id="vp-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+        </header>
+        <div class="vp-body">
+          <div class="vp-summary" id="vp-summary">
+            <span class="vp-summary-label"><i data-lucide="sparkles"></i>当前画质</span>
+            <span class="vp-summary-value" id="vp-summary-text">—</span>
+          </div>
+          <section class="vp-group">
+            <div class="vp-group-title"><h3>显示</h3><span class="vp-hint">仅浏览器</span></div>
+            <div class="vp-seg" id="vp-fit" role="group" aria-label="显示尺寸">
+              <span class="vp-seg-thumb" aria-hidden="true"></span>
+              <button type="button" data-fit="contain" aria-pressed="true">适应窗口</button>
+              <button type="button" data-fit="original" aria-pressed="false">原始尺寸</button>
+            </div>
+            <p class="vp-note">只改变本页显示尺寸,不会重启视频流。</p>
+          </section>
+          <div class="vp-tabs" role="tablist" aria-label="画质设置">
+            <button class="vp-tab active" type="button" role="tab" id="vp-tab-presets" data-vp-seg="presets" aria-selected="true" aria-controls="vp-panel-presets"><i data-lucide="layout-grid"></i><span>预设</span></button>
+            <button class="vp-tab" type="button" role="tab" id="vp-tab-tuning" data-vp-seg="tuning" aria-selected="false" aria-controls="vp-panel-tuning" tabindex="-1"><i data-lucide="sliders-horizontal"></i><span>微调</span></button>
+          </div>
+          <section class="vp-group" id="vp-panel-presets" data-vp-panel="presets" role="tabpanel" aria-labelledby="vp-tab-presets">
+            <div class="vp-group-title"><h3>画质预设</h3><span class="vp-hint">点击即应用</span></div>
+            <div class="vp-profiles" id="vp-presets" role="radiogroup" aria-label="画质预设"></div>
+            <p class="vp-note" id="vp-custom-hint" hidden>当前使用手动微调参数，可在「微调」页签修改。</p>
+          </section>
+          <section class="vp-group" id="vp-panel-tuning" data-vp-panel="tuning" role="tabpanel" aria-labelledby="vp-tab-tuning" hidden>
+            <div class="vp-group-title" id="vp-custom-title"><h3>参数微调</h3><span class="vp-hint vp-hint-warn">修改后按自定义应用</span></div>
+            <div class="vp-custom" id="vp-custom">
+              <label class="vp-field">输出尺寸
+                <span class="vp-input-wrap"><select id="vp-res" aria-label="输出尺寸">
+                  <option value="854x480">854 × 480</option>
+                  <option value="1280x720" selected>1280 × 720</option>
+                  <option value="1920x1080">1920 × 1080</option>
+                  <option value="custom">自定义</option>
+                </select></span>
+              </label>
+              <div class="vp-res-custom" id="vp-res-custom" hidden>
+                <label class="vp-field">宽
+                  <span class="vp-input-wrap"><input id="vp-resw" type="number" min="320" max="1920" step="1" inputmode="numeric"><span class="vp-unit">px</span></span>
+                </label>
+                <label class="vp-field">高
+                  <span class="vp-input-wrap"><input id="vp-resh" type="number" min="240" max="1920" step="1" inputmode="numeric"><span class="vp-unit">px</span></span>
+                </label>
+              </div>
+              <label class="vp-field">帧率
+                <span class="vp-input-wrap"><input id="vp-fps" type="number" min="15" max="240" step="1" inputmode="numeric"><span class="vp-unit">fps</span></span>
+              </label>
+              <label class="vp-field">码率
+                <span class="vp-input-wrap"><input id="vp-bitrate" type="number" min="0.5" max="10" step="0.5" inputmode="decimal"><span class="vp-unit">Mbps</span></span>
+              </label>
+            </div>
+          </section>
+          <div class="vp-group-title vp-group-title-extra" id="vp-fullscreen-title"><h3>全屏默认画质</h3></div>
+          <label class="vp-field vp-field-select" id="vp-fullscreen-field">
+            <span class="vp-input-wrap"><select id="vp-fullscreen" aria-label="全屏默认画质"></select></span>
+          </label>
+          <div class="vp-status" id="vp-status" role="status" aria-live="polite">
+            <span class="vp-status-dot" id="vp-status-dot"><i data-lucide="check"></i></span>
+            <span id="vp-status-text">画质设置已同步</span>
+          </div>
+          <p class="vp-note">预设来自后台"画质与传输"管理页,修改参数会自动切换到自定义并保存。</p>
+        </div>
+      </aside>
+      <div class="vp-backdrop" id="ap-backdrop" aria-hidden="true"></div>
+      <aside class="vp-panel ap-panel" id="ap-panel" role="dialog" aria-modal="true" aria-label="ALAS 设置" aria-hidden="true" inert>
+        <span class="vp-grabber" aria-hidden="true"></span>
+        <header class="vp-head">
+          <div class="vp-head-copy"><h2>ALAS</h2><p>自动化配置与运行</p></div>
+          <button class="vp-close" id="ap-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+        </header>
+        <div class="vp-body">
+          <section class="vp-group">
+            <div class="vp-group-title"><h3>运行设备</h3><span class="vp-hint">当前选择</span></div>
+            <div class="ap-device" id="ap-device">
+              <span class="ap-device-icon" aria-hidden="true"><i data-lucide="monitor"></i></span>
+              <span class="ap-device-copy">
+                <span class="ap-device-label">设备</span>
+                <strong id="ap-device-name">未选择设备</strong>
+                <small id="ap-device-meta">请先在左侧选择设备</small>
+              </span>
+            </div>
+            <div class="vp-group-title vp-group-title-extra"><h3>ALAS 配置</h3><span class="vp-hint">该设备唯一配置</span></div>
+            <div class="ap-config-single" id="ap-config-single">
+              <span class="ap-config-single-icon" aria-hidden="true"><i data-lucide="bot"></i></span>
+              <span class="ap-config-single-copy">
+                <span class="ap-device-label">配置</span>
+                <strong id="ap-config-name">—</strong>
+                <small id="ap-config-task">—</small>
+              </span>
+              <span class="ap-config-state" id="ap-config-chip">未加载</span>
+            </div>
+            <div class="ap-empty" id="ap-empty" hidden><i data-lucide="bot"></i><span>该设备未绑定 ALAS 配置</span><small>联系管理员在后台"ALAS 管理"中绑定配置</small></div>
+            <div class="vp-group-title vp-group-title-extra"><h3>运行状态</h3></div>
+            <div class="ap-state" id="ap-state" data-state="idle">
+              <span class="ap-state-dot" aria-hidden="true"></span>
+              <span class="ap-state-copy">
+                <strong id="ap-state-label">未运行</strong>
+                <small id="ap-state-detail">选择配置后查看运行状态</small>
+              </span>
+            </div>
+            <div class="ap-actions">
+              <button class="ap-btn ap-btn-primary" id="ap-toggle" type="button" disabled><i data-lucide="play"></i><span id="ap-toggle-label">启动 ALAS</span></button>
+              <button class="ap-btn" id="ap-refresh" type="button"><i data-lucide="refresh-cw"></i>刷新状态</button>
+              <a class="ap-btn disabled" id="ap-open" href="/alas/embed/" rel="noopener noreferrer" aria-haspopup="dialog" aria-controls="alas-float-window" aria-disabled="true"><i data-lucide="external-link"></i>打开 ALAS 面板</a>
+            </div>
+            <div class="ap-switch-row">
+              <span class="ap-switch-copy">
+                <b>退出浏览器后自动检测</b>
+                <small>只在你关闭浏览器后检测一次：ALAS 已停止或异常时自动重启，不会持续检测</small>
+              </span>
+              <button class="ap-switch sg-switch" id="ap-exit-guard" type="button" role="switch" aria-checked="false" aria-label="退出浏览器后自动检测 ALAS"><i></i></button>
+            </div>
+            <div class="vp-status" id="ap-status" role="status" aria-live="polite">
+              <span class="vp-status-dot" id="ap-status-dot"><i data-lucide="check"></i></span>
+              <span id="ap-status-text">ALAS 数据已同步</span>
+            </div>
+            <p class="vp-note">ALAS 配置与绑定由管理员在后台"ALAS 管理"中维护;启动后 ALAS 将接管设备的自动化任务。</p>
+          </section>
+        </div>
+      </aside>
+      <dialog class="alas-float-window" id="alas-float-window" aria-labelledby="alas-float-title" aria-describedby="alas-float-subtitle" aria-modal="false" aria-hidden="true" inert>
+        <header class="alas-float-head" id="alas-float-head">
+          <div class="alas-float-head-copy">
+            <h2 id="alas-float-title">ALAS 面板</h2>
+            <p id="alas-float-subtitle">工作台内设置</p>
+          </div>
+          <div class="alas-float-actions">
+            <button class="alas-float-icon" id="alas-float-maximize" type="button" aria-label="最大化 ALAS 窗口" aria-pressed="false" title="最大化"><i data-lucide="maximize-2"></i></button>
+            <button class="alas-float-icon" id="alas-float-close" type="button" aria-label="关闭 ALAS 面板" title="关闭"><i data-lucide="x"></i></button>
+          </div>
+        </header>
+        <div class="alas-float-frame-wrap">
+          <iframe class="alas-float-frame" id="alas-float-frame" title="ALAS 设置面板" loading="eager"></iframe>
+        </div>
+      </dialog>
+      <div class="vp-backdrop" id="up-backdrop" aria-hidden="true"></div>
+      <aside class="vp-panel up-panel" id="up-panel" role="dialog" aria-modal="true" aria-label="账户设置" aria-hidden="true" inert>
+        <span class="vp-grabber" aria-hidden="true"></span>
+        <header class="vp-head">
+          <div class="vp-head-copy"><h2>账户</h2><p>资料、偏好与安全</p></div>
+          <button class="vp-close" id="up-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+        </header>
+        <div class="vp-body">
+          <section class="vp-group">
+            <div class="vp-group-title"><h3>账户信息</h3><span class="vp-hint">当前登录</span></div>
+            <div class="up-identity">
+              <span class="up-avatar" id="up-avatar" aria-hidden="true">A</span>
+              <span class="up-identity-copy">
+                <strong id="up-name">当前账户</strong>
+                <span class="up-username" id="up-username">—</span>
+                <span class="up-role" id="up-role"></span>
+              </span>
+            </div>
+            <div class="up-expiry" id="up-expiry" data-state="ok">
+              <span class="up-expiry-icon" aria-hidden="true"><i data-lucide="calendar-clock"></i></span>
+              <span class="up-expiry-copy">
+                <span class="up-expiry-label">账号有效期</span>
+                <strong id="up-expiry-text">—</strong>
+                <small id="up-expiry-meta">—</small>
+              </span>
+              <button class="ap-btn" id="up-renew" type="button" hidden>申请续期</button>
+            </div>
+            <div class="up-last-login"><i data-lucide="clock"></i><span id="up-last-login">上次登录 —</span></div>
+
+            <div class="vp-group-title vp-group-title-extra"><h3>设备权限</h3><span class="vp-hint">由管理员分配</span></div>
+            <div class="up-perms" id="up-perms"></div>
+            <div class="ap-empty" id="up-perms-empty" hidden><i data-lucide="shield-off"></i><span>暂无设备权限</span><small>请联系管理员为你分配设备</small></div>
+
+            <div class="vp-group-title vp-group-title-extra"><h3>修改密码</h3><span class="vp-hint">至少 12 位</span></div>
+            <form class="up-password" id="up-password-form" novalidate>
+              <label class="vp-field">当前密码
+                <span class="vp-input-wrap"><input id="up-cur" type="password" autocomplete="current-password"></span>
+              </label>
+              <label class="vp-field">新密码
+                <span class="vp-input-wrap"><input id="up-new" type="password" autocomplete="new-password"></span>
+              </label>
+              <label class="vp-field">确认新密码
+                <span class="vp-input-wrap"><input id="up-confirm" type="password" autocomplete="new-password"></span>
+              </label>
+              <button class="ap-btn ap-btn-primary" id="up-save" type="submit"><i data-lucide="check"></i>保存新密码</button>
+            </form>
+
+            <div class="vp-status" id="up-status" role="status" aria-live="polite">
+              <span class="vp-status-dot" id="up-status-dot"><i data-lucide="check"></i></span>
+              <span id="up-status-text">账户信息已同步</span>
+            </div>
+
+            <button class="ap-btn up-logout" id="up-logout" type="button"><i data-lucide="log-out"></i>退出登录</button>
+            <p class="vp-note">设备权限与账号状态由管理员维护;退出后需要重新登录才能继续使用。</p>
+          </section>
+        </div>
+      </aside>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+  </main>
+
+
+
+</body>
+</html>

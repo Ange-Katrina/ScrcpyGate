@@ -1,0 +1,569 @@
+/* 投屏管理页面样式（Apple Copy 取向）。
+   设计要点：
+   - 居中内容列（Apple 设置页做法）：卡片不铺满宽屏，行内标签与开关不再相距上千像素；
+   - 卡片是安静容器：1px 边框 + 16px 圆角，静止不加阴影，阴影只留给浮层与拖拽；
+   - 行是设置行：图标 + 标签 + 说明 + 右侧开关，最小 44pt 高；
+   - 用间距分组而不是分隔线；状态色只出现在开关与提示文字上；
+   - 所有可点控件的命中区 ≥ 44pt（视觉可以更小，用透明内边距撑开）。
+   尺度令牌与 /quality、/users 一致（圆角 8/10/12/16 + 胶囊，高度 20/24/30/34/44）。 */
+
+:root {
+  --page-radius-xs: 8px;
+  --page-radius-sm: 10px;
+  --page-radius-md: 12px;
+  --page-radius-lg: 16px;
+  --page-radius-pill: 999px;
+  --page-h-badge: 20px;
+  --page-h-mini: 24px;
+  --page-h-control: 30px;
+  --page-h-field: 34px;
+  --page-h-touch: 44px;
+  --wb-space-1: 4px;
+  --wb-space-2: 8px;
+  --wb-space-3: 12px;
+  --wb-space-4: 16px;
+  --wb-space-6: 24px;
+  --wb-space-8: 32px;
+  --wb-shadow-hairline: 0 1px 2px 0 rgba(0, 0, 0, .04);
+  --wb-shadow-float: 0 8px 24px -8px rgba(0, 0, 0, .08);
+  --wb-shadow-modal: 0 24px 64px -12px rgba(0, 0, 0, .12);
+  --wb-ease: cubic-bezier(.32, .72, 0, 1);
+  /* 内容列：窄屏是 Apple 设置页那种一列（标签与开关不会被拉开），
+     宽屏把两张卡片并排铺开并加宽到 --wb-column-wide，避免中间一条、两边全空。 */
+  --wb-column: 780px;
+  --wb-column-wide: 1360px;
+  --wb-column-gutter: var(--wb-space-6);
+}
+
+/* ---------- 页头（与 /security、/quality 同一套度量） ---------- */
+/* 页头、工具行、卡片共用一条内容列：以前标题/角色切换在左、卡片居中，三条左边缘互相对不齐。 */
+.wb-head { align-items: center; max-width: var(--wb-column); margin-inline: auto; }
+.wb-head .page-heading-copy p { max-width: 620px; }
+.wb-actions { display: flex; align-items: center; gap: var(--wb-space-2); flex-wrap: wrap; }
+/* 底部保存行：动作跟内容走完之后（Apple Copy），与 /security、/quality 的底部条同款。 */
+.wb-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--wb-space-3);
+  flex-wrap: wrap;
+  max-width: var(--wb-column);
+  margin: var(--wb-space-6) auto 0;
+  padding: var(--wb-space-3) 20px;
+  border: 1px solid var(--admin-elev-border);
+  border-radius: var(--page-radius-lg);
+  background: var(--admin-surface);
+  box-shadow: var(--wb-shadow-hairline), var(--wb-shadow-float);
+}
+.wb-foot-spacer { flex: 1 1 auto; }
+.wb-status { color: var(--admin-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wb-status[data-tone="ok"] { color: var(--admin-success); }
+.wb-status[data-tone="warn"] { color: var(--admin-warn); }
+.wb-status[data-tone="error"] { color: var(--admin-danger); }
+/* 工具行：一句说明 + 角色分段控件同处一行，宽屏下把这一行铺满内容列。 */
+.wb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wb-space-3) var(--wb-space-6);
+  flex-wrap: wrap;
+  max-width: var(--wb-column);
+  margin: 0 auto var(--wb-space-6);
+}
+/* 说明文字：跟页面同字号、限制行宽，不用浏览器默认段落（16px 纯黑会比标题还抢眼）。 */
+.wb-hint {
+  flex: 1 1 300px;
+  /* 620px 时这句会剩「控制。」两个字单独一行；右角色分段控件前还有余量，放宽到 700px。 */
+  max-width: 700px;
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+  /* 兜底：不支持 text-wrap 时也只是普通换行 */
+  text-wrap: pretty;
+}
+
+/* 胶囊按钮：与 .guard-btn / .q-btn 一致（桌面 30px，移动端抬到 44px）。 */
+.wb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--page-h-control);
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--page-radius-pill);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms var(--wb-ease), border-color 150ms var(--wb-ease),
+    color 150ms var(--wb-ease), opacity 150ms var(--wb-ease);
+}
+.wb-btn.primary { color: var(--admin-on-brand); background: var(--admin-brand-btn); }
+.wb-btn.primary:hover:not(:disabled) { background: var(--admin-brand-hover); }
+.wb-btn.ghost { color: var(--admin-text); background: transparent; border-color: var(--admin-border); }
+.wb-btn.ghost:hover:not(:disabled) { background: var(--admin-hover); border-color: var(--admin-elev-border); }
+.wb-btn:disabled { opacity: .45; cursor: not-allowed; }
+.wb-btn [data-lucide] { width: 15px; height: 15px; }
+.wb-btn:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
+
+/* ---------- 角色切换：与 /quality 同一套分段控件（.sg-segments） ---------- */
+.wb-roletabs { flex: 0 0 auto; }
+.wb-roletabs .sg-seg small { color: var(--admin-muted); font-size: 10.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.wb-roletabs .sg-seg.active small { color: var(--admin-muted); }
+
+/* ---------- 内容列 + 卡片 ---------- */
+.wb-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-6);
+  width: 100%;
+  max-width: var(--wb-column);
+  margin-inline: auto;
+}
+.wb-placeholder {
+  margin: 0;
+  padding: var(--wb-space-4) 0;
+  color: var(--admin-muted);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.wb-card { overflow: hidden; }
+.wb-card .panel-header { min-height: 0; padding: 18px 20px 12px; border-bottom: 0; }
+.wb-card .panel-title { font-size: 15px; }
+.wb-card .panel-subtitle { font-size: 12px; font-weight: 400; }
+
+/* ---------- 设置行 ---------- */
+.wb-body { display: flex; flex-direction: column; padding: 0 20px 12px; }
+.wb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wb-space-4);
+  min-height: var(--page-h-touch);
+  padding: var(--wb-space-3) 0;
+}
+.wb-row + .wb-row { border-top: 1px solid var(--admin-line); }
+/* 「通知中心」排在子项容器之后，不满足上面的相邻选择器 —— 少一条分隔线（并排时尤其明显） */
+.wb-body > .wb-children + .wb-row { border-top: 1px solid var(--admin-line); }
+.wb-copy { display: flex; align-items: center; gap: var(--wb-space-3); min-width: 0; }
+.wb-copy-icon { display: inline-flex; flex: 0 0 auto; color: var(--admin-muted); }
+.wb-copy-icon [data-lucide] { width: 18px; height: 18px; stroke-width: 1.7; }
+.wb-copy-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wb-copy-text b { color: var(--admin-text); font-size: 13px; font-weight: 600; }
+.wb-copy-text span { color: var(--admin-muted); font-size: 11.5px; line-height: 17px; }
+.wb-row.is-child { min-height: 52px; }
+.wb-row.is-child .wb-copy-text b { font-size: 12.5px; font-weight: 500; }
+/* 细项：用缩进和间距表达层级，不再画第二条竖线。 */
+.wb-children { display: flex; flex-direction: column; padding-left: 30px; }
+.wb-children .wb-row:first-child { border-top: 1px solid var(--admin-line); }
+.wb-row.is-off .wb-copy-text b,
+.wb-row.is-off .wb-copy-icon { color: var(--admin-muted); opacity: .7; }
+
+/* ---------- 顶部状态条预览（按工作台那条胶囊画） ---------- */
+.wb-preview { display: flex; justify-content: center; padding: 0 20px var(--wb-space-3); }
+.wb-preview-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px var(--wb-space-3);
+  width: max-content;
+  max-width: 100%;
+  min-height: var(--page-h-field);
+  padding: 5px 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: var(--page-radius-pill);
+  background: var(--admin-field);
+}
+.wb-preview-group { display: inline-flex; align-items: center; gap: 7px; }
+.wb-preview-group + .wb-preview-group { padding-left: var(--wb-space-3); border-left: 1px solid var(--admin-line); }
+.wb-part { color: var(--admin-text); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-part.is-label { color: var(--admin-muted); font-size: 10.5px; font-weight: 500; }
+.wb-part.is-mono { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-part.is-sub { color: var(--admin-muted); font-size: 10.5px; font-weight: 500; }
+.wb-part.is-state { display: inline-flex; align-items: center; gap: 6px; }
+.wb-part.is-state::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--admin-success);
+}
+.wb-preview-empty { color: var(--admin-muted); font-size: 11.5px; }
+
+/* ---------- 底部菜单：一级/二级预览（工作台样式） ---------- */
+.wb-dock-levels { display: flex; flex-direction: column; gap: var(--wb-space-4); padding: 0 20px var(--wb-space-2); }
+.wb-level-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--wb-space-2); }
+.wb-level-head b { color: var(--admin-text); font-size: 12.5px; font-weight: 600; }
+.wb-level-head small { color: var(--admin-muted); font-size: 11px; }
+.wb-level-shell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wb-space-1);
+  width: max-content;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 0 var(--wb-space-2);
+  border: 1px solid var(--admin-line);
+  border-radius: var(--page-radius-pill);
+  background: var(--admin-field);
+}
+.wb-level-shell.is-level2 {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  min-width: 200px;
+  min-height: 0;
+  padding: 5px;
+  border-radius: var(--page-radius-md);
+  background: var(--admin-surface);
+}
+/* 一级预览和真实控制栏一样：横向不换行，超宽就滚动（否则按钮会挤出胶囊）。 */
+.wb-level-shell.is-level1 { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.wb-level-shell.is-level1::-webkit-scrollbar { display: none; }
+.wb-dock-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--page-radius-pill);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.wb-dock-item small { color: var(--admin-muted); font-size: 9px; font-weight: 500; }
+.wb-dock-item [data-lucide] { width: 13px; height: 13px; }
+.wb-dock-item.is-menu {
+  height: 30px;
+  padding: 0 var(--wb-space-2);
+  border-radius: var(--page-radius-xs);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+}
+.wb-dock-item.is-menu small { margin-left: auto; color: var(--admin-muted); font-size: 10px; }
+.wb-level-shell .wb-preview-empty { padding: 0 var(--wb-space-2); color: var(--admin-muted); font-size: 11.5px; }
+/* 卡片底部的操作行（Apple 的卡片动作放底部，而不是挤在标题栏）。 */
+.wb-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wb-space-3);
+  padding: var(--wb-space-3) 20px var(--wb-space-4);
+  border-top: 1px solid var(--admin-line);
+  color: var(--admin-muted);
+  font-size: 11.5px;
+}
+/* 预览标记：状态条胶囊与「更多」菜单是**工作台另一个界面**的仿真，保留工作台形状；
+   这里在各自小标题后统一标「预览」，避免被读成"页面自己长了几个胶囊"。 */
+.wb-preview-tag {
+  display: inline-flex;
+  align-items: center;
+  height: var(--page-h-badge);
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--page-radius-pill);
+  background: var(--admin-field);
+  color: var(--admin-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+/* ---------- 编排弹窗（sheet） ---------- */
+/* 层级与应用其它弹窗对齐：遮罩 90/100、弹窗 95/105、Toast 120；低于 82 会被移动端侧栏盖住。 */
+.wb-layout-modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: var(--wb-space-6); }
+.wb-layout-modal[hidden] { display: none; }
+.wb-layout-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .42); }
+.wb-layout-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 940px);
+  max-height: min(88vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--admin-elev-border);
+  border-radius: var(--page-radius-lg);
+  background: var(--admin-elev);
+  box-shadow: var(--wb-shadow-modal);
+}
+.wb-layout-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wb-space-4);
+  padding: 20px 20px var(--wb-space-3);
+}
+.wb-layout-head h2 { margin: 0; color: var(--admin-text); font-size: 16px; font-weight: 600; }
+.wb-layout-head p { margin: 5px 0 0; max-width: 620px; color: var(--admin-muted); font-size: 12px; line-height: 18px; }
+/* 键位提示：<kbd> 做实体键的样子（1px 线 + 4px 圆角 + 字段底色 + 内侧下沿） */
+.wb-kbd-hint { margin: 6px 0 0; color: var(--admin-muted); font-size: 11.5px; }
+.wb-kbd-hint kbd {
+  display: inline-block;
+  min-width: 19px;
+  margin: 0 1px;
+  padding: 0 4px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--page-radius-xs);
+  background: var(--admin-field);
+  box-shadow: inset 0 -1px 0 var(--admin-border);
+  color: var(--admin-text);
+  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.wb-layout-close {
+  display: grid;
+  place-items: center;
+  width: var(--page-h-touch);
+  height: var(--page-h-touch);
+  flex: 0 0 auto;
+  margin: -6px -6px 0 0;
+  border: 0;
+  border-radius: var(--page-radius-pill);
+  background: transparent;
+  color: var(--admin-muted);
+  cursor: pointer;
+}
+.wb-layout-close:hover { color: var(--admin-text); background: var(--admin-hover); }
+.wb-layout-close:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
+.wb-layout-body {
+  display: grid;
+  grid-template-columns: minmax(0, 268px) minmax(0, 1fr);
+  gap: var(--wb-space-4);
+  padding: 0 20px var(--wb-space-4);
+  overflow: auto;
+  /* Windows 的覆盖式滚动条不滚动就不出现：内容超出一屏时，用户会以为"少了一项"
+     （二级菜单 2 条只看到 1 条就是这么来的）。这里给滚动条留位并让它常显。 */
+  scrollbar-gutter: stable;
+}
+.wb-layout-body::-webkit-scrollbar { width: 10px; }
+.wb-layout-body::-webkit-scrollbar-thumb { background: var(--admin-border); border-radius: 999px; }
+.wb-layout-body::-webkit-scrollbar-thumb:hover { background: var(--admin-elev-border); }
+.wb-layout-body::-webkit-scrollbar-track { background: transparent; }
+.wb-layout-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wb-space-3);
+  padding: var(--wb-space-3) 20px var(--wb-space-4);
+  border-top: 1px solid var(--admin-line);
+  color: var(--admin-muted);
+  font-size: 11.5px;
+}
+.wb-zone { display: flex; flex-direction: column; gap: var(--wb-space-2); min-width: 0; }
+.wb-zone-col { display: flex; flex-direction: column; gap: var(--wb-space-4); min-width: 0; }
+.wb-zone-title { display: flex; flex-direction: column; gap: 2px; }
+.wb-zone-title b { color: var(--admin-text); font-size: 12.5px; font-weight: 600; }
+.wb-zone-title small { color: var(--admin-muted); font-size: 11px; }
+.wb-zone-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-1);
+  min-height: 150px;
+  margin: 0;
+  padding: var(--wb-space-2);
+  list-style: none;
+  border: 1px dashed var(--admin-line);
+  border-radius: var(--page-radius-md);
+  background: var(--admin-field);
+  transition: background-color 150ms var(--wb-ease), border-color 150ms var(--wb-ease);
+}
+.wb-zone-list.is-dock { min-height: 84px; border-radius: var(--page-radius-lg); }
+.wb-zone.is-over .wb-zone-list {
+  border-style: solid;
+  border-color: var(--admin-brand);
+  background: var(--admin-brand-soft);
+}
+.wb-zone-empty { margin: 0; padding: 18px var(--wb-space-2); color: var(--admin-muted); font-size: 11.5px; text-align: center; }
+
+/* ---------- 编排条目 ---------- */
+.wb-chip {
+  display: flex;
+  align-items: center;
+  /* 列窄时让操作区换到第二行，绝不把按钮挤出条目（否则看起来像"内容缺失"）。 */
+  flex-wrap: wrap;
+  gap: var(--wb-space-1) var(--wb-space-2);
+  min-height: var(--page-h-touch);
+  padding: 2px var(--wb-space-1) 2px 0;
+  border: 1px solid var(--admin-line);
+  border-radius: var(--page-radius-sm);
+  background: var(--admin-surface);
+  transition: box-shadow 150ms var(--wb-ease), border-color 150ms var(--wb-ease), opacity 150ms var(--wb-ease);
+}
+.wb-zone-list.is-dock .wb-chip { border-radius: var(--page-radius-pill); }
+.wb-chip:hover { border-color: var(--admin-border); box-shadow: var(--wb-shadow-hairline); }
+.wb-chip.is-dragging { opacity: .6; box-shadow: var(--wb-shadow-float); }
+.wb-chip-handle {
+  display: grid;
+  place-items: center;
+  width: var(--page-h-touch);
+  height: var(--page-h-touch);
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--page-radius-sm);
+  background: transparent;
+  color: var(--admin-faint);
+  cursor: grab;
+}
+.wb-chip-handle:hover { color: var(--admin-muted); background: var(--admin-hover); }
+.wb-chip-handle:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: -2px; }
+.wb-chip-handle [data-lucide] { width: 16px; height: 16px; }
+.wb-chip-icon { display: inline-flex; flex: 0 0 auto; color: var(--admin-muted); }
+.wb-chip-icon [data-lucide] { width: 16px; height: 16px; }
+.wb-chip-copy { display: flex; flex-direction: column; gap: 1px; flex: 1 1 120px; min-width: 0; padding-right: var(--wb-space-1); }
+.wb-chip-copy b { overflow: hidden; color: var(--admin-text); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.wb-chip-copy small {
+  overflow: hidden;
+  color: var(--admin-muted);
+  font-size: 11px;
+  /* 宽屏弹窗里描述有位置放两行：截成一行会砍掉近一半信息（视觉核对指出过） */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+}
+.wb-chip-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wb-space-1);
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* 条目里的「一级/二级」是同一套分段控件的紧凑版（视觉 28pt，命中区由外层 44pt 行提供）。 */
+.wb-chip-seg { padding: 2px; border-radius: var(--page-radius-pill); }
+.wb-chip-seg .sg-seg {
+  --sg-seg-height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--page-radius-pill);
+  font-size: 11.5px;
+}
+.wb-chip-seg .sg-seg:disabled { opacity: .4; cursor: not-allowed; }
+.wb-chip-remove {
+  display: grid;
+  place-items: center;
+  width: var(--page-h-touch);
+  height: var(--page-h-touch);
+  border: 0;
+  border-radius: var(--page-radius-pill);
+  background: transparent;
+  color: var(--admin-faint);
+  cursor: pointer;
+}
+.wb-chip-remove:hover { color: var(--admin-danger); background: var(--admin-danger-soft); }
+.wb-chip-remove:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: -2px; }
+.wb-chip-remove [data-lucide] { width: 15px; height: 15px; }
+.wb-chip-fixed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding-right: var(--wb-space-3);
+  color: var(--admin-muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.wb-chip-fixed [data-lucide] { width: 13px; height: 13px; }
+
+/* ---------- 响应式 ---------- */
+/* 本页不加载 admin-page.css（容器声明在那里），所以 .admin-content 不是容器，
+   下面的 @container 永远不会命中——这里补上，让它按可用宽度判断，
+   与 /quality、/devices 等页保持一致；也避免用视口断点去猜侧栏宽度。 */
+.admin-content { container-type: inline-size; }
+/* 宽屏（按 .admin-content 的可用宽度判定）：内容列铺开到 --wb-column-wide，
+   宽度用在卡片内部，而不是把整页挤成中间一条窄列：
+   - 状态条卡片内部左右分栏：左边是总开关/通知中心，右边是状态条内容各块；
+   - 控制栏卡片把一级/二级预览并排，一级预览因此不会被裁成横向滚动。
+   卡片高度接近（约 370 / 300），也不会出现"一张 600 一张 300"的空洞。 */
+@container (min-width: 1080px) {
+  .wb-head,
+  .wb-toolbar,
+  .wb-layout { max-width: var(--wb-column-wide); }
+  /* 状态条卡片：总开关单独占一整行（一眼看出它是这一块的总闸），下面 5 个内容块 +
+     通知中心共 6 项排成两列 3+3 —— 刚好填满，不留空格。
+     上一版是"两个顶层开关一行 + 5 个子项两列（3+2）"，视觉核对指出层级读不出来、
+     且右下角空出一整行。 */
+  .wb-card[data-group="topbar"] .wb-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: min-content;
+    align-items: start;
+    gap: 0 var(--wb-space-8);
+  }
+  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child { grid-column: 1 / -1; }
+  /* 总闸要一眼看出来：标题加重一档 + 图标略大（视觉核对说之前它和子项"墨量"几乎一样），
+     子项左缩进 12px 表示隶属关系；两者都不动右侧开关轨道。 */
+  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child .wb-copy-text b { font-weight: 700; }
+  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child .wb-copy-icon [data-lucide] { width: 20px; height: 20px; }
+  /* 子项（含通知中心）左缩进 12px 表示隶属关系；不动右侧开关轨道。
+     注意子行在 DOM 里包在 .wb-children 里，所以不能只写 `> *:not(:first-child)`。 */
+  .wb-card[data-group="topbar"] .wb-body > .wb-children .wb-row,
+  .wb-card[data-group="topbar"] .wb-body > .wb-row:not(:first-child) { padding-left: var(--wb-space-3); }
+  /* 子项不再嵌套成一块：直接作为网格项参与两列排布（display:contents 保留 DOM 层级） */
+  .wb-card[data-group="topbar"] .wb-body > .wb-children { display: contents; }
+  /* 控制栏卡片：一级/二级预览并排，一级预览因此不会被裁成横向滚动 */
+  .wb-dock-levels {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+    gap: var(--wb-space-6);
+  }
+  .wb-dock-level { min-width: 0; }
+}
+@media (max-width: 900px) {
+  .wb-layout-body { grid-template-columns: minmax(0, 1fr); }
+  .wb-layout-dialog { max-height: 92vh; }
+}
+/* 宽屏把三个区并排（未启用 / 一级 / 二级）：一级菜单 8 条很高，原来把二级菜单挤到
+   折线以下，看起来像"少了一项"。并排后 1500x950 下整个弹窗不需要滚动。
+   三个投放区拉满列高：既补齐"二级菜单只有 73px、右下留一大片空白"，也让投放目标更大。 */
+@media (min-width: 1024px) {
+  .wb-layout-dialog { width: min(100%, 1180px); }
+  .wb-layout-body {
+    grid-template-columns: minmax(0, 240px) minmax(0, 1fr) minmax(0, 340px);
+    align-items: stretch;
+  }
+  .wb-zone-col { display: contents; }
+  .wb-layout-modal .wb-zone { min-height: 0; }
+  .wb-layout-modal .wb-zone-list { flex: 1 1 auto; }
+}
+@media (max-width: 767px) {
+  .wb-head { align-items: stretch; flex-direction: column; }
+  .wb-actions { justify-content: space-between; }
+  .wb-btn { height: var(--page-h-touch); font-size: 13px; }
+  .wb-layout, .wb-head, .wb-toolbar { max-width: none; }
+  .wb-toolbar { align-items: stretch; }
+  /* 手机宽度下两个角色标签并排：让摘要小字截断，而不是把分段控件撑出内容列 */
+  .wb-roletabs { flex: 1 1 100%; min-width: 0; }
+  .wb-roletabs .sg-seg { min-width: 0; }
+  .wb-roletabs .sg-seg small { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .wb-card .panel-header { padding: 16px 16px 10px; }
+  .wb-body { padding: 0 16px 10px; }
+  .wb-dock-levels { padding: 0 16px var(--wb-space-1); }
+  .wb-card-foot { padding: var(--wb-space-3) 16px var(--wb-space-4); flex-direction: column; align-items: stretch; }
+  .wb-card-foot .wb-btn { width: 100%; }
+  .wb-layout-modal { padding: var(--wb-space-3); }
+  .wb-layout-head, .wb-layout-body, .wb-layout-foot { padding-left: 16px; padding-right: 16px; }
+  .wb-level-shell.is-level2 { min-width: 0; width: 100%; }
+  .wb-chip-copy small { display: none; }
+  /* 底部保存行在手机上竖排：状态一行、按钮各占整行（44px 触控目标已由 .wb-btn 提供）。 */
+  .wb-foot { max-width: none; flex-direction: column; align-items: stretch; gap: var(--wb-space-2); padding: var(--wb-space-3) 16px; }
+  .wb-foot-spacer { display: none; }
+  .wb-foot .wb-btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-btn, .wb-chip, .wb-zone-list { transition: none; }
+}
