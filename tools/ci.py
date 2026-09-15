@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,10 +67,12 @@ def check_files() -> None:
             ast.parse((ROOT / path).read_text(encoding="utf-8"), filename=name)
         elif path.suffix == ".json":
             json.loads((ROOT / path).read_text(encoding="utf-8"))
+        elif path.suffix == ".svg":
+            ET.parse(ROOT / path)
         checked += 1
     if failures:
         raise ValueError("Workspace-only files are tracked: " + ", ".join(failures))
-    print(f"Checked {checked} tracked files; Python/JSON syntax and repository boundaries passed")
+    print(f"Checked {checked} tracked files; Python/JSON/SVG syntax and repository boundaries passed")
 
 
 def main() -> None:
