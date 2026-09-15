@@ -17,11 +17,11 @@ services:
       - "${WEB_SCRCPY_BIND:-127.0.0.1}:${WEB_SCRCPY_PORT:-5000}:5000"
     environment:
       WEB_SCRCPY_DATA_DIR: /app/data
-      # 首次启动的管理员密码：只在库里还没有 admin 账号时被消费一次。留空时应用会随机
-      # 生成一个不打印的密码（等于把自己锁在外面）—— 那样请先用
-      # `compose run --rm --no-deps -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate
-      #  python -m app.cli bootstrap-admin` 把密码打出来。deploy.sh --install 自己会做这一步。
+      # Only used when creating the administrator. Without an explicit password,
+      # the default recovery file is data/initial_admin_password.txt (0600).
+      # For an existing administrator use reset-admin with per-command output opt-in.
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      SCRCPYGATE_ADMIN_PASSWORD_FILE: ${SCRCPYGATE_ADMIN_PASSWORD_FILE:-true}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:5000}
       ALAS_EMBED_ORIGIN: ${ALAS_EMBED_ORIGIN:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}

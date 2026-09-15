@@ -58,7 +58,8 @@ docker run -d --name scrcpygate --restart unless-stopped \
   -e INITIAL_ADMIN_PASSWORD \
   -e PUBLIC_BASE_URL=http://127.0.0.1:5000 \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
-  -e SESSION_COOKIE_SECURE=false \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver local --log-opt max-size=20m --log-opt max-file=5 \
   -v "$PWD/data:/app/data" \
   "$IMAGE"
 ```
@@ -79,8 +80,9 @@ docker run -d --name scrcpygate --restart unless-stopped --net=host \
   -e INITIAL_ADMIN_PASSWORD \
   -e PUBLIC_BASE_URL=http://127.0.0.1:5000 \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
-  -e SESSION_COOKIE_SECURE=false \
   -e ADB_SERVER_SOCKET=tcp:127.0.0.1:5037 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver local --log-opt max-size=20m --log-opt max-file=5 \
   -v "$PWD/data:/app/data" \
   "$IMAGE"
 ```
@@ -96,6 +98,18 @@ adb 客户端指到你已经在宿主上跑着的那个 server —— 也就是 
 也省掉这些额外权限。
 
 ## 5. 生命周期与升级
+
+容器内 ADB 的授权密钥保存在 `/app/data/.android`，复用同一数据卷重建后仍保留。
+旧镜像使用 `/tmp/.android`。删除旧容器前，先停止投屏并执行一次迁移（不输出密钥内容）：
+
+```sh
+docker exec scrcpygate sh -c 'if [ -d /tmp/.android ]; then test ! -e /app/data/.android || exit 1; cp -a /tmp/.android /app/data/.android; fi'
+```
+
+目标目录已存在时命令会拒绝覆盖，请先确认它是否已有所需身份。旧容器已删除时，需要从备份恢复密钥，
+或在设备上重新授权。复用宿主 ADB server 时不需要此迁移。
+新容器入口会配置 ALAS 加密密钥；已有加密数据应恢复原密钥，不能靠生成替代密钥解密。
+将公开 URL 改为 HTTPS 后，会自动启用 Secure Cookie；不要继续显式设置 `SESSION_COOKIE_SECURE=false`。
 
 ```sh
 docker logs -f scrcpygate            # 跟踪日志（stdout 为 JSON）

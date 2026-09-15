@@ -311,6 +311,7 @@ ScrcpyGate 引导式安装与管理脚本
 凭据与候选制品:
   ./deploy.sh --token-status       输出脱敏的 ALAS Token 迁移状态
   ./deploy.sh --migrate-alas-token 执行迁移/轮换并输出脱敏状态
+  ./deploy.sh --clear-alas-token   清空换不回密钥的 ALAS Token（之后在 ALAS 设置里重新填写）
   ./deploy.sh --candidate-manifest [文件] 生成清洁 checkout 的文件哈希与镜像 digest
 
 备份与恢复:
@@ -345,7 +346,9 @@ SCRCPYGATE_AUTO_INSTALL_DEPS=true 时安装系统软件。
   SCRCPYGATE_REGISTRY_CONNECT_TIMEOUT_SECONDS=8
   SCRCPYGATE_IMAGE_PULL_TIMEOUT_SECONDS=120
 
-Existing .env files, databases, users, and passwords are never overwritten.
+Install preserves existing accounts and passwords. Normal uninstall keeps data,
+its ALAS key, .env and the local image; --purge explicitly removes local data.
+Missing keys for encrypted data must be recovered before automatic provisioning.
 EOF
 }
 
@@ -393,6 +396,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --token-status) ACTION=token_status ;;
     --migrate-alas-token) ACTION=migrate_alas_token ;;
+    --clear-alas-token) ACTION=clear_alas_token ;;
     --candidate-manifest)
       ACTION=candidate_manifest
       if [ "$#" -gt 1 ]; then
@@ -2042,7 +2046,8 @@ prepare_data_directory() {
     mkdir -p "$WEB_SCRCPY_DATA_HOST" || die "无法创建数据目录: $WEB_SCRCPY_DATA_HOST"
   fi
   DATA_DIR=$(CDPATH= cd -- "$WEB_SCRCPY_DATA_HOST" && pwd -P)
-  case "$DATA_DIR" in '/'|"$SCRIPT_DIR") die "拒绝使用不安全的数据目录: $DATA_DIR" ;; esac
+  case "$DATA_DIR" in '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝使用不安全的数据目录: $DATA_DIR" ;; esac
+  case "$SCRIPT_DIR/" in "$DATA_DIR/"*) die "拒绝使用项目父目录作为数据目录" ;; esac
   # 幂等收紧：数据目录含数据库（会话/令牌/审计），无论是否新建都不应组/其他可读。
   chmod 700 "$DATA_DIR" 2>/dev/null || warn_msg "无法限制数据目录权限"
 }
@@ -2067,6 +2072,57 @@ generate_persisted_alas_token_key() {
   printf '%s\n' "$generated_key"
 }
 
+existing_database_needs_alas_key() {
+  # Inspect only the stored format, without bootstrapping or exposing a token.
+  # SQLite mode=ro keeps the database read-only, but WAL readers may need to
+  # create sidecars. Run as the app user on the writable data mount, not root.
+  # Docker failures must never be confused with an empty credential.
+  key_probe_result=$(docker run --rm --network none --read-only \
+    -v "$DATA_DIR:/app/data" --entrypoint python scrcpygate:local -c '
+import sqlite3, sys
+try:
+    conn = sqlite3.connect("file:/app/data/webscrcpy.db?mode=ro", uri=True)
+    row = conn.execute("SELECT value FROM settings WHERE key=?", ("alas_token",)).fetchone()
+    needs_key = bool(row and str(row[0] or "").startswith("v1:"))
+    conn.close()
+except Exception:
+    sys.exit(2)
+print("encrypted" if needs_key else "clear")
+' 2>/dev/null) || return 2
+  case "$key_probe_result" in
+    encrypted) return 0 ;;
+    clear) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+confirm_reset_alas_token_without_key() {
+  if ! is_interactive; then
+    die "旧数据库含加密 ALAS Token，但密钥文件缺失。请恢复配套密钥或注入原密钥；确认无法找回时，可执行 --clear-alas-token 后重装并重新填写 Token。非交互安装不会自动重置"
+  fi
+  warn_msg "旧数据库含加密 ALAS Token，但密钥文件缺失；优先恢复原密钥可以保留现有 Token"
+  warn_msg "强行重置只清空保存的 ALAS Token（含旧配置中的 Token），并生成新密钥；账号、密码、设备和其他配置保留。安装后需重新填写 ALAS Token"
+  if ! prompt_confirm_no "是否强行重置 ALAS Token 并继续安装？"; then
+    die "已取消重置，原 Token 保留；请恢复配套密钥后重新安装"
+  fi
+  if [ -e "$DATA_DIR/.alas-token-encryption-key" ] || [ -L "$DATA_DIR/.alas-token-encryption-key" ]; then
+    die "密钥文件状态已变化，未清空 Token；请重新安装以检查当前密钥"
+  fi
+  # Target the data directory just inspected, not a possibly stale running
+  # container. Do not initialize the database or replay startup side effects.
+  if ! docker run --rm --network none --read-only \
+    -v "$DATA_DIR:/app/data" --entrypoint python scrcpygate:local -c '
+from app import storage, storage_core
+with storage_core.StartupLock():
+    storage.clear_alas_token()
+    if storage.get_setting("alas_token") or storage._legacy_env_has_alas_token():
+        raise SystemExit(1)
+' >/dev/null 2>&1; then
+    die "ALAS Token 重置失败，未生成新密钥；请检查数据目录后重试"
+  fi
+  success_msg "已重置 ALAS Token，正在生成新密钥；安装后请在 ALAS 设置中重新填写 Token"
+}
+
 ensure_alas_token_key() {
   # Explicit Secret Manager injection remains the strongest source and is
   # never copied to disk by this script.
@@ -2077,17 +2133,28 @@ ensure_alas_token_key() {
 
   key_file="$DATA_DIR/.alas-token-encryption-key"
   if [ -L "$key_file" ]; then
-    die "ALAS Token 密钥文件不能是符号链接；请移除后重新安装"
+    die "ALAS Token 密钥文件不能是符号链接；请恢复与数据库配套的普通密钥文件"
   fi
   if [ -e "$key_file" ]; then
     [ -f "$key_file" ] || die "ALAS Token 密钥路径不是普通文件"
     key_file_value=$(cat "$key_file" 2>/dev/null) || die "无法读取 ALAS Token 密钥文件"
     valid_token_encryption_key_value "$key_file_value" \
-      || die "ALAS Token 密钥文件无效；请移除该文件后重新生成"
+      || die "ALAS Token 密钥文件无效；请恢复匹配的密钥备份，不要删除后重新生成"
     chmod 600 "$key_file" 2>/dev/null \
       || die "无法限制 ALAS Token 密钥文件权限（需要仅文件所有者可读）"
     success_msg "已复用服务器侧 ALAS Token 加密密钥"
     return 0
+  fi
+
+  if [ -e "$DATA_DIR/webscrcpy.db" ]; then
+    ensure_data_permissions
+    key_probe_status=0
+    existing_database_needs_alas_key || key_probe_status=$?
+    case "$key_probe_status" in
+      0) confirm_reset_alas_token_without_key ;;
+      1) ;;
+      *) die "无法只读检查旧数据库，未生成新密钥；请检查数据库和本地镜像后重试" ;;
+    esac
   fi
 
   TOKEN_KEY_TMP_FILE=$(mktemp "$DATA_DIR/.alas-token-encryption-key.XXXXXX") \
@@ -2600,11 +2667,15 @@ install_service() {
   prepare_deployment
   ensure_startup_conflicts
   prepare_data_directory
-  ensure_alas_token_key
   show_install_summary
   build_image
+  ensure_alas_token_key
   ensure_data_permissions
-  initialize_admin
+  detect_scrcpygate_instance
+  case "${EXISTING_SCRCPYGATE_STATE:-}" in
+    running|restarting|paused) ;;
+    *) initialize_admin ;;
+  esac
   log "正在启动 ScrcpyGate..."
   compose_up_checked -d
   wait_for_health
@@ -2631,6 +2702,11 @@ start_service() {
   prepare_data_directory
   ensure_alas_token_key
   ensure_data_permissions
+  detect_scrcpygate_instance
+  case "${EXISTING_SCRCPYGATE_STATE:-}" in
+    running|restarting|paused) ;;
+    *) initialize_admin ;;
+  esac
   compose_up_checked -d
   wait_for_health
   success_msg "ScrcpyGate 已启动"
@@ -3345,6 +3421,25 @@ migrate_alas_token_service() {
     || die "ALAS Token 迁移尚未达到 current key 状态；未显示凭据"
 }
 
+clear_alas_token_service() {
+  # 恢复出口：存不出来的密文（密钥换了/丢了）会一直让 ALAS 报错，清空后可在界面重填。
+  # 只打印脱敏摘要（是否清掉、原值指纹），绝不出示凭据本身。
+  prepare_readonly_deployment
+  token_output=$(token_cli clear-alas-token) || {
+    token_output=""
+    die "清空 ALAS Token 失败；未显示凭据"
+  }
+  if ! token_line=$(parse_single_output_line "$token_output"); then
+    token_output=""
+    die "清空 ALAS Token 返回了无法识别的多行输出"
+  fi
+  token_output=""
+  panel_top "ALAS Token 已清空"
+  panel_line "结果" "$token_line"
+  panel_line "下一步" "在「ALAS 设置」里重新填写 Runtime Token（会用当前密钥重新加密）"
+  print_rule
+}
+
 candidate_manifest_service() {
   manifest_python=$(python_command) || die "生成候选清单需要 Python"
   # Tests and maintenance tools live in the repository, but are not release
@@ -3443,10 +3538,12 @@ resolve_uninstall_data_dir() {
     UNINSTALL_DATA_DIR=$(configured_data_path_from_disk) \
       || UNINSTALL_DATA_DIR=$(existing_container_data_path) \
       || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
-    actual_data=$(existing_container_data_path) \
-      || die "无法验证现有容器的数据挂载目录"
-    [ "$actual_data" = "$UNINSTALL_DATA_DIR" ] \
-      || die "数据挂载目录不匹配: $actual_data"
+    if [ -n "${EXISTING_SCRCPYGATE_STATE:-}" ]; then
+      actual_data=$(existing_container_data_path) \
+        || die "无法验证现有容器的数据挂载目录"
+      [ "$actual_data" = "$UNINSTALL_DATA_DIR" ] \
+        || die "数据挂载目录不匹配: $actual_data"
+    fi
   fi
   case "$UNINSTALL_DATA_DIR" in
     '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝删除不安全的数据目录: $UNINSTALL_DATA_DIR" ;;
@@ -3468,9 +3565,40 @@ confirm_permanent_data_deletion() {
   answer=$(printf '%s' "$answer" | tr -d '\r')
   [ "$answer" = "$UNINSTALL_DATA_DIR" ] || return 1
   current_data_dir=$(configured_data_dir_from_disk) \
-    || current_data_dir=$(existing_container_data_dir) \
+    || current_data_dir=$(configured_data_path_from_disk) \
     || return 1
   [ "$current_data_dir" = "$UNINSTALL_DATA_DIR" ]
+}
+
+legacy_uninstall_data_is_recognized() {
+  # Without container labels or .env, only recognize the default local SQLite
+  # database. Never infer ownership of arbitrary directories or symlink targets.
+  [ "$UNINSTALL_DATA_DIR" = "$SCRIPT_DIR/data" ] || return 1
+  [ ! -L "$SCRIPT_DIR/data" ] || return 1
+  [ -f "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ ! -L "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ "$(LC_ALL=C od -An -tx1 -N16 "$UNINSTALL_DATA_DIR/webscrcpy.db" 2>/dev/null | tr -d ' \n')" = '53514c69746520666f726d6174203300' ]
+}
+
+uninstall_menu_service() {
+  # Keep the destructive choice local to this action, including cancellation.
+  (
+    require_interactive
+    panel_top "选择卸载方式"
+    panel_line "1（默认）" "保留数据卸载：保留账号、数据库、ALAS 密钥、.env 和镜像"
+    panel_line "2" "彻底清理：删除本地数据、密钥、.env 和镜像，重装创建新账号"
+    panel_line "0" "取消"
+    printf '\n%s>%s 请选择 [1/2/0，默认 1]: ' "$C_YELLOW" "$C_RESET"
+    IFS= read -r uninstall_choice || return 0
+    uninstall_choice=$(printf '%s' "$uninstall_choice" | tr -d '\r')
+    case "$uninstall_choice" in
+      ''|1) PURGE=false ;;
+      2) PURGE=true ;;
+      0) return 0 ;;
+      *) warn_msg "无效选项，已取消卸载"; return 0 ;;
+    esac
+    uninstall_service
+  )
 }
 
 compose_down_owned_project() (
@@ -3481,23 +3609,42 @@ compose_down_owned_project() (
 )
 
 uninstall_service() {
+  # Menu actions share shell variables; never reuse an earlier resolved path.
+  UNINSTALL_DATA_DIR=""
+  legacy_cleanup=false
   load_uninstall_settings
   require_docker
   detect_scrcpygate_instance
   if [ -z "$EXISTING_SCRCPYGATE_STATE" ]; then
-    # A previous purge may have removed the container before cleanup finished.
-    # With an explicit purge and an existing project .env, continue the owned
-    # data/config cleanup instead of leaving a half-purged install.
-    # Ordinary --uninstall remains idempotent when no service exists.
-    if [ "$PURGE" != true ] || [ ! -f .env ]; then
-      success_msg "未检测到当前目录所属的 ScrcpyGate 服务容器，无需卸载"
+    if [ "$PURGE" != true ]; then
+      success_msg "未检测到服务容器；已有数据、密钥、.env 和镜像均保留"
+      warn_msg "保留数据重装可能沿用旧账号和 ALAS Token；全新安装请使用卸载菜单的彻底清理或 --uninstall --purge"
       return 0
     fi
-    warn_msg "未检测到服务容器，将继续清理当前项目 .env 与数据目录"
+    resolve_uninstall_data_dir
+    if [ ! -f .env ] && { [ -e "$WEB_SCRCPY_DATA_HOST" ] || [ -L "$WEB_SCRCPY_DATA_HOST" ]; }; then
+      legacy_uninstall_data_is_recognized \
+        || die "无容器和 .env，无法确认残留数据归属；已保留全部文件和镜像。请恢复原 .env 并确认数据目录后重试"
+      legacy_cleanup=true
+    fi
+    warn_msg "未检测到服务容器，将继续清理当前项目的残留安装状态"
   else
     existing_instance_can_be_managed || return 1
     resolve_uninstall_data_dir
+  fi
 
+  if [ "$PURGE" = true ] && is_interactive; then
+    panel_top "彻底清理 ScrcpyGate（不可恢复）"
+    panel_line "数据目录" "$UNINSTALL_DATA_DIR"
+    panel_line "清理范围" "账号、密码、设备、权限、ALAS Token/密钥、ADB 授权、本地镜像和 .env"
+    warn_msg "外置数据目录和项目备份不会自动删除；只有 ALAS 密钥丢失时，可取消并在安装时仅重置 ALAS Token"
+    if ! confirm_permanent_data_deletion; then
+      warn_msg "确认路径不匹配或已取消，未修改任何文件或容器"
+      return 0
+    fi
+  fi
+
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
     if is_interactive && [ "$PURGE" != true ]; then
       if [ -d "$UNINSTALL_DATA_DIR" ]; then
         uninstall_data_label="$UNINSTALL_DATA_DIR（默认保留）"
@@ -3523,8 +3670,8 @@ uninstall_service() {
     fi
     success_msg "ScrcpyGate 服务容器和 Compose 网络已移除"
 
-    if ! is_interactive && [ "$PURGE" != true ]; then
-      success_msg "非交互卸载已保留本地镜像、数据目录和 .env（彻底清理请使用 ./deploy.sh --uninstall --purge）"
+    if [ "$PURGE" != true ]; then
+      success_msg "已保留本地镜像、数据库、ALAS 密钥和 .env；运行 ./deploy.sh --install 可重装并继续使用原账号"
       return 0
     fi
   fi
@@ -3532,21 +3679,23 @@ uninstall_service() {
     resolve_uninstall_data_dir
   fi
 
+  if [ "$legacy_cleanup" = true ]; then
+    # Retain retry evidence outside the directory being deleted: interrupted
+    # cleanup may already have removed the database used for recognition.
+    (umask 077; set -C; printf 'WEB_SCRCPY_DATA_HOST=./data\n' > "$SCRIPT_DIR/.env") \
+      || die "无法保存清理重试配置；未继续删除镜像或数据"
+  fi
+
   image_status="不存在"
   cleanup_failed=false
   if docker image inspect scrcpygate:local >/dev/null 2>&1; then
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除本地镜像 scrcpygate:local？下次安装需要重新构建"; then
-      if docker image rm scrcpygate:local; then
-        image_status="已删除"
-        success_msg "本地镜像已删除"
-      else
-        image_status="删除失败"
-        cleanup_failed=true
-        warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
-      fi
+    if docker image rm scrcpygate:local; then
+      image_status="已删除"
+      success_msg "本地镜像已删除"
     else
-      image_status="已保留"
-      success_msg "已保留本地镜像 scrcpygate:local"
+      image_status="删除失败"
+      cleanup_failed=true
+      warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
     fi
   fi
 
@@ -3554,43 +3703,33 @@ uninstall_service() {
     data_status="不存在"
     success_msg "数据目录不存在，无需清理"
   elif uninstall_data_can_be_removed; then
-    data_status="已保留"
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除数据目录 ${UNINSTALL_DATA_DIR}？此操作不可恢复"; then
-      delete_data=false
-      if [ "$PURGE" = true ]; then
-        delete_data=true
-      elif confirm_permanent_data_deletion; then
-        delete_data=true
-      else
-        warn_msg "确认路径不匹配或目录已变化，已保留数据目录"
-      fi
-      if [ "$delete_data" = true ]; then
-        rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
-        data_status="已删除"
-        success_msg "数据目录已删除"
-      fi
-    else
-      success_msg "已保留数据目录"
-    fi
+    rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
+    data_status="已删除"
+    success_msg "数据目录已删除"
   else
     data_status="已保留"
+    cleanup_failed=true
     warn_msg "数据目录位于项目目录之外，脚本不会自动删除：$(safe_display "$UNINSTALL_DATA_DIR")"
     warn_msg "确认不再需要后请手工删除该目录"
   fi
 
   env_status="不存在"
   if [ -f .env ]; then
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除 .env 部署配置？"; then
+    if [ "$data_status" = "已保留" ] || [ "$cleanup_failed" = true ]; then
+      env_status="已保留"
+      warn_msg "清理尚未完成，已保留 .env 以记录原数据目录；处理后可重试 --uninstall --purge"
+    else
       rm -f -- "$SCRIPT_DIR/.env" || die "无法删除 .env"
       env_status="已删除"
       success_msg ".env 部署配置已删除"
-    else
-      env_status="已保留"
-      success_msg "已保留 .env 部署配置"
     fi
   fi
 
-  panel_top "卸载完成"
+  if [ "$cleanup_failed" = true ]; then
+    panel_top "服务已卸载，清理未完成"
+  else
+    panel_top "卸载完成"
+  fi
   panel_line "服务容器" "已移除"
   panel_line "本地镜像" "$image_status"
   panel_line "数据目录" "$data_status"
@@ -3686,7 +3825,7 @@ show_menu() {
     menu_item 18 "查看已有备份" "$C_CYAN"
     menu_item 19 "查看 ALAS 令牌迁移状态" "$C_CYAN"
     menu_item 20 "导入/轮换 ALAS 令牌" "$C_YELLOW"
-
+    menu_item 23 "清空 ALAS 令牌（密钥丢失时的恢复出口）" "$C_RED"
     menu_group "诊断与帮助"
     menu_item 11 "检查/安装 Docker 与 Compose" "$C_CYAN"
     menu_item 12 "查看命令帮助" "$C_GRAY"
@@ -3696,7 +3835,7 @@ show_menu() {
     menu_item 22 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
 
     menu_group "卸载"
-    menu_item 13 "卸载 ScrcpyGate" "$C_RED"
+    menu_item 13 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
     menu_item 0 "退出" "$C_GRAY"
 
     printf '\n%s>%s 请选择 / Choose: ' "$C_YELLOW" "$C_RESET"
@@ -3722,7 +3861,7 @@ show_menu() {
       11) run_menu_action check_system_dependencies || true; pause_menu ;;
       12) usage; pause_menu ;;
       13)
-        run_menu_action uninstall_service || true
+        run_menu_action uninstall_menu_service || true
         pause_menu
         ;;
       14) (check_service) || true; pause_menu ;;
@@ -3763,6 +3902,14 @@ show_menu() {
         pause_menu
         ;;
       21) (check_production_boundary) || true; pause_menu ;;
+      23)
+        if prompt_confirm_no "确认清空 ALAS 令牌？（除非你有对应密钥备份，否则无法恢复）"; then
+          run_menu_action clear_alas_token_service || true
+        else
+          warn_msg "已取消"
+        fi
+        pause_menu
+        ;;
       22)
         printf '\n%s>%s 清单输出路径（留空=写入 output/release-manifest/…）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r manifest_choice || exit 1
@@ -3786,7 +3933,7 @@ fi
 # interactive menu acquires it per action so an idle menu does not block a
 # second operator from running a read-only command.
 case "$ACTION" in
-  configure|install|start|stop|restart|reset_admin|uninstall|migrate_alas_token|candidate_manifest|check_conflicts|restore)
+  configure|install|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore)
     acquire_deploy_lock
     ;;
 esac
@@ -3807,6 +3954,7 @@ case "$ACTION" in
   uninstall) uninstall_service ;;
   token_status) token_status_service ;;
   migrate_alas_token) migrate_alas_token_service ;;
+  clear_alas_token) clear_alas_token_service ;;
   candidate_manifest) candidate_manifest_service ;;
   check) check_service ;;
   check_conflicts) check_conflicts_service ;;

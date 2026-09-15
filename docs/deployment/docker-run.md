@@ -63,7 +63,8 @@ docker run -d --name scrcpygate --restart unless-stopped \
   -e INITIAL_ADMIN_PASSWORD \
   -e PUBLIC_BASE_URL=http://127.0.0.1:5000 \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
-  -e SESSION_COOKIE_SECURE=false \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver local --log-opt max-size=20m --log-opt max-file=5 \
   -v "$PWD/data:/app/data" \
   "$IMAGE"
 ```
@@ -86,8 +87,9 @@ docker run -d --name scrcpygate --restart unless-stopped --net=host \
   -e INITIAL_ADMIN_PASSWORD \
   -e PUBLIC_BASE_URL=http://127.0.0.1:5000 \
   -e ALLOWED_HOSTS=127.0.0.1,localhost \
-  -e SESSION_COOKIE_SECURE=false \
   -e ADB_SERVER_SOCKET=tcp:127.0.0.1:5037 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver local --log-opt max-size=20m --log-opt max-file=5 \
   -v "$PWD/data:/app/data" \
   "$IMAGE"
 ```
@@ -105,6 +107,22 @@ its own adb server, which is what you want for network ADB (`adb connect`) only.
 rules). Reusing the host adb server is usually simpler and avoids the extra privileges.
 
 ## 5. Lifecycle and upgrades
+
+The image stores container-managed ADB authorization keys in `/app/data/.android`, which
+survives container replacement when you keep the same data mount. Older images used
+`/tmp/.android`. Before removing an old container, stop mirroring and copy its existing
+identity once (no device key contents are printed):
+
+```sh
+docker exec scrcpygate sh -c 'if [ -d /tmp/.android ]; then test ! -e /app/data/.android || exit 1; cp -a /tmp/.android /app/data/.android; fi'
+```
+
+An existing destination is never overwritten; check that it already holds the intended identity
+before continuing. If the old container was already deleted, restore those keys from a backup or
+authorize the new identity on the device. This migration is unnecessary when using the host's ADB server.
+For a fresh container the entrypoint provisions an ALAS encryption key; for retained encrypted data,
+restore its original key instead of generating a replacement. Changing the public URL to HTTPS
+enables Secure cookies automatically unless you explicitly override `SESSION_COOKIE_SECURE`.
 
 ```sh
 docker logs -f scrcpygate            # follow logs (JSON on stdout)

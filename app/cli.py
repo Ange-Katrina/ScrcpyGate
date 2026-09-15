@@ -65,6 +65,9 @@ def _provision_alas_key() -> int:
     from . import alas_secrets
 
     if alas_secrets.injected_key_present():
+        if not alas_secrets.key_is_valid():
+            print(json.dumps({"ok": False, "action": "failed", "error": "invalid_injected_key"}, sort_keys=True))
+            return 1
         print(json.dumps({"ok": True, "action": "environment", "source": "environment"}, sort_keys=True))
         return 0
     try:
@@ -104,6 +107,24 @@ def main() -> int:
         except Exception:
             return _redacted_migration_status_failure()
         return _redacted_migration_status()
+
+    if command == "clear-alas-token":
+        if sys.argv[2:]:
+            print("unknown option for ALAS token clearing", file=sys.stderr)
+            return 2
+        # 换不回密钥时的恢复出口：清掉存不出来的密文，管理员重新在 ALAS 设置里填写。
+        # 只打印脱敏摘要（是否清掉了、原值的指纹），永远不回显凭据本身。
+        try:
+            storage.init_db()
+        except Exception:
+            return _redacted_migration_status_failure()
+        try:
+            summary = storage.clear_alas_token()
+        except Exception:
+            print(json.dumps({"ok": False, "action": "failed", "error": "token_clear_failed"}, sort_keys=True))
+            return 1
+        print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
+        return 0
 
     if command == "bootstrap-admin":
         if _reject_password_arguments(sys.argv[2:]):
