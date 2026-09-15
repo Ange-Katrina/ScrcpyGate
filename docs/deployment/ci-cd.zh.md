@@ -48,10 +48,16 @@
 1. 进入账号的 **Packages → scrcpygate → Package settings**。
 2. 在 **Manage Actions access** 中添加当前仓库，授予 **Write** 权限；
    同时确认 **Connect repository** 指向当前仓库。
-3. 重新运行失败的工作流。即使 YAML 已设置 `packages: write`，包授权缺失仍会
-   返回 `permission_denied: write_package`。
+3. 已验证构建产物仍在一天保留期内时，选择 **Re-run failed jobs**；过期后选择
+   **Re-run all jobs** 重新构建验证。即使 YAML 已设置 `packages: write`，包授权
+   缺失仍会返回 `permission_denied: write_package`。
 
 镜像包含 OCI source 标签用于关联来源，但它不能替代旧包的访问权限设置。
+把 `packages: write` 移到工作流顶层，或在 `docker push` 与构建 Action 之间切换，
+都不会改变包访问权限。本地 GitHub CLI 登录与工作流自动获得的 `GITHUB_TOKEN`
+相互独立；给 CLI 增加 Packages scope 不会为工作流授权。
+发布任务成功和失败时都会生成摘要；候选镜像推送失败时，还会显示包授权修复步骤。
+请结合失败步骤的日志区分权限、仓库服务或网络故障。
 
 ## 发布版本
 

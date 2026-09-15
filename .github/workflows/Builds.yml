@@ -221,6 +221,7 @@ jobs:
           sbom-path: ${{ runner.temp }}/images/verified-image-arm64/sbom.spdx.json
           push-to-registry: true
       - name: Promote the verified index to public release tags
+        id: promote
         env:
           IMAGE_TAGS: ${{ needs.checks.outputs.tags }}
           DIGEST: ${{ steps.candidate.outputs.digest }}
@@ -236,11 +237,39 @@ jobs:
             actual=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)
             test "$actual" = "$DIGEST"
           done <<< "$IMAGE_TAGS"
+      - name: Summarize publication
+        if: always()
+        env:
+          PUBLICATION_STATUS: ${{ job.status }}
+          PROMOTION_OUTCOME: ${{ steps.promote.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate.outcome }}
+          IMAGE_TAGS: ${{ needs.checks.outputs.tags }}
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
           {
-            echo '## Verified GHCR image'
+            echo '## GHCR publication'
             echo
-            printf 'Image: `%s@%s`\n\n' "$IMAGE_REPO" "$DIGEST"
-            printf 'Tags:\n```text\n%s\n```\n' "$IMAGE_TAGS"
+            printf 'Status: **%s**\n\n' "$PUBLICATION_STATUS"
+            printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
             echo 'Both architectures passed bridge/host-network startup and image scanning.'
-            echo 'Deploy this digest manually; no server connection is made by this workflow.'
+            if [ "$PROMOTION_OUTCOME" = success ]; then
+              printf '\nImage: `%s@%s`\n\n' "$IMAGE_REPO" "$DIGEST"
+              printf 'Published tags:\n```text\n%s\n```\n' "$IMAGE_TAGS"
+              echo 'Deploy this digest manually; no server connection is made by this workflow.'
+            else
+              echo
+              echo 'Publication did not complete. Check the failed step before deploying this run.'
+              if [ "$CANDIDATE_OUTCOME" = failure ]; then
+                echo
+                echo 'If the push reports `permission_denied: write_package`:'
+                echo "1. Open the container package settings under the owner's Packages tab."
+                echo '2. In **Manage Actions access**, grant the current repository **Write** access.'
+                echo '3. Check **Connect repository**, especially after deleting and recreating a repository.'
+                echo '4. Re-run failed jobs while the verified artifacts remain available (one day); otherwise re-run all jobs.'
+                echo
+                echo 'The workflow already uses `GITHUB_TOKEN` with `packages: write`; this does not override existing package access rules.'
+              fi
+              printf '\n[Publication and recovery guide](%s/%s/blob/%s/docs/deployment/ci-cd.md)\n' \
+                "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

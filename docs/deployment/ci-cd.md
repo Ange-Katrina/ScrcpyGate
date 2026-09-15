@@ -62,11 +62,20 @@ If the repository was deleted and recreated while the GHCR package remained:
 2. Under **Manage Actions access**, add the current repository and grant
    **Write** access. Check that **Connect repository** points to the current
    repository as well.
-3. Retry the failed workflow. `permission_denied: write_package` can indicate
-   missing package access even when the workflow has `packages: write`.
+3. Select **Re-run failed jobs** while the verified artifacts remain available
+   (one day); after expiry, select **Re-run all jobs** to rebuild and verify.
+   `permission_denied: write_package` can indicate missing package access even
+   when the workflow has `packages: write`.
 
 The code includes an OCI source label for package linkage. This does not
 replace access configuration on a package left over from an older repository.
+Moving `packages: write` to the workflow level or switching between
+`docker push` and a build action does not change package access. The local
+GitHub CLI login and the workflow's automatic `GITHUB_TOKEN` are separate;
+adding package scopes to the CLI does not grant the workflow access.
+The publication job writes a summary on success and failure, including package
+access recovery steps when the candidate push fails. Consult the failed step
+to distinguish authorization errors from other registry or network failures.
 
 ## Publish a release
 
