@@ -1,0 +1,110 @@
+# CI/CD and manual deployment
+
+The `Builds` workflow validates source changes, tests both image architectures,
+and publishes verified images to GHCR. Deployments to servers remain manual.
+
+## Triggers and tags
+
+| Event | Checks and native image tests | Published tags |
+| --- | --- | --- |
+| Pull request to `main` or `dev` | Yes, amd64 and arm64 | None |
+| Push to `main` | Yes | `edge`, `sha-<full-commit>` |
+| Push to `dev` | Yes | `dev`, `sha-<full-commit>` |
+| Push tag `v1.2.3` | Yes | `v1.2.3`, `latest`, `sha-<full-commit>` |
+| Push tag `v1.2.3-rc.1` | Yes | `v1.2.3-rc.1`, `sha-<full-commit>` |
+| Manual run | Yes | Same policy for the selected branch or version tag |
+
+Manual runs on other branches perform verification without publishing.
+Release tags must use `vMAJOR.MINOR.PATCH[-prerelease]` syntax. A prerelease
+never updates `latest`. Use an image digest for repeatable deployments.
+Different version tags may publish concurrently: `latest` follows the last
+completed stable release, not a comparison of version numbers. Publish stable
+tags sequentially when their ordering matters. Each branch is serialized
+independently, so branch builds cannot cancel a queued version release.
+
+## Validation before publication
+
+1. Check tracked-file boundaries, Python/JSON/JavaScript syntax, Ruff, shell
+   syntax, both Compose configurations, runtime dependency advisories,
+   GitHub Actions syntax, and reachable Git history with redacted Gitleaks.
+2. Build on native `ubuntu-24.04` and `ubuntu-24.04-arm` runners. Each image
+   must pass bridge and host-network startup, `/healthz`, `/login`, Docker
+   health status, non-root execution, and the system ADB version command.
+3. Scan each local image for fixable critical OS vulnerabilities with Trivy.
+   Python dependency advisories are handled by the separate `pip-audit` gate.
+4. Transfer the tested images and their SPDX SBOMs as checksummed artifacts,
+   retained for one day. Publication loads these images without rebuilding.
+5. Publish architecture manifests and a candidate index, create provenance
+   and SBOM attestations, then promote that index to the public tags above.
+
+Temporary `build-<run>-<attempt>[-<architecture>]` tags identify intermediate
+registry artifacts. Use the verified digest from the successful workflow
+summary. If publication fails before promotion, public release aliases stay
+at their previous versions. Device mirroring and ALAS integration with real
+services still require separate validation.
+
+## GitHub setup
+
+The workflow uses the automatic `GITHUB_TOKEN`; no PAT or server credentials
+belong in repository files. Only the publication job requests package,
+attestation, and OIDC write permissions. Pull requests receive no publication
+credentials and cannot reach that job.
+
+For a new package, review its visibility after the first successful push.
+The repository being public does not automatically make its GHCR package
+public. To allow anonymous image pulls, open the package settings and change
+its visibility to **Public**.
+
+If the repository was deleted and recreated while the GHCR package remained:
+
+1. Open the `scrcpygate` container package under the repository owner's
+   **Packages** tab, then **Package settings**.
+2. Under **Manage Actions access**, add the current repository and grant
+   **Write** access. Check that **Connect repository** points to the current
+   repository as well.
+3. Retry the failed workflow. `permission_denied: write_package` can indicate
+   missing package access even when the workflow has `packages: write`.
+
+The code includes an OCI source label for package linkage. This does not
+replace access configuration on a package left over from an older repository.
+
+## Publish a release
+
+After merging the desired source to `main`, create and push a version tag:
+
+```sh
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+Use `v1.0.0-rc.1` for a prerelease. In **Actions > Builds**, wait for all three
+stages to succeed, then copy the `ghcr.io/<owner>/scrcpygate@sha256:...`
+reference from the summary.
+
+## Deploy manually
+
+For an existing bridge-mode deployment, use the health-gated deployment
+helper with the verified digest:
+
+```sh
+sh tools/deploy_release.sh \
+  --image ghcr.io/<owner>/scrcpygate@sha256:<digest> \
+  --compose-dir /path/to/deployment
+```
+
+This helper uses `compose.yaml` and rolls back on health-check failure when
+a previous image is available. For host networking, set `SCRCPYGATE_IMAGE`
+in the server's `.env`, then use the matching Compose file:
+
+```sh
+docker compose -f compose.host.yaml pull
+docker compose -f compose.host.yaml up -d --no-build
+docker compose -f compose.host.yaml ps
+```
+
+Keep the previous image digest for manual rollback in host-network mode.
+First-time installation, data-directory ownership, password initialization,
+and `docker run` commands are covered by [the README](../../README.md) and
+[the Docker deployment guide](docker-run.md).
+
+Upstream Canary remains a separate experiment and does not promote `latest`.

@@ -7,8 +7,22 @@ __pycache__/
 .coverage
 htmlcov/
 /.agents/
+/.codex/
+/.claude/
 /.uv-cache/
 /.uv-python/
+
+# Workspace-only instructions, internal documents, and verification artifacts.
+AGENTS.md
+CLAUDE.md
+/tests/
+/test-tools/
+/docs/organized/
+/snapshots/
+/skill/
+/test-results/
+/playwright-report/
+*.har
 
 .env
 .env.*
@@ -47,4 +61,3 @@ log/
 
 .run-data/
 /.ui-adapter-test-data/
-/backups/

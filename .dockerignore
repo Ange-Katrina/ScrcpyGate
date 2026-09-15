@@ -2,14 +2,31 @@
 .gitignore
 .github/
 .agents/
+.codex/
+.claude/
 .codex-mobile-data/
 .uv-cache/
 .uv-cache-local/
 .uv-python/
 /.venv-codex-mobile/
 /.phase4-browser-data/
-/.ruff_cache/
+/.run-data/
+/.ui-adapter-test-data/
 /output/
+
+# Workspace-only instructions, internal documents, and verification artifacts.
+AGENTS.md
+**/AGENTS.md
+CLAUDE.md
+**/CLAUDE.md
+/tests/
+/test-tools/
+/snapshots/
+/skill/
+/test-results/
+/playwright-report/
+*.har
+**/*.har
 
 # Never send deployment state, credentials, runtime data, or rollback archives
 # to the Docker daemon. The Dockerfile copies only the explicit application
@@ -32,7 +49,9 @@ tools/
 static_analysis_semgrep_*/
 
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 *$py.class
 .pytest_cache/
 .mypy_cache/
