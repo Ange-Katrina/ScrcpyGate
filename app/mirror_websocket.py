@@ -30,6 +30,7 @@ from .mirror_runtime import (
     VIDEO_SEND_TIMEOUT_SECONDS,
     ClientSession,
     ControlAuditCallback,
+    StreamNotice,
     StreamReset,
     StreamTermination,
     acquire_control_lock,
@@ -38,6 +39,7 @@ from .mirror_runtime import (
     renew_control_lock,
 )
 from .devices import public_lock_payload
+from .mirror_record import record_registry
 from .runtime import disconnect_stop_delay_seconds
 
 log = logging.getLogger("webscrcpy.mirror")
@@ -249,6 +251,10 @@ async def _video_sender(
                 if frame.video is not None:
                     payload["video"] = frame.video
                 await asyncio.wait_for(websocket.send_json(payload), timeout=VIDEO_SEND_TIMEOUT_SECONDS)
+                continue
+            if isinstance(frame, StreamNotice):
+                # 控制面通知（投屏记录邀请/上传请求/参与者状态/汇总回传）。
+                await asyncio.wait_for(websocket.send_json(frame.payload), timeout=VIDEO_SEND_TIMEOUT_SECONDS)
                 continue
             if isinstance(frame, StreamTermination):
                 state.end_reason = "stream_terminated"
@@ -467,6 +473,11 @@ async def video_socket(
                 )
         _release_video_connection(username)
         session.remove_client(client.id)
+        # 多端投屏记录：把这个观看端标成已离开，并告知发起端（不落盘，仅内存中继）。
+        try:
+            record_registry.note_client_left(device_id, client.id)
+        except Exception:  # noqa: BLE001 - 记录协同失败不能影响观看端清理
+            log.exception("MIRROR_RECORD_NOTE_LEFT_FAILED device=%s client=%s", device_id, client.id)
         # 无观看端自动停止时间由设置决定；0 时只保留重连宽限。
         disconnect_delay = await asyncio.to_thread(disconnect_stop_delay_seconds)
         manager.schedule_disconnect_stop(device_id, session, delay_seconds=disconnect_delay)

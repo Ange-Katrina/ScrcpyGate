@@ -290,10 +290,47 @@
         <button class="tl-btn" id="tl-clear" type="button"><i data-lucide="trash-2"></i>清空</button>
         <label class="tl-auto"><input type="checkbox" id="tl-autoscroll" checked><span>自动滚动</span></label>
       </div>
+      <div class="tl-multi" id="tl-multi" hidden>
+        <div class="tl-multi-head">
+          <b id="tl-multi-title">多端记录</b>
+          <span class="tl-multi-state" id="tl-multi-state">—</span>
+        </div>
+        <div class="tl-multi-actions">
+          <button class="tl-btn" id="tl-stop" type="button"><i data-lucide="square"></i>停止记录并汇总</button>
+          <button class="tl-btn" id="tl-bundle-copy" type="button"><i data-lucide="clipboard-list"></i>复制汇总</button>
+          <button class="tl-btn" id="tl-bundle-export" type="button"><i data-lucide="download"></i>导出汇总 JSON</button>
+        </div>
+        <ul class="tl-participants" id="tl-participants"></ul>
+        <ul class="tl-bundles" id="tl-bundles"></ul>
+      </div>
       <ol class="tl-list" id="tl-list">
         <li class="tl-empty">还没有记录。开始投屏后，这里会按时间顺序显示连接、关键帧等待、跳号丢帧、解码器重建、延迟回跳等事件，便于排查「黑一下 / 卡住 / 自己停了」这类问题。</li>
       </ol>
     </aside>
+    <div class="vp-backdrop" id="tl-mode-backdrop" aria-hidden="true"></div>
+    <div class="tl-dialog" id="tl-mode-dialog" role="dialog" aria-modal="true" aria-label="选择记录方式" aria-hidden="true" inert>
+      <h3 class="tl-dialog-title">投屏记录方式</h3>
+      <p class="tl-dialog-text">选择只记录本机，还是邀请正在观看这台设备的其他客户端一起记录（对方会收到弹窗确认）。</p>
+      <div class="tl-dialog-actions">
+        <button class="tl-choice" id="tl-mode-local" type="button">
+          <i data-lucide="monitor"></i><b>仅本端记录</b><small>只记录本浏览器，不经服务端</small>
+        </button>
+        <button class="tl-choice" id="tl-mode-multi" type="button">
+          <i data-lucide="users"></i><b>多端记录</b><small>邀请同设备的其他观看端，停止后自动汇总到本端</small>
+        </button>
+      </div>
+      <button class="tl-btn tl-dialog-cancel" id="tl-mode-cancel" type="button">取消</button>
+    </div>
+    <div class="vp-backdrop" id="tl-invite-backdrop" aria-hidden="true"></div>
+    <div class="tl-dialog" id="tl-invite-dialog" role="alertdialog" aria-modal="true" aria-label="参与投屏记录" aria-hidden="true" inert>
+      <h3 class="tl-dialog-title">管理员请求记录本设备</h3>
+      <p class="tl-dialog-text" id="tl-invite-text">管理员发起了对这台设备的多端投屏记录。参与后本浏览器会记录画面管道事件，并在管理员停止记录时把这份记录上传给他。</p>
+      <p class="tl-dialog-note">记录只保存在浏览器内存与服务端内存中继里，不写磁盘；你可以拒绝。</p>
+      <div class="tl-dialog-actions tl-dialog-actions-row">
+        <button class="tl-btn tl-primary" id="tl-invite-accept" type="button">参与记录</button>
+        <button class="tl-btn" id="tl-invite-decline" type="button">不参与</button>
+      </div>
+    </div>
     <div class="vp-backdrop" id="vp-backdrop" aria-hidden="true"></div>
       <aside class="vp-panel" id="vp-panel" role="dialog" aria-modal="true" aria-label="画面设置" aria-hidden="true" inert>
         <span class="vp-grabber" aria-hidden="true"></span>

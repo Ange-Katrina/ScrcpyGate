@@ -3031,9 +3031,10 @@ document.addEventListener('DOMContentLoaded',function(){
         row.appendChild(body);
         return row;
       }
-      function tlClearList(){
-        if(!tlList) return;
-        tlList.innerHTML='';
+      function tlClearList(target){
+        var node=target||tlList;
+        if(!node) return;
+        node.innerHTML='';
       }
       function tlScrollToEnd(){
         if(tlList&&tlAuto&&tlAuto.checked) tlList.scrollTop=tlList.scrollHeight;
@@ -3065,13 +3066,26 @@ document.addEventListener('DOMContentLoaded',function(){
         tlScrollToEnd();
         tlRenderStats();
       }
+      function recordApi(){
+        return (window.ScrcpyGateV2&&window.ScrcpyGateV2.mirrorRecord)||null;
+      }
+      function recordState(){
+        var api=recordApi();
+        return api&&typeof api.state==='function'?api.state():null;
+      }
+      // 参与者（普通用户）在邀请/参与期间也能打开面板看自己那份记录。
+      function recordParticipantActive(){
+        var s=recordState();
+        return !!(s&&(s.armed||s.invite));
+      }
       function tlOpen(){
-        if(!mirrorIsAdmin()) return;
+        if(!mirrorIsAdmin()&&!recordParticipantActive()) return;
         if(!tlPanel) return;
         vpClose();
         apClose();
         upClose();
         tlRenderAll();
+        tlRenderMulti();
         tlPanel.classList.add('open');
         tlBackdrop.classList.add('open');
         tlPanel.setAttribute('aria-hidden','false');
@@ -3138,9 +3152,194 @@ document.addEventListener('DOMContentLoaded',function(){
           showToast('导出失败：'+(err&&err.message?err.message:'未知错误'));
         }
       }
+      /* ---------- 多端记录：模式选择 / 参与邀请 / 参与端与汇总 ---------- */
+      var tlModeDialog=document.getElementById('tl-mode-dialog');
+      var tlModeBackdrop=document.getElementById('tl-mode-backdrop');
+      var tlInviteDialog=document.getElementById('tl-invite-dialog');
+      var tlInviteBackdrop=document.getElementById('tl-invite-backdrop');
+      var RECORD_STATE_LABEL={invited:'待确认',accepted:'参与中',declined:'已拒绝',uploaded:'已上传',left:'已离开',unavailable:'不可用'};
+      function dialogOpen(dialog,backdrop){
+        if(!dialog) return;
+        dialog.classList.add('open');
+        if(backdrop) backdrop.classList.add('open');
+        dialog.setAttribute('aria-hidden','false');
+        dialog.removeAttribute('inert');
+        if(backdrop) backdrop.setAttribute('aria-hidden','false');
+      }
+      function dialogClose(dialog,backdrop){
+        if(!dialog) return;
+        dialog.classList.remove('open');
+        if(backdrop) backdrop.classList.remove('open');
+        releasePanelFocus(dialog);
+        dialog.setAttribute('aria-hidden','true');
+        dialog.setAttribute('inert','');
+        if(backdrop) backdrop.setAttribute('aria-hidden','true');
+      }
+      function openRecordModeDialog(){
+        if(!mirrorIsAdmin()) return;
+        dialogOpen(tlModeDialog,tlModeBackdrop);
+        var first=document.getElementById('tl-mode-local');
+        if(first) first.focus();
+      }
+      function closeRecordModeDialog(){ dialogClose(tlModeDialog,tlModeBackdrop); }
+      function showRecordInvite(invite){
+        if(!invite) return;
+        var text=document.getElementById('tl-invite-text');
+        if(text){
+          text.textContent='管理员 '+String(invite.initiator||'')+' 发起了对这台设备的多端投屏记录。参与后本浏览器会记录画面管道事件，'
+            +'并在管理员停止记录时把这份记录上传给他（约 '+Math.round(Number(invite.ttl_seconds||900)/60)+' 分钟内有效）。';
+        }
+        dialogOpen(tlInviteDialog,tlInviteBackdrop);
+        var accept=document.getElementById('tl-invite-accept');
+        if(accept) accept.focus();
+      }
+      function closeRecordInvite(){ dialogClose(tlInviteDialog,tlInviteBackdrop); }
+      function answerRecordInvite(accept){
+        var api=recordApi();
+        var invite=recordState()&&recordState().invite;
+        var sessionId=(invite&&invite.session)||'';
+        closeRecordInvite();
+        if(!api||typeof api.respond!=='function'||!sessionId) return;
+        api.respond(sessionId,accept).then(function(){
+          showToast(accept?'已参与记录，管理员停止后会收到你这份记录':'已拒绝参与记录');
+          tlRenderMulti();
+        }).catch(function(error){
+          showToast('响应失败：'+apiErrorText(error));
+        });
+      }
+      function tlRenderMulti(){
+        var box=document.getElementById('tl-multi');
+        if(!box) return;
+        var state=recordState();
+        var session=state&&state.session;
+        var mine=mirrorIsAdmin();
+        if(!session||(!mine&&!recordParticipantActive())){
+          box.hidden=true;
+          return;
+        }
+        box.hidden=false;
+        var title=document.getElementById('tl-multi-title');
+        if(title) title.textContent=mine?'多端记录 · 由我发起':'多端记录 · 参与中（管理员 '+String(session.initiator||'')+' 发起）';
+        var stateEl=document.getElementById('tl-multi-state');
+        var participants=session.participants||[];
+        var bundles=(state&&state.bundles)||[];
+        var uploaded=participants.filter(function(item){return item.uploaded;}).length;
+        if(stateEl){
+          stateEl.textContent=(session.stopped?'已停止':'进行中')
+            +' · 参与 '+participants.filter(function(item){return item.state==='accepted'||item.state==='uploaded';}).length+'/'+participants.length
+            +' · 已收到 '+uploaded+' 份';
+        }
+        var stopBtn=document.getElementById('tl-stop');
+        if(stopBtn) stopBtn.disabled=!mine||!!session.stopped;
+        var list=document.getElementById('tl-participants');
+        if(list){
+          tlClearList(list);
+          if(!participants.length){
+            var emptyPart=document.createElement('li');
+            emptyPart.className='tl-participant empty';
+            emptyPart.textContent='当前没有其他观看端，只有本端记录。';
+            list.appendChild(emptyPart);
+          }
+          participants.forEach(function(item){
+            var li=document.createElement('li');
+            li.className='tl-participant '+String(item.state||'');
+            var who=document.createElement('b');
+            who.textContent=String(item.username||'?');
+            var badge=document.createElement('span');
+            badge.className='tl-participant-state';
+            badge.textContent=RECORD_STATE_LABEL[item.state]||String(item.state||'');
+            var meta=document.createElement('small');
+            meta.textContent=String(item.client_id||'').slice(0,8);
+            li.appendChild(who);
+            li.appendChild(badge);
+            li.appendChild(meta);
+            list.appendChild(li);
+          });
+        }
+        var bundlesEl=document.getElementById('tl-bundles');
+        if(bundlesEl){
+          tlClearList(bundlesEl);
+          bundles.forEach(function(bundle,index){
+            var li=document.createElement('li');
+            li.className='tl-bundle';
+            var from=(bundle&&bundle.from)||{};
+            var entries=((bundle&&bundle.timeline&&bundle.timeline.entries)||[]).length;
+            li.textContent='#'+(index+1)+' '+(from.username||'?')+' · '+entries+' 条 · '+Math.round(Number(bundle.bytes||0)/1024)+' KB · '
+              +new Date(Number(bundle.received_at||0)*1000).toLocaleTimeString();
+            bundlesEl.appendChild(li);
+          });
+          if(bundles.length){
+            var hint=document.createElement('li');
+            hint.className='tl-bundle hint';
+            hint.textContent='上面是收到的参与端完整记录，点「复制汇总 / 导出汇总 JSON」可拿到本端 + 全部参与端的内容。';
+            bundlesEl.appendChild(hint);
+          }
+        }
+      }
+      function tlStopRecord(){
+        var api=recordApi();
+        if(!api||typeof api.stop!=='function') return;
+        var btn=document.getElementById('tl-stop');
+        if(btn) btn.disabled=true;
+        api.stop().then(function(){
+          showToast('已停止记录，正在等各参与端上传');
+          tlRenderMulti();
+        }).catch(function(error){
+          showToast('停止失败：'+apiErrorText(error));
+          tlRenderMulti();
+        });
+      }
+      function tlBundleCopy(){
+        var api=recordApi();
+        if(!api||typeof api.bundleText!=='function') return;
+        var text=api.bundleText();
+        var fallback=function(){
+          try{
+            var area=document.createElement('textarea');
+            area.value=text;
+            area.setAttribute('readonly','');
+            area.style.position='fixed';
+            area.style.left='-9999px';
+            document.body.appendChild(area);
+            area.select();
+            var ok=document.execCommand&&document.execCommand('copy');
+            document.body.removeChild(area);
+            showToast(ok?'已复制多端汇总':'复制失败，请改用「导出汇总 JSON」');
+          }catch(err){ showToast('复制失败，请改用「导出汇总 JSON」'); }
+        };
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){ showToast('已复制多端汇总'); }).catch(fallback);
+        }else{
+          fallback();
+        }
+      }
+      function tlBundleExport(){
+        var api=recordApi();
+        if(!api||typeof api.bundleJson!=='function') return;
+        try{
+          var blob=new Blob([JSON.stringify(api.bundleJson(),null,2)],{type:'application/json'});
+          var url=URL.createObjectURL(blob);
+          var link=document.createElement('a');
+          var stamp=new Date().toISOString().replace(/[:.]/g,'-');
+          link.href=url;
+          link.download='scrcpygate-mirror-record-bundle-'+stamp+'.json';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.setTimeout(function(){ URL.revokeObjectURL(url); },4000);
+          showToast('已导出多端汇总 JSON');
+        }catch(err){
+          showToast('导出失败：'+(err&&err.message?err.message:'未知错误'));
+        }
+      }
       (function initTimelinePanel(){
         var trigger=document.getElementById('record-item');
-        if(trigger) trigger.addEventListener('click',function(e){ e.preventDefault(); tlOpen(); });
+        if(trigger) trigger.addEventListener('click',function(e){
+          e.preventDefault();
+          // 管理员先选记录方式；参与中/被邀请的普通用户直接看自己那份记录。
+          if(mirrorIsAdmin()&&!recordParticipantActive()) openRecordModeDialog();
+          else tlOpen();
+        });
         var closeBtn=document.getElementById('tl-close');
         if(closeBtn) closeBtn.addEventListener('click',tlClose);
         if(tlBackdrop) tlBackdrop.addEventListener('click',tlClose);
@@ -3156,8 +3355,74 @@ document.addEventListener('DOMContentLoaded',function(){
           tlRenderAll();
           showToast('记录已清空');
         });
+        // 记录方式选择
+        var localBtn=document.getElementById('tl-mode-local');
+        if(localBtn) localBtn.addEventListener('click',function(){
+          closeRecordModeDialog();
+          tlOpen();
+          showToast('仅记录本端；需要多端协同时再点一次「投屏记录」');
+        });
+        var multiBtn=document.getElementById('tl-mode-multi');
+        if(multiBtn) multiBtn.addEventListener('click',function(){
+          var api=recordApi();
+          closeRecordModeDialog();
+          if(!api||typeof api.start!=='function'){ tlOpen(); return; }
+          api.start().then(function(session){
+            tlOpen();
+            var invited=session&&session.participants?session.participants.length:0;
+            showToast(invited?('已邀请 '+invited+' 个观看端参与记录'):'当前没有其他观看端，仅记录本端');
+            tlRenderMulti();
+          }).catch(function(error){
+            tlOpen();
+            showToast('发起多端记录失败：'+apiErrorText(error));
+          });
+        });
+        var modeCancel=document.getElementById('tl-mode-cancel');
+        if(modeCancel) modeCancel.addEventListener('click',closeRecordModeDialog);
+        if(tlModeBackdrop) tlModeBackdrop.addEventListener('click',closeRecordModeDialog);
+        // 参与邀请
+        var acceptBtn=document.getElementById('tl-invite-accept');
+        if(acceptBtn) acceptBtn.addEventListener('click',function(){ answerRecordInvite(true); });
+        var declineBtn=document.getElementById('tl-invite-decline');
+        if(declineBtn) declineBtn.addEventListener('click',function(){ answerRecordInvite(false); });
+        var stopBtn=document.getElementById('tl-stop');
+        if(stopBtn) stopBtn.addEventListener('click',tlStopRecord);
+        var bundleCopyBtn=document.getElementById('tl-bundle-copy');
+        if(bundleCopyBtn) bundleCopyBtn.addEventListener('click',tlBundleCopy);
+        var bundleExportBtn=document.getElementById('tl-bundle-export');
+        if(bundleExportBtn) bundleExportBtn.addEventListener('click',tlBundleExport);
+        // 适配器派发的多端记录事件
+        document.addEventListener('scrcpygate:record-invite',function(e){ showRecordInvite(e.detail); });
+        document.addEventListener('scrcpygate:record-responded',function(e){
+          // 普通用户同意参与后，把「投屏记录」入口露出来：他能看到自己正在分享什么。
+          var detail=e&&e.detail||{};
+          if(detail.accept){
+            var item=document.getElementById('record-item');
+            if(item) item.style.display='';
+          }
+          tlRenderMulti();
+        });
+        document.addEventListener('scrcpygate:record-started',function(){
+          var item=document.getElementById('record-item');
+          if(item) item.style.display='';
+          tlRenderMulti();
+        });
+        document.addEventListener('scrcpygate:record-participants',function(){ tlRenderMulti(); });
+        document.addEventListener('scrcpygate:record-bundle',function(){ tlRenderMulti(); });
+        document.addEventListener('scrcpygate:record-stopped',function(){
+          closeRecordInvite();
+          tlRenderMulti();
+        });
+        document.addEventListener('scrcpygate:record-uploaded',function(e){
+          var detail=e&&e.detail||{};
+          showToast(detail.delivered===false?'记录未能送达发起端，本端仍保留':'已把本端记录上传给发起端');
+          tlRenderMulti();
+        });
+        document.addEventListener('scrcpygate:record-upload-failed',function(){ tlRenderMulti(); });
         document.addEventListener('keydown',function(e){
           if(e.key!=='Escape') return;
+          if(tlInviteDialog&&tlInviteDialog.classList.contains('open')){ e.preventDefault(); answerRecordInvite(false); return; }
+          if(tlModeDialog&&tlModeDialog.classList.contains('open')){ e.preventDefault(); closeRecordModeDialog(); return; }
           if(!tlPanel||!tlPanel.classList.contains('open')) return;
           e.preventDefault();
           tlClose();

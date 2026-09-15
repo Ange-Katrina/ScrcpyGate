@@ -212,8 +212,23 @@ When a mirror looks wrong ("black for a moment", "frozen", "it stopped by itself
 browser-side event timeline in the workbench sidebar (**投屏记录 / Mirror record**): connection
 state, keyframe waits, sequence gaps, decoder rebuilds, latency seeks, server resets, socket close
 codes, bitrate and resolution changes, and control-lease changes, each with a timestamp. It lives
-only in that browser tab's memory (nothing is stored or uploaded) and can be copied or exported as
-JSON. Server-side events stay in `/logs`.
+in browser memory and can be copied or exported as JSON. Choose **Local only** to keep the
+timeline in that tab, or **Multi-viewer** to invite other clients watching the same device.
+Each invited viewer can accept or decline. When the administrator stops and collects records,
+accepted clients upload their timelines and the server relays them to the initiating browser
+in memory. Exports keep each client's segment separate instead of merging different clocks.
+Timeline payloads are not persisted by the relay; operation metadata is audited separately.
+Server-side events stay in `/logs`.
+
+Each browser keeps the latest **800 events**, dropping older entries when full. Accepted uploads
+preserve the submitted fields, including unknown keys; this does not recover events already
+evicted by the browser. Sessions default to 15 minutes with a 20-second upload window after
+stopping, up to 12 invited participants, 20,000 entries and a 2 MiB timeline limit.
+The global `API_REQUEST_BODY_MAX_BYTES` limit also applies to the entire JSON request and
+defaults to 1 MiB. Increase it with enough room for the request envelope when accepting larger
+timelines. Configure `MIRROR_RECORD_TTL_SECONDS`, `MIRROR_RECORD_UPLOAD_GRACE_SECONDS`,
+`MIRROR_RECORD_UPLOAD_MAX_BYTES`, `MIRROR_RECORD_MAX_ENTRIES`, and `MIRROR_RECORD_MAX_PARTICIPANTS`
+in the Compose `.env` (both network modes inherit them), or export them for a direct Python run.
 
 With the installer (recommended — it wraps the same Compose project):
 
