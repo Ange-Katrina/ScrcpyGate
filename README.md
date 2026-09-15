@@ -126,8 +126,8 @@ One command, and it does the whole first install in order:
 
 1. creates `.env` from `.env.example` (or drives an interactive wizard with `--configure`),
 2. validates the configuration, then checks for port and container conflicts,
-3. creates the data directory and generates the ALAS token encryption key,
-4. builds the image,
+3. creates the data directory,
+4. builds the image, then reuses the ALAS token encryption key or provisions one for new data,
 5. fixes the data-directory ownership for the container user (`uid 100` / `gid 101`),
 6. creates the admin account and prints its password,
 7. starts the stack and waits for the `/healthz` gate.
@@ -139,6 +139,21 @@ overwritten.
 Running `./deploy.sh` with no arguments opens an interactive menu with the same operations —
 install/update, start/stop/restart, status, logs, configuration, admin reset, backups, ALAS token
 status and migration, environment checks and uninstall.
+
+For a reinstall that keeps accounts and settings, run `./deploy.sh --uninstall` and then
+`./deploy.sh --install`. Ordinary uninstall always keeps `.env`, the local image, the database,
+and its ALAS key together, including in the interactive menu. Existing passwords are retained;
+use `./deploy.sh --reset-admin` if the original password was not saved.
+
+Use `./deploy.sh --uninstall --purge` only to remove the local data and start fresh. If cleanup
+fails, `.env` is retained so the same command can be retried. Data outside the project directory
+is never deleted automatically; its configuration is retained and cleanup reports incomplete.
+Backups are retained. Keep the database and its matching key together when moving a deployment.
+An old database with an encrypted ALAS token and a missing key blocks key generation: restore the
+matching key first. If that key cannot be recovered, explicitly run `./deploy.sh --clear-alas-token`,
+then reinstall and enter a new ALAS token. This clears only the stored ALAS credential, not accounts.
+An invalid existing key file must be repaired separately; reinstall never replaces it silently.
+Do not use `--skip-build` when installing source fixes.
 
 ### Docker: Compose
 

@@ -19,8 +19,10 @@ from .alas_secrets import (
     decrypt_token,
     encrypt_token,
     is_encrypted_token,
+    key_diagnostics,
     key_is_configured,
     key_is_valid,
+    token_summary,
 )
 from . import (
     storage_alas,
@@ -722,8 +724,17 @@ def _clear_legacy_alas_token() -> bool:
     return True
 
 
-def migrate_alas_token_storage() -> None:
-    """Migrate legacy ALAS tokens at the controlled database-init boundary."""
+def migrate_alas_token_storage() -> dict[str, object]:
+    """Migrate legacy ALAS tokens at the controlled database-init boundary.
+
+    Credential failures do not abort startup: an unreadable credential must not take the
+    whole service down (that also blocks ``reset-admin``, so an operator could
+    not even get in to fix it).  The stored value is left untouched and a loud,
+    actionable warning is logged instead; the ALAS runtime paths already report
+    a token they cannot decrypt, so the UI stays truthful while the admin either
+    restores the matching key or clears the token. Database failures still
+    propagate so that an unavailable database cannot be reported as healthy.
+    """
     with db_connect() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
         raw = str(row["value"] or "") if row else ""
@@ -737,37 +748,106 @@ def migrate_alas_token_storage() -> None:
                 # administrator cleared the DB value.  Remove that stale
                 # credential without importing it again.
                 conn.commit()
-                _clear_legacy_alas_token()
-            return
+                _clear_legacy_alas_token_safely()
+            return {"ok": True, "action": "empty"}
         if is_encrypted_token(raw):
             try:
                 _token, source = decrypt_token(raw, allow_legacy=True)
             except AlasTokenError as exc:
-                # An unreadable ciphertext must stop startup even when ALAS
-                # is currently disabled; otherwise the process could continue
-                # with an unrecoverable credential and a misleading status.
-                raise RuntimeError("ALAS token encryption key cannot decrypt the configured token") from exc
-            if source != "ALAS_TOKEN_ENCRYPTION_KEY":
+                # 保留原文：换回正确密钥后仍能解密。这里只降级并说清"该怎么修"。
+                AUDIT_LOGGER.warning(
+                    "ALAS_TOKEN_UNDECRYPTABLE error=%s token=%s key=%s hint=%s",
+                    exc,
+                    json.dumps(token_summary(raw), sort_keys=True),
+                    json.dumps(key_diagnostics(), sort_keys=True),
+                    "restore the matching key (ALAS_TOKEN_ENCRYPTION_KEY / "
+                    "ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS / data/.alas-token-encryption-key, "
+                    "e.g. from a deployment backup) and restart, or clear the token with "
+                    "`python -m app.cli clear-alas-token` and re-enter it in the ALAS settings",
+                )
+                return {"ok": False, "action": "undecryptable", "error": str(exc)}
+            if source != TOKEN_KEY_ENV:
                 try:
                     encrypted = encrypt_token(_token)
                 except AlasTokenError as exc:
-                    raise RuntimeError("current ALAS token encryption key is required for rotation") from exc
+                    AUDIT_LOGGER.warning(
+                        "ALAS_TOKEN_ROTATION_SKIPPED error=%s key=%s hint=%s",
+                        exc,
+                        json.dumps(key_diagnostics(), sort_keys=True),
+                        "set ALAS_TOKEN_ENCRYPTION_KEY to rotate the token; it stays readable "
+                        "through ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS in the meantime",
+                    )
+                    return {"ok": False, "action": "rotation_skipped", "error": str(exc)}
                 conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (encrypted,))
                 conn.commit()
-            _clear_legacy_alas_token()
-            return
+            _clear_legacy_alas_token_safely()
+            return {"ok": True, "action": "encrypted", "source": source}
         if not key_is_configured():
-            # A disabled ALAS integration can still leave a legacy plaintext
-            # credential on disk.  Refuse to continue until it is encrypted;
-            # otherwise a later restart or backup could expose the secret.
-            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token")
+            # 明文凭据留在库里确实是安全问题，但把服务整体打挂并不能解决它：
+            # 明确告警 + 让管理员进来设置密钥或清空该值。
+            AUDIT_LOGGER.warning(
+                "ALAS_TOKEN_PLAINTEXT_WITHOUT_KEY token=%s key=%s hint=%s",
+                json.dumps(token_summary(raw), sort_keys=True),
+                json.dumps(key_diagnostics(), sort_keys=True),
+                "set ALAS_TOKEN_ENCRYPTION_KEY (or run `python -m app.cli generate-alas-key`) "
+                "and restart to encrypt it, or clear it with `python -m app.cli clear-alas-token`",
+            )
+            return {"ok": False, "action": "plaintext_without_key"}
         try:
             encrypted = encrypt_token(raw)
         except AlasTokenError as exc:
-            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token") from exc
+            AUDIT_LOGGER.warning(
+                "ALAS_TOKEN_ENCRYPT_FAILED error=%s key=%s",
+                exc,
+                json.dumps(key_diagnostics(), sort_keys=True),
+            )
+            return {"ok": False, "action": "encrypt_failed", "error": str(exc)}
         conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (encrypted,))
         conn.commit()
-    _clear_legacy_alas_token()
+    _clear_legacy_alas_token_safely()
+    return {"ok": True, "action": "encrypted", "source": "migrated"}
+
+
+def _clear_legacy_alas_token_safely() -> bool:
+    """Best-effort legacy-token cleanup: never let it stop startup.
+
+    The legacy env file is an old-deployment artifact.  If it cannot be read or
+    rewritten (symlink, permissions, read-only mount) the DB migration itself
+    has already succeeded, so log loudly and keep booting — the operator still
+    has to remove that plaintext credential by hand.
+    """
+    try:
+        return bool(_clear_legacy_alas_token())
+    except RuntimeError as exc:
+        AUDIT_LOGGER.warning(
+            "ALAS_TOKEN_LEGACY_FILE_KEPT error=%s hint=%s",
+            exc,
+            "remove the ALAS_GYRE_TOKEN assignment from the legacy env file by hand",
+        )
+        return False
+
+
+def clear_alas_token() -> dict[str, object]:
+    """Clear the stored ALAS token (recovery path when its encryption key is lost).
+
+    Returns a redacted summary so the CLI can report what happened without ever
+    printing the credential.
+    """
+    with db_connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
+        previous = str(row["value"] or "") if row else ""
+        conn.execute("UPDATE settings SET value='' WHERE key='alas_token'")
+        conn.commit()
+    legacy_removed = _clear_legacy_alas_token_safely()
+    summary = {
+        "ok": True,
+        "action": "cleared",
+        "cleared": bool(previous),
+        "previous": token_summary(previous),
+        "legacy_file_removed": legacy_removed,
+    }
+    AUDIT_LOGGER.warning("ALAS_TOKEN_CLEARED cleared=%s legacy_removed=%s", bool(previous), legacy_removed)
+    return summary
 
 
 def get_alas_token_migration_status() -> dict[str, object]:
@@ -1347,18 +1427,31 @@ def migrate_legacy_data() -> bool:
                     if not current_token or not str(current_token["value"] or "").strip():
                         legacy_token = str(env.get("ALAS_GYRE_TOKEN") or "")
                         if legacy_token and not key_is_configured():
-                            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token")
-                        if legacy_token:
-                            try:
-                                legacy_token = encrypt_token(legacy_token)
-                            except AlasTokenError as exc:
-                                raise RuntimeError(
-                                    "ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token"
-                                ) from exc
-                        conn.execute(
-                            "INSERT OR REPLACE INTO settings(key,value) VALUES('alas_token',?)",
-                            (legacy_token,),
-                        )
+                            # 旧 .env 里的明文 token + 没有密钥：跳过导入并告警，不要让
+                            # 整个服务（以及 reset-admin）起不来。
+                            AUDIT_LOGGER.warning(
+                                "ALAS_TOKEN_LEGACY_ENV_SKIPPED key=%s hint=%s",
+                                json.dumps(key_diagnostics(), sort_keys=True),
+                                "set ALAS_TOKEN_ENCRYPTION_KEY (or run `python -m app.cli "
+                                "generate-alas-key`) and restart to import ALAS_GYRE_TOKEN, then "
+                                "remove it from the legacy env file",
+                            )
+                        else:
+                            if legacy_token:
+                                try:
+                                    legacy_token = encrypt_token(legacy_token)
+                                except AlasTokenError as exc:
+                                    AUDIT_LOGGER.warning(
+                                        "ALAS_TOKEN_LEGACY_ENV_SKIPPED error=%s key=%s",
+                                        exc,
+                                        json.dumps(key_diagnostics(), sort_keys=True),
+                                    )
+                                    legacy_token = ""
+                            if legacy_token:
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO settings(key,value) VALUES('alas_token',?)",
+                                    (legacy_token,),
+                                )
                 conn.execute(
                     "INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')",
                     (LEGACY_ENV_MIGRATED_SETTING,),

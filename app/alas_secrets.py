@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import re
 import secrets
@@ -141,7 +142,7 @@ def provision_key_file() -> dict[str, object]:
             raise AlasTokenError(f"{TOKEN_KEY_ENV} file is unreadable") from exc
         except AlasTokenError as exc:
             raise AlasTokenError(
-                f"{TOKEN_KEY_ENV} file is invalid; remove it and run this command again"
+                f"{TOKEN_KEY_ENV} file is invalid; restore a valid matching key from backup"
             ) from exc
         _restrict_key_file(path)
         return {"ok": True, "action": "reused", "path": str(path), "source": "file"}
@@ -203,6 +204,48 @@ def encrypt_token(token: str) -> str:
 
 def is_encrypted_token(value: str) -> bool:
     return str(value or "").startswith(TOKEN_PREFIX)
+
+
+def key_diagnostics() -> dict[str, object]:
+    """Describe the key material this process can see — never the key itself.
+
+    Used by startup warnings and the CLI status command so an operator can tell
+    *which* key source is in play when a stored token cannot be decrypted
+    (env var vs key file vs nothing, and whether a rotation key is present).
+    """
+    diagnostics: dict[str, object] = {
+        "injected": injected_key_present(),
+        "previous_injected": bool(os.environ.get(TOKEN_PREVIOUS_KEY_ENV, "").strip()),
+        "key_file": "",
+        "key_file_exists": False,
+    }
+    try:
+        path = _token_key_file_path()
+    except Exception:  # noqa: BLE001 - diagnostics must never raise
+        return diagnostics
+    diagnostics["key_file"] = str(path)
+    try:
+        diagnostics["key_file_exists"] = bool(path.is_file())
+    except OSError:
+        diagnostics["key_file_exists"] = False
+    return diagnostics
+
+
+def token_summary(value: str) -> dict[str, object]:
+    """Redacted fingerprint of a stored token (ciphertext hash, never plaintext).
+
+    Lets an operator match "the token in this database" against a backup or a
+    key without ever printing the credential.
+    """
+    raw = str(value or "")
+    if not raw:
+        return {"present": False}
+    return {
+        "present": True,
+        "encrypted": is_encrypted_token(raw),
+        "length": len(raw),
+        "fingerprint": hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:12],
+    }
 
 
 def decrypt_token(value: str, *, allow_legacy: bool = False) -> tuple[str, str]:
