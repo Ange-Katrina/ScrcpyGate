@@ -149,8 +149,11 @@ Use `./deploy.sh --uninstall --purge` only to remove the local data and start fr
 fails, `.env` is retained so the same command can be retried. Data outside the project directory
 is never deleted automatically; its configuration is retained and cleanup reports incomplete.
 Backups are retained. Keep the database and its matching key together when moving a deployment.
-An old database with an encrypted ALAS token and a missing key blocks key generation: restore the
-matching key first. If that key cannot be recovered, explicitly run `./deploy.sh --clear-alas-token`,
+An old database with an encrypted ALAS token and a missing key blocks automatic key generation: restore the
+matching key first. Interactive installation offers to clear only the ALAS token and continue with
+a new key; the default answer is No. Accounts and device settings are retained. Noninteractive
+installation never accepts this reset automatically, including with `--yes`.
+If that key cannot be recovered, you can also explicitly run `./deploy.sh --clear-alas-token`,
 then reinstall and enter a new ALAS token. This clears only the stored ALAS credential, not accounts.
 An invalid existing key file must be repaired separately; reinstall never replaces it silently.
 Do not use `--skip-build` when installing source fixes.

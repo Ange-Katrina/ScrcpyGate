@@ -2096,6 +2096,33 @@ print("encrypted" if needs_key else "clear")
   esac
 }
 
+confirm_reset_alas_token_without_key() {
+  if ! is_interactive; then
+    die "旧数据库含加密 ALAS Token，但密钥文件缺失。请恢复配套密钥或注入原密钥；确认无法找回时，可执行 --clear-alas-token 后重装并重新填写 Token。非交互安装不会自动重置"
+  fi
+  warn_msg "旧数据库含加密 ALAS Token，但密钥文件缺失；优先恢复原密钥可以保留现有 Token"
+  warn_msg "强行重置只清空保存的 ALAS Token（含旧配置中的 Token），并生成新密钥；账号、密码、设备和其他配置保留。安装后需重新填写 ALAS Token"
+  if ! prompt_confirm_no "是否强行重置 ALAS Token 并继续安装？"; then
+    die "已取消重置，原 Token 保留；请恢复配套密钥后重新安装"
+  fi
+  if [ -e "$DATA_DIR/.alas-token-encryption-key" ] || [ -L "$DATA_DIR/.alas-token-encryption-key" ]; then
+    die "密钥文件状态已变化，未清空 Token；请重新安装以检查当前密钥"
+  fi
+  # Target the data directory just inspected, not a possibly stale running
+  # container. Do not initialize the database or replay startup side effects.
+  if ! docker run --rm --network none --read-only \
+    -v "$DATA_DIR:/app/data" --entrypoint python scrcpygate:local -c '
+from app import storage, storage_core
+with storage_core.StartupLock():
+    storage.clear_alas_token()
+    if storage.get_setting("alas_token") or storage._legacy_env_has_alas_token():
+        raise SystemExit(1)
+' >/dev/null 2>&1; then
+    die "ALAS Token 重置失败，未生成新密钥；请检查数据目录后重试"
+  fi
+  success_msg "已重置 ALAS Token，正在生成新密钥；安装后请在 ALAS 设置中重新填写 Token"
+}
+
 ensure_alas_token_key() {
   # Explicit Secret Manager injection remains the strongest source and is
   # never copied to disk by this script.
@@ -2124,7 +2151,7 @@ ensure_alas_token_key() {
     key_probe_status=0
     existing_database_needs_alas_key || key_probe_status=$?
     case "$key_probe_status" in
-      0) die "旧数据库含加密 ALAS Token，但密钥文件缺失。请恢复配套密钥或注入原密钥；确认原密钥无法找回时，可执行 --clear-alas-token 后重装并重新填写 Token。原数据库未更改" ;;
+      0) confirm_reset_alas_token_without_key ;;
       1) ;;
       *) die "无法只读检查旧数据库，未生成新密钥；请检查数据库和本地镜像后重试" ;;
     esac
