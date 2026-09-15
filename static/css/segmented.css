@@ -1,0 +1,67 @@
+/* 分段控件（Apple Copy）：/quality 的「画质 / 传输 / 会话」与投屏管理的「管理员 / 普通用户」
+   共用同一套；以前两页各写一份、圆角与高度略有差别。
+   令牌带兜底，管理页与工作台都能用。 */
+
+:root {
+  --sg-seg-bg: var(--admin-field, rgba(120, 120, 128, .08));
+  --sg-seg-border: var(--admin-line, rgba(120, 120, 128, .18));
+  --sg-seg-active-bg: var(--admin-surface, #fff);
+  --sg-seg-text: var(--admin-muted, #6e6e73);
+  --sg-seg-text-active: var(--admin-text, #1d1d1f);
+  --sg-seg-ring: var(--admin-brand, #007aff);
+  --sg-seg-shadow: 0 1px 2px 0 rgba(0, 0, 0, .04);
+  --sg-seg-radius: 12px;
+  --sg-seg-radius-inner: 9px;
+  --sg-seg-height: 34px;
+  --sg-seg-ease: cubic-bezier(.32, .72, 0, 1);
+}
+
+.sg-segments {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--sg-seg-border);
+  border-radius: var(--sg-seg-radius);
+  background: var(--sg-seg-bg);
+}
+
+.sg-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1 1 0;
+  min-height: var(--sg-seg-height);
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--sg-seg-radius-inner);
+  background: transparent;
+  color: var(--sg-seg-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms var(--sg-seg-ease), color 150ms var(--sg-seg-ease),
+    box-shadow 150ms var(--sg-seg-ease);
+}
+.sg-seg [data-lucide] { width: 14px; height: 14px; }
+.sg-seg:hover { color: var(--sg-seg-text-active); }
+.sg-seg.active,
+.sg-seg[aria-selected="true"] {
+  color: var(--sg-seg-text-active);
+  background: var(--sg-seg-active-bg);
+  box-shadow: var(--sg-seg-shadow);
+}
+.sg-seg:focus-visible { outline: 2px solid var(--sg-seg-ring); outline-offset: 2px; }
+
+@media (max-width: 767px) {
+  .sg-segments { width: 100%; }
+  .sg-seg { padding: 0 8px; }
+  .sg-seg [data-lucide] { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sg-seg { transition: none; }
+}

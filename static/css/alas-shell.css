@@ -1,0 +1,401 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--ui-color-canvas);
+  color: var(--ui-color-text);
+  font-family: var(--ui-font-sans);
+}
+
+button,
+a {
+  font: inherit;
+}
+
+.alas-shell-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  min-height: 52px;
+  padding: max(var(--ui-space-2), env(safe-area-inset-top)) max(var(--ui-space-3), env(safe-area-inset-right)) var(--ui-space-2) max(var(--ui-space-4), env(safe-area-inset-left));
+  background: var(--ui-color-surface);
+  border-bottom: 1px solid var(--ui-color-border);
+}
+
+.alas-shell-identity {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.alas-shell-brand {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-primary);
+  color: var(--ui-color-on-primary);
+  font-size: 12px;
+  font-weight: var(--ui-weight-bold);
+  letter-spacing: 0;
+}
+
+.alas-shell-title-wrap {
+  min-width: 0;
+}
+
+.alas-shell-title,
+.alas-shell-message {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alas-shell-title {
+  font-size: 14px;
+  font-weight: var(--ui-weight-semibold);
+}
+
+.alas-shell-message {
+  margin-top: 2px;
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+}
+
+.alas-shell-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ui-space-2);
+  margin-left: auto;
+}
+
+.alas-shell-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.alas-shell-status::before {
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ui-color-text-muted);
+  content: "";
+}
+
+.alas-shell-status[data-state="ready"]::before {
+  background: var(--ui-color-success);
+}
+
+.alas-shell-status[data-state="error"] {
+  color: var(--ui-color-danger);
+}
+
+.alas-shell-status[data-state="error"]::before {
+  background: var(--ui-color-danger);
+}
+
+.alas-shell-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-color-surface-raised);
+  color: var(--ui-color-text);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
+}
+
+.alas-shell-button:active {
+  transform: scale(0.98);
+}
+
+.alas-shell-button.primary {
+  border-color: var(--ui-color-primary);
+  background: var(--ui-color-primary);
+  color: var(--ui-color-on-primary);
+}
+
+.alas-shell-button:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+}
+
+.alas-shell-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ui-color-surface-raised);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
+.alas-shell-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--ui-color-surface-raised);
+}
+
+.alas-shell-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  place-items: center;
+  padding: var(--ui-space-6);
+  background: var(--ui-color-canvas);
+  background: color-mix(in srgb, var(--ui-color-canvas) 94%, transparent);
+}
+
+.alas-shell-state.is-visible {
+  display: grid;
+}
+
+.alas-shell-state-card {
+  width: min(460px, 100%);
+  padding: var(--ui-space-6);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-shadow-raised);
+  text-align: center;
+}
+
+.alas-shell-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto var(--ui-space-4);
+  border: 3px solid var(--ui-color-border);
+  border-top-color: var(--ui-color-primary);
+  border-radius: 50%;
+  animation: alas-shell-spin 800ms linear infinite;
+}
+
+.alas-shell-state[data-kind="timeout"] .alas-shell-spinner,
+.alas-shell-state[data-kind="unreachable"] .alas-shell-spinner {
+  border-color: var(--ui-color-danger);
+  animation: none;
+}
+
+.alas-shell-state h1 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.alas-shell-state p {
+  margin: var(--ui-space-2) 0 0;
+  color: var(--ui-color-text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.alas-shell-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--ui-space-2);
+  margin-top: 18px;
+}
+
+.alas-shell-state-actions[hidden] {
+  display: none;
+}
+
+@keyframes alas-shell-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .alas-shell-button:hover {
+    border-color: var(--ui-color-primary);
+    background: var(--ui-color-surface);
+  }
+
+  .alas-shell-button.primary:hover {
+    background: var(--ui-color-primary-hover);
+  }
+}
+
+@media (pointer: coarse) {
+  .alas-shell-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 720px) {
+  .alas-shell-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: var(--ui-space-2);
+  }
+
+  .alas-shell-identity {
+    flex-basis: calc(100% - 40px);
+    min-height: 36px;
+  }
+
+  .alas-shell-toolbar {
+    width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+    overflow: visible;
+  }
+
+  .alas-shell-status {
+    min-width: 0;
+    margin-right: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .alas-shell-button {
+    min-height: 44px;
+  }
+
+  .alas-shell-toolbar > .alas-shell-button:last-child {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .alas-shell-toolbar > .alas-shell-button:nth-last-child(2) {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .alas-shell-toolbar > #refreshFrame {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .alas-shell-toolbar > .ui-locale-picker {
+    grid-column: 5;
+    grid-row: 1;
+  }
+
+  .alas-shell-state {
+    padding: var(--ui-space-4);
+  }
+
+  .alas-shell-state-card {
+    padding: var(--ui-space-5);
+  }
+
+  .alas-shell-state-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .alas-shell-message {
+    display: none;
+  }
+
+  .alas-shell-toolbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .alas-shell-toolbar > .alas-shell-status {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .alas-shell-toolbar > .alas-shell-button:last-child {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .alas-shell-toolbar > #refreshFrame {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .alas-shell-toolbar > .alas-shell-button:nth-last-child(2) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .alas-shell-toolbar > .ui-locale-picker {
+    grid-column: 4;
+    grid-row: 2;
+    justify-self: center;
+  }
+
+  .alas-shell-button {
+    min-width: 0;
+    padding-inline: var(--ui-space-2);
+    white-space: normal;
+    text-align: center;
+  }
+
+  .alas-shell-state-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .alas-shell-state {
+    background: var(--ui-color-canvas);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .alas-shell-bar,
+  .alas-shell-button,
+  .alas-shell-state-card {
+    border-color: var(--ui-color-border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

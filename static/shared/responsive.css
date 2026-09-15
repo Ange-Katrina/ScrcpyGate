@@ -1,0 +1,76 @@
+/**
+ * ScrcpyGate 响应式增强层
+ * 在保留设计稿既有响应式规则的基础上，补充：
+ * - 投屏工作台移动端侧边栏抽屉（配合 responsive.js 切换 body.sg-mobile-nav）
+ * - iOS 安全区适配（底部导航栏 / 控制坞）
+ * - 触控滚动优化、弹层全宽、窄屏布局微调
+ */
+@media (max-width: 1023px) {
+  .admin-rail { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .admin-stage { padding-bottom: calc(0px + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 767px) {
+  /* ===== 投屏工作台：侧边栏抽屉 ===== */
+  .app { grid-template-columns: minmax(0, 1fr) !important; }
+  .workspace { grid-column: 1 / -1 !important; padding: 10px 8px calc(12px + env(safe-area-inset-bottom)); }
+  .topnav-left .mobile-menu-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; margin-right: 2px;
+    border: 0; border-radius: 10px; color: var(--c-text);
+    background: transparent; cursor: pointer;
+  }
+  .topnav-left .mobile-menu-btn [data-lucide] { width: 22px; height: 22px; }
+  .topnav-left .mobile-menu-btn:active { background: var(--c-hover); }
+  .app .sidebar {
+    position: fixed;
+    top: calc(48px + env(safe-area-inset-top)); left: 0; bottom: 0;
+    z-index: 60;
+    width: min(272px, 84vw) !important;
+    margin: 0 !important;
+    transform: translateX(-105%);
+    transition: transform var(--motion-layout) var(--ease-standard);
+    box-shadow: 0 16px 48px var(--deep-shadow-strong);
+  }
+  .sidebar.is-collapsed { width: min(272px, 84vw) !important; transform: translateX(-105%); }
+  body.sg-mobile-nav .sidebar,
+  body.sg-mobile-nav .sidebar.is-collapsed { transform: translateX(0); }
+  body.sg-mobile-nav::after {
+    content: '';
+    position: fixed; inset: calc(48px + env(safe-area-inset-top)) 0 0 0;
+    background: rgba(0, 0, 0, .45);
+    z-index: 39;
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  /* ===== 投屏工作台：布局微调 ===== */
+  .topnav { padding: 0 8px; }
+  .topnav-nav { gap: 10px; }
+  .topnav-user .user-meta { display: none; }
+  .topnav-user small { display: none; }
+  .status-pill { flex-wrap: wrap; height: auto; min-height: 34px; padding: 6px 14px; gap: 6px 14px; }
+  .ctrl-dock { flex-wrap: wrap; justify-content: center; }
+  .mirror-panel { min-height: 0; }
+
+  /* ===== 管理后台 ===== */
+  .breadcrumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+  .table-toolbar { flex-wrap: wrap; gap: 8px; }
+  .search-box { min-width: 0; width: min(100%, 150px); }
+  .page-heading { flex-wrap: wrap; }
+
+  /* ===== 弹层 / 抽屉：移动端全宽 ===== */
+  .log-drawer, .perm-drawer, .alas-drawer, .user-drawer, .dev-drawer,
+  .settings-drawer, .sess-drawer, .transfer-drawer { width: 100% !important; max-width: 100% !important; }
+
+  /* ===== 触控滚动优化 ===== */
+  .alas-status-strip, .alas-list, .sessions-wrap, .table-wrap,
+  .user-table-wrap, .admin-rail, .device-list { -webkit-overflow-scrolling: touch; }
+}
+
+@media (max-width: 480px) {
+  .topnav-nav { display: none; }
+  .status-pill { justify-content: center; }
+  .ctrl-dock .ctrl-sep { display: none; }
+  .admin-avatar + .user-copy { display: none; }
+}

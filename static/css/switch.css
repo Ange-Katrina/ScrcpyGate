@@ -1,0 +1,96 @@
+/* 统一开关（Apple Copy 取向）—— 全站唯一实现。
+   视觉与「投屏管理」页的开关完全一致：44×26 轨道 + 20px 白色滑块，开启时品牌绿，
+   不带对勾/叉号图标；触控变体把宿主撑到 52×44 但外观不变。
+   颜色令牌带兜底，管理页（--admin-*）与工作台（--c-* / --state-*）都能用。 */
+
+:root {
+  --sg-switch-off: var(--admin-line, var(--c-line, rgba(120, 120, 128, .32)));
+  --sg-switch-on: var(--admin-success, var(--state-success, #34c759));
+  --sg-switch-knob: var(--admin-on-brand, #fff);
+  --sg-switch-ring: var(--admin-brand, var(--brand-blue, #007aff));
+  --sg-switch-ease: var(--ease-standard, cubic-bezier(.2, 0, 0, 1));
+}
+
+.sg-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+.sg-switch::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 26px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--sg-switch-off);
+  transition: background-color 200ms var(--sg-switch-ease);
+}
+.sg-switch > i {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: var(--sg-switch-knob);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: transform 200ms var(--sg-switch-ease);
+}
+.sg-switch[aria-checked="true"]::before { background: var(--sg-switch-on); }
+.sg-switch[aria-checked="true"] > i { transform: translateY(-50%) translateX(18px); }
+.sg-switch:focus-visible { outline: 2px solid var(--sg-switch-ring); outline-offset: 2px; }
+.sg-switch:disabled { cursor: not-allowed; opacity: .45; }
+.sg-switch.is-muted::before { opacity: .45; }
+.sg-switch.is-muted > i { opacity: .6; }
+
+/* 触控变体：宿主 52×44，轨道仍是 44×26（宿主居中绘制）。 */
+.sg-switch.sg-switch-touch { width: 52px; height: 44px; border-radius: 12px; }
+.sg-switch.sg-switch-touch::before { left: 4px; width: 44px; }
+.sg-switch.sg-switch-touch > i { left: 7px; }
+
+/* 原生 checkbox 版开关：保留 input 语义（JS 继续读 .checked），外观同上。 */
+input.sg-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--sg-switch-off);
+  cursor: pointer;
+  transition: background-color 200ms var(--sg-switch-ease);
+}
+input.sg-switch-input::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--sg-switch-knob);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: transform 200ms var(--sg-switch-ease);
+}
+input.sg-switch-input:checked { background: var(--sg-switch-on); }
+input.sg-switch-input:checked::after { transform: translateX(18px); }
+input.sg-switch-input:focus-visible { outline: 2px solid var(--sg-switch-ring); outline-offset: 2px; }
+input.sg-switch-input:disabled { cursor: not-allowed; opacity: .45; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-switch::before, .sg-switch > i, input.sg-switch-input, input.sg-switch-input::after { transition: none; }
+}

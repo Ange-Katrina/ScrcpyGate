@@ -1,0 +1,39 @@
+.sg-runtime-toast-host {
+  position: fixed;
+  right: 18px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 5000;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.sg-runtime-toast {
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .96);
+  color: #1d1d1f;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .16);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+}
+
+.sg-runtime-toast-error { border-color: rgba(224, 53, 63, .45); }
+.sg-runtime-toast-success { border-color: rgba(52, 199, 89, .45); }
+
+.dark .sg-runtime-toast {
+  border-color: rgba(255, 255, 255, .14);
+  background: rgba(28, 31, 39, .96);
+  color: #f5f5f7;
+}
+
+@media (max-width: 600px) {
+  .sg-runtime-toast-host {
+    right: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: calc(100vw - 32px);
+  }
+}

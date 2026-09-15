@@ -1,0 +1,144 @@
+name: scrcpygate
+
+services:
+  scrcpygate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-alpine}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    image: ${SCRCPYGATE_IMAGE:-scrcpygate:local}
+    container_name: scrcpygate
+    restart: unless-stopped
+    ports:
+      # Keep the application private; terminate public TLS and WebSocket traffic at the WAF.
+      # Do not publish a separate ALAS Gateway port while ALAS_EMBED_ORIGIN is empty.
+      - "${WEB_SCRCPY_BIND:-127.0.0.1}:${WEB_SCRCPY_PORT:-5000}:5000"
+    environment:
+      WEB_SCRCPY_DATA_DIR: /app/data
+      # 首次启动的管理员密码：只在库里还没有 admin 账号时被消费一次。留空时应用会随机
+      # 生成一个不打印的密码（等于把自己锁在外面）—— 那样请先用
+      # `compose run --rm --no-deps -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate
+      #  python -m app.cli bootstrap-admin` 把密码打出来。deploy.sh --install 自己会做这一步。
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:5000}
+      ALAS_EMBED_ORIGIN: ${ALAS_EMBED_ORIGIN:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      ALLOW_NULL_ORIGIN: ${ALLOW_NULL_ORIGIN:-false}
+      ALLOW_MISSING_WEBSOCKET_ORIGIN: ${ALLOW_MISSING_WEBSOCKET_ORIGIN:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-127.0.0.1,::1}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      API_REQUEST_BODY_MAX_BYTES: ${API_REQUEST_BODY_MAX_BYTES:-1048576}
+      REQUEST_BODY_IDLE_TIMEOUT_SECONDS: ${REQUEST_BODY_IDLE_TIMEOUT_SECONDS:-15}
+      ALAS_UPSTREAM_RESPONSE_MAX_BYTES: ${ALAS_UPSTREAM_RESPONSE_MAX_BYTES:-16777216}
+      ALAS_UPSTREAM_DECOMPRESSED_MAX_BYTES: ${ALAS_UPSTREAM_DECOMPRESSED_MAX_BYTES:-67108864}
+      ALAS_ALLOWED_HOSTS: ${ALAS_ALLOWED_HOSTS:-}
+      ALAS_ALLOWED_CIDRS: ${ALAS_ALLOWED_CIDRS:-}
+      ALAS_WS_MESSAGE_MAX_BYTES: ${ALAS_WS_MESSAGE_MAX_BYTES:-1048576}
+      ALAS_POLICY_MAX_DEPTH: ${ALAS_POLICY_MAX_DEPTH:-128}
+      ALAS_POLICY_MAX_NODES: ${ALAS_POLICY_MAX_NODES:-20000}
+      ALAS_POLICY_REGISTRY_MAX_ENTRIES: ${ALAS_POLICY_REGISTRY_MAX_ENTRIES:-16384}
+      # Secret Manager injects these into the Compose process. Null mapping
+      # entries pass through the process environment without storing values in
+      # the project .env file or interpolating them into this YAML. When no
+      # external key is injected, the application reads the protected key file
+      # provisioned once by deploy.sh from the mounted data directory. The
+      # previous key is present only during the migration window.
+      ALAS_TOKEN_ENCRYPTION_KEY:
+      ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS:
+      ALAS_TOKEN_ENCRYPTION_KEY_FILE: /app/data/.alas-token-encryption-key
+      SCRCPYGATE_WS_MAX_SIZE: ${SCRCPYGATE_WS_MAX_SIZE:-65536}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_QUEUE_SIZE: ${LOG_QUEUE_SIZE:-2048}
+      LOG_MAX_BYTES: ${LOG_MAX_BYTES:-5242880}
+      AUDIT_QUEUE_SIZE: ${AUDIT_QUEUE_SIZE:-512}
+      AUDIT_MAX_ROWS: ${AUDIT_MAX_ROWS:-100000}
+      AUDIT_ALERT_MAX_ROWS: ${AUDIT_ALERT_MAX_ROWS:-20000}
+      VIEWER_WATCH_RETENTION_DAYS: ${VIEWER_WATCH_RETENTION_DAYS:-180}
+      LOG_TAIL_MAX_BYTES: ${LOG_TAIL_MAX_BYTES:-2097152}
+      LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-5}
+      LOG_FILE_ENABLED: ${LOG_FILE_ENABLED:-true}
+      # 这行决定容器内 scrcpy server 的日志量（VERBOSE 才有「选中编码器 / 实际 codec options」）。
+      SCRCPY_SERVER_LOG_LEVEL: ${SCRCPY_SERVER_LOG_LEVEL:-VERBOSE}
+      SCRCPY_LOW_LATENCY_ENCODER_HINTS: ${SCRCPY_LOW_LATENCY_ENCODER_HINTS:-1}
+      MIN_PASSWORD_LENGTH: ${MIN_PASSWORD_LENGTH:-12}
+      PASSWORD_PBKDF2_ITERATIONS: ${PASSWORD_PBKDF2_ITERATIONS:-310000}
+      LOGIN_RATE_LIMIT_ENABLED: ${LOGIN_RATE_LIMIT_ENABLED:-true}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-3}
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-900}
+      LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-300}
+      LOGIN_CAPTCHA_ENABLED: ${LOGIN_CAPTCHA_ENABLED:-true}
+      LOGIN_CAPTCHA_AFTER_FAILURES: ${LOGIN_CAPTCHA_AFTER_FAILURES:-1}
+      LOGIN_CAPTCHA_TTL_SECONDS: ${LOGIN_CAPTCHA_TTL_SECONDS:-120}
+      LOGIN_CAPTCHA_ISSUE_INTERVAL_SECONDS: ${LOGIN_CAPTCHA_ISSUE_INTERVAL_SECONDS:-2}
+      VIDEO_QUEUE_MAXSIZE: ${VIDEO_QUEUE_MAXSIZE:-24}
+      VIDEO_QUEUE_SOFT_LIMIT: ${VIDEO_QUEUE_SOFT_LIMIT:-0}
+      CONTROL_PERMISSION_RECHECK_INTERVAL: ${CONTROL_PERMISSION_RECHECK_INTERVAL:-5}
+      VIDEO_QUEUE_MAX_BYTES: ${VIDEO_QUEUE_MAX_BYTES:-8388608}
+      SCRCPY_RAW_MAX_NAL_BYTES: ${SCRCPY_RAW_MAX_NAL_BYTES:-8388608}
+      SCRCPY_RAW_MAX_FRAME_BYTES: ${SCRCPY_RAW_MAX_FRAME_BYTES:-16777216}
+      SCRCPY_RAW_MAX_PACKET_BYTES: ${SCRCPY_RAW_MAX_PACKET_BYTES:-25165824}
+      MIRROR_VIEWER_RESERVATION_TTL: ${MIRROR_VIEWER_RESERVATION_TTL:-15}
+      MIRROR_VIEWER_DISCONNECT_GRACE: ${MIRROR_VIEWER_DISCONNECT_GRACE:-5}
+      EVENT_SESSION_RECHECK_SECONDS: ${EVENT_SESSION_RECHECK_SECONDS:-10}
+      MIRROR_CANCEL_CLEANUP_TIMEOUT_SECONDS: ${MIRROR_CANCEL_CLEANUP_TIMEOUT_SECONDS:-10}
+      VIDEO_RESET_COOLDOWN: ${VIDEO_RESET_COOLDOWN:-0.75}
+      CONTROL_LEASE_VERIFY_INTERVAL: ${CONTROL_LEASE_VERIFY_INTERVAL:-5}
+      VIDEO_PERMISSION_RECHECK_SECONDS: ${VIDEO_PERMISSION_RECHECK_SECONDS:-10}
+      VIDEO_SEND_TIMEOUT_SECONDS: ${VIDEO_SEND_TIMEOUT_SECONDS:-3}
+      MAX_VIDEO_CONNECTIONS_PER_USER: ${MAX_VIDEO_CONNECTIONS_PER_USER:-4}
+      # Gates only the `adb connect` fallback; the heartbeat always probes.
+      ADB_AUTOCONNECT: ${ADB_AUTOCONNECT:-true}
+      # 容器内 adb 路径：镜像里 adb 来自 apk 的 android-tools（/usr/bin/adb），留空即走 PATH；
+      # 仓库自带的 adb/linux/adb 是 glibc 构建，在 Alpine 镜像内不可执行，只在非 Alpine 宿主上有效。
+      ADB_PATH: ${ADB_PATH:-}
+      # 复用宿主已有的 adb server（USB 直连时宿主 `adb devices` 已能看到手机）。
+      # 只有宿主网络下 127.0.0.1 才指向宿主：--net=host 或 compose.host.yaml。
+      # 留空 = 容器内自己起 adb server（网络 ADB 走 `adb connect`）。
+      # 注意：变量留空时这里会传进一个空字符串，而 adb 见到空值会直接报
+      # `cannot connect to daemon at : unknown socket specification`（设备永远不上线），
+      # 因此 docker-entrypoint.sh 会把空的 ADB_SERVER_SOCKET/ADB_PATH 整个 unset 掉。
+      ADB_SERVER_SOCKET: ${ADB_SERVER_SOCKET:-}
+      # 设备转屏跟随轮询间隔（秒；0 = 关闭跟随）。
+      ADB_ROTATION_POLL_INTERVAL: ${ADB_ROTATION_POLL_INTERVAL:-3}
+      ADB_HEARTBEAT_INTERVAL: ${ADB_HEARTBEAT_INTERVAL:-15}
+      ADB_STARTUP_PROBE_TIMEOUT: ${ADB_STARTUP_PROBE_TIMEOUT:-10}
+      ADB_CONNECT_TIMEOUT: ${ADB_CONNECT_TIMEOUT:-8}
+      ADB_RECONNECT_BACKOFF: ${ADB_RECONNECT_BACKOFF:-5}
+      ADB_HEARTBEAT_CONCURRENCY: ${ADB_HEARTBEAT_CONCURRENCY:-4}
+      SCRCPY_STREAM_MODE: ${SCRCPY_STREAM_MODE:-raw}
+      SCRCPY_STREAM_HEALTH_TIMEOUT: ${SCRCPY_STREAM_HEALTH_TIMEOUT:-5}
+      SCRCPY_STREAM_START_RESPONSE_TIMEOUT: ${SCRCPY_STREAM_START_RESPONSE_TIMEOUT:-0.5}
+      SCRCPY_I_FRAME_INTERVAL: ${SCRCPY_I_FRAME_INTERVAL:-1}
+      SCRCPY_SOCKET_READY_TIMEOUT: ${SCRCPY_SOCKET_READY_TIMEOUT:-8}
+      SCRCPY_ADB_COMMAND_TIMEOUT: ${SCRCPY_ADB_COMMAND_TIMEOUT:-15}
+      SCRCPY_CONTROL_SEND_TIMEOUT_SECONDS: ${SCRCPY_CONTROL_SEND_TIMEOUT_SECONDS:-3}
+      SCRCPY_SOCKET_KEEPALIVE: ${SCRCPY_SOCKET_KEEPALIVE:-true}
+      SCRCPY_SOCKET_KEEPALIVE_IDLE: ${SCRCPY_SOCKET_KEEPALIVE_IDLE:-30}
+      SCRCPY_SOCKET_KEEPALIVE_INTERVAL: ${SCRCPY_SOCKET_KEEPALIVE_INTERVAL:-10}
+      SCRCPY_SOCKET_KEEPALIVE_COUNT: ${SCRCPY_SOCKET_KEEPALIVE_COUNT:-3}
+    volumes:
+      - ${WEB_SCRCPY_DATA_HOST:-./data}:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "${SCRCPYGATE_LOG_DRIVER:-local}"
+      options:
+        max-size: "${SCRCPYGATE_LOG_MAX_SIZE:-20m}"
+        max-file: "${SCRCPYGATE_LOG_MAX_FILES:-5}"
+    networks:
+      - scrcpygate-net
+    # Network ADB only does not need privileged mode. USB ADB requires extra device mapping and permissions.
+
+networks:
+  # 自定义 bridge 网络：容器只与同一网络内的服务互通，公网入口仍靠上面的 ports: 映射。
+  # 需要「容器直接用宿主网络栈」时用 compose.host.yaml（网络模式互斥）。
+  scrcpygate-net:
+    driver: bridge

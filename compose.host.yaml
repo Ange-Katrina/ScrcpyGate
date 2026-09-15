@@ -1,0 +1,31 @@
+# 宿主网络变体：容器直接使用宿主的网络栈，没有 ports: 映射。
+#
+#   docker compose -f compose.host.yaml up -d --build
+#
+# 什么时候用它：
+#   * 想让容器复用宿主已有的 adb server（宿主 `adb devices` 能看到 USB 直连的手机），
+#     配合 ADB_SERVER_SOCKET=tcp:127.0.0.1:5037；
+#   * 需要与宿主同一个网络命名空间（例如宿主上跑着只能从 127.0.0.1 访问的服务）。
+# 什么时候别用：只做网络 ADB、想让宿主只暴露一个端口时，用默认的 compose.yaml（bridge + ports）。
+#
+# 绑定位置由 .env 里的 WEB_SCRCPY_BIND / WEB_SCRCPY_PORT 决定（默认 0.0.0.0:5000）——
+# 宿主网络下没有端口映射，容器绑的端口就是宿主端口，记得和 PUBLIC_BASE_URL 保持一致。
+#
+# 服务定义整体继承 compose.yaml（环境变量只维护一份），只覆盖网络相关的三项：
+#   network_mode: host + 清空继承来的 ports / networks（同一个服务不能同时两者）。
+# !reset 需要 Docker Compose >= 2.24（`docker compose version` 查看）。
+name: scrcpygate
+
+services:
+  scrcpygate:
+    extends:
+      file: compose.yaml
+      service: scrcpygate
+    network_mode: host
+    ports: !reset []
+    networks: !reset []
+    environment:
+      WEB_SCRCPY_BIND: ${WEB_SCRCPY_BIND:-0.0.0.0}
+      WEB_SCRCPY_PORT: ${WEB_SCRCPY_PORT:-5000}
+      # ADB_SERVER_SOCKET 从 compose.yaml 继承（默认空；宿主网络下填
+      # tcp:127.0.0.1:5037 就会复用宿主的 adb server）。

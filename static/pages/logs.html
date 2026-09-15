@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>日志审计 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item" href="/devices" data-dom-id="admin-devices-link" title="设备管理"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item active" href="/logs" data-dom-id="admin-logs-link" title="日志审计" aria-current="page"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>日志审计</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+          <div class="page-heading">
+            <h1>日志审计</h1>
+            <p>运行日志与安全审计事件记录</p>
+          </div>
+
+          <section class="stats-grid" aria-label="日志审计统计">
+            <div class="stat-card static">
+              <div class="stat-top"><span>审计事件</span><span class="stat-icon blue"><i data-lucide="scroll-text"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="stat-total-count">—</strong><span class="stat-unit">条</span></div>
+              <p class="stat-note">最近 24 小时</p>
+            </div>
+            <div class="stat-card static">
+              <div class="stat-top"><span>已拒绝</span><span class="stat-icon orange"><i data-lucide="shield-x"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="stat-denied-count">—</strong><span class="stat-unit">条</span></div>
+              <p class="stat-note">权限或安全策略拒绝</p>
+            </div>
+            <div class="stat-card static">
+              <div class="stat-top"><span>执行失败</span><span class="stat-icon cyan"><i data-lucide="circle-x"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="stat-failed-count">—</strong><span class="stat-unit">条</span></div>
+              <p class="stat-note">失败或错误结果</p>
+            </div>
+            <div class="stat-card static">
+              <div class="stat-top"><span>高风险事件</span><span class="stat-icon orange"><i data-lucide="triangle-alert"></i></span></div>
+              <div class="stat-main"><strong class="stat-value" id="stat-high-risk-count">—</strong><span class="stat-unit">条</span></div>
+              <p class="stat-note">需优先核查</p>
+            </div>
+          </section>
+
+          <section class="panel" id="logs-panel" aria-labelledby="logs-panel-title">
+            <div class="panel-header">
+              <h2 class="panel-title" id="logs-panel-title">运行日志与安全审计<span class="panel-subtitle">实时记录 · 按需刷新</span></h2>
+              <div class="panel-tools">
+                <span class="refresh-meta" id="refresh-meta"><i data-lucide="clock"></i><span id="refresh-meta-text">等待服务端数据</span><span class="meta-dot" id="refresh-meta-dot"></span></span>
+                <label class="switch"><span>自动刷新</span><input type="checkbox" id="auto-switch" class="sg-switch-input"></label>
+                <button class="tool-btn is-hidden" id="integrity-check-btn" type="button" title="检查日志完整性"><i data-lucide="shield-check"></i><span>检查完整性</span></button>
+                <button class="tool-btn" id="refresh-btn" type="button" title="手动刷新"><i data-lucide="refresh-cw"></i><span class="btn-text">刷新</span></button>
+                <button class="tool-btn primary" id="export-btn" type="button" title="导出当前筛选视图"><i data-lucide="download"></i><span>导出当前视图</span></button>
+              </div>
+            </div>
+
+            <div class="table-toolbar" role="tablist" aria-label="日志视图切换">
+              <div class="filter-tabs">
+                <button class="view-tab" id="tab-logs" type="button" role="tab" aria-selected="false">运行日志<span class="count" id="tab-logs-count">0</span></button>
+                <button class="view-tab active" id="tab-audit" type="button" role="tab" aria-selected="true">安全审计<span class="count" id="tab-audit-count">0</span></button>
+              </div>
+            </div>
+
+            <div class="logs-filter-bar is-hidden" id="logs-filter-bar">
+              <label class="search-box"><i data-lucide="search"></i><input type="search" id="logs-search" placeholder="搜索关键词" aria-label="搜索日志关键词"></label>
+              <span class="filter-field" id="f-time"><span class="f-label">时间范围</span><span class="select-wrap"><select id="logs-time" aria-label="时间范围"><option value="24h" selected>最近 24 小时</option><option value="today">今天</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="all">全部时间</option><option value="custom">自定义</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="custom-range is-hidden" id="logs-date-range">
+                <input class="field-input" type="datetime-local" id="logs-date-from" aria-label="自定义开始时间">
+                <span>至</span>
+                <input class="field-input" type="datetime-local" id="logs-date-to" aria-label="自定义结束时间">
+              </span>
+              <span class="filter-field" id="f-severity"><span class="f-label">严重级别</span><span class="select-wrap"><select id="logs-severity" aria-label="严重级别"><option value="all">全部</option><option value="debug">调试</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field" id="f-source"><span class="f-label">来源模块</span><span class="select-wrap"><select id="logs-source" aria-label="来源模块"><option value="all">全部</option><option value="auth">认证</option><option value="account">账户</option><option value="device">设备</option><option value="quality">画质传输</option><option value="alas">ALAS</option><option value="system">系统</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field" id="f-device"><span class="f-label">设备</span><span class="select-wrap"><select id="logs-device" aria-label="设备"><option value="all">全部设备</option><option value="none">无设备</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field" id="f-user"><span class="f-label">用户</span><span class="select-wrap"><select id="logs-user" aria-label="用户"><option value="all">全部用户</option><option value="none">无用户</option></select><i data-lucide="chevron-down"></i></span></span>
+            </div>
+
+            <div class="logs-filter-bar" id="audit-filter-bar">
+              <label class="search-box" id="f-audit-search"><i data-lucide="search"></i><input type="search" id="audit-search" placeholder="搜索审计关键词" aria-label="搜索审计关键词"></label>
+              <span class="filter-field" id="f-audit-time"><span class="f-label">时间范围</span><span class="select-wrap"><select id="audit-time" aria-label="审计时间范围"><option value="24h" selected>最近 24 小时</option><option value="today">今天</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="all">全部时间</option><option value="custom">自定义</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="custom-range is-hidden" id="audit-date-range">
+                <input class="field-input" type="datetime-local" id="audit-date-from" aria-label="自定义开始时间">
+                <span>至</span>
+                <input class="field-input" type="datetime-local" id="audit-date-to" aria-label="自定义结束时间">
+              </span>
+              <span class="filter-field" id="f-event-type"><span class="f-label">事件类型</span><span class="select-wrap"><select id="logs-event-type" aria-label="事件类型"><option value="all">全部事件类型</option><option value="login">登录与退出审计</option><option value="authfail">认证失败</option><option value="acct">账户状态变更</option><option value="perm">用户权限调整</option><option value="dev">设备操作</option><option value="quality">画质与传输配置修改</option><option value="alas">ALAS 配置与运行操作</option><option value="admin">管理员操作</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field" id="f-result"><span class="f-label">执行结果</span><span class="select-wrap"><select id="logs-result" aria-label="执行结果"><option value="all">全部</option><option value="success">成功</option><option value="fail">失败</option><option value="denied">拒绝</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field" id="f-actor"><span class="f-label">操作者</span><span class="select-wrap"><select id="logs-actor" aria-label="操作者"><option value="all">全部操作者</option><option value="none">未认证用户</option></select><i data-lucide="chevron-down"></i></span></span>
+              <label class="search-box" id="f-target"><i data-lucide="crosshair"></i><input type="search" id="logs-target" placeholder="筛选操作对象" aria-label="筛选操作对象"></label>
+            </div>
+
+            <div class="logs-banner banner-error is-hidden" id="logs-fail-banner" role="alert"><i data-lucide="alert-circle"></i><span class="banner-msg">刷新失败 · 无法获取最新日志，请重试</span><button class="banner-close" id="logs-fail-retry" type="button"><i data-lucide="rotate-cw"></i>重试</button></div>
+            <div class="logs-banner banner-error is-hidden" id="logs-down-banner" role="alert"><i data-lucide="server-off"></i><span class="banner-msg">日志服务不可用 · 数据可能延迟，恢复后自动同步</span><button class="banner-close" id="logs-down-close" type="button" aria-label="关闭提示"><i data-lucide="x"></i></button></div>
+            <div class="logs-banner banner-error is-hidden" id="logs-export-fail-banner" role="alert"><i data-lucide="download"></i><span class="banner-msg">导出失败 · 无法生成导出文件，请稍后重试</span><button class="banner-close" id="logs-export-fail-close" type="button" aria-label="关闭提示"><i data-lucide="x"></i></button></div>
+            <div class="logs-banner banner-permission is-hidden" id="logs-permission-banner" role="alert"><i data-lucide="lock"></i><span class="banner-msg">当前账号无导出权限 · 导出请求已被拒绝</span><button class="banner-close" id="logs-permission-close" type="button" aria-label="关闭提示"><i data-lucide="x"></i></button></div>
+
+            <div id="logs-run-view" class="is-hidden">
+              <div id="logs-structured">
+                <div class="logs-table-wrap">
+                  <table class="logs-table">
+                    <thead>
+                      <tr><th style="width:12%">时间</th><th style="width:7%">级别</th><th style="width:12%">来源</th><th style="width:11%">设备</th><th style="width:9%">用户</th><th style="width:39%">内容摘要</th><th style="width:10%;text-align:right">操作</th></tr>
+                    </thead>
+                    <tbody id="logs-tbody">
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                      <tr aria-hidden="true"><td><span class="sk line" style="width:108px"></span></td><td><span class="sk chip"></span></td><td><span class="sk line" style="width:60px"></span></td><td><span class="sk line" style="width:70px"></span></td><td><span class="sk line" style="width:46px"></span></td><td><span class="sk line" style="width:220px"></span></td><td><div class="row-actions"><span class="sk chip" style="width:46px"></span></div></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="logs-empty is-hidden" id="logs-empty">
+                <i data-lucide="search-x"></i><span>无匹配日志</span>
+                <button class="empty-btn" id="logs-empty-clear" type="button"><i data-lucide="filter-x"></i>清除筛选</button>
+              </div>
+            </div>
+
+            <div id="audit-view">
+              <div class="audit-toolbar">
+                <div class="seg" id="view-seg" role="group" aria-label="审计视图模式">
+                  <button class="seg-btn active" id="view-structured" type="button"><i data-lucide="table"></i>结构化视图</button>
+                  <button class="seg-btn" id="view-raw" type="button"><i data-lucide="list"></i>原始日志视图</button>
+                </div>
+              </div>
+              <div class="logs-banner banner-audit" id="logs-audit-banner"><i data-lucide="alert-triangle"></i><span class="banner-msg" id="logs-audit-banner-text">正在加载审计风险统计</span></div>
+              <div id="audit-structured">
+                <div class="logs-table-wrap">
+                  <table class="logs-table audit-table">
+                    <thead>
+                      <tr><th style="width:14%">时间</th><th style="width:22%">事件</th><th style="width:24%">操作者 / 对象</th><th style="width:10%">结果</th><th style="width:10%">严重度</th><th style="width:15%">请求 ID</th><th style="width:5%;text-align:right">详情</th></tr>
+                    </thead>
+                    <tbody id="audit-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="audit-raw" class="is-hidden">
+                <div class="raw-toolbar">
+                  <span class="raw-count" id="raw-count"></span>
+                  <button class="tool-btn" id="raw-wrap-btn" type="button" aria-pressed="true"><i data-lucide="wrap-text"></i><span>自动换行</span></button>
+                </div>
+                <div class="raw-view" id="audit-raw-list"></div>
+              </div>
+              <div class="logs-empty is-hidden" id="audit-empty">
+                <i data-lucide="search-x"></i><span>无匹配审计记录</span>
+                <button class="empty-btn" id="audit-empty-clear" type="button"><i data-lucide="filter-x"></i>清除筛选</button>
+              </div>
+              <div class="integrity-card">
+                <span class="integrity-ic"><i data-lucide="shield-check"></i></span>
+                <div class="integrity-copy"><b>日志完整性检查</b><span>校验日志文件是否被篡改或缺失，与安全事件失败相互独立</span></div>
+                <div class="integrity-fields">
+                  <div class="integrity-field"><span class="k">检查状态</span><span class="v"><span class="result-chip" id="integrity-status"><span class="mini-dot"></span>未检查</span></span></div>
+                  <div class="integrity-field"><span class="k">最近检查时间</span><span class="v" id="integrity-time">—</span></div>
+                  <div class="integrity-field"><span class="k">检查范围</span><span class="v" id="integrity-range">未检查</span></div>
+                  <div class="integrity-field"><span class="k">检查结果</span><span class="v"><span class="result-chip" id="integrity-result"><span class="mini-dot"></span>—</span></span></div>
+                  <div class="integrity-field"><span class="k">已验证记录</span><span class="v" id="integrity-verified">—</span></div>
+                  <div class="integrity-field"><span class="k">检查失败记录</span><span class="v" id="integrity-failed">—</span></div>
+                </div>
+                <div class="integrity-actions">
+                  <button class="tool-btn" id="integrity-details-btn" type="button"><i data-lucide="list-checks"></i><span>异常记录详情</span></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="logs-footer">
+              <span class="page-info" id="logs-footer-info">等待服务端分页数据</span>
+              <button class="load-more-btn" id="load-more-btn" type="button"><i data-lucide="plus"></i><span>加载更多</span></button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== 日志详情抽屉 ===== -->
+  <div class="drawer-mask" id="drawer-mask"></div>
+  <aside class="log-drawer" id="log-drawer" role="dialog" aria-modal="true" aria-labelledby="log-drawer-title">
+    <div class="drawer-head">
+      <div><h3 class="drawer-title" id="log-drawer-title">日志详情</h3><div class="meta" id="log-drawer-meta"></div></div>
+      <div class="drawer-head-actions">
+        <button class="drawer-nav" id="log-drawer-prev" type="button" title="上一条" aria-label="上一条"><i data-lucide="chevron-up"></i></button>
+        <button class="drawer-nav" id="log-drawer-next" type="button" title="下一条" aria-label="下一条"><i data-lucide="chevron-down"></i></button>
+        <button class="drawer-close" id="log-drawer-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+    <div class="drawer-body">
+      <p class="drawer-section-label">完整日志内容</p>
+      <div class="raw-block" id="log-drawer-raw"></div>
+      <p class="drawer-section-label">日志上下文</p>
+      <div class="kv-grid">
+        <div class="kv-item"><span class="k">时间</span><span class="v" id="ld-time">—</span></div>
+        <div class="kv-item"><span class="k">级别</span><span class="v" id="ld-level">—</span></div>
+        <div class="kv-item"><span class="k">来源模块</span><span class="v" id="ld-source">—</span></div>
+        <div class="kv-item"><span class="k">设备</span><span class="v" id="ld-device">—</span></div>
+        <div class="kv-item"><span class="k">用户</span><span class="v" id="ld-user">—</span></div>
+        <div class="kv-item"><span class="k">会话 ID</span><span class="v" id="ld-session">—</span></div>
+        <div class="kv-item"><span class="k">事件 ID</span><span class="v" id="ld-event">—</span></div>
+      </div>
+    </div>
+    <div class="drawer-foot">
+      <span class="drawer-foot-left">原始内容仅供参考与排障</span>
+      <div class="drawer-foot-actions">
+        <button class="btn-primary-lg" id="log-drawer-copy" type="button"><i data-lucide="copy"></i>复制原始内容</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== 安全审计记录详情弹窗 ===== -->
+  <div class="modal-mask" id="audit-modal-mask">
+    <div class="modal-card audit-detail-card" role="dialog" aria-modal="true" aria-labelledby="audit-modal-title" aria-describedby="audit-modal-status">
+      <div class="modal-head">
+        <div><p class="modal-eyebrow">安全审计</p><h3 class="modal-title" id="audit-modal-title">事件详情</h3></div>
+        <button class="modal-close" id="audit-modal-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="detail-load-status" id="audit-modal-status" role="status" aria-live="polite">选择记录后加载完整详情</p>
+        <div class="kv-grid">
+          <div class="kv-item"><span class="k">时间</span><span class="v" id="am-time">—</span></div>
+          <div class="kv-item"><span class="k">事件 ID</span><span class="v mono" id="am-event">—</span></div>
+          <div class="kv-item"><span class="k">请求 ID</span><span class="v mono" id="am-request">—</span></div>
+          <div class="kv-item"><span class="k">操作者</span><span class="v" id="am-actor">—</span></div>
+          <div class="kv-item"><span class="k">动作</span><span class="v mono" id="am-action">—</span></div>
+          <div class="kv-item"><span class="k">操作对象</span><span class="v" id="am-target">—</span></div>
+          <div class="kv-item"><span class="k">执行结果</span><span class="v" id="am-result">—</span></div>
+          <div class="kv-item"><span class="k">严重度</span><span class="v" id="am-severity">—</span></div>
+          <div class="kv-item"><span class="k">来源 IP</span><span class="v mono" id="am-ip">—</span></div>
+          <div class="kv-item"><span class="k">结构版本</span><span class="v" id="am-schema">—</span></div>
+        </div>
+        <div class="detail-section"><h4>原因</h4><p id="am-reason">—</p></div>
+        <div class="detail-section"><h4>详情</h4><p id="am-desc">—</p></div>
+        <div class="detail-section"><h4>用户代理</h4><p class="detail-code" id="am-user-agent">—</p></div>
+        <div class="detail-section"><h4>元数据</h4><pre class="detail-json" id="am-metadata" tabindex="0">{}</pre></div>
+        <details class="detail-integrity"><summary>完整性信息</summary><p>用于核对本地审计链；通常无需人工阅读。</p><pre class="detail-json" id="am-integrity" tabindex="0">{}</pre></details>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-primary-lg" id="audit-modal-copy" type="button"><i data-lucide="copy"></i>复制事件 JSON</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 完整性异常记录弹窗 ===== -->
+  <div class="modal-mask" id="integrity-modal-mask">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="integrity-modal-title">
+      <div class="modal-head">
+        <h3 class="modal-title" id="integrity-modal-title">完整性异常记录</h3>
+        <button class="modal-close" id="integrity-modal-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="q-modal-target">以下为完整性检查覆盖范围内发现的失败或拒绝审计事件</p>
+        <div class="integrity-issue-list" id="integrity-issue-list"></div>
+        <div class="logs-empty" id="integrity-issue-empty">
+          <i data-lucide="shield-check"></i><span>当前无完整性异常记录</span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-primary-lg" id="integrity-modal-ok" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 导出格式选择 ===== -->
+  <div class="export-pop" id="export-pop" role="menu">
+    <div class="export-head"><i data-lucide="download"></i>导出当前视图</div>
+    <p class="export-desc" id="export-desc">将导出当前筛选视图中的记录</p>
+    <button class="menu-item" id="export-csv" type="button" role="menuitem"><i data-lucide="file-spreadsheet"></i><span>CSV 文件</span></button>
+    <button class="menu-item" id="export-json" type="button" role="menuitem"><i data-lucide="file-code"></i><span>JSON 文件</span></button>
+    <button class="menu-item" id="export-text" type="button" role="menuitem"><i data-lucide="file-text"></i><span>原始文本</span></button>
+  </div>
+
+  <div class="toast-root" id="toast-root" aria-live="polite"></div>
+
+
+
+</body></html>

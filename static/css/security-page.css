@@ -1,0 +1,101 @@
+/* 安全机制页面样式。
+   Apple Copy 取向：安静容器（1px 边框 + 大圆角）、用间距分组而非分隔线、
+   胶囊按钮、克制的阴影；状态色只用于开关与提示。 */
+
+.sec-head { align-items: center; }
+.sec-hint { margin: 0 0 clamp(12px, 1.6vh, 18px); color: var(--admin-muted); font-size: 12px; line-height: 18px; max-width: 860px; }
+.sec-layout { display: flex; flex-direction: column; gap: clamp(12px, 1.5vh, 16px); width: 100%; max-width: 860px; }
+/* 窄屏没有列壳：.sec-col 不生成盒子，卡片直接进 flex 流，用 order 保持
+   总开关 → 阈值与时长 → 高级 → 当前封禁 的阅读顺序。 */
+.sec-col { display: contents; }
+.sec-card[data-card="switch"] { order: 1; }
+.sec-card[data-card="limits"] { order: 2; }
+.sec-card[data-card="advanced"] { order: 3; }
+.sec-card[data-card="locked"] { order: 4; }
+.sec-card .panel-header { min-height: 46px; }
+.sec-card .guard-body { padding-bottom: 8px; }
+
+/* ===== 行 / 开关 / 数值字段 ===== */
+.guard-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.guard-btn { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 14px; border-radius: 999px; border: 1px solid transparent; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background-color 150ms var(--ease-fade), border-color 150ms var(--ease-fade), color 150ms var(--ease-fade), opacity 150ms var(--ease-fade); }
+.guard-btn.primary { color: var(--admin-on-brand); background: var(--admin-brand-btn); }
+.guard-btn.primary:hover:not(:disabled) { background: var(--admin-brand-hover); }
+.guard-btn.ghost { color: var(--admin-muted); background: transparent; border-color: var(--admin-border); }
+.guard-btn.ghost:hover { color: var(--admin-text); background: var(--admin-hover); border-color: var(--admin-elev-border); }
+.guard-btn:disabled { opacity: .45; cursor: not-allowed; }
+.guard-btn:focus-visible, .guard-preset:focus-visible, .guard-unlock:focus-visible, .guard-field input:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
+
+/* 左右留白与 .panel-header 一致（14px），卡片标题与行标签才能对齐在同一条竖线上。 */
+.guard-body { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px 6px; }
+.guard-group { display: flex; flex-direction: column; gap: 2px; }
+.guard-group-title { margin: 0 0 6px; color: var(--admin-faint); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+
+.guard-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 0; border-top: 1px solid var(--admin-line); }
+.guard-row:first-of-type { border-top: 0; }
+.guard-row.is-muted { opacity: .5; }
+.guard-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.guard-copy b { color: var(--admin-text); font-size: 13px; font-weight: 600; }
+.guard-copy span { color: var(--admin-muted); font-size: 11.5px; line-height: 17px; }
+
+.is-guard-off .guard-switch:disabled { opacity: .45; }
+
+.guard-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 0 10px; height: 32px; border: 1px solid var(--admin-border); border-radius: 10px; background: var(--admin-field); }
+.guard-field input { width: 62px; border: 0; outline: 0; background: transparent; color: var(--admin-text); font: inherit; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.guard-field input:disabled { color: var(--admin-faint); }
+.guard-unit { color: var(--admin-muted); font-size: 11px; white-space: nowrap; }
+
+.guard-presets { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: var(--admin-field); align-self: center; flex-wrap: wrap; }
+.guard-preset { height: 24px; padding: 0 12px; border: 0; border-radius: 999px; color: var(--admin-muted); background: transparent; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 150ms var(--ease-fade), background-color 150ms var(--ease-fade); }
+.guard-preset:hover { color: var(--admin-text); }
+.guard-preset.active { color: var(--admin-text); background: var(--admin-surface); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+.guard-locked { margin: 0; padding: 0; list-style: none; }
+.guard-locked-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--admin-line); font-size: 12.5px; }
+.guard-locked-row:first-child { border-top: 0; }
+.guard-locked-ip { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--admin-text); font-variant-numeric: tabular-nums; }
+.guard-locked-meta { margin-left: auto; color: var(--admin-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.guard-unlock { flex: none; height: 26px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--admin-border); background: transparent; color: var(--admin-brand); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background-color 150ms var(--ease-fade); }
+.guard-unlock:hover { background: var(--admin-brand-soft); }
+
+.guard-status { color: var(--admin-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.guard-status[data-tone="ok"] { color: var(--admin-success); }
+.guard-status[data-tone="warn"] { color: var(--admin-warn); }
+.guard-status[data-tone="error"] { color: var(--admin-danger); }
+
+@media (min-width: 1180px) {
+  /* 宽屏：左列 总开关 / 高级，右列 阈值与时长 / 当前封禁。两列各自堆叠（列壳成为
+     弹性列），因此短卡片下方不会留出与邻列高度差相等的空洞；整列占满内容区宽度，
+     不再在右侧留下空白。 */
+  .sec-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; column-gap: 16px; max-width: none; }
+  .sec-col { display: flex; flex-direction: column; gap: clamp(12px, 1.5vh, 16px); min-width: 0; }
+  .sec-hint { max-width: none; }
+}
+
+@media (max-width: 767px) {
+  .sec-head { align-items: stretch; flex-direction: column; gap: 10px; }
+  .guard-body { padding: 8px 12px 4px; }
+  .guard-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .guard-field { align-self: stretch; justify-content: space-between; }
+  .guard-field input { flex: 1 1 auto; }
+  .guard-presets { align-self: stretch; justify-content: space-between; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guard-switch, .guard-switch > i, .guard-btn, .guard-preset { transition: none; }
+}
+
+/* ===== 底部保存行（原顶部按钮移到这里） =====
+   与 /quality 的底部操作条同一套观感：发丝边 + 玻璃底 + 轻阴影，状态文字左、按钮右，
+   标题栏只留标题与说明。保存动作跟内容走完之后，视线自然落在这一行。 */
+.sec-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; max-width: 860px; margin-top: clamp(12px, 1.6vh, 18px); padding: 12px 14px; border: 1px solid var(--admin-elev-border); border-radius: 16px; background: var(--admin-surface); box-shadow: 0 1px 2px var(--c-shadow), 0 8px 24px var(--c-shadow); }
+.sec-foot-spacer { flex: 1 1 auto; }
+
+@media (min-width: 1180px) {
+  .sec-foot { max-width: none; }
+}
+
+@media (max-width: 767px) {
+  /* 触屏：按钮抬到 44px 最小点击区（Apple Copy 触控目标规范），状态文字单独一行。 */
+  .sec-foot { align-items: stretch; flex-direction: column; gap: 8px; }
+  .sec-foot-spacer { display: none; }
+  .sec-foot .guard-btn { height: 44px; }
+}

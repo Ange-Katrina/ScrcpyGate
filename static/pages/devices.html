@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>设备管理 - ScrcpyGate</title>
+    <script>
+      (function(){try{var saved=localStorage.getItem('scrcpygate-theme');var dark=(saved==='dark')||(!saved&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();
+    </script>
+
+    <link rel="stylesheet" href="/static/css/tailwind.generated.css">
+    <script src="/static/vendor/lucide.min.js"></script>
+    <link rel="stylesheet" href="/static/shared/responsive.css">
+    <script src="/static/shared/i18n.js"></script>
+    <script src="/static/shared/api.js"></script>
+    <script src="/static/shared/session.js"></script>
+    <script src="/static/shared/responsive.js"></script>
+
+
+
+</head>
+<body class="h-screen overflow-hidden font-sans antialiased">
+
+
+  <main class="admin-shell" data-viewport-mode="app-shell" data-admin-page aria-label="ScrcpyGate 管理控制台">
+    <aside class="admin-rail" id="admin-sidebar" aria-label="主导航">
+      <button class="collapse-btn" id="adminSidebarToggle" type="button" aria-label="收起侧边栏" title="收起侧边栏" aria-expanded="true"><i data-lucide="panel-left-close"></i></button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">工作台</div>
+      <nav class="sidebar-nav" aria-label="工作区导航">
+        <a class="side-item" href="/admin" data-dom-id="admin-dashboard-link" title="仪表盘"><i data-lucide="layout-dashboard"></i><span class="menu-text"><b>仪表盘</b><small>概览统计</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">资源管理</div>
+      <nav class="sidebar-nav" aria-label="资源导航">
+        <a class="side-item active" href="/devices" data-dom-id="admin-devices-link" title="设备管理" aria-current="page"><i data-lucide="smartphone"></i><span class="menu-text"><b>设备管理</b><small>投屏与状态</small></span></a>
+        <a class="side-item" href="/users" data-dom-id="admin-users-link" title="用户与权限"><i data-lucide="users"></i><span class="menu-text"><b>用户与权限</b><small>角色与到期</small></span><span class="side-badge" id="nav-expiring-badge" hidden></span></a>
+        <a class="side-item" href="/mirror-admin" data-dom-id="admin-mirror-admin-link" title="投屏管理"><i data-lucide="monitor-cog"></i><span class="menu-text"><b>投屏管理</b><small>菜单与控件</small></span></a>
+        <a class="side-item" href="/alas" data-dom-id="admin-alas-link" title="ALAS 管理"><i data-lucide="bot"></i><span class="menu-text"><b>ALAS 管理</b><small>配置与绑定</small></span></a>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-group-label">系统</div>
+      <nav class="sidebar-nav" aria-label="系统导航">
+        <a class="side-item" href="/quality" data-dom-id="admin-quality-link" title="画质与传输"><i data-lucide="sliders-horizontal"></i><span class="menu-text"><b>画质与传输</b><small>分辨率与码率</small></span></a>
+        <a class="side-item" href="/security" data-dom-id="admin-security-link" title="安全机制"><i data-lucide="shield-check"></i><span class="menu-text"><b>安全机制</b><small>登录防护</small></span></a>
+        <a class="side-item" href="/logs" data-dom-id="admin-logs-link" title="日志审计"><i data-lucide="scroll-text"></i><span class="menu-text"><b>日志审计</b><small>记录与追踪</small></span></a>
+      </nav>
+      <div class="rail-bottom">
+        <div class="sidebar-divider"></div>
+        <a id="back-to-mirror" data-dom-id="back-to-mirror" class="side-item" href="/mirror" title="返回投屏工作台"><i data-lucide="monitor-up"></i><span class="menu-text"><b>返回投屏工作台</b><small>前往画面与控制</small></span></a>
+        <div class="side-version">ScrcpyGate</div>
+        <a data-dom-id="mirror-link" href="/mirror" hidden aria-hidden="true" tabindex="-1"></a>
+      </div>
+      <div class="admin-rail-scrollbar" id="admin-rail-scrollbar" aria-hidden="true"></div>
+    </aside>
+    <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
+      <nav class="breadcrumb" aria-label="面包屑">
+        <a href="/">首页</a><i data-lucide="chevron-right"></i><a href="/admin">管理后台</a><i data-lucide="chevron-right"></i><b>设备管理</b>
+      </nav>
+      <div class="topbar-actions">
+      <button class="theme-toggle" id="adminThemeToggle" type="button" aria-label="切换到浅色模式" aria-pressed="true" title="切换到浅色模式"><i data-lucide="sun-moon"></i></button>
+      <div class="account-menu" id="account-menu">
+        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="账户菜单">
+          <span class="admin-avatar" aria-hidden="true">A</span>
+          <span class="user-copy"><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></span>
+          <span class="chev"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="menu-panel" role="menu">
+          <div class="menu-head">
+            <span class="admin-avatar" aria-hidden="true">A</span>
+            <div><b data-session-display-name>当前账户</b><span data-session-username>正在加载账户信息</span></div>
+          </div>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item danger" type="button" role="menuitem"><i data-lucide="log-out"></i><span>退出登录</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <section class="admin-stage">
+      <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
+        <div class="admin-content">
+
+          <div class="page-heading dev-head">
+            <div>
+              <h1>设备管理</h1>
+              <p>投屏设备、连接状态与观看会话管理</p>
+            </div>
+            <div class="dev-head-actions">
+              <button class="btn-ghost icon-only" id="devRefreshAllBtn" type="button" title="刷新全部设备" aria-label="刷新全部设备"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-primary" id="devAddBtn" type="button"><i data-lucide="plus"></i><span>新增设备</span></button>
+            </div>
+          </div>
+
+          <section class="alas-status-strip" role="region" tabindex="0" aria-label="设备状态摘要">
+            <div class="alas-status-item"><span class="alas-status-dot ok" id="devStatusOnlineDot"></span><div><span>在线设备</span><strong id="devStatusOnline">—</strong></div></div>
+            <div class="alas-status-item"><div><span>投屏中</span><strong id="devStatusStreaming">—</strong></div></div>
+            <div class="alas-status-item"><div><span>观看端</span><strong id="devStatusViewers">—</strong></div></div>
+            <div class="alas-status-item warning" id="devStatusAttentionWrap"><div><span>需要处理</span><strong id="devStatusAttention">—</strong></div></div>
+            <div class="alas-status-item"><div><span>最近刷新</span><strong id="devStatusSync">—</strong></div></div>
+          </section>
+
+          <section class="alas-workspace" id="devWorkspace" aria-label="设备列表与详情">
+            <aside class="alas-master">
+              <div class="alas-pane-head">
+                <div><h2>设备列表</h2><p>搜索、筛选和选择设备</p></div>
+                <button class="alas-row-action" id="devMasterRefreshBtn" type="button" title="刷新全部设备状态" aria-label="刷新全部设备状态"><i data-lucide="refresh-cw"></i></button>
+              </div>
+              <div class="alas-search">
+                <i data-lucide="search"></i>
+                <input id="devSearch" class="alas-input" type="search" placeholder="搜索设备名或 ADB 地址" aria-label="搜索设备">
+              </div>
+              <div class="alas-filter-row" style="grid-template-columns:1fr 1fr">
+                <select id="devFilter" class="alas-select" aria-label="按状态筛选设备">
+                  <option value="all">全部状态</option>
+                  <option value="online">在线</option>
+                  <option value="offline">离线</option>
+                  <option value="disabled">禁用</option>
+                  <option value="connecting">连接中</option>
+                  <option value="check-fail">检测失败</option>
+                  <option value="unknown">未检查</option>
+                </select>
+                <select id="devMirrorFilter" class="alas-select" aria-label="按投屏状态筛选设备">
+                  <option value="all">全部投屏</option>
+                  <option value="mirroring">投屏中</option>
+                  <option value="idle">空闲</option>
+                </select>
+              </div>
+              <div class="alas-error-bar" id="devErrorBar" hidden>
+                <i data-lucide="alert-triangle"></i><span id="devErrorBarText">设备状态刷新失败</span>
+                <button class="row-btn" id="devErrorRetryBtn" type="button"><i data-lucide="rotate-cw"></i><span>重试</span></button>
+              </div>
+              <div class="alas-list" id="devList" role="group" aria-label="设备列表"></div>
+            </aside>
+            <section class="alas-detail" id="devDetail" aria-live="polite">
+              <div class="alas-detail-head">
+                <div class="alas-detail-title">
+                  <span class="alas-avatar" id="devDetailAvatar">—</span>
+                  <div>
+                    <h2 id="devDetailName">请选择设备</h2>
+                    <p id="devDetailMeta">—</p>
+                    <div class="alas-chips" id="devDetailChips"></div>
+                  </div>
+                </div>
+                <div class="dev-detail-actions">
+                  <button class="btn-ghost dev-btn-sm" id="devAccessBtn" type="button"><i data-lucide="users"></i><span>权限与绑定</span></button>
+                  <button class="btn-ghost dev-btn-sm" id="devEditBtn" type="button"><i data-lucide="pencil"></i><span>编辑</span></button>
+                  <button class="btn-ghost dev-btn-sm" id="devCheckConnBtn" type="button"><i data-lucide="plug"></i><span>检测连接</span></button>
+                  <button class="btn-primary dev-btn-sm" id="devToggleBtn" type="button"><i data-lucide="power"></i><span>停用设备</span></button>
+                </div>
+              </div>
+
+              <div class="dev-facts" id="devFactsGrid">
+                <div class="dev-fact"><span>在线状态</span><strong id="devFactOnline">—</strong></div>
+                <div class="dev-fact"><span>ADB 延迟</span><strong id="devFactLatency" class="dev-mono">—</strong></div>
+                <div class="dev-fact"><span>观看端</span><strong id="devFactViewers">—</strong></div>
+                <div class="dev-fact"><span>控制权</span><strong id="devFactController">—</strong></div>
+                <div class="dev-fact"><span>投屏状态</span><strong id="devFactStreaming">—</strong></div>
+                <div class="dev-fact"><span>启用状态</span><strong id="devFactEnabled">—</strong></div>
+                <div class="dev-fact"><span>关联 ALAS</span><strong id="devFactAlas">—</strong></div>
+                <div class="dev-fact"><span id="devFactErrorLabel">最近错误</span><strong id="devFactError">无错误</strong></div>
+              </div>
+
+              <div class="dev-warning-band" id="devWarningBand" hidden>
+                <span class="dev-warning-copy"><i data-lucide="triangle-alert"></i><span id="devWarningText">设备心跳超时，建议检查 ADB 连接。</span></span>
+                <a class="btn-ghost dev-btn-sm" id="devWarningLogsBtn" href="/logs">查看日志</a>
+              </div>
+
+              <div class="dev-split-grid">
+                <article class="dev-card">
+                  <div class="dev-card-head"><div><h3>观看会话</h3><span id="devSessionSummary">—</span></div></div>
+                  <div class="dev-session-list" id="devSessionList"><div class="dev-session-empty">该设备暂无观看会话</div></div>
+                </article>
+                <article class="dev-card">
+                  <div class="dev-card-head"><div><h3>关联入口</h3><span>快速跳转到相关管理</span></div></div>
+                  <div class="dev-link-list">
+                    <div class="dev-link-row"><div><strong>用户权限</strong><span>查看可观看和可控制用户</span></div><a class="btn-ghost dev-btn-sm" id="devUsersLinkBtn" href="/users">打开</a></div>
+                    <div class="dev-link-row"><div><strong>ALAS 关联</strong><span id="devAlasLinkCopy">当前未绑定 ALAS 配置</span></div><a class="btn-ghost dev-btn-sm" id="devAlasLinkBtn" href="/alas">打开</a></div>
+                    <div class="dev-link-row"><div><strong>设备日志</strong><span>连接、投屏和控制事件</span></div><a class="btn-ghost dev-btn-sm" id="devLogsLinkBtn" href="/logs">打开</a></div>
+                  </div>
+                </article>
+              </div>
+
+              <article class="dev-card" style="margin-top:16px;">
+                <div class="dev-card-head"><div><h3>维护操作</h3><span>对选中设备执行低频操作</span></div></div>
+                <div class="dev-maintenance">
+                  <button class="btn-ghost dev-btn-sm" id="devRefreshOneBtn" type="button"><i data-lucide="rotate-cw"></i><span>重新读取设备信息</span></button>
+                  <button class="btn-ghost dev-btn-sm" id="devReleaseCtrlBtn" type="button"><i data-lucide="hand"></i><span>释放当前控制权</span></button>
+                  <button class="btn-ghost dev-btn-sm dev-danger" id="devStopStreamBtn" type="button"><i data-lucide="square"></i><span>停止当前投屏会话</span></button>
+                  <button class="btn-ghost dev-btn-sm dev-danger" id="devDeleteBtn" type="button"><i data-lucide="trash-2"></i><span>删除设备</span></button>
+                </div>
+              </article>
+            </section>
+          </section>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+
+
+  <!-- 新增 / 编辑设备弹窗 -->
+  <div class="alas-drawer-mask" id="devDrawerMask" hidden></div>
+  <aside class="alas-drawer" id="devDrawer" aria-label="新增或编辑设备" aria-hidden="true" inert>
+    <div class="alas-drawer-head">
+      <div><h2 id="devDrawerTitle">新增设备</h2><p>设备名称、ADB 地址和启用状态</p></div>
+      <button class="alas-row-action" type="button" data-close-drawer="devDrawer" aria-label="关闭抽屉" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-drawer-body">
+      <div class="alas-field">
+        <label for="devFormName">设备显示名称 <span class="dev-required">*</span></label>
+        <input class="alas-input" type="text" id="devFormName" placeholder="输入设备名称" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="alas-field">
+        <label for="devFormAdb">ADB 地址 <span class="dev-required">*</span></label>
+        <input class="alas-input dev-mono" type="text" id="devFormAdb" placeholder="host:port" spellcheck="false" autocomplete="off">
+        <small>填写设备服务要求的连接地址</small>
+      </div>
+      <div class="alas-field">
+        <label for="devFormNote">备注</label>
+        <input class="alas-input" type="text" id="devFormNote" placeholder="用途 / 位置等补充说明" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="alas-toggle-row">
+        <div><strong>启用设备</strong><p>停用时设备将标记为禁用，不可投屏</p></div>
+        <label class="alas-switch"><input type="checkbox" id="devFormEnabled" checked><span class="alas-switch-track"></span></label>
+      </div>
+      <div class="dev-form-error" id="devFormError" hidden></div>
+    </div>
+    <div class="alas-drawer-actions">
+      <button class="btn-ghost" type="button" data-close-drawer="devDrawer">取消</button>
+      <button class="btn-primary" id="devFormSaveBtn" type="button"><i data-lucide="check"></i><span>保存设备</span></button>
+    </div>
+  </aside>
+
+  <!-- 设备用户权限与 ALAS 绑定抽屉 -->
+  <div class="alas-drawer-mask" id="devAccessMask" hidden></div>
+  <aside class="alas-drawer dev-access-drawer" id="devAccessDrawer" aria-label="设备权限与 ALAS 绑定" aria-hidden="true" inert>
+    <div class="alas-drawer-head">
+      <div><h2 id="devAccessTitle">权限与绑定</h2><p id="devAccessSubtitle">分别管理用户访问和 ALAS 关联</p></div>
+      <button class="alas-row-action" type="button" id="devAccessClose" aria-label="关闭抽屉" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-drawer-body">
+      <div class="dev-access-context">
+        <span class="dev-access-context-icon"><i data-lucide="smartphone"></i></span>
+        <div><strong id="devAccessDeviceName">当前设备</strong><span id="devAccessDeviceMeta">正在读取访问关系…</span></div>
+      </div>
+      <div class="dev-access-tabs" role="tablist" aria-label="权限与绑定类型">
+        <button class="dev-access-tab" id="devAccessUsersTab" type="button" role="tab" aria-selected="true" aria-controls="devAccessUsersPanel" data-access-tab="users"><i data-lucide="users"></i>用户访问<span class="dev-access-count" id="devAccessUsersCount">0</span></button>
+        <button class="dev-access-tab" id="devAccessAlasTab" type="button" role="tab" aria-selected="false" aria-controls="devAccessAlasPanel" data-access-tab="alas"><i data-lucide="bot"></i>ALAS 关联<span class="dev-access-count" id="devAccessAlasCount">0</span></button>
+      </div>
+      <section id="devAccessUsersPanel" role="tabpanel" aria-labelledby="devAccessUsersTab">
+        <div class="dev-access-panel-head">
+          <div><h3>用户访问</h3><p>控制权限会自动包含观看权限。</p></div>
+          <label class="dev-access-search"><i data-lucide="search"></i><span class="sr-only">搜索用户</span><input id="devAccessSearch" type="search" placeholder="搜索用户" autocomplete="off"></label>
+        </div>
+        <div id="devAccessUsers" class="dev-access-list"><div class="dev-access-empty">加载中…</div></div>
+      </section>
+      <section id="devAccessAlasPanel" role="tabpanel" aria-labelledby="devAccessAlasTab" hidden>
+        <div class="dev-access-panel-head">
+          <div><h3>添加 ALAS 关联</h3><p>当前设备已固定，只需选择用户和 Runtime 配置。</p></div>
+        </div>
+        <div class="dev-access-form">
+          <label class="dev-access-field" for="devAccessUser">用户<select class="alas-select" id="devAccessUser"><option value="">选择用户</option></select></label>
+          <label class="dev-access-field" for="devAccessConfig">Runtime 配置<select class="alas-select" id="devAccessConfig"><option value="">选择配置</option></select></label>
+        </div>
+        <div class="dev-access-notice" id="devAccessGrantNotice" hidden><i data-lucide="shield-check"></i><div>该用户尚无当前设备的观看权限。<label class="dev-access-toggle"><span>同时授予</span><input type="checkbox" id="devAccessGrantView"><span class="dev-access-toggle-track"></span></label></div></div>
+        <div class="dev-access-notice warn" id="devAccessConflictNotice" hidden><i data-lucide="alert-triangle"></i><span id="devAccessConflictText">所选配置已绑定其他设备，保存时需要确认换绑。</span></div>
+        <div class="dev-access-options">
+          <div class="dev-access-option"><div><strong>允许运行</strong><p>允许用户启动和停止该配置。</p></div><label class="dev-access-toggle"><span class="sr-only">允许运行</span><input type="checkbox" id="devAccessRun" checked><span class="dev-access-toggle-track"></span></label></div>
+          <div class="dev-access-option"><div><strong>允许编辑</strong><p>允许用户修改 ALAS 配置内容。</p></div><label class="dev-access-toggle"><span class="sr-only">允许编辑</span><input type="checkbox" id="devAccessEdit" checked><span class="dev-access-toggle-track"></span></label></div>
+        </div>
+        <div class="dev-access-binding-head"><strong>当前关联</strong><span>一个配置只能绑定一台设备</span></div>
+        <div id="devAccessBindings" class="dev-access-list"><div class="dev-access-empty">暂无绑定</div></div>
+      </section>
+      <div id="devAccessError" class="dev-form-error" hidden></div>
+    </div>
+    <div class="alas-drawer-actions">
+      <button class="btn-ghost" type="button" id="devAccessCancel">关闭</button>
+      <button class="btn-primary" type="button" id="devAccessSave"><i data-lucide="check"></i><span>保存用户访问</span></button>
+    </div>
+  </aside>
+
+  <!-- 删除设备确认弹窗 -->
+  <div class="alas-modal-mask" id="devDeleteMask" hidden></div>
+  <div class="alas-modal" id="devDeleteModal" role="dialog" aria-modal="true" aria-labelledby="devDeleteTitle" aria-hidden="true" hidden>
+    <div class="alas-modal-head">
+      <h3 id="devDeleteTitle">删除设备</h3>
+      <button class="alas-row-action" type="button" data-close-modal="devDeleteModal" aria-label="关闭弹窗" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-modal-body" id="devDeleteBody">确定删除该设备？</div>
+    <div class="alas-modal-foot">
+      <button class="btn-ghost" type="button" data-close-modal="devDeleteModal">取消</button>
+      <button class="btn-primary danger" id="devDeleteConfirmBtn" type="button"><i data-lucide="trash-2"></i><span>删除设备</span></button>
+    </div>
+  </div>
+
+  <!-- 停用设备确认弹窗 -->
+  <div class="alas-modal-mask" id="devDisableMask" hidden></div>
+  <div class="alas-modal" id="devDisableModal" role="dialog" aria-modal="true" aria-labelledby="devDisableTitle" aria-hidden="true" hidden>
+    <div class="alas-modal-head">
+      <h3 id="devDisableTitle">停用设备</h3>
+      <button class="alas-row-action" type="button" data-close-modal="devDisableModal" aria-label="关闭弹窗" title="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="alas-modal-body" id="devDisableBody">确定停用该设备？</div>
+    <div class="alas-modal-foot">
+      <button class="btn-ghost" type="button" data-close-modal="devDisableModal">取消</button>
+      <button class="btn-primary danger" id="devDisableConfirmBtn" type="button"><i data-lucide="power"></i><span>确认停用</span></button>
+    </div>
+  </div>
+
+  <div class="alas-toast-wrap" id="devToastWrap" aria-live="polite"></div>
+
+
+
+</body></html>
