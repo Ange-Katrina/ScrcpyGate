@@ -65,6 +65,9 @@ def _provision_alas_key() -> int:
     from . import alas_secrets
 
     if alas_secrets.injected_key_present():
+        if not alas_secrets.key_is_valid():
+            print(json.dumps({"ok": False, "action": "failed", "error": "invalid_injected_key"}, sort_keys=True))
+            return 1
         print(json.dumps({"ok": True, "action": "environment", "source": "environment"}, sort_keys=True))
         return 0
     try:

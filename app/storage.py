@@ -184,6 +184,7 @@ DEFAULT_SETTINGS = {
 # restart cannot overwrite settings changed through the current UI or restore
 # a token that an administrator deliberately cleared.
 LEGACY_ENV_MIGRATED_SETTING = "_legacy_env_migrated_v1"
+LEGACY_ALAS_TOKEN_PENDING_SETTING = "_legacy_alas_token_pending_v1"
 LEGACY_ALAS_TOKEN_KEY = "ALAS_GYRE_TOKEN"
 
 VIDEO_QUALITY_MIGRATION_VERSION = "3"
@@ -738,6 +739,26 @@ def migrate_alas_token_storage() -> dict[str, object]:
     with db_connect() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
         raw = str(row["value"] or "") if row else ""
+        pending = conn.execute(
+            "SELECT value FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,)
+        ).fetchone()
+        if not raw and pending and pending["value"] == "true":
+            # Other legacy settings/permissions stay migrated. Retry only the
+            # credential whose encryption failed, without replaying grants.
+            try:
+                if storage_core.LEGACY_ENV_FILE.is_symlink():
+                    raise OSError("legacy file must not be a symlink")
+                legacy = storage_core.parse_env_file(storage_core.LEGACY_ENV_FILE)
+                token = str(legacy.get(LEGACY_ALAS_TOKEN_KEY, "") or "")
+                if not token:
+                    return {"ok": False, "action": "legacy_token_pending"}
+                raw = encrypt_token(token)
+            except (OSError, AlasTokenError):
+                AUDIT_LOGGER.warning("ALAS_TOKEN_LEGACY_PENDING restore a valid key and retry migration")
+                return {"ok": False, "action": "legacy_token_pending"}
+            conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (raw,))
+            conn.execute("DELETE FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+            conn.commit()
         if not raw:
             marker = conn.execute(
                 "SELECT value FROM settings WHERE key=?",
@@ -837,6 +858,8 @@ def clear_alas_token() -> dict[str, object]:
         row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
         previous = str(row["value"] or "") if row else ""
         conn.execute("UPDATE settings SET value='' WHERE key='alas_token'")
+        conn.execute("DELETE FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ENV_MIGRATED_SETTING,))
         conn.commit()
     legacy_removed = _clear_legacy_alas_token_safely()
     summary = {
@@ -1427,6 +1450,7 @@ def migrate_legacy_data() -> bool:
                     if not current_token or not str(current_token["value"] or "").strip():
                         legacy_token = str(env.get("ALAS_GYRE_TOKEN") or "")
                         if legacy_token and not key_is_configured():
+                            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
                             # 旧 .env 里的明文 token + 没有密钥：跳过导入并告警，不要让
                             # 整个服务（以及 reset-admin）起不来。
                             AUDIT_LOGGER.warning(
@@ -1441,6 +1465,7 @@ def migrate_legacy_data() -> bool:
                                 try:
                                     legacy_token = encrypt_token(legacy_token)
                                 except AlasTokenError as exc:
+                                    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
                                     AUDIT_LOGGER.warning(
                                         "ALAS_TOKEN_LEGACY_ENV_SKIPPED error=%s key=%s",
                                         exc,

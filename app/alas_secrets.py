@@ -9,6 +9,8 @@ import os
 import re
 import secrets
 import stat
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -121,6 +123,21 @@ def _restrict_key_file(path: Path) -> None:
         raise AlasTokenError(f"{TOKEN_KEY_ENV} file permissions could not be restricted") from exc
 
 
+def _check_database_before_key_creation() -> None:
+    database = Path(os.environ.get("WEB_SCRCPY_DATA_DIR", "data") or "data") / "webscrcpy.db"
+    if database.is_symlink():
+        raise AlasTokenError("database must not be a symlink during key provisioning")
+    if not database.exists():
+        return
+    try:
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
+    except sqlite3.Error as exc:
+        raise AlasTokenError("database cannot be checked; no key was created") from exc
+    if row and is_encrypted_token(str(row[0] or "")):
+        raise AlasTokenError("encrypted ALAS token exists; restore its matching key before provisioning")
+
+
 def provision_key_file() -> dict[str, object]:
     """Create the server-side key file once, mirroring deploy.sh's contract.
 
@@ -147,6 +164,7 @@ def provision_key_file() -> dict[str, object]:
         _restrict_key_file(path)
         return {"ok": True, "action": "reused", "path": str(path), "source": "file"}
 
+    _check_database_before_key_creation()
     path.parent.mkdir(parents=True, exist_ok=True)
     value = secrets.token_hex(32)
     temp_path = path.parent / f"{path.name}.{secrets.token_hex(4)}.tmp"
@@ -154,7 +172,12 @@ def provision_key_file() -> dict[str, object]:
     try:
         with os.fdopen(descriptor, "w", encoding="ascii") as handle:
             handle.write(value + "\n")
-        os.replace(temp_path, path)
+        # Publish without replacing a key another process has just created.
+        os.link(temp_path, path)
+        temp_path.unlink()
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise AlasTokenError("key file could not be created without replacing existing state") from exc
     except BaseException:
         try:
             temp_path.unlink()

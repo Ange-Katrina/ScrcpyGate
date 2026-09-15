@@ -51,6 +51,12 @@ if [ -z "${ADB_PATH:-}" ]; then
   unset ADB_PATH
 fi
 
+# Provision only for fresh/unencrypted data. Existing ciphertext without its
+# matching key is preserved; core service recovery remains available.
+if ! python -m app.cli generate-alas-key; then
+  echo "[WARN] ALAS key provisioning failed; restore the matching key or explicitly clear the token. Existing credentials were preserved." >&2
+fi
+
 exec "$uvicorn_bin" app.main:app \
   --host "$bind" \
   --port "$port" \

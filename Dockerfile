@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     WEB_SCRCPY_DATA_DIR=/app/data \
     PATH="/app/venv/bin:$PATH" \
-    HOME=/tmp
+    HOME=/app/data
 
 RUN apk add --no-cache android-tools libstdc++ libffi curl && \
     addgroup -S app && \
@@ -40,6 +40,6 @@ USER app
 EXPOSE 5000
 # 端口跟随 WEB_SCRCPY_PORT（宿主网络模式下容器直接绑宿主端口，默认 5000 不变）。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${WEB_SCRCPY_PORT:-5000}/healthz" || exit 1
+  CMD python -m app.container_health || exit 1
 
 CMD ["/app/docker-entrypoint.sh"]

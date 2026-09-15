@@ -170,6 +170,13 @@ docker compose up -d --build
 应用会把生成的密码写进 `./data/initial_admin_password.txt`（权限 `0600`，下次启动即删除），
 不会再把你锁在外面 —— 见[高级与故障恢复](#高级与故障恢复)。
 
+容器入口会为新数据或尚未加密的数据配置 ALAS 密钥，复用已有密钥。
+数据库含加密 Token 却缺失密钥时，不生成替代密钥；请恢复匹配密钥，核心服务仍可启动并显示 ALAS 告警。
+在 `.env` 中设置 `SCRCPYGATE_ADMIN_PASSWORD_FILE=false` 可关闭首次密码落盘。
+
+容器内 ADB 的授权身份现在保存在 `data/.android`。替换使用旧 `/tmp` 路径的容器前，
+请先按 [ADB 迁移步骤](docs/deployment/docker-run.zh.md#5-生命周期与升级) 保留原身份。
+
 ### 特殊场景: 宿主网络与 USB
 
 需要容器与宿主共用网络栈时用 `compose.host.yaml` —— 典型场景是复用宿主已有的 adb server

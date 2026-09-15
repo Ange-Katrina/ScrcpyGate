@@ -431,7 +431,7 @@ def save_settings(payload: dict) -> None:
             visible = str(visible_value).strip().lower() in ("1", "true", "yes", "on")
         storage.set_setting("workbench_alas_visible", "true" if visible else "false")
     if "clear_token" in payload and parse_bool_strict(payload.get("clear_token")):
-        storage.set_setting("alas_token", "")
+        storage.clear_alas_token()
     elif str(payload.get("api_token") or "").strip():
         token = str(payload.get("api_token") or "").strip()
         if len(token) > 512 or any(ch in token for ch in "\r\n\t "):

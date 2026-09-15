@@ -180,6 +180,14 @@ the admin account. If you skip the password, the app generates one and writes it
 `./data/initial_admin_password.txt` (mode `0600`, removed again on the next start) instead of
 leaving you locked out — see [Advanced and recovery](#advanced-and-recovery).
 
+The container entrypoint provisions an ALAS key for new or unencrypted data. It preserves
+existing keys and refuses to replace a missing key when the database contains encrypted tokens.
+Restore the matching key in that case; the core application can start with an ALAS warning.
+`SCRCPYGATE_ADMIN_PASSWORD_FILE=false` in `.env` disables the first-run password file.
+
+Container-managed ADB now stores its identity in `data/.android`. Before replacing an older
+container that stored it under `/tmp`, follow the [ADB migration steps](docs/deployment/docker-run.md#5-lifecycle-and-upgrades).
+
 ### Special: host network and USB
 
 Use `compose.host.yaml` when the container must share the host's network stack — typically to
