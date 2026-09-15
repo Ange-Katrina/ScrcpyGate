@@ -309,6 +309,18 @@ class StreamTermination:
     reason: str = "stream stopped"
 
 
+@dataclass(frozen=True)
+class StreamNotice:
+    """服务端经同一条视频 WebSocket 下发的 JSON 通知（控制面，不占视频语义）。
+
+    用于「投屏记录」这类跨观看端协同：邀请、请上传、参与者状态、汇总回传。
+    通知与视频帧共用队列，但在 clear_queue() 里被保留 —— 丢一帧无所谓，
+    丢一条邀请/上传请求会让整次记录静默失败。
+    """
+
+    payload: dict[str, Any]
+
+
 @dataclass
 class ClientSession:
     id: str
@@ -325,12 +337,13 @@ class ClientSession:
     terminated: bool = False
 
     def clear_queue(self) -> None:
-        """Drop queued frames while preserving pending terminal signals.
+        """Drop queued frames while preserving control-plane signals.
 
         A congested queue is cleared from the producer side while the video
         sender is blocked in ``send_bytes``.  Dropping the ``StreamTermination``
         (or the ``None`` stream-ended sentinel) in that window would leave the
-        WebSocket open forever, so terminal signals survive a clear.
+        WebSocket open forever, and dropping a ``StreamNotice`` (投屏记录邀请/上传请求)
+        would silently break cross-viewer coordination, so both survive a clear.
         """
         terminal: list[Any] = []
         queued_bytes = 0
@@ -341,7 +354,7 @@ class ClientSession:
                 break
             if isinstance(queued, (bytes, bytearray, memoryview)):
                 queued_bytes += len(queued)
-            elif queued is None or isinstance(queued, StreamTermination):
+            elif queued is None or isinstance(queued, (StreamTermination, StreamNotice)):
                 terminal.append(queued)
         self.queue_bytes = max(0, self.queue_bytes - queued_bytes)
         for item in terminal:
@@ -350,7 +363,23 @@ class ClientSession:
             except asyncio.QueueFull:
                 break
 
-    async def get_frame(self) -> bytes | StreamReset | StreamTermination | None:
+    def push_notice(self, payload: dict[str, Any]) -> bool:
+        """Queue a JSON notice for this viewer; returns False when it cannot fit."""
+        if self.terminated:
+            return False
+        notice = StreamNotice(payload)
+        try:
+            self.queue.put_nowait(notice)
+            return True
+        except asyncio.QueueFull:
+            self.clear_queue()
+            try:
+                self.queue.put_nowait(notice)
+                return True
+            except asyncio.QueueFull:
+                return False
+
+    async def get_frame(self) -> bytes | StreamReset | StreamTermination | StreamNotice | None:
         frame = await self.queue.get()
         if isinstance(frame, (bytes, bytearray, memoryview)):
             self.queue_bytes = max(0, self.queue_bytes - len(frame))
@@ -1307,13 +1336,24 @@ class MirrorSession:
 
     async def stop(self) -> bool:
         async with self._lock:
+            self._cancel_record_session("stream_stopped")
             return await self._stop_locked()
 
     async def stop_if_no_clients(self) -> bool:
         async with self._lock:
             if not self.running or self.has_clients_or_reservations():
                 return False
+            self._cancel_record_session("stream_stopped")
             return await self._stop_locked()
+
+    def _cancel_record_session(self, reason: str) -> None:
+        """设备停流时终止该设备上的「多端投屏记录」并通知参与者（内存态，不落盘）。"""
+        try:
+            from .mirror_record import record_registry
+
+            record_registry.cancel_for_device(self.device_id, reason)
+        except Exception:  # noqa: BLE001 - 清理失败不能掩盖停流本身
+            log.exception("MIRROR_RECORD_CANCEL_FAILED device=%s reason=%s", self.device_id, reason)
 
     async def restart(self) -> bool:
         await self.stop()

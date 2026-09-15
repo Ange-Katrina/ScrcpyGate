@@ -22,6 +22,7 @@ from .routers import (
     alas,
     alas_embed,
     mirror,
+    mirror_record,
     notifications,
     public,
     websockets,
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(public.router)
     app.include_router(notifications.router)
     app.include_router(mirror.router)
+    app.include_router(mirror_record.router)
     app.include_router(alas.router)
     app.include_router(alas_embed.router)
     app.include_router(admin_overview.router)

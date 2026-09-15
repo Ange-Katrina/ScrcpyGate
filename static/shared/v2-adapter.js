@@ -83,6 +83,11 @@
     videoRecordLastRateAt: 0,
     videoRecordLastRateMbps: null,
     videoRecordLastSize: '',
+    // 多端投屏记录（管理员发起、邀请同设备的其他观看端；只经内存中继，不落盘）。
+    recordArmed: false,      // 本端是否在记录（管理员，或已同意参与的观看端）
+    recordInvite: null,      // 待响应的邀请
+    recordSession: null,     // 当前多端记录会话（发起端与参与端都会拿到）
+    recordBundles: [],       // 收到的其他端完整记录
     rawV2ConfigGeneration: 0,
     rawV2ConfigGenerationSeen: false,
     rawV2Transport: '',
@@ -193,9 +198,9 @@
   // 需要新关键帧时向服务端发 player_reset 的最小间隔（服务端 VIDEO_RESET_COOLDOWN
   // 是 0.75s，这里略大一点，避免把无谓的控制消息打到设备上）。
   var VIDEO_KEYFRAME_REQUEST_INTERVAL_MS = 900;
-  // 投屏实时记录（管理员排查用）：只在浏览器内存里保留最近若干条事件，不落盘、不上报。
-  // 400 条在 60fps 正常收流下足够覆盖十几分钟（码率样本另有节流）。
-  var VIDEO_RECORD_LIMIT = 400;
+  // 投屏诊断时间线保存在浏览器内存中；同意参与多端记录后可上传给发起端汇总。
+  // 保留最近 800 条事件；超过上限时移除最早的事件。
+  var VIDEO_RECORD_LIMIT = 800;
   var VIDEO_RECORD_RATE_REPORT_MS = 60000;   // 码率样本最短间隔
   var VIDEO_RECORD_RATE_DELTA_MBPS = 1;      // 码率变化超过这个值也记一条
 
@@ -2606,6 +2611,23 @@
         } else if (msg.type === 'mirror_status' || msg.type === 'session_update') {
           if (msg.session) state.session = Object.assign({}, state.session || {}, msg.session);
           emitViewerUpdate(state.session, deviceId);
+        } else if (msg.type === 'record_invite') {
+          // 管理员发起了多端记录：本端是被邀请的观看端，交给页面弹窗询问是否参与。
+          state.recordInvite = msg;
+          emitRecordEvent('scrcpygate:record-invite', msg);
+        } else if (msg.type === 'record_upload_request') {
+          state.recordInvite = null;
+          emitRecordEvent('scrcpygate:record-upload-request', msg);
+          uploadMirrorRecord(msg.session);
+        } else if (msg.type === 'record_participant') {
+          applyRecordParticipant(msg);
+        } else if (msg.type === 'record_bundle') {
+          receiveRecordBundle(msg);
+        } else if (msg.type === 'record_stopped') {
+          state.recordInvite = null;
+          state.recordArmed = false;
+          if (state.recordSession) state.recordSession.stopped = true;
+          emitRecordEvent('scrcpygate:record-stopped', msg);
         }
         return;
       }
@@ -2790,6 +2812,8 @@
   };
 
   function videoRecordAllowed() {
+    // 多端记录时，被邀请并同意的观看端（可能是普通用户）也要记录自己那份。
+    if (state.recordArmed) return true;
     try {
       var session = window.ScrcpyGateSession;
       var user = session && typeof session.current === 'function' ? session.current() : null;
@@ -2934,9 +2958,213 @@
     };
   }
 
+  /* ---------------- 多端投屏记录（同设备多观看端协同，服务端只做内存中继） ----------------
+     流程：管理员点「多端记录」→ 服务端建内存会话并给同设备其他观看端下发邀请 →
+     被邀请端弹窗确认 → 管理员停止记录 → 服务端请各参与端上传 → 各端上传**完整**记录 →
+     服务端实时转发给发起端浏览器做汇总/导出。全程不落盘。 */
+
+  function emitRecordEvent(name, detail) {
+    try { document.dispatchEvent(new CustomEvent(name, { detail: detail || {} })); } catch (e) {}
+  }
+
+  function currentRecordClientId() {
+    return String((state.session && state.session.client_id) || '');
+  }
+
+  function mirrorRecordDeviceId() {
+    return String(state.videoSocketDevice || state.deviceId || '');
+  }
+
+  function unwrapRecordPayload(payload) {
+    if (payload && payload.data && typeof payload.data === 'object') return payload.data;
+    return payload && typeof payload === 'object' ? payload : {};
+  }
+
+  function recordEndpoint(suffix) {
+    return '/api/devices/' + encodeURIComponent(mirrorRecordDeviceId()) + '/mirror/record/' + suffix;
+  }
+
+  function startMirrorRecord() {
+    // 发起多端记录：需要本端已经在看这台设备（服务端按 client_id 认发起端）。
+    var clientId = currentRecordClientId();
+    if (!mirrorRecordDeviceId() || !clientId) {
+      return Promise.reject(new Error('record_client_required'));
+    }
+    return apiPost(recordEndpoint('start'), { client_id: clientId }).then(function (payload) {
+      var data = unwrapRecordPayload(payload);
+      state.recordSession = data.session || null;
+      state.recordArmed = true;
+      videoRecord('record_start', 'info', '发起多端投屏记录', {
+        invited: data.invited,
+        delivered: data.delivered
+      });
+      emitRecordEvent('scrcpygate:record-started', state.recordSession);
+      return state.recordSession;
+    });
+  }
+
+  function respondMirrorRecord(sessionId, accept) {
+    var clientId = currentRecordClientId();
+    return apiPost(recordEndpoint('respond'), {
+      session: String(sessionId || ''),
+      client_id: clientId,
+      accept: !!accept
+    }).then(function (payload) {
+      var data = unwrapRecordPayload(payload);
+      state.recordInvite = null;
+      state.recordArmed = !!accept;
+      videoRecord('record_response', accept ? 'info' : 'warn',
+        accept ? '同意参与管理员发起的多端记录' : '拒绝参与管理员发起的多端记录', { session: String(sessionId || '') });
+      emitRecordEvent('scrcpygate:record-responded', { accept: !!accept, participant: data.participant || null });
+      return data;
+    });
+  }
+
+  // 上传本端那份**完整**记录（不做字段裁剪）；服务端原样转发给发起端。
+  function uploadMirrorRecord(sessionId) {
+    var clientId = currentRecordClientId();
+    if (!sessionId || !clientId || !mirrorRecordDeviceId()) {
+      return Promise.reject(new Error('record_client_required'));
+    }
+    var timeline = videoRecordJson();
+    return apiPost(recordEndpoint('upload'), {
+      session: String(sessionId),
+      client_id: clientId,
+      timeline: timeline
+    }).then(function (payload) {
+      var data = unwrapRecordPayload(payload);
+      var delivered = data.delivered !== false;
+      videoRecord('record_upload', delivered ? 'info' : 'warn',
+        delivered ? '本端记录已送达发起端' : '本端记录未能送达发起端（对方已离线）', {
+          entries: data.entries,
+          bytes: data.bytes
+        });
+      state.recordArmed = false;
+      emitRecordEvent('scrcpygate:record-uploaded', data);
+      return data;
+    }).catch(function (error) {
+      var message = error && error.message ? String(error.message) : 'unknown';
+      videoRecord('record_upload', 'error', '本端记录上传失败', { reason: message.slice(0, 160) });
+      emitRecordEvent('scrcpygate:record-upload-failed', { error: message });
+      throw error;
+    });
+  }
+
+  function stopMirrorRecord() {
+    var session = state.recordSession && state.recordSession.session;
+    if (!session) return Promise.resolve(null);
+    return apiPost(recordEndpoint('stop'), { session: String(session) }).then(function (payload) {
+      var data = unwrapRecordPayload(payload);
+      if (data.session) state.recordSession = data.session;
+      videoRecord('record_stop', 'info', '停止多端记录，等待其他端上传', {
+        upload_requests: data.upload_requests
+      });
+      emitRecordEvent('scrcpygate:record-stop-requested', state.recordSession);
+      return data;
+    });
+  }
+
+  function applyRecordParticipant(msg) {
+    var participant = msg && msg.participant;
+    if (!participant || !state.recordSession || state.recordSession.session !== msg.session) return;
+    var list = state.recordSession.participants || [];
+    var replaced = false;
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].client_id) === String(participant.client_id)) {
+        list[i] = participant;
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) list.push(participant);
+    state.recordSession.participants = list;
+    emitRecordEvent('scrcpygate:record-participants', state.recordSession);
+  }
+
+  var RECORD_BUNDLE_LIMIT = 16;
+
+  function receiveRecordBundle(msg) {
+    if (!msg || !msg.timeline) return;
+    state.recordBundles.push({
+      session: msg.session,
+      from: msg.from || {},
+      received_at: msg.received_at || Math.floor(Date.now() / 1000),
+      bytes: msg.bytes || 0,
+      timeline: msg.timeline
+    });
+    if (state.recordBundles.length > RECORD_BUNDLE_LIMIT) {
+      state.recordBundles.splice(0, state.recordBundles.length - RECORD_BUNDLE_LIMIT);
+    }
+    videoRecord('record_bundle', 'info', '收到其他观看端的记录', {
+      user: (msg.from && msg.from.username) || '',
+      entries: (msg.timeline.entries || []).length
+    });
+    // 服务端会把该参与端的最新状态一并带来（uploaded）；不更新的话面板会一直显示"已收到 0 份"。
+    if (msg.participant) {
+      applyRecordParticipant({ session: msg.session, participant: msg.participant });
+    }
+    emitRecordEvent('scrcpygate:record-bundle', state.recordBundles[state.recordBundles.length - 1]);
+  }
+
+  // 汇总导出：本端 + 各参与端的**完整**记录，按端分段（不同机器时钟可能不同，不混排）。
+  function recordBundleJson() {
+    return {
+      kind: 'scrcpygate-mirror-record-bundle',
+      generated_at: new Date().toISOString(),
+      device_id: state.deviceId || '',
+      session: state.recordSession ? state.recordSession.session : '',
+      initiator: state.recordSession ? state.recordSession.initiator : '',
+      participants: state.recordSession ? state.recordSession.participants || [] : [],
+      local: videoRecordJson(),
+      remote: (state.recordBundles || []).map(function (bundle) {
+        return {
+          from: bundle.from,
+          received_at: bundle.received_at,
+          bytes: bundle.bytes,
+          timeline: bundle.timeline
+        };
+      })
+    };
+  }
+
+  function recordBundleText() {
+    var lines = [];
+    lines.push('ScrcpyGate 多端投屏记录汇总');
+    lines.push('设备: ' + (state.deviceId || '-')
+      + '  会话: ' + (state.recordSession ? state.recordSession.session : '-')
+      + '  参与端记录: ' + (state.recordBundles || []).length + ' 份');
+    lines.push('');
+    lines.push('===== 本端记录 =====');
+    lines.push(videoRecordText());
+    (state.recordBundles || []).forEach(function (bundle) {
+      var from = bundle.from || {};
+      lines.push('');
+      lines.push('===== 参与端 ' + (from.username || '?') + ' (' + String(from.client_id || '').slice(0, 8)
+        + ') · 收到于 ' + videoRecordTime(Number(bundle.received_at) * 1000)
+        + ' · ' + ((bundle.timeline && bundle.timeline.entries) || []).length + ' 条 =====');
+      var timeline = bundle.timeline || {};
+      lines.push('设备: ' + (timeline.device_id || '-') + '  通道: ' + (timeline.transport || '-'));
+      (timeline.entries || []).forEach(function (entry) {
+        lines.push(videoRecordLine({
+          t: Number(entry.t) || 0,
+          level: entry.level || 'info',
+          kind: entry.kind || 'event',
+          text: entry.text || '',
+          data: entry.data || null
+        }));
+      });
+    });
+    return lines.join('\n');
+  }
+
+  function clearRecordBundles() {
+    state.recordBundles = [];
+    emitRecordEvent('scrcpygate:record-bundle', null);
+    return true;
+  }
+
   function cancelVideoReconnect() {
-    if (state.videoRetryTimer) {
-      window.clearTimeout(state.videoRetryTimer);
+    if (state.videoRetryTimer) {      window.clearTimeout(state.videoRetryTimer);
       state.videoRetryTimer = null;
     }
   }
@@ -5288,6 +5516,26 @@
       json: videoRecordJson,
       line: videoRecordLine,
       limit: VIDEO_RECORD_LIMIT
+    },
+    // 多端投屏记录：发起/响应/停止 + 本端与参与端的完整记录汇总。
+    mirrorRecord: {
+      start: startMirrorRecord,
+      stop: stopMirrorRecord,
+      respond: respondMirrorRecord,
+      upload: uploadMirrorRecord,
+      state: function () {
+        return {
+          device_id: mirrorRecordDeviceId(),
+          client_id: currentRecordClientId(),
+          armed: !!state.recordArmed,
+          invite: state.recordInvite,
+          session: state.recordSession,
+          bundles: (state.recordBundles || []).slice()
+        };
+      },
+      bundleJson: recordBundleJson,
+      bundleText: recordBundleText,
+      clearBundles: clearRecordBundles
     },
     setVideoRotation: setVideoRotation,
     setFullscreenMode: setFullscreenMode,
