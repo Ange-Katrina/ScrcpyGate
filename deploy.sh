@@ -3565,9 +3565,40 @@ confirm_permanent_data_deletion() {
   answer=$(printf '%s' "$answer" | tr -d '\r')
   [ "$answer" = "$UNINSTALL_DATA_DIR" ] || return 1
   current_data_dir=$(configured_data_dir_from_disk) \
-    || current_data_dir=$(existing_container_data_dir) \
+    || current_data_dir=$(configured_data_path_from_disk) \
     || return 1
   [ "$current_data_dir" = "$UNINSTALL_DATA_DIR" ]
+}
+
+legacy_uninstall_data_is_recognized() {
+  # Without container labels or .env, only recognize the default local SQLite
+  # database. Never infer ownership of arbitrary directories or symlink targets.
+  [ "$UNINSTALL_DATA_DIR" = "$SCRIPT_DIR/data" ] || return 1
+  [ ! -L "$SCRIPT_DIR/data" ] || return 1
+  [ -f "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ ! -L "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ "$(LC_ALL=C od -An -tx1 -N16 "$UNINSTALL_DATA_DIR/webscrcpy.db" 2>/dev/null | tr -d ' \n')" = '53514c69746520666f726d6174203300' ]
+}
+
+uninstall_menu_service() {
+  # Keep the destructive choice local to this action, including cancellation.
+  (
+    require_interactive
+    panel_top "选择卸载方式"
+    panel_line "1（默认）" "保留数据卸载：保留账号、数据库、ALAS 密钥、.env 和镜像"
+    panel_line "2" "彻底清理：删除本地数据、密钥、.env 和镜像，重装创建新账号"
+    panel_line "0" "取消"
+    printf '\n%s>%s 请选择 [1/2/0，默认 1]: ' "$C_YELLOW" "$C_RESET"
+    IFS= read -r uninstall_choice || return 0
+    uninstall_choice=$(printf '%s' "$uninstall_choice" | tr -d '\r')
+    case "$uninstall_choice" in
+      ''|1) PURGE=false ;;
+      2) PURGE=true ;;
+      0) return 0 ;;
+      *) warn_msg "无效选项，已取消卸载"; return 0 ;;
+    esac
+    uninstall_service
+  )
 }
 
 compose_down_owned_project() (
@@ -3580,23 +3611,40 @@ compose_down_owned_project() (
 uninstall_service() {
   # Menu actions share shell variables; never reuse an earlier resolved path.
   UNINSTALL_DATA_DIR=""
+  legacy_cleanup=false
   load_uninstall_settings
   require_docker
   detect_scrcpygate_instance
   if [ -z "$EXISTING_SCRCPYGATE_STATE" ]; then
-    # A previous purge may have removed the container before cleanup finished.
-    # With an explicit purge and an existing project .env, continue the owned
-    # data/config cleanup instead of leaving a half-purged install.
-    # Ordinary --uninstall remains idempotent when no service exists.
-    if [ "$PURGE" != true ] || [ ! -f .env ]; then
-      success_msg "未检测到当前目录所属的 ScrcpyGate 服务容器，无需卸载"
+    if [ "$PURGE" != true ]; then
+      success_msg "未检测到服务容器；已有数据、密钥、.env 和镜像均保留"
+      warn_msg "保留数据重装可能沿用旧账号和 ALAS Token；全新安装请使用卸载菜单的彻底清理或 --uninstall --purge"
       return 0
     fi
-    warn_msg "未检测到服务容器，将继续清理当前项目 .env 与数据目录"
+    resolve_uninstall_data_dir
+    if [ ! -f .env ] && { [ -e "$WEB_SCRCPY_DATA_HOST" ] || [ -L "$WEB_SCRCPY_DATA_HOST" ]; }; then
+      legacy_uninstall_data_is_recognized \
+        || die "无容器和 .env，无法确认残留数据归属；已保留全部文件和镜像。请恢复原 .env 并确认数据目录后重试"
+      legacy_cleanup=true
+    fi
+    warn_msg "未检测到服务容器，将继续清理当前项目的残留安装状态"
   else
     existing_instance_can_be_managed || return 1
     resolve_uninstall_data_dir
+  fi
 
+  if [ "$PURGE" = true ] && is_interactive; then
+    panel_top "彻底清理 ScrcpyGate（不可恢复）"
+    panel_line "数据目录" "$UNINSTALL_DATA_DIR"
+    panel_line "清理范围" "账号、密码、设备、权限、ALAS Token/密钥、ADB 授权、本地镜像和 .env"
+    warn_msg "外置数据目录和项目备份不会自动删除；只有 ALAS 密钥丢失时，可取消并在安装时仅重置 ALAS Token"
+    if ! confirm_permanent_data_deletion; then
+      warn_msg "确认路径不匹配或已取消，未修改任何文件或容器"
+      return 0
+    fi
+  fi
+
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
     if is_interactive && [ "$PURGE" != true ]; then
       if [ -d "$UNINSTALL_DATA_DIR" ]; then
         uninstall_data_label="$UNINSTALL_DATA_DIR（默认保留）"
@@ -3631,21 +3679,23 @@ uninstall_service() {
     resolve_uninstall_data_dir
   fi
 
+  if [ "$legacy_cleanup" = true ]; then
+    # Retain retry evidence outside the directory being deleted: interrupted
+    # cleanup may already have removed the database used for recognition.
+    (umask 077; set -C; printf 'WEB_SCRCPY_DATA_HOST=./data\n' > "$SCRIPT_DIR/.env") \
+      || die "无法保存清理重试配置；未继续删除镜像或数据"
+  fi
+
   image_status="不存在"
   cleanup_failed=false
   if docker image inspect scrcpygate:local >/dev/null 2>&1; then
-    if [ "$PURGE" = true ]; then
-      if docker image rm scrcpygate:local; then
-        image_status="已删除"
-        success_msg "本地镜像已删除"
-      else
-        image_status="删除失败"
-        cleanup_failed=true
-        warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
-      fi
+    if docker image rm scrcpygate:local; then
+      image_status="已删除"
+      success_msg "本地镜像已删除"
     else
-      image_status="已保留"
-      success_msg "已保留本地镜像 scrcpygate:local"
+      image_status="删除失败"
+      cleanup_failed=true
+      warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
     fi
   fi
 
@@ -3653,24 +3703,9 @@ uninstall_service() {
     data_status="不存在"
     success_msg "数据目录不存在，无需清理"
   elif uninstall_data_can_be_removed; then
-    data_status="已保留"
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除数据目录 ${UNINSTALL_DATA_DIR}？此操作不可恢复"; then
-      delete_data=false
-      if [ "$PURGE" = true ]; then
-        delete_data=true
-      elif confirm_permanent_data_deletion; then
-        delete_data=true
-      else
-        warn_msg "确认路径不匹配或目录已变化，已保留数据目录"
-      fi
-      if [ "$delete_data" = true ]; then
-        rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
-        data_status="已删除"
-        success_msg "数据目录已删除"
-      fi
-    else
-      success_msg "已保留数据目录"
-    fi
+    rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
+    data_status="已删除"
+    success_msg "数据目录已删除"
   else
     data_status="已保留"
     cleanup_failed=true
@@ -3683,13 +3718,10 @@ uninstall_service() {
     if [ "$data_status" = "已保留" ] || [ "$cleanup_failed" = true ]; then
       env_status="已保留"
       warn_msg "清理尚未完成，已保留 .env 以记录原数据目录；处理后可重试 --uninstall --purge"
-    elif [ "$PURGE" = true ]; then
+    else
       rm -f -- "$SCRIPT_DIR/.env" || die "无法删除 .env"
       env_status="已删除"
       success_msg ".env 部署配置已删除"
-    else
-      env_status="已保留"
-      success_msg "已保留 .env 部署配置"
     fi
   fi
 
@@ -3803,7 +3835,7 @@ show_menu() {
     menu_item 22 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
 
     menu_group "卸载"
-    menu_item 13 "卸载 ScrcpyGate" "$C_RED"
+    menu_item 13 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
     menu_item 0 "退出" "$C_GRAY"
 
     printf '\n%s>%s 请选择 / Choose: ' "$C_YELLOW" "$C_RESET"
@@ -3829,7 +3861,7 @@ show_menu() {
       11) run_menu_action check_system_dependencies || true; pause_menu ;;
       12) usage; pause_menu ;;
       13)
-        run_menu_action uninstall_service || true
+        run_menu_action uninstall_menu_service || true
         pause_menu
         ;;
       14) (check_service) || true; pause_menu ;;

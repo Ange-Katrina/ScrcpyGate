@@ -142,13 +142,24 @@ status and migration, environment checks and uninstall.
 
 For a reinstall that keeps accounts and settings, run `./deploy.sh --uninstall` and then
 `./deploy.sh --install`. Ordinary uninstall always keeps `.env`, the local image, the database,
-and its ALAS key together, including in the interactive menu. Existing passwords are retained;
+and its ALAS key together. Menu option 13 offers **Keep data** (the default) or **Full cleanup**.
+Existing passwords are retained when keeping data;
 use `./deploy.sh --reset-admin` if the original password was not saved.
 
 Use `./deploy.sh --uninstall --purge` only to remove the local data and start fresh. If cleanup
 fails, `.env` is retained so the same command can be retried. Data outside the project directory
 is never deleted automatically; its configuration is retained and cleanup reports incomplete.
 Backups are retained. Keep the database and its matching key together when moving a deployment.
+Interactive full cleanup requires typing the complete data path before anything is removed;
+an empty answer cancels, and `--yes` does not skip this confirmation. Noninteractive
+`--uninstall --purge` is an explicit destructive command and runs without a prompt.
+If an older uninstall already removed the container and `.env`, full cleanup can still remove
+the default `./data` containing a `webscrcpy.db` with a SQLite header. Unrecognized directories
+and symlinks are retained; restore the original `.env` and verify its data path before retrying.
+Recognized legacy cleanup saves a minimal `.env` with the data path before deletion, so an
+interrupted purge remains retryable even if the database was already removed.
+Full cleanup removes accounts, ALAS credentials and persisted ADB authorization; reinstall
+requires fresh setup. If only the ALAS key is missing, prefer the token-only reset below.
 An old database with an encrypted ALAS token and a missing key blocks automatic key generation: restore the
 matching key first. Interactive installation offers to clear only the ALAS token and continue with
 a new key; the default answer is No. Accounts and device settings are retained. Noninteractive
