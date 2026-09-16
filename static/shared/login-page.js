@@ -3,6 +3,9 @@
    requires a signed proof-of-work challenge (slider + WebCrypto solve), and
    reaching the failure threshold locks the source IP for 5 minutes. */
 (function () {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
     var pwd = document.getElementById('password');
     var toggle = document.getElementById('pwd-toggle');
     if (pwd && toggle) {
@@ -53,6 +56,11 @@
     var captcha = { armed: false, sliderDone: false, busy: false };
     var sliderResolve = null;
     var lockUntilMs = 0;
+    /* 滑块确认后立刻开始算：挑战一次性、且绑定「来源 IP + 用户名」，所以缓存要跟着用户名走。
+       以前这里只有「等滑块」的 promise，真正取挑战 + 算 PoW 的 runCaptcha() 只在提交
+       登录请求、服务端回 CAPTCHA_REQUIRED 之后才被调用 —— 于是滑块明明显示「正在计算」，
+       实际什么都没算，必须再点一次「登录」才动。 */
+    var proof = { user: null, promise: null, value: null, expiresAtMs: 0 };
 
     function fmtCountdown(ms) {
         var total = Math.max(0, Math.ceil(ms / 1000));
@@ -63,6 +71,18 @@
 
     function setCaptchaState(text) { captchaState.textContent = text; }
 
+    function currentUsername() {
+        var input = document.getElementById('username');
+        return input ? input.value.trim() : '';
+    }
+
+    function setPowProgress(ratio) {
+        if (!powProgress) return;
+        var bar = powProgress.firstElementChild;
+        if (bar) bar.style.width = Math.max(0, Math.min(100, ratio)).toFixed(1) + '%';
+        powProgress.classList.toggle('done', ratio >= 100);
+    }
+
     function resetSlider() {
         captcha.sliderDone = false;
         slider.classList.remove('done', 'dragging');
@@ -72,13 +92,30 @@
         slider.setAttribute('aria-valuenow', '0');
     }
 
+    function markSliderDone() {
+        captcha.sliderDone = true;
+        slider.classList.add('done');
+        sliderFill.style.width = '100%';
+        // 交给 .login-slider.done 的 CSS 摆到最右侧：清掉拖动时的内联 left，
+        // 否则内联值会盖住那条规则，键盘确认（没拖过）时滑块会停在最左边。
+        sliderKnob.style.left = '';
+        sliderLabel.textContent = '已确认';
+        slider.setAttribute('aria-valuenow', '100');
+    }
+
     function armCaptcha() {
         captcha.armed = true;
         captchaEl.hidden = false;
-        resetSlider();
-        powProgress.classList.remove('done');
-        powProgress.firstElementChild.style.width = '0%';
-        setCaptchaState('等待拖动滑块');
+        // 已经拖到底就不再要求重拖（滑块只是确认动作，真正的门槛是绑定 IP/用户名的 PoW），
+        // 直接按当前用户名重新计算，用户也不必再点一次「登录」。
+        if (captcha.sliderDone) {
+            markSliderDone();
+            startProofFromSlider();
+        } else {
+            resetSlider();
+            setPowProgress(0);
+            setCaptchaState('等待拖动滑块');
+        }
     }
 
     function unarmCaptcha() {
@@ -86,6 +123,8 @@
         captcha.armed = false;
         captchaEl.hidden = true;
         resetSlider();
+        invalidateProof();
+        setPowProgress(0);
         setCaptchaState('等待拖动滑块');
     }
 
@@ -120,9 +159,8 @@
             dragging = false;
             slider.classList.remove('dragging');
             if (moveTo(event.clientX) >= 0.985) {
-                captcha.sliderDone = true;
-                slider.classList.add('done');
-                sliderLabel.textContent = '已确认，正在计算人机验证…';
+                markSliderDone();
+                startProofFromSlider();
                 if (sliderResolve) { var resolve = sliderResolve; sliderResolve = null; resolve(); }
             } else {
                 sliderKnob.style.left = '3px';
@@ -139,11 +177,8 @@
             if (captcha.sliderDone) return;
             if (event.key === 'ArrowRight' || event.key === 'End' || event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                captcha.sliderDone = true;
-                slider.classList.add('done');
-                sliderFill.style.width = '100%';
-                sliderLabel.textContent = '已确认，正在计算人机验证…';
-                slider.setAttribute('aria-valuenow', '100');
+                markSliderDone();
+                startProofFromSlider();
                 if (sliderResolve) { var resolve = sliderResolve; sliderResolve = null; resolve(); }
             }
         });
@@ -179,6 +214,11 @@
 
     function fetchChallenge(user, attempt) {
         if (!window.ScrcpyGateApi) return Promise.reject(new Error('API unavailable'));
+        /* 这里必须用 params（不是 query）：登录页同时加载 v2-adapter.js，它接管了
+           ScrcpyGateApi.configured/get/... ，其中 handlerAuthChallenge 读的是
+           `opts.params.user` 并自己拼 `?user=`。写成 query 会被适配层忽略，
+           挑战就会绑到空用户名上，提交后服务端一律判 challenge_binding_mismatch
+           （表现为「滑了滑块也算了，但登录一直说人机验证未通过」）。 */
         return window.ScrcpyGateApi.get('auth.challenge', { params: { user: user || '' } })
             .catch(function (err) {
                 // 挑战签发限流：按 Retry-After 自动重试一次
@@ -193,36 +233,82 @@
             });
     }
 
-    function runCaptcha(username) {
-        armCaptcha();
-        setCaptchaState('等待拖动滑块');
-        return waitForSlider().then(function () {
-            setCaptchaState('正在计算');
-            powProgress.classList.remove('done');
-            return fetchChallenge(username, 0);
-        }).then(function (payload) {
+    /* 证明缓存：滑块确认后就算好，点「登录」时直接带上（挑战一次性，用过即作废）。
+       挑战绑定来源 IP 与用户名，改了用户名必须重算，否则服务端判 binding_mismatch。 */
+    function proofFresh(name) {
+        if (!proof.value || proof.user !== name) return false;
+        // 服务端 TTL 默认 2 分钟，留 5 秒余量，避免在往返途中过期。
+        return !proof.expiresAtMs || Date.now() < proof.expiresAtMs - 5000;
+    }
+
+    function invalidateProof() {
+        proof.user = null;
+        proof.promise = null;
+        proof.value = null;
+        proof.expiresAtMs = 0;
+    }
+
+    function startProof(name, force) {
+        var target = String(name == null ? currentUsername() : name);
+        if (!window.ScrcpyGatePow || !window.ScrcpyGateApi) return Promise.resolve(null);
+        if (!force && proofFresh(target)) return Promise.resolve(proof.value);
+        if (!force && proof.promise && proof.user === target) return proof.promise;
+        invalidateProof();
+        proof.user = target;
+        setPowProgress(0);
+        setCaptchaState('正在申请验证挑战…');
+        var pending = fetchChallenge(target, 0).then(function (payload) {
             var challenge = payload && payload.challenge;
             if (!challenge) {
                 // 服务端未要求验证码或已锁定：让登录接口给出权威答复
                 return null;
             }
+            if (proof.user !== target) return null; // 期间用户名被改了：丢弃这次结果
             return window.ScrcpyGatePow.solve(challenge, function (info) {
-                powProgress.firstElementChild.style.width = Math.min(100, (info.hashes / Math.pow(2, challenge.bits)) * 100).toFixed(1) + '%';
+                setPowProgress((info.hashes / Math.pow(2, challenge.bits)) * 100);
                 powMeta.textContent = '难度 ' + challenge.bits + ' bit ｜ 已计算 ' + fmtInt(info.hashes) + ' ｜ 耗时 ' + fmtMs(info.elapsedMs);
                 setCaptchaState('正在计算 ' + fmtInt(info.hashes) + ' 次');
             }).then(function (solved) {
-                powProgress.firstElementChild.style.width = '100%';
-                powProgress.classList.add('done');
+                setPowProgress(100);
                 powMeta.textContent = '难度 ' + challenge.bits + ' bit ｜ 已计算 ' + fmtInt(solved.hashes) + ' ｜ 耗时 ' + fmtMs(solved.elapsedMs);
-                setCaptchaState('计算完成');
-                return {
+                setCaptchaState('验证已就绪，可直接登录');
+                var value = {
                     v: challenge.v, algorithm: challenge.algorithm, challenge: challenge.challenge,
                     salt: challenge.salt, bits: challenge.bits, maxNumber: challenge.maxNumber,
                     expires: challenge.expires, signature: challenge.signature, user: challenge.user,
                     number: solved.number
                 };
+                if (proof.user === target) {
+                    proof.value = value;
+                    proof.expiresAtMs = Number(challenge.expires || 0) * 1000;
+                }
+                return value;
             });
+        }).catch(function (error) {
+            if (proof.user === target) proof.promise = null;
+            setCaptchaState('人机验证计算失败，点「登录」重试');
+            throw error;
         });
+        proof.promise = pending;
+        return pending;
+    }
+
+    function startProofFromSlider() {
+        if (!captcha.armed || !captcha.sliderDone) return;
+        startProof(currentUsername(), false).catch(function () {
+            /* 失败时保持面板可见：点「登录」会再试一次，并给出可读原因 */
+        });
+    }
+
+    function runCaptcha(username) {
+        armCaptcha();
+        var name = String(username || currentUsername());
+        if (captcha.sliderDone) {
+            if (!proofFresh(name)) setCaptchaState('正在准备人机验证…');
+            return startProof(name, false);
+        }
+        setCaptchaState('等待拖动滑块');
+        return waitForSlider().then(function () { return startProof(name, false); });
     }
 
     function codeOf(err) {
@@ -261,21 +347,30 @@
             submit.setAttribute('aria-busy', 'true');
             submit.textContent = '登录中…';
 
-            function attempt(proof) {
-                return window.ScrcpyGateApi.post('auth.login', { body: { username: name, password: secret, proof: proof } })
+            function attempt(proofPayload, canRetryCaptcha) {
+                return window.ScrcpyGateApi.post('auth.login', { body: { username: name, password: secret, proof: proofPayload } })
                     .catch(function (err) {
                         var code = codeOf(err);
                         if (code === 'CAPTCHA_REQUIRED') {
                             return runCaptcha(name).then(function (solved) {
                                 if (!solved) throw err;
-                                return attempt(solved);
+                                return attempt(solved, canRetryCaptcha);
+                            });
+                        }
+                        if (code === 'CAPTCHA_INVALID' && canRetryCaptcha) {
+                            // 挑战一次性且有过期时间：过期的证明静默重算一次再试，不让用户白点一次「登录」。
+                            invalidateProof();
+                            return runCaptcha(name).then(function (solved) {
+                                if (!solved) throw err;
+                                return attempt(solved, false);
                             });
                         }
                         throw err;
                     });
             }
 
-            attempt(null)
+            // 滑块拖完就已经算好了：第一次请求就把证明带上，省掉 CAPTCHA_REQUIRED 往返。
+            attempt(proofFresh(name) ? proof.value : null, true)
                 .then(function () {
                     // A successful login response is not enough when the browser rejects
                     // a Secure cookie on a direct HTTP test URL. Verify the session before
@@ -297,9 +392,11 @@
                                 : '登录尝试次数过多，请稍后再试。';
                             error.style.display = '';
                         }
+                        invalidateProof();
                         armCaptcha();
                     } else if (code === 'CAPTCHA_INVALID') {
                         if (error) { error.textContent = '人机验证未通过，请重试。'; error.style.display = ''; }
+                        invalidateProof();
                         armCaptcha();
                     } else if (code === 'AUTH_INVALID') {
                         var failures = payload && payload.failures;
@@ -311,6 +408,7 @@
                             error.style.display = '';
                         }
                         // 只有服务端明确要求时才显示验证码（登录保护可能被管理员关闭）。
+                        invalidateProof();
                         if (payload && payload.captcha_required === false) unarmCaptcha();
                         else armCaptcha();
                     } else if (loginAccepted) {
@@ -337,6 +435,19 @@
                         submit.textContent = '登录';
                     }
                 });
+        });
+    }
+
+    // 用户名改了：挑战按用户名签名，旧证明必然被判 binding_mismatch，直接作废并按需重算。
+    var usernameField = document.getElementById('username');
+    if (usernameField) {
+        usernameField.addEventListener('input', function () {
+            var name = currentUsername();
+            if (proof.user === null || proof.user === name) return;
+            invalidateProof();
+            setPowProgress(0);
+            if (captcha.armed && captcha.sliderDone) startProofFromSlider();
+            else if (captcha.armed) setCaptchaState('等待拖动滑块');
         });
     }
 
