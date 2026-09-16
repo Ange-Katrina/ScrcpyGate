@@ -86,7 +86,9 @@
     // 多端投屏记录（管理员发起、邀请同设备的其他观看端；只经内存中继，不落盘）。
     recordArmed: false,      // 本端是否在记录（管理员，或已同意参与的观看端）
     recordInvite: null,      // 待响应的邀请
+    recordInviteClientId: '', // 收到邀请的那个观看端（宫格视图一页多端时必须按它响应）
     recordSession: null,     // 当前多端记录会话（发起端与参与端都会拿到）
+    recordRole: '',          // 'initiator' = 主端（可停止）/ 'participant' = 副端（只能参与或退出）
     recordBundles: [],       // 收到的其他端完整记录
     rawV2ConfigGeneration: 0,
     rawV2ConfigGenerationSeen: false,
@@ -94,6 +96,15 @@
     rawV2PacketUnit: '',
     rawV2ProtocolVersion: 0,
     videoRateBytes: 0,      // 当前统计窗口内收到的视频字节数
+    videoRateFrames: 0,     // 当前统计窗口内收到的帧数（算实测帧率）
+    videoFps: 0,            // 平滑后的实测帧率
+    browserDeviceId: '',    // 本浏览器的稳定设备标识（localStorage）
+    videoRaw: [],           // 原始数据层（ws-in / ws-out / packet / api / state / env）
+    videoRawSeq: 0,
+    videoRawBytes: 0,
+    videoRawDropped: 0,
+    videoRawFirstAt: 0,
+    videoRawSubs: null,
     videoRateMbps: 0,       // 最近一次实测码率(Mbps, 一位小数)
     videoRateTimer: null,
     playerRecoveryTimer: null,
@@ -307,16 +318,61 @@
 
   function apiRequest(path, opts) {
     opts = opts || {};
+    var startedAt = Date.now();
+    var method = String(opts.method || 'GET').toUpperCase();
+    var body = opts.body;
     return Api.request(path, {
-      method: opts.method || 'GET',
+      method: method,
       query: opts.query,
-      body: opts.body,
+      body: body,
       timeout: opts.timeout || 20000,
       force: opts.force === true,
       cache: opts.cache,
       coalesce: opts.coalesce
+    }).then(function (payload) {
+      rawRecord('api', method + ' ' + path, {
+        method: method,
+        url: path,
+        query: opts.query || null,
+        body: body === undefined ? null : body,
+        ok: true,
+        status: Number(payload && payload.status_code) || 200,
+        ms: Date.now() - startedAt,
+        // 响应原文只对投屏/记录相关接口保留（设备列表之类的整页数据太占地方）。
+        response: apiRawResponseWanted(path) ? truncateRaw(payload) : null
+      });
+      return payload;
+    }).catch(function (error) {
+      rawRecord('api', method + ' ' + path + ' FAILED', {
+        method: method,
+        url: path,
+        query: opts.query || null,
+        body: body === undefined ? null : body,
+        ok: false,
+        status: httpStatus(error),
+        ms: Date.now() - startedAt,
+        error: String((error && (error.message || error.detail)) || error)
+      });
+      throw error;
     });
   }
+
+  function apiRawResponseWanted(path) {
+    var text = String(path || '');
+    return text.indexOf('/mirror/') >= 0 || text.indexOf('/record') >= 0 || text.indexOf('/ws') >= 0;
+  }
+
+  function truncateRaw(value, limit) {
+    var max = limit || 4000;
+    try {
+      var text = typeof value === 'string' ? value : JSON.stringify(value);
+      if (text == null) return null;
+      return text.length > max ? (text.slice(0, max) + '…(truncated ' + text.length + ')') : text;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function apiGet(path, query) { return apiRequest(path, { query: query }); }
   function apiPost(path, body) { return apiRequest(path, { method: 'POST', body: body }); }
   function apiPut(path, body) { return apiRequest(path, { method: 'PUT', body: body }); }
@@ -1164,7 +1220,16 @@
           bindings.forEach(function (b) {
             if (b.username !== u.username) return;
             if (configIds.indexOf(b.config_name) < 0) configIds.push(b.config_name);
-            configs.push({ id: b.config_name, name: b.config_name, online: b.can_run !== false });
+            configs.push({
+              id: b.config_name,
+              name: b.config_name,
+              online: b.can_run !== false,
+              // 用户页「编辑」里的 ALAS 关联要能回读当前绑的设备与权限。
+              deviceId: String(b.device_id || ''),
+              canRun: b.can_run !== false,
+              canEdit: !!b.can_edit,
+              isDefault: !!b.is_default
+            });
           });
         }
         return {
@@ -1174,6 +1239,12 @@
           displayName: u.username,
           role: u.role,
           enabled: u.enabled !== false,
+          /* 服务端下发的是 0/1（或字符串 "0"/"false"），统一折算成布尔再给页面，
+             否则 `0 !== false` 会把「隐藏 ALAS」当成开启。 */
+          alasVisible: settingBoolean(
+            u.alas_visible !== undefined ? u.alas_visible : u.alasVisible,
+            true
+          ),
           status: userStatusOf(u),
           expiry: dateStr(u.expires_at),
           expiresAt: dateStr(u.expires_at),
@@ -2068,6 +2139,16 @@
         },
         onError: function () {
           if (state.videoEl !== el) return;
+          // 原始层：播放器/解码器报错的原文（派生事件只记「重建解码器」这个结论）。
+          var mediaError = el && el.error ? { code: el.error.code, message: String(el.error.message || '') } : null;
+          var readyState = el ? Number(el.readyState) : null;
+          rawRecord('player', 'error', {
+            media_error: mediaError,
+            ready_state: readyState,
+            network_state: el ? Number(el.networkState) : null,
+            current_time: el ? Math.round(Number(el.currentTime || 0) * 1000) / 1000 : null,
+            feed_count: state.jmuxerFeedCount || 0
+          });
           schedulePlayerRecovery();
         }
       });
@@ -2167,6 +2248,14 @@
       reason: String(reason || 'unknown'),
       sequence: state.rawV2Sequence
     });
+    rawRecord('player', 'rebuild', {
+      reason: String(reason || 'unknown'),
+      sequence: state.rawV2Sequence,
+      last_fed: state.rawV2LastFedSequence,
+      retry: state.videoRetryCount || 0,
+      had_player: !!state.jmuxer,
+      feed_count: state.jmuxerFeedCount || 0
+    });
     var previous = state.videoEl;
     destroyPlayer(true);
     var ok = ensurePlayer();
@@ -2234,6 +2323,7 @@
     if (!state.videoSocket || state.videoSocket.readyState !== 1) return;
     try {
       state.videoSocket.send(JSON.stringify({ type: 'player_reset' }));
+      rawRecordOut({ type: 'player_reset', reason: String(reason), sequence: state.rawV2Sequence });
     } catch (e) {
       return;
     }
@@ -2499,8 +2589,43 @@
     } catch (e) {}
   }
 
+  function emitVideoFps(fps) {
+    try {
+      document.dispatchEvent(new CustomEvent('scrcpygate:videofps', {
+        detail: { fps: Number(fps) || 0 }
+      }));
+    } catch (e) {}
+  }
+
+  /* 本浏览器的稳定设备标识（用户要求：同一台设备进出记录时 id 不要变）。
+     连接级的 client_id 每次握手都会变，做不了「是不是同一台设备」的判断；
+     这个 id 只存在本机 localStorage，登录、投屏、投屏记录都带上它。 */
+  var BROWSER_ID_KEY = 'scrcpygate-device-id';
+
+  function browserDeviceId() {
+    if (state.browserDeviceId) return state.browserDeviceId;
+    var value = '';
+    try { value = String(window.localStorage.getItem(BROWSER_ID_KEY) || ''); } catch (e) { value = ''; }
+    if (!/^b-[0-9a-z]{8,32}$/.test(value)) {
+      var random = '';
+      try {
+        var bytes = new Uint8Array(8);
+        if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+        else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        for (var j = 0; j < bytes.length; j++) random += ('0' + bytes[j].toString(16)).slice(-2);
+      } catch (e) {
+        random = String(Date.now().toString(16)) + Math.random().toString(16).slice(2, 10);
+      }
+      value = 'b-' + random.slice(0, 16);
+      try { window.localStorage.setItem(BROWSER_ID_KEY, value); } catch (e) {}
+    }
+    state.browserDeviceId = value;
+    return value;
+  }
+
   function resetVideoRateMeter() {
     state.videoRateBytes = 0;
+    state.videoRateFrames = 0;
     if (state.videoRateTimer) {
       window.clearInterval(state.videoRateTimer);
       state.videoRateTimer = null;
@@ -2509,11 +2634,15 @@
       state.videoRateMbps = 0;
       emitVideoRate(0);
     }
+    state.videoFps = 0;
+    emitVideoFps(0);
   }
 
   function flushVideoRate() {
     var bytes = state.videoRateBytes;
+    var frames = state.videoRateFrames;
     state.videoRateBytes = 0;
+    state.videoRateFrames = 0;
     if (!state.videoSocket) {
       resetVideoRateMeter();
       return;
@@ -2524,7 +2653,11 @@
       ? Math.round((state.videoRateMbps * 0.4 + mbps * 0.6) * 10) / 10
       : mbps;
     emitVideoRate(state.videoRateMbps);
-    // 记录里不要每秒一条码率：至少间隔 60s，或变化 ≥1 Mbps 且已过 15s 才记。
+    // 实测帧率：同一个 1 秒窗口里收到的帧数（Raw v2 一个访问单元 = 一帧；legacy 一个包 = 一帧）。
+    var fps = Math.max(0, Number(frames) || 0);
+    state.videoFps = state.videoFps > 0 ? Math.round(state.videoFps * 0.4 + fps * 0.6) : fps;
+    emitVideoFps(state.videoFps);
+    // 记录里不要每秒一条码率：至少间隔 60s，或变化 ≥1 Mbps 且已过 15s 才记（帧率一并带上）。
     var now = Date.now();
     var elapsed = state.videoRecordLastRateAt ? now - state.videoRecordLastRateAt : Number.POSITIVE_INFINITY;
     var previous = state.videoRecordLastRateMbps;
@@ -2533,7 +2666,7 @@
     if (elapsed >= VIDEO_RECORD_RATE_REPORT_MS || (bigChange && elapsed >= 15000)) {
       state.videoRecordLastRateAt = now;
       state.videoRecordLastRateMbps = state.videoRateMbps;
-      videoRecord('rate', 'info', '实测码率', { mbps: state.videoRateMbps });
+      videoRecord('rate', 'info', '实测码率', { mbps: state.videoRateMbps, fps: state.videoFps });
     }
   }
 
@@ -2541,6 +2674,7 @@
     var bytes = Number(count) || 0;
     if (bytes <= 0) return;
     state.videoRateBytes += bytes;
+    state.videoRateFrames = (state.videoRateFrames || 0) + 1;
     if (!state.videoRateTimer) {
       state.videoRateTimer = window.setInterval(flushVideoRate, VIDEO_RATE_WINDOW_MS);
     }
@@ -2562,8 +2696,14 @@
     resetRawV2State(true);
     evaluateViewerStopPolicy(Date.now());
     var query = '';
-    if (state.viewerToken) query = '?viewer_token=' + encodeURIComponent(state.viewerToken);
+    var queryParts = [];
+    if (state.viewerToken) queryParts.push('viewer_token=' + encodeURIComponent(state.viewerToken));
+    // 带上稳定的浏览器设备标识：服务端据此判断「是不是同一台设备」，投屏记录里的 id
+    // 因此不会每次进出都变（连接级 client_id 每次握手都会变）。
+    queryParts.push('browser_id=' + encodeURIComponent(browserDeviceId()));
+    if (queryParts.length) query = '?' + queryParts.join('&');
     var url = wsBase() + '/ws/devices/' + encodeURIComponent(deviceId) + '/video' + query;
+    rawRecord('state', 'video_socket_open', { url: url, retry: state.videoRetryCount || 0 });
     var ws;
     try { ws = new window.WebSocket(url); } catch (e) { attemptVideoReconnect(); return; }
     state.videoSocket = ws;
@@ -2577,7 +2717,12 @@
       if (state.videoSocket !== ws) return;
       if (typeof event.data === 'string') {
         var msg;
-        try { msg = JSON.parse(event.data); } catch (e) { return; }
+        try { msg = JSON.parse(event.data); } catch (e) {
+          rawRecord('ws-in', 'unparsed', String(event.data).slice(0, 2000));
+          return;
+        }
+        // 原始层：控制面消息原文（派生事件只保留结论，原文才能看到被摘要掉的字段）。
+        rawRecord('ws-in', String(msg.type || 'unknown'), msg);
         if (msg.type === 'hello') {
           emitVideoLifecycle('scrcpygate:videohello');
           scheduleFirstFrameWatchdog();
@@ -2588,6 +2733,8 @@
           emitViewerUpdate(state.session, deviceId);
           // 画面（含中断后的重连）一旦握手成功，就核对一次控制权是否还在自己手上。
           revalidateControlOwnership();
+          // 多端投屏记录：握手后对齐会话（晚到者补邀请、发起端刷新页面后拿回主导权）。
+          attachMirrorRecord();
           if (msg.session && msg.session.video) {
             var v = msg.session.video;
             if (v && v.max_size) {
@@ -2614,26 +2761,49 @@
         } else if (msg.type === 'record_invite') {
           // 管理员发起了多端记录：本端是被邀请的观看端，交给页面弹窗询问是否参与。
           state.recordInvite = msg;
+          state.recordInviteClientId = String(msg.client_id || '') || currentRecordClientId();
           emitRecordEvent('scrcpygate:record-invite', msg);
+        } else if (msg.type === 'record_session') {
+          // 服务端对齐后的会话快照：只有带着本机会话 id 回来的发起端会拿到 role=initiator，
+          // 同账号的其它设备（手机端）拿到的是 role=participant。
+          state.recordInvite = null;
+          state.recordSession = msg.session || null;
+          state.recordRole = String(msg.role || 'participant');
+          state.recordArmed = recordRoleArmed(state.recordRole, msg.session);
+          // 通知里带的是「这条通知属于哪个观看端」：宫格一页多端时，退出/响应必须认它。
+          if (msg.client_id) state.recordInviteClientId = String(msg.client_id);
+          emitRecordEvent('scrcpygate:record-session', {
+            session: state.recordSession,
+            role: state.recordRole,
+            client_id: String(msg.client_id || '') || currentRecordClientId()
+          });
         } else if (msg.type === 'record_upload_request') {
           state.recordInvite = null;
           emitRecordEvent('scrcpygate:record-upload-request', msg);
-          uploadMirrorRecord(msg.session);
+          uploadMirrorRecord(msg.session, msg.client_id);
         } else if (msg.type === 'record_participant') {
           applyRecordParticipant(msg);
         } else if (msg.type === 'record_bundle') {
           receiveRecordBundle(msg);
         } else if (msg.type === 'record_stopped') {
           state.recordInvite = null;
+          state.recordInviteClientId = '';
           state.recordArmed = false;
           if (state.recordSession) state.recordSession.stopped = true;
+          if (state.recordRole !== 'initiator') clearRecordClaim(String(msg.session || ''));
           emitRecordEvent('scrcpygate:record-stopped', msg);
+        } else if (msg.type === 'record_stream_stopped') {
+          // 画面停了但记录会话仍在（服务端不再因为停流终止记录）：只提示，不动状态。
+          if (state.recordSession) state.recordSession.stream_stopped = true;
+          emitRecordEvent('scrcpygate:record-stream-stopped', msg);
         }
         return;
       }
       var bytes = new Uint8Array(event.data);
       if (state.rawV2Transport === 'legacy-annexb') {
         noteVideoBytes(bytes.byteLength);
+        rawRecord('packet', 'annexb', { bytes: bytes.byteLength, gap_ms: state.rawV2LastFedAt ? (Date.now() - state.rawV2LastFedAt) : null });
+        state.rawV2LastFedAt = Date.now();
         if (!ensurePlayer()) { schedulePlayerRecovery(); return; }
         if (!state.rawV2KeyframeSeen) {
           state.rawV2KeyframeSeen = true;
@@ -2647,6 +2817,20 @@
         var packet = parseRawV2Packet(bytes);
         if (!acceptRawV2Packet(packet)) return;
         noteVideoBytes(packet.payload.byteLength);
+        // 原始层：每个 Raw v2 包的包头（序号/类型/长度/代数/帧间隔），不含像素数据。
+        // 派生事件只记「异常」，这里把每一帧的元数据都留下，便于对齐服务端日志与
+        // 复现「帧在到但画面不动」这类问题。
+        rawRecord('packet', packet.keyframe ? 'keyframe' : 'frame', {
+          sequence: packet.sequence,
+          flags: packet.flags,
+          keyframe: !!packet.keyframe,
+          discontinuity: !!packet.discontinuity,
+          generation: packet.generation,
+          bytes: bytes.byteLength,
+          payload_bytes: packet.payload.byteLength,
+          gap_ms: state.rawV2LastFedAt ? (Date.now() - state.rawV2LastFedAt) : null
+        });
+        state.rawV2LastFedAt = Date.now();
         // Do not mark a keyframe as consumed before the player exists. A
         // transient JMuxer/MSE construction failure must remain recoverable
         // by the watchdog instead of leaving the UI in a permanent wait state.
@@ -2690,7 +2874,9 @@
         state.rawV2LastFedSequenceSeen = true;
         // Raw v2/protocol packets are complete access units. Tell jMuxer so
         // it does not wait for the next NAL to flush one extra frame.
-        state.jmuxer.feed({ video: packet.payload, duration: 0, isLastVideoFrameComplete: true });
+        try { state.jmuxer.feed({ video: packet.payload, duration: 0, isLastVideoFrameComplete: true }); state.jmuxerFeedCount = (state.jmuxerFeedCount || 0) + 1; } catch (e) {
+          rawRecord('player', 'feed_failed', { error: String((e && e.message) || e), sequence: packet.sequence });
+        }
       } catch (e) {
         state.watchActive = false;
         state.videoSurfaceReady = false;
@@ -2723,8 +2909,16 @@
         reason: event && event.reason ? String(event.reason).slice(0, 60) : '',
         retry: state.videoRetryCount
       });
-      if (event && (event.code === 4401 || (event.code === 4403 && /session|auth|account|login/.test(closeReason)))) {
+      if (event && (event.code === 4401 || (event.code === 4403 && /session|auth|login/.test(closeReason)))) {
         invalidateAuthentication();
+        return;
+      }
+      // 到期账户仍然保持登录（可以浏览与续期），只是投屏被拒绝：不要把它当作
+      // 登录失效踢回登录页，而是停止观看并明确告知原因。
+      if (event && event.code === 4403 && /account/.test(closeReason)) {
+        giveUpVideoWatch();
+        try { document.dispatchEvent(new CustomEvent('scrcpygate:account-expired', { detail: { scope: 'mirror' } })); } catch (e) {}
+        emitViewerUpdate(state.session, deviceId);
         return;
       }
       // 权限撤销或服务端明确终止当前观看时，不再自动重连；普通网络抖动仍走退避重连。
@@ -2941,8 +3135,14 @@
   function videoRecordJson() {
     return {
       device_id: state.deviceId || '',
+      // 稳定标识：同一台设备跨会话不变；client_id 是本次连接的，两个都留着便于对照。
+      browser_id: browserDeviceId(),
       client_id: (state.session && state.session.client_id) || '',
       transport: state.rawV2Transport || '',
+      fps: state.videoFps || 0,
+      mbps: state.videoRateMbps || 0,
+      // 原始数据层：控制面原文 / 包头元数据 / 接口调用 / 状态切换 / 环境快照。
+      raw: videoRecordRawJson(),
       generated_at: new Date().toISOString(),
       stats: videoRecordStats(),
       entries: (state.videoRecord || []).map(function (entry) {
@@ -2958,6 +3158,197 @@
     };
   }
 
+  /* ---------------- 原始数据层（排查用，用户要求「不要漏掉任何东西」） ----------------
+     派生事件（时间线）只记「我们判断重要的事」，参数被摘要、频次被节流，正好会把
+     问题的关键漏掉。这里再加一层**原始记录**：
+       ws-in   视频通道收到的每一条控制面 JSON（原文）
+       ws-out  本端发出去的每一条控制消息（原文）
+       packet  Raw v2 每个包的包头（序号/关键帧/长度/代数/时间间隔），不含像素数据
+       api     每次接口请求（方法/URL/请求体/状态/耗时/耗时；投屏与记录接口连响应原文）
+       state   页面状态切换（watchState、控制权、全屏/旋转、离开超时决策）
+       env     记录开始时的环境快照（UA/视口/DPR/内核数/解码能力/服务端画质参数）
+     边界：**不记录视频像素**（每秒几 MB，浏览器端受不了）；需要像素级证据时用服务端
+     scrcpy 日志 + 关键帧截图。原始层有独立的条数/字节上限，超了丢最旧的并计数
+     （dropped），导出时能看到有没有丢。 */
+  var RAW_ENTRY_LIMIT = 20000;
+  var RAW_BYTE_LIMIT = 4 * 1024 * 1024;
+  var RAW_UPLOAD_BYTE_BUDGET = 1500 * 1024;
+
+  function rawAllowed() {
+    // 记录中（管理员或已同意参与的观看端）才采集；开关关闭时完全不占内存。
+    if (state.videoRawEnabled === false) return false;
+    return videoRecordAllowed();
+  }
+
+  function rawEnabled() {
+    return state.videoRawEnabled !== false;
+  }
+
+  function rawSetEnabled(enabled) {
+    state.videoRawEnabled = enabled !== false;
+    return state.videoRawEnabled;
+  }
+
+  function rawBytesOf(entry) {
+    try {
+      return JSON.stringify(entry || {}).length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function rawRecord(channel, kind, payload) {
+    if (!rawAllowed()) return null;
+    if (!state.videoRaw) state.videoRaw = [];
+    var entry = {
+      seq: (state.videoRawSeq = (state.videoRawSeq || 0) + 1),
+      t: Date.now(),
+      channel: String(channel || 'misc'),
+      kind: String(kind || ''),
+      payload: payload === undefined ? null : payload
+    };
+    var size = rawBytesOf(entry);
+    state.videoRaw.push(entry);
+    state.videoRawBytes = (state.videoRawBytes || 0) + size;
+    while (state.videoRaw.length > RAW_ENTRY_LIMIT
+      || (state.videoRawBytes > RAW_BYTE_LIMIT && state.videoRaw.length > 1)) {
+      var dropped = state.videoRaw.shift();
+      state.videoRawBytes -= rawBytesOf(dropped);
+      state.videoRawDropped = (state.videoRawDropped || 0) + 1;
+    }
+    if (!state.videoRawFirstAt) state.videoRawFirstAt = entry.t;
+    var subs = state.videoRawSubs || [];
+    for (var i = 0; i < subs.length; i++) {
+      try { subs[i](entry); } catch (e) {}
+    }
+    return entry;
+  }
+
+  function rawRecordState(kind, payload) {
+    return rawRecord('state', kind, payload);
+  }
+
+  function rawRecordOut(payload) {
+    return rawRecord('ws-out', (payload && payload.type) || 'message', payload);
+  }
+
+  function videoRecordRaw() {
+    return (state.videoRaw || []).slice();
+  }
+
+  function videoRecordRawJson() {
+    return {
+      entries: videoRecordRaw(),
+      stats: videoRecordRawStats()
+    };
+  }
+
+  function videoRecordRawStats() {
+    var list = state.videoRaw || [];
+    var channels = {};
+    var kinds = {};
+    list.forEach(function (entry) {
+      channels[entry.channel] = (channels[entry.channel] || 0) + 1;
+      var key = entry.channel + ':' + entry.kind;
+      kinds[key] = (kinds[key] || 0) + 1;
+    });
+    return {
+      total: list.length,
+      dropped: state.videoRawDropped || 0,
+      bytes: state.videoRawBytes || 0,
+      entry_limit: RAW_ENTRY_LIMIT,
+      byte_limit: RAW_BYTE_LIMIT,
+      first_at: state.videoRawFirstAt || 0,
+      last_at: list.length ? list[list.length - 1].t : 0,
+      channels: channels,
+      kinds: kinds
+    };
+  }
+
+  function videoRecordRawText() {
+    var lines = ['ScrcpyGate 原始投屏数据', '', '# 时间 通道 类型 内容'];
+    videoRecordRaw().forEach(function (entry) {
+      var time = videoRecordTime(entry.t);
+      var payload = '';
+      try {
+        payload = typeof entry.payload === 'string' ? entry.payload : JSON.stringify(entry.payload);
+      } catch (e) {
+        payload = '<unserializable>';
+      }
+      lines.push(time + ' [' + entry.channel + '/' + entry.kind + '] ' + payload);
+    });
+    return lines.join('\n');
+  }
+
+  function videoRecordRawSubscribe(fn) {
+    if (typeof fn !== 'function') return function () {};
+    if (!state.videoRawSubs) state.videoRawSubs = [];
+    state.videoRawSubs.push(fn);
+    return function () {
+      var list = state.videoRawSubs || [];
+      var index = list.indexOf(fn);
+      if (index >= 0) list.splice(index, 1);
+    };
+  }
+
+  function videoRecordRawClear() {
+    state.videoRaw = [];
+    state.videoRawSeq = 0;
+    state.videoRawBytes = 0;
+    state.videoRawDropped = 0;
+    state.videoRawFirstAt = 0;
+    return true;
+  }
+
+  /* 环境快照：复现问题时「什么浏览器 / 什么视口 / 服务端给了什么参数」经常是关键。 */
+  function rawRecordEnvironment(extra) {
+    var video = (state.session && state.session.video) || {};
+    var env = {
+      user_agent: String((window.navigator && window.navigator.userAgent) || ''),
+      platform: String((window.navigator && window.navigator.platform) || ''),
+      languages: (window.navigator && window.navigator.languages) ? Array.prototype.slice.call(window.navigator.languages) : [],
+      hardware_concurrency: Number((window.navigator && window.navigator.hardwareConcurrency) || 0) || null,
+      device_memory_gb: Number((window.navigator && window.navigator.deviceMemory) || 0) || null,
+      viewport: { width: window.innerWidth || 0, height: window.innerHeight || 0 },
+      screen: { width: (window.screen && window.screen.width) || 0, height: (window.screen && window.screen.height) || 0 },
+      device_pixel_ratio: Number(window.devicePixelRatio) || 1,
+      visibility: String(document.visibilityState || ''),
+      webcodecs: typeof window.VideoDecoder === 'function',
+      media_source: !!(window.MediaSource || window.ManagedMediaSource),
+      secure_context: window.isSecureContext === true,
+      device_id: state.deviceId || '',
+      browser_id: browserDeviceId(),
+      client_id: (state.session && state.session.client_id) || '',
+      video_transport: state.rawV2Transport || '',
+      video_options: video,
+      quality: state.videoQuality || null
+    };
+    if (extra && typeof extra === 'object') {
+      Object.keys(extra).forEach(function (key) { env[key] = extra[key]; });
+    }
+    return rawRecord('env', 'snapshot', env);
+  }
+
+  function trimRawForUpload(timeline) {
+    // 服务端对上传体积有兜底上限（默认 2 MiB）：原始层优先保留最新的，
+    // 并明确标出被裁剪的条数，避免「看起来完整其实被截了」。
+    try {
+      var raw = timeline && timeline.raw;
+      if (!raw || !raw.entries) return timeline;
+      var budget = RAW_UPLOAD_BYTE_BUDGET;
+      var kept = raw.entries.slice();
+      var trimmed = 0;
+      while (kept.length && JSON.stringify(kept).length > budget) {
+        kept.shift();
+        trimmed += 1;
+      }
+      raw.entries = kept;
+      raw.stats = Object.assign({}, raw.stats, { trimmed_for_upload: trimmed, upload_budget_bytes: budget });
+      return timeline;
+    } catch (e) {
+      return timeline;
+    }
+  }
   /* ---------------- 多端投屏记录（同设备多观看端协同，服务端只做内存中继） ----------------
      流程：管理员点「多端记录」→ 服务端建内存会话并给同设备其他观看端下发邀请 →
      被邀请端弹窗确认 → 管理员停止记录 → 服务端请各参与端上传 → 各端上传**完整**记录 →
@@ -2965,6 +3356,77 @@
 
   function emitRecordEvent(name, detail) {
     try { document.dispatchEvent(new CustomEvent(name, { detail: detail || {} })); } catch (e) {}
+  }
+
+  /* 「我是这次记录的发起端」必须能被服务端验证：刷新页面后 client_id 会变，光靠用户名
+     会把同一账号的另一台设备（手机端）也算成主端。因此发起/参与时把「会话 id + 角色」
+     存在本机 localStorage，重连时作为 claim 带上去；只有能出示它的页面才是主端。 */
+  var RECORD_CLAIM_KEY = 'scrcpygate-record-claim';
+
+  function readRecordClaim() {
+    try {
+      var raw = window.localStorage.getItem(RECORD_CLAIM_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      var session = String(parsed.session || '');
+      var role = String(parsed.role || '');
+      if (!session || (role !== 'initiator' && role !== 'participant')) return null;
+      return { session: session, role: role };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeRecordClaim(session, role) {
+    var id = String((session && session.session) || session || '');
+    if (!id) return;
+    try {
+      window.localStorage.setItem(RECORD_CLAIM_KEY, JSON.stringify({ session: id, role: role }));
+    } catch (e) {}
+  }
+
+  function clearRecordClaim(sessionId) {
+    try {
+      var current = readRecordClaim();
+      if (sessionId && current && current.session !== String(sessionId)) return;
+      window.localStorage.removeItem(RECORD_CLAIM_KEY);
+    } catch (e) {}
+  }
+
+  function recordRoleArmed(role, session) {
+    if (role === 'initiator') return true;
+    if (role !== 'participant') return false;
+    var mine = recordParticipantOf(session, currentRecordClientId());
+    return !!(mine && mine.state === 'accepted');
+  }
+
+  function recordParticipantOf(session, clientId) {
+    var list = (session && session.participants) || [];
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].client_id) === String(clientId)) return list[i];
+    }
+    return null;
+  }
+
+  /* 握手后调用：把「本机 claim」交给服务端，由服务端决定本端是主端还是副端，
+     并补发邀请/上传请求（晚一步接入的观看端因此也能收到邀请）。 */
+  function attachMirrorRecord() {
+    var clientId = currentRecordClientId();
+    var deviceId = mirrorRecordDeviceId();
+    if (!clientId || !deviceId) return Promise.resolve(null);
+    var claim = readRecordClaim();
+    return apiPost(recordEndpoint('attach'), {
+      client_id: clientId,
+      browser_id: browserDeviceId(),
+      session: claim ? claim.session : '',
+      role: claim ? claim.role : ''
+    }).then(function (payload) {
+      return unwrapRecordPayload(payload);
+    }).catch(function () {
+      // 老服务端没有该接口，或连接刚建立就断开：不影响观看与本地记录。
+      return null;
+    });
   }
 
   function currentRecordClientId() {
@@ -2994,6 +3456,13 @@
       var data = unwrapRecordPayload(payload);
       state.recordSession = data.session || null;
       state.recordArmed = true;
+      state.recordRole = 'initiator';
+      state.recordInvite = null;
+      // 本机记下「我发起的这次会话」：刷新页面后靠它向服务端证明主端身份。
+      writeRecordClaim(state.recordSession, 'initiator');
+      // 记录开始时留一份环境快照 + 一次状态标记（复现问题常要看这些）。
+      rawRecordEnvironment({ record_session: (state.recordSession && state.recordSession.session) || '', role: 'initiator' });
+      rawRecordState('record_start', { mode: 'multi', session: (state.recordSession && state.recordSession.session) || '' });
       videoRecord('record_start', 'info', '发起多端投屏记录', {
         invited: data.invited,
         delivered: data.delivered
@@ -3003,16 +3472,24 @@
     });
   }
 
-  function respondMirrorRecord(sessionId, accept) {
-    var clientId = currentRecordClientId();
+  function respondMirrorRecord(sessionId, accept, clientId) {
+    var targetClient = String(clientId || state.recordInviteClientId || currentRecordClientId());
     return apiPost(recordEndpoint('respond'), {
       session: String(sessionId || ''),
-      client_id: clientId,
+      client_id: targetClient,
       accept: !!accept
     }).then(function (payload) {
       var data = unwrapRecordPayload(payload);
       state.recordInvite = null;
+      state.recordInviteClientId = '';
       state.recordArmed = !!accept;
+      if (accept) {
+        state.recordRole = 'participant';
+        // 参与端也记下会话：刷新页面后服务端据此补发上传请求（而不是重新弹邀请）。
+        writeRecordClaim(String(sessionId || ''), 'participant');
+      } else {
+        clearRecordClaim(String(sessionId || ''));
+      }
       videoRecord('record_response', accept ? 'info' : 'warn',
         accept ? '同意参与管理员发起的多端记录' : '拒绝参与管理员发起的多端记录', { session: String(sessionId || '') });
       emitRecordEvent('scrcpygate:record-responded', { accept: !!accept, participant: data.participant || null });
@@ -3021,16 +3498,18 @@
   }
 
   // 上传本端那份**完整**记录（不做字段裁剪）；服务端原样转发给发起端。
-  function uploadMirrorRecord(sessionId) {
-    var clientId = currentRecordClientId();
-    if (!sessionId || !clientId || !mirrorRecordDeviceId()) {
+  // `clientId` 是收到上传请求的那个观看端：宫格一页多个观看端时必须显式传。
+  function uploadMirrorRecord(sessionId, clientId) {
+    var targetClient = String(clientId || currentRecordClientId());
+    if (!sessionId || !targetClient || !mirrorRecordDeviceId()) {
       return Promise.reject(new Error('record_client_required'));
     }
     var timeline = videoRecordJson();
     return apiPost(recordEndpoint('upload'), {
       session: String(sessionId),
-      client_id: clientId,
-      timeline: timeline
+      client_id: targetClient,
+      browser_id: browserDeviceId(),
+      timeline: trimRawForUpload(timeline)
     }).then(function (payload) {
       var data = unwrapRecordPayload(payload);
       var delivered = data.delivered !== false;
@@ -3040,6 +3519,7 @@
           bytes: data.bytes
         });
       state.recordArmed = false;
+      clearRecordClaim(String(sessionId));
       emitRecordEvent('scrcpygate:record-uploaded', data);
       return data;
     }).catch(function (error) {
@@ -3056,6 +3536,9 @@
     return apiPost(recordEndpoint('stop'), { session: String(session) }).then(function (payload) {
       var data = unwrapRecordPayload(payload);
       if (data.session) state.recordSession = data.session;
+      state.recordArmed = false;
+      // 会话结束：本机不再对这次会话主张任何角色。
+      clearRecordClaim(session);
       videoRecord('record_stop', 'info', '停止多端记录，等待其他端上传', {
         upload_requests: data.upload_requests
       });
@@ -3112,6 +3595,7 @@
       kind: 'scrcpygate-mirror-record-bundle',
       generated_at: new Date().toISOString(),
       device_id: state.deviceId || '',
+      browser_id: browserDeviceId(),
       session: state.recordSession ? state.recordSession.session : '',
       initiator: state.recordSession ? state.recordSession.initiator : '',
       participants: state.recordSession ? state.recordSession.participants || [] : [],
@@ -3363,6 +3847,9 @@
   function controlSend(msg) {
     if (!state.controlSocket || state.controlSocket.readyState !== 1) return false;
     state.controlSocket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    // 原始层：控制通道发出的每条消息（按键/触摸/导航等），文本消息原样记，二进制记长度。
+    if (typeof msg === 'string') rawRecord('ws-out', 'control-text', String(msg).slice(0, 2000));
+    else rawRecord('ws-out', 'control-binary', { type: (msg && msg.type) || '', bytes: msg ? JSON.stringify(msg).length : 0 });
     return true;
   }
 
@@ -3496,8 +3983,11 @@
           pending.reject(new Error('控制通道已断开'));
         }
         var closeReason = String(event && event.reason || '').toLowerCase();
-        if (event && (event.code === 4401 || (event.code === 4403 && /session|auth|account|login/.test(closeReason)))) {
+        if (event && (event.code === 4401 || (event.code === 4403 && /session|auth|login/.test(closeReason)))) {
           invalidateAuthentication();
+        } else if (event && event.code === 4403 && /account/.test(closeReason)) {
+          // 到期账户保持登录；视频通道会同时关闭并给出提示。
+          try { document.dispatchEvent(new CustomEvent('scrcpygate:account-expired', { detail: { scope: 'control' } })); } catch (e) {}
         }
       };
       ws.onerror = function () {
@@ -4583,6 +5073,9 @@
     };
     if (body.password) req.password = body.password;
     if (body.enabled !== undefined) req.enabled = body.enabled !== false;
+    if (body.alasVisible !== undefined || body.alas_visible !== undefined) {
+      req.alas_visible = (body.alasVisible !== undefined ? body.alasVisible : body.alas_visible) !== false;
+    }
     if (body.expiry) req.expires_at = expiryEpoch(body.expiry);
     else req.expires_at = null;
     return apiPut('/api/admin/users', req).then(function () {
@@ -4598,6 +5091,9 @@
     if (body.expiry !== undefined) req.expires_at = body.expiry ? expiryEpoch(body.expiry) : null;
     if (body.password) req.password = body.password;
     if (body.enabled !== undefined) req.enabled = body.enabled !== false;
+    if (body.alasVisible !== undefined || body.alas_visible !== undefined) {
+      req.alas_visible = (body.alasVisible !== undefined ? body.alasVisible : body.alas_visible) !== false;
+    }
     return apiPut('/api/admin/users', req).then(function () {
       return fetchUsersEnriched();
     });
@@ -4703,12 +5199,33 @@
           });
           var submittedDevices = requestedDevices;
           if (deviceBaseline && results[2]) {
+            /* /api/admin/permissions 对「每个普通用户 × 每台设备」都返回一行，没有授权
+               记录的行是 assigned=false / can_view=false。这里只想保留「编辑期间别人
+               新加的授权」，所以必须同时看 assigned 与 can_view：只按 device_id 判断
+               会把整库未授权设备都补成可观看（加一台设备保存后全部设备都被绑定）。 */
+            var permissionRows = results[2].permissions || [];
+            var publicByRef = {};
+            permissionRows.forEach(function (row) {
+              var publicId = String(row.public_device_id || '');
+              if (!publicId) return;
+              publicByRef[String(row.device_id || '')] = publicId;
+              publicByRef[publicId] = publicId;
+            });
+            var inBaseline = function (ref) {
+              var normalized = publicByRef[ref] || ref;
+              return deviceBaseline.indexOf(ref) >= 0 || deviceBaseline.indexOf(normalized) >= 0;
+            };
             var known = {};
-            submittedDevices.forEach(function (row) { known[String(row.device_id)] = true; });
-            (results[2].permissions || []).forEach(function (row) {
+            submittedDevices.forEach(function (row) {
+              var ref = String(row.device_id || '');
+              known[ref] = true;
+              known[publicByRef[ref] || ref] = true;
+            });
+            permissionRows.forEach(function (row) {
               if (row.username !== username) return;
-              var ref = String(row.public_device_id || row.device_id || '');
-              if (!ref || known[ref] || deviceBaseline.indexOf(ref) >= 0) return;
+              if (!row.assigned || !row.can_view) return;
+              var ref = publicByRef[String(row.device_id || '')] || String(row.public_device_id || row.device_id || '');
+              if (!ref || known[ref] || inBaseline(ref)) return;
               submittedDevices.push({ device_id: ref, can_view: true, can_control: !!row.can_control });
               known[ref] = true;
             });
@@ -5400,6 +5917,8 @@
     'quality.presets.create': function (opts) { return handlerQualityPresets('create', opts); },
     'quality.presets.update': function (opts) { return handlerQualityPresets('update', opts); },
     'quality.presets.delete': function (opts) { return handlerQualityPresets('delete', opts); },
+    // 设备 ↔ Runtime 配置配对（只读）：用户页「选设备自动带出配置 / 选配置自动带出设备」用。
+    'alas.configMatches': function () { return apiGet('/api/admin/alas/config-matches'); },
     'alas.configs': handlerAlasConfigs,
     'alas.status': handlerAlasStatus,
     'alas.toggle': handlerAlasToggle,
@@ -5433,6 +5952,10 @@
     'alas.relations.bulkUpdate': handlerAlasRelationBulk,
     'alas.connection.check': handlerAlasConnectionCheck,
     'alas.config.status': handlerAlasConfigStatus,
+    // 打开 ALAS 管理页时扫一次：按 ALAS 配置里的模拟器 ADB 地址补齐缺失的管理员关联。
+    'alas.autoBind': function () {
+      return apiPost('/api/admin/alas/auto-bind', {}).then(function (payload) { return payload || { ok: true }; });
+    },
     'notifications.list': handlerNotificationsList,
     'notifications.markRead': handlerNotificationsMarkRead,
     'permissions.request': function () { return handlerUnsupported('该功能暂未支持：请由管理员在后台直接调整权限'); },
@@ -5515,7 +6038,24 @@
       text: videoRecordText,
       json: videoRecordJson,
       line: videoRecordLine,
+      // 页面可以补一条自定义事件（例如「开始仅本端记录」这个纯前端的会话边界）。
+      push: videoRecord,
       limit: VIDEO_RECORD_LIMIT
+    },
+    // 原始数据层（控制面原文 / 包头元数据 / 接口调用 / 状态 / 环境快照）。
+    videoRecordRaw: {
+      entries: videoRecordRaw,
+      stats: videoRecordRawStats,
+      text: videoRecordRawText,
+      json: videoRecordRawJson,
+      subscribe: videoRecordRawSubscribe,
+      clear: videoRecordRawClear,
+      push: rawRecord,
+      environment: rawRecordEnvironment,
+      setEnabled: rawSetEnabled,
+      isEnabled: rawEnabled,
+      entryLimit: RAW_ENTRY_LIMIT,
+      byteLimit: RAW_BYTE_LIMIT
     },
     // 多端投屏记录：发起/响应/停止 + 本端与参与端的完整记录汇总。
     mirrorRecord: {
@@ -5523,13 +6063,30 @@
       stop: stopMirrorRecord,
       respond: respondMirrorRecord,
       upload: uploadMirrorRecord,
+      attach: attachMirrorRecord,
       state: function () {
+        var session = state.recordSession;
+        var clientId = currentRecordClientId();
+        var mine = recordParticipantOf(session, clientId);
+        var initiatorClient = String((session && session.initiator_client_id) || '');
+        // 主端判定以服务端给的 initiator_client_id 为准；老服务端不带该字段时退回本机
+        // 角色（只有本端自己发起或凭 claim 拿回主导权时才是 initiator，被邀请的端不会）。
+        var isInitiator = initiatorClient
+          ? initiatorClient === clientId
+          : state.recordRole === 'initiator';
         return {
           device_id: mirrorRecordDeviceId(),
-          client_id: currentRecordClientId(),
+          client_id: clientId,
+          // 稳定设备标识：面板/导出显示它，同一台设备进出记录时不会变。
+          browser_id: browserDeviceId(),
           armed: !!state.recordArmed,
           invite: state.recordInvite,
-          session: state.recordSession,
+          invite_client_id: state.recordInviteClientId,
+          session: session,
+          role: state.recordRole || (isInitiator ? 'initiator' : (session ? 'participant' : '')),
+          // 主端 / 副端：只有发起这次会话的那个观看端能停止；同账号的其它设备是副端。
+          is_initiator: isInitiator,
+          me: mine,
           bundles: (state.recordBundles || []).slice()
         };
       },
@@ -5537,6 +6094,9 @@
       bundleText: recordBundleText,
       clearBundles: clearRecordBundles
     },
+    // 本浏览器的稳定设备标识（同一台设备进出记录/登录会话都用它）。
+    browserDeviceId: browserDeviceId,
+    deviceIdentity: { browserId: browserDeviceId },
     setVideoRotation: setVideoRotation,
     setFullscreenMode: setFullscreenMode,
     refreshVideoLayout: updateVideoRotationLayout,

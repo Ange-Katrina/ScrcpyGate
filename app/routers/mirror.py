@@ -40,7 +40,7 @@ def _optional_bool(payload: dict, key: str) -> bool:
 @router.post("/api/devices/{device_id}/mirror/start")
 async def api_mirror_start(device_id: str, request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         audit_request(
@@ -126,7 +126,7 @@ async def api_mirror_start(device_id: str, request: Request):
 @router.put("/api/devices/{device_id}/mirror/settings")
 async def api_mirror_settings(device_id: str, request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         audit_request(
@@ -261,7 +261,7 @@ async def api_mirror_stop(device_id: str, request: Request):
 async def api_mirror_stop_self(device_id: str, request: Request):
     """Stop only the authenticated user's viewer connection."""
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.device_denied"))
@@ -292,7 +292,7 @@ async def api_mirror_stop_self(device_id: str, request: Request):
 @router.post("/api/devices/{device_id}/mirror/idle-stop")
 async def api_mirror_idle_stop(device_id: str, request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         audit_request(
@@ -330,7 +330,7 @@ async def api_mirror_idle_stop(device_id: str, request: Request):
 @router.post("/api/devices/{device_id}/control/acquire")
 async def api_control_acquire(device_id: str, request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "control"):
         audit_request(
@@ -375,7 +375,7 @@ async def api_control_acquire(device_id: str, request: Request):
 async def api_control_takeover(device_id: str, request: Request):
     """Explicitly replace the current controller after a user confirmation."""
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "control"):
         audit_request(
@@ -417,7 +417,7 @@ async def api_control_takeover(device_id: str, request: Request):
 @router.post("/api/devices/{device_id}/control/release")
 async def api_control_release(device_id: str, request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     real_device_id = await asyncio.to_thread(resolve_device_or_404, device_id)
     # 与其它控制入口一致：对设备没有任何权限的人不该够到这条路（也顺带不再用
     # 404/200 区分「设备是否存在」）。这里要求的是「可观看」而不是「可控制」：

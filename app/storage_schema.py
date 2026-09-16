@@ -195,7 +195,8 @@ USERS_COLUMNS = """
             expires_at INTEGER NULL,
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
             last_login_at INTEGER NULL,
-            last_login_ip TEXT NULL
+            last_login_ip TEXT NULL,
+            alas_visible INTEGER NOT NULL DEFAULT 1 CHECK(alas_visible IN (0, 1))
 """
 
 
@@ -446,7 +447,8 @@ SESSIONS_COLUMNS = """
             absolute_expires_at INTEGER NOT NULL,
             last_seen_at INTEGER,
             client_ip TEXT,
-            user_agent TEXT
+            user_agent TEXT,
+            device_id TEXT
 """
 
 
@@ -499,10 +501,15 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
         conn.execute("ALTER TABLE users ADD COLUMN last_login_ip TEXT NULL")
     if "enabled" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    # 每个用户的 ALAS 可见性（有些账号用不上 ALAS）：只影响界面显隐，不参与权限判定。
+    if "alas_visible" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN alas_visible INTEGER NOT NULL DEFAULT 1")
     conn.execute("UPDATE users SET enabled=1 WHERE enabled IS NULL")
+    conn.execute("UPDATE users SET alas_visible=1 WHERE alas_visible IS NULL")
 
     # 登录会话列表需要展示「最近活动 / 来源 IP / 客户端」，老库补齐这三列（可空，无默认值，
-    # 因此 ALTER 不会重写既有行，成本可忽略）。
+    # 因此 ALTER 不会重写既有行，成本可忽略）。device_id 是浏览器侧的稳定设备标识，
+    # 用来把「同一台设备的多条会话」在安全页里归并成一行。
     session_columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if session_columns:
         if "last_seen_at" not in session_columns:
@@ -511,6 +518,8 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
             conn.execute("ALTER TABLE sessions ADD COLUMN client_ip TEXT")
         if "user_agent" not in session_columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN user_agent TEXT")
+        if "device_id" not in session_columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN device_id TEXT")
 
     # 设备权限的来源：'manual'（管理员显式授予）或 'alas'（ALAS 绑定顺带授予）。
     # 历史库里的行无法追溯来源，一律按 'manual' 处理（保守：不会误删既有授权）。

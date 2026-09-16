@@ -44,7 +44,8 @@ def _apply_layout_to_switches(
     for role in workbench_features.WORKBENCH_ROLES:
         placed = set(layout[role]["level1"]) | set(layout[role]["level2"])
         for feature_id in workbench_features.DOCK_FEATURE_IDS:
-            if feature_id == workbench_features.ALAS_ANCHOR:
+            # 锚点（@alas / 旋转按钮）没有开关，也不参与「拖出去即停用」。
+            if feature_id in workbench_features.ANCHOR_FEATURE_IDS:
                 continue
             switches[role][feature_id] = feature_id in placed
     return switches

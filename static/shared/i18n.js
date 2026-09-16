@@ -259,7 +259,7 @@
     '受限设置项': 'Restricted settings', '受限设置任务': 'Restricted settings task',
     '默认值': 'Default',
     '有未保存的修改': 'Unsaved changes', '未修改': 'Unchanged',
-    '配置目录': 'Config directory', '个配置': 'configs', '个归属冲突': 'ownership conflicts', '最近同步': 'Last sync', '发现 ': 'Found ', '条配置归属冲突': 'config ownership conflicts', '工作台显示': 'Workbench visible', '工作台已隐藏': 'Workbench hidden', '请选择用户': 'Select a user', '暂无可显示的用户': 'No user data available', '暂无配置关联': 'No config associations', '账户已到期，其 ALAS 配置已自动停止运行': 'The account expired; its ALAS configs were stopped', '账户已停用，其 ALAS 配置已自动停止运行': 'The account is disabled; its ALAS configs were stopped',
+    '配置目录': 'Config directory', '个配置': 'configs', '个归属冲突': 'ownership conflicts', '最近同步': 'Last sync', '发现 ': 'Found ', '条配置归属冲突': 'config ownership conflicts', '工作台显示': 'Workbench visible', '工作台已隐藏': 'Workbench hidden', '请选择用户': 'Select a user', '暂无可显示的用户': 'No user data available', '暂无配置关联': 'No config associations', '账户已到期，请检查已关联的 ALAS 配置运行状态': 'The account has expired. Check the runtime status of its linked ALAS configs.',
     '从未': 'Never', '用户与归属': 'Users & ownership', '个可授权账户': 'authorizable accounts', '全部用户': 'All users',
     '已关联': 'Linked', '未关联': 'Not linked', '归属冲突': 'Ownership conflicts', '发现': 'Found',
     '条配置归属冲突': 'config conflicts', '筛选': 'Filter', '新增关联': 'Add binding',
@@ -394,6 +394,7 @@
     '保存策略': 'Save policy', '账户到期策略已保存': 'Expiry policy saved',
     '到期提醒提前天数必须是 0-90 的整数': 'Reminder lead must be an integer between 0 and 90',
     '账户即将到期': 'Account expiring soon', '账户已到期': 'Account expired',
+    '账户已到期：投屏与 ALAS 已停用，请联系管理员续期': 'Account expired: casting and ALAS are disabled. Ask an administrator to renew it.',
     '知道了（今天不再提醒）': 'Got it (hide today)',
     '连续投屏自动停止时长': 'Max cast duration', '单会话连续投屏超过设定时长后自动停止，0': 'Stop casts longer than this. 0 ',
     '表示不限制': 'means unlimited', '运行状态': 'Runtime status', '服务与资源健康度': 'Service & resource health',
@@ -535,6 +536,16 @@
     '「ALAS」小标题': 'The ALAS caption',
     '「画质」小标题': 'The Quality caption',
     '分辨率、帧率与码率摘要': 'Resolution, frame rate and bitrate summary',
+    // 控制权块（替代「剩余时长」）：显示谁在控制，以及实测帧率。
+    '当前持有控制权的用户（我 / 某个用户名 / 空闲）': 'Who currently holds control (me / a username / free)',
+    '我 · 控制中': 'Me · controlling', '空闲（可获取）': 'Free (can acquire)',
+    '实测帧率（客户端每秒收到的帧数）': 'Measured frame rate (frames received per second)',
+    '投屏已停止，但这次投屏记录仍在进行；重新开始投屏后会自动继续':
+      'Casting stopped, but the record session is still running; it resumes when casting restarts',
+    '同一台设备': 'Same device', '个会话': 'sessions', '踢出该设备': 'Revoke this device',
+    '设备标识': 'Device ID', '来源 IP': 'Source IPs',
+    '历史记录': 'History', '还没有历史记录。结束一次记录后，它会出现在这里。':
+      'No history yet. Records show up here after a session ends.',
     '观看端标题': 'Viewers caption', '观看人数': 'Viewer count', '剩余时长': 'Remaining time',
     'ALAS 标题': 'ALAS caption', 'ALAS 运行状态': 'ALAS state', '画质标题': 'Quality caption',
     '画质名称': 'Quality preset', '画质详情': 'Quality details',

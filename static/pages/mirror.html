@@ -59,7 +59,7 @@
           <i data-lucide="bot"></i><span class="menu-text"><b>ALAS</b><small>配置与运行</small></span>
         </a>
         <a class="menu-item" href="#" id="record-item" data-admin-only title="投屏记录" aria-haspopup="dialog" aria-controls="tl-panel">
-          <i data-lucide="activity"></i><span class="menu-text"><b>投屏记录</b><small>实时事件时间线</small></span>
+          <i data-lucide="activity"></i><span class="menu-text"><b>投屏记录</b><small id="record-item-hint">实时事件时间线</small></span><i class="rec-dot" id="record-dot" hidden aria-hidden="true"></i>
         </a>
         <a class="menu-item" href="#" title="账户" id="acct-item" aria-haspopup="dialog" aria-controls="up-panel">
           <i data-lucide="user-round"></i><span class="menu-text"><b>账户</b><small>密码与资料</small></span>
@@ -106,10 +106,12 @@
         <span class="pill-block" id="pill-viewers"><span class="pill-label" id="mirror-viewers-label">观看端</span><span class="pill-viewers" id="mirror-viewers-block"><i data-lucide="eye"></i><span id="mirror-viewers">—</span></span></span>
         <span class="pill-sep" id="cd-sep" hidden></span>
         <span class="pill-block" id="cd-block" hidden><span class="pill-label" id="cd-label">剩余</span><b class="cd-time" id="cd-time">45:00</b></span>
+        <span class="pill-sep"></span>
+        <span class="pill-block" id="pill-control"><span class="pill-label" id="mirror-control-label">控制权</span><span class="ctrl-state" id="ctrl-state"><i data-lucide="shield"></i>未加载</span></span>
         <span class="pill-sep" id="mirror-alas-sep" hidden></span>
         <span class="pill-block" id="mirror-alas-status-block" hidden><span class="pill-label" id="mirror-alas-label">ALAS</span><i class="dot off" id="mirror-alas-dot"></i><span id="mirror-alas-status">检查中</span></span>
         <span class="pill-sep"></span>
-        <span class="pill-block" id="pill-quality"><span class="pill-label" id="mirror-quality-label">画质</span><b id="mirror-quality-name">未加载</b><span class="pill-sub" id="mirror-quality-meta">—</span></span>
+        <span class="pill-block" id="pill-quality"><span class="pill-label" id="mirror-quality-label">画质</span><b id="mirror-quality-name">未加载</b><span class="pill-fps" id="mirror-fps" hidden>—</span><span class="pill-sub" id="mirror-quality-meta">—</span></span>
       </div>
 
       <section class="mirror-panel" id="mirror-panel" aria-label="设备观看画面">
@@ -241,6 +243,7 @@
           <button class="cb-btn" id="cb-home" type="button" title="主页" aria-label="主页" disabled><i data-lucide="house"></i><span>主页</span></button>
           <button class="cb-btn" id="cb-tasks" type="button" title="多任务" aria-label="多任务" disabled><i data-lucide="square-stack"></i><span>多任务</span></button>
           <button class="cb-btn cb-fullscreen" id="cb-fullscreen" type="button" title="全屏显示" aria-label="全屏显示" aria-pressed="false" disabled><i data-lucide="maximize"></i><span>全屏</span><small id="cb-fullscreen-state">窗口</small></button>
+          <button class="cb-btn cb-rotate" id="cb-rotate" type="button" title="顺时针旋转 90°" aria-label="顺时针旋转画面" disabled><i data-lucide="rotate-cw"></i><span>旋转</span><small id="cb-rotate-state">0°</small></button>
           <div class="cb-more" id="cb-more">
             <button class="cb-btn" id="cb-more-btn" type="button" title="更多" aria-label="更多" aria-haspopup="true" aria-expanded="false" aria-controls="cb-pop" disabled><i data-lucide="ellipsis"></i><span>更多</span></button>
             <div class="cb-pop" id="cb-pop" role="menu" aria-label="更多操作">
@@ -275,7 +278,9 @@
         </section>
       </div>
       <div class="vp-backdrop" id="tl-backdrop" aria-hidden="true"></div>
-    <aside class="vp-panel" id="tl-panel" role="dialog" aria-modal="true" aria-label="投屏实时记录" aria-hidden="true" inert>
+    <!-- data-i18n-skip：记录里全是原始参数（键=值、序号、码率等），一律不翻译，
+         否则未收录的词条会被 i18n 改写/丢掉，排查时看不到真实数据。 -->
+    <aside class="vp-panel" id="tl-panel" role="dialog" aria-modal="true" aria-label="投屏实时记录" aria-hidden="true" data-i18n-skip inert>
       <header class="tl-head">
         <div class="tl-title">
           <b>投屏实时记录</b>
@@ -292,20 +297,52 @@
       </div>
       <div class="tl-multi" id="tl-multi" hidden>
         <div class="tl-multi-head">
-          <b id="tl-multi-title">多端记录</b>
+          <b id="tl-multi-title">投屏记录</b>
+          <span class="tl-mode-chip" id="tl-mode-chip">未选择</span>
           <span class="tl-multi-state" id="tl-multi-state">—</span>
         </div>
+        <p class="tl-multi-role" id="tl-multi-role"></p>
         <div class="tl-multi-actions">
-          <button class="tl-btn" id="tl-stop" type="button"><i data-lucide="square"></i>停止记录并汇总</button>
+          <button class="tl-btn tl-primary" id="tl-stop" type="button"><i data-lucide="square"></i>停止记录并汇总</button>
+          <button class="tl-btn" id="tl-leave" type="button" hidden><i data-lucide="log-out"></i>退出参与</button>
+          <button class="tl-btn" id="tl-restart" type="button" hidden><i data-lucide="sliders-horizontal"></i>重新选择记录方式</button>
           <button class="tl-btn" id="tl-bundle-copy" type="button"><i data-lucide="clipboard-list"></i>复制汇总</button>
           <button class="tl-btn" id="tl-bundle-export" type="button"><i data-lucide="download"></i>导出汇总 JSON</button>
         </div>
         <ul class="tl-participants" id="tl-participants"></ul>
         <ul class="tl-bundles" id="tl-bundles"></ul>
       </div>
+      <!-- 旧记录（自动归档）：记录一结束就把这次记录收进这里，同时清空实时缓冲，
+           下一次记录从干净状态开始。卡片左侧是信息，操作在右下角。 -->
+      <div class="tl-archive" id="tl-archive">
+        <div class="tl-archive-head">
+          <b>旧记录</b>
+          <span class="tl-archive-count" id="tl-archive-count">0 条</span>
+          <button class="tl-btn tl-archive-clear" id="tl-archive-clear" type="button" hidden>全部删除</button>
+        </div>
+        <ul class="tl-archive-list" id="tl-archive-list">
+          <li class="tl-archive-empty">还没有旧记录。结束一次记录后，它会自动出现在这里。</li>
+        </ul>
+      </div>
       <ol class="tl-list" id="tl-list">
         <li class="tl-empty">还没有记录。开始投屏后，这里会按时间顺序显示连接、关键帧等待、跳号丢帧、解码器重建、延迟回跳等事件，便于排查「黑一下 / 卡住 / 自己停了」这类问题。</li>
       </ol>
+      <!-- 原始数据层：视频通道控制面 JSON 原文 / 发出的控制消息 / 每个 Raw v2 包的包头 /
+           每次接口调用 / 页面状态切换 / 环境快照。只记元数据不记像素；有独立的条数与
+           字节上限，超了丢最旧的并计数，导出里能看到丢弃条数。 -->
+      <details class="tl-raw" id="tl-raw">
+        <summary>
+          <b>原始数据</b>
+          <span class="tl-raw-stats" id="tl-raw-stats">—</span>
+          <label class="tl-auto tl-raw-toggle" title="关闭后不再采集原始数据（更省内存）">
+            <input type="checkbox" id="tl-raw-toggle" checked><span>采集</span>
+          </label>
+          <button class="tl-btn tl-raw-clear" id="tl-raw-clear" type="button">清空原始</button>
+        </summary>
+        <ol class="tl-list tl-raw-list" id="tl-raw-list">
+          <li class="tl-empty">还没有原始数据。展开并在开始投屏后，这里会逐条显示控制面 JSON 原文、发出的控制消息、Raw v2 包头、接口调用、状态切换与环境快照。</li>
+        </ol>
+      </details>
     </aside>
     <div class="vp-backdrop" id="tl-mode-backdrop" aria-hidden="true"></div>
     <div class="tl-dialog" id="tl-mode-dialog" role="dialog" aria-modal="true" aria-label="选择记录方式" aria-hidden="true" inert>
@@ -319,7 +356,35 @@
           <i data-lucide="users"></i><b>多端记录</b><small>邀请同设备的其他观看端，停止后自动汇总到本端</small>
         </button>
       </div>
+      <!-- 历史记录：和「投屏实时记录」面板里同一套旧记录卡片（单端/多端有标记）。
+           只有**卡片列表**标 data-i18n-skip（设备名/时间/条数这类原始内容不翻译），
+           标题仍可翻译。 -->
+      <section class="tl-mode-history" id="tl-mode-history" aria-label="历史记录">
+        <div class="tl-history-head">
+          <b>历史记录</b>
+          <span class="tl-history-count" id="tl-mode-history-count">0 条</span>
+        </div>
+        <ul class="tl-archive-list" id="tl-mode-history-list" data-i18n-skip>
+          <li class="tl-archive-empty">还没有历史记录。结束一次记录后，它会出现在这里。</li>
+        </ul>
+      </section>
       <button class="tl-btn tl-dialog-cancel" id="tl-mode-cancel" type="button">取消</button>
+    </div>
+    <!-- 旧记录查看器：只读打开归档内容（派生事件 + 原始数据），不改动实时记录。 -->
+    <div class="vp-backdrop" id="tl-archive-backdrop" aria-hidden="true"></div>
+    <div class="tl-dialog tl-archive-dialog" id="tl-archive-dialog" role="dialog" aria-modal="true" aria-label="查看旧记录" aria-hidden="true" data-i18n-skip inert>
+      <h3 class="tl-dialog-title" id="tl-archive-title">旧记录</h3>
+      <p class="tl-dialog-note" id="tl-archive-meta">—</p>
+      <div class="tl-archive-view-switch" role="group" aria-label="查看内容">
+        <button class="tl-btn active" id="tl-archive-view-events" type="button" aria-pressed="true">事件</button>
+        <button class="tl-btn" id="tl-archive-view-raw" type="button" aria-pressed="false">原始数据</button>
+      </div>
+      <ol class="tl-list tl-archive-view-list" id="tl-archive-view-list"></ol>
+      <div class="tl-dialog-actions tl-dialog-actions-row">
+        <button class="tl-btn" id="tl-archive-copy" type="button">复制</button>
+        <button class="tl-btn" id="tl-archive-export" type="button">导出 JSON</button>
+        <button class="tl-btn tl-primary" id="tl-archive-close" type="button">关闭</button>
+      </div>
     </div>
     <div class="vp-backdrop" id="tl-invite-backdrop" aria-hidden="true"></div>
     <div class="tl-dialog" id="tl-invite-dialog" role="alertdialog" aria-modal="true" aria-label="参与投屏记录" aria-hidden="true" inert>
@@ -330,6 +395,15 @@
         <button class="tl-btn tl-primary" id="tl-invite-accept" type="button">参与记录</button>
         <button class="tl-btn" id="tl-invite-decline" type="button">不参与</button>
       </div>
+    </div>
+    <!-- 记录中悬浮窗：关掉右侧面板后仍然能看到「正在记录 + 条数 + 错误数」，点一下回到面板。 -->
+    <div class="tl-float" id="tl-float" data-i18n-skip hidden>
+      <button class="tl-float-main" id="tl-float-main" type="button" aria-label="打开投屏记录面板">
+        <span class="tl-float-dot" aria-hidden="true"></span>
+        <b id="tl-float-title">投屏记录中</b>
+        <span class="tl-float-meta" id="tl-float-meta">0 条 · 0 错误</span>
+      </button>
+      <button class="tl-float-stop" id="tl-float-stop" type="button" title="停止记录" aria-label="停止记录"><i data-lucide="square"></i></button>
     </div>
     <div class="vp-backdrop" id="vp-backdrop" aria-hidden="true"></div>
       <aside class="vp-panel" id="vp-panel" role="dialog" aria-modal="true" aria-label="画面设置" aria-hidden="true" inert>

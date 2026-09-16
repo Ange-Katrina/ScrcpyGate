@@ -82,6 +82,7 @@ ACCOUNT_EXPIRING_WINDOW_DAYS_MAX = 365
 MAX_ACCOUNT_EXPIRES_AT = 253402300799  # 9999-12-31T23:59:59Z
 EXPIRATION_UNSET = object()
 ENABLED_UNSET = object()
+ALAS_VISIBLE_UNSET = object()
 ALAS_DEVICE_UNCHANGED = object()
 SESSION_IDLE_SECONDS = 12 * 60 * 60
 SESSION_ABSOLUTE_SECONDS = 7 * 24 * 60 * 60
@@ -2274,7 +2275,8 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
         users = [
             dict(row)
             for row in conn.execute(
-                "SELECT username,role,created_at,must_change_password,expires_at,enabled,last_login_at,last_login_ip FROM users ORDER BY username"
+                "SELECT username,role,created_at,must_change_password,expires_at,enabled,alas_visible,"
+                "last_login_at,last_login_ip FROM users ORDER BY username"
             )
         ]
         current = now_ts()
@@ -2284,6 +2286,7 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
         watch_page_size, _watch_page_offset = _bounded_watch_page(watch_history_limit, 0)
         for user in users:
             user["enabled"] = bool(user.get("enabled", 1))
+            user["alas_visible"] = bool(user.get("alas_visible", 1))
             user["video_mode"] = "normal"
             user.update(storage_users.user_expiration_payload(user, now=current, expiring_window_seconds=expiring_window))
             if include_watch_data:
@@ -2387,6 +2390,7 @@ def upsert_user(
     expires_at=EXPIRATION_UNSET,
     must_change_password: bool | None = None,
     enabled=ENABLED_UNSET,
+    alas_visible=ALAS_VISIBLE_UNSET,
 ) -> None:
     _ = video_mode  # 兼容旧调用；统一画质不再按用户保存模式。
     username = (username or "").strip()
@@ -2409,7 +2413,7 @@ def upsert_user(
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         current = conn.execute(
-            "SELECT username,role,expires_at,must_change_password,enabled FROM users WHERE username=?", (username,)
+            "SELECT username,role,expires_at,must_change_password,enabled,alas_visible FROM users WHERE username=?", (username,)
         ).fetchone()
         final_must_change_password = (
             bool(current["must_change_password"])
@@ -2430,6 +2434,14 @@ def upsert_user(
             if enabled is ENABLED_UNSET
             else bool(enabled)
         )
+        # 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
+        normalized_alas_visible = (
+            bool(current["alas_visible"])
+            if alas_visible is ALAS_VISIBLE_UNSET and current
+            else True
+            if alas_visible is ALAS_VISIBLE_UNSET
+            else bool(alas_visible)
+        )
         if current:
             if current and current["role"] == "admin" and role != "admin" and admin_count(conn) <= 1:
                 raise ValueError("last_admin_required")
@@ -2439,14 +2451,30 @@ def upsert_user(
             if password:
                 conn.execute(
                     "UPDATE users SET password_hash=?, role=?, video_mode='normal', expires_at=?, "
-                    "must_change_password=?, enabled=? WHERE username=?",
-                    (hash_password(password), role, normalized_expires_at, int(final_must_change_password), int(normalized_enabled), username),
+                    "must_change_password=?, enabled=?, alas_visible=? WHERE username=?",
+                    (
+                        hash_password(password),
+                        role,
+                        normalized_expires_at,
+                        int(final_must_change_password),
+                        int(normalized_enabled),
+                        int(normalized_alas_visible),
+                        username,
+                    ),
                 )
                 conn.execute("DELETE FROM sessions WHERE username=?", (username,))
             else:
                 conn.execute(
-                    "UPDATE users SET role=?, video_mode='normal', expires_at=?, must_change_password=?, enabled=? WHERE username=?",
-                    (role, normalized_expires_at, int(final_must_change_password), int(normalized_enabled), username),
+                    "UPDATE users SET role=?, video_mode='normal', expires_at=?, must_change_password=?, enabled=?, "
+                    "alas_visible=? WHERE username=?",
+                    (
+                        role,
+                        normalized_expires_at,
+                        int(final_must_change_password),
+                        int(normalized_enabled),
+                        int(normalized_alas_visible),
+                        username,
+                    ),
                 )
             if was_expired or will_be_expired or not normalized_enabled:
                 _revoke_user_access(conn, username)
@@ -2464,7 +2492,8 @@ def upsert_user(
             if role == "admin" and normalized_expires_at is None and not normalized_enabled and available_permanent_admin_count(conn) < 1:
                 raise ValueError("last_permanent_admin_required")
             conn.execute(
-                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible) "
+                "VALUES(?,?,?,?,?,?,?,?)",
                 (
                     username,
                     hash_password(password),
@@ -2473,13 +2502,19 @@ def upsert_user(
                     int(final_must_change_password),
                     normalized_expires_at,
                     int(normalized_enabled),
+                    int(normalized_alas_visible),
                 ),
             )
         conn.commit()
 
 
 def revoke_expired_access(now: int | None = None) -> set[str]:
-    """Revoke durable access for every expired account without deleting users."""
+    """回收**停用**账户的会话，并返回所有不可用账户（含仅到期）供上层收尾。
+
+    到期不等于封号：账户保留登录态与全部授权（续期后原样恢复），投屏与 ALAS 由
+    功能闸门按 ``user_is_active`` 拒绝。返回值仍包含到期账户，调用方据此停止其
+    ALAS 配置、断开其长连接并记账；只有 ``enabled=0`` 才会删会话。
+    """
     current = now_ts() if now is None else int(now)
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -2490,11 +2525,7 @@ def revoke_expired_access(now: int | None = None) -> set[str]:
                 (current,),
             ).fetchall()
         }
-        conn.execute(
-            "DELETE FROM sessions WHERE username IN "
-            "(SELECT username FROM users WHERE enabled=0 OR (expires_at IS NOT NULL AND expires_at<=?))",
-            (current,),
-        )
+        conn.execute("DELETE FROM sessions WHERE username IN (SELECT username FROM users WHERE enabled=0)")
         conn.execute(
             "DELETE FROM control_locks WHERE username IN "
             "(SELECT username FROM users WHERE enabled=0 OR (expires_at IS NOT NULL AND expires_at<=?))",
@@ -3308,13 +3339,14 @@ def create_session(
     *,
     client_ip: str | None = None,
     user_agent: str | None = None,
+    device_id: str | None = None,
 ) -> dict:
     """Create a session with a bounded idle lifetime and a fixed absolute cap.
 
-    ``client_ip`` / ``user_agent`` are recorded for the session list only; they are
-    truncated so a hostile header cannot bloat the row.  When ``MAX_SESSIONS_PER_USER``
-    is set, the oldest sessions beyond the cap are dropped in the same transaction
-    (login-time only, no per-request cost).
+    ``client_ip`` / ``user_agent`` / ``device_id`` are recorded for the session list only;
+    they are truncated so a hostile header cannot bloat the row.  When
+    ``MAX_SESSIONS_PER_USER`` is set, the oldest sessions beyond the cap are dropped in
+    the same transaction (login-time only, no per-request cost).
     """
     try:
         requested_idle_seconds = int(ttl_seconds)
@@ -3329,16 +3361,17 @@ def create_session(
     expires_at = min(idle_expires_at, absolute_expires_at)
     recorded_ip = str(client_ip or "").strip()[:SESSION_CLIENT_IP_MAX_LENGTH] or None
     recorded_agent = str(user_agent or "").strip()[:SESSION_USER_AGENT_MAX_LENGTH] or None
+    recorded_device = str(device_id or "").strip()[:64] or None
     with db_connect() as conn:
         cursor = conn.execute(
             """
             INSERT INTO sessions(
                 sid,username,csrf_token,created_at,expires_at,idle_expires_at,absolute_expires_at,
-                last_seen_at,client_ip,user_agent
+                last_seen_at,client_ip,user_agent,device_id
             )
-            SELECT ?,?,?,?,?,?,?,?,?,?
+            SELECT ?,?,?,?,?,?,?,?,?,?,?
             FROM users
-            WHERE username=? AND enabled=1 AND (expires_at IS NULL OR expires_at>?)
+            WHERE username=? AND enabled=1
             """,
             (
                 session_token_hash(sid),
@@ -3351,12 +3384,13 @@ def create_session(
                 ts,
                 recorded_ip,
                 recorded_agent,
+                recorded_device,
                 username,
-                ts,
             ),
         )
         if cursor.rowcount != 1:
             conn.rollback()
+            # 只有「账号不存在」或管理员显式停用会走到这里；到期账户允许登录。
             raise ValueError("account_expired_or_missing")
         if MAX_SESSIONS_PER_USER:
             # 用 rowid 而不是 sid 作为次序兜底：同一秒内登录的多个会话 created_at 相同，
@@ -3399,7 +3433,7 @@ def list_login_sessions(username: str | None = None, current_sid: str | None = N
         rows = conn.execute(
             f"""
             SELECT s.sid, s.username, s.created_at, s.last_seen_at, s.expires_at,
-                   s.idle_expires_at, s.absolute_expires_at, s.client_ip, s.user_agent,
+                   s.idle_expires_at, s.absolute_expires_at, s.client_ip, s.user_agent, s.device_id,
                    u.role AS account_role, u.enabled AS account_enabled
             FROM sessions s
             LEFT JOIN users u ON u.username=s.username
@@ -3422,6 +3456,8 @@ def list_login_sessions(username: str | None = None, current_sid: str | None = N
             "absolute_expires_at": int(row["absolute_expires_at"] or 0),
             "client_ip": str(row["client_ip"] or ""),
             "user_agent": str(row["user_agent"] or ""),
+            # 浏览器侧稳定设备标识：安全页据此把同一台设备的多条会话归并成一行。
+            "device_id": str(row["device_id"] or ""),
             "current": bool(current_hash) and str(row["sid"]) == current_hash,
         }
         for row in rows
@@ -3479,9 +3515,10 @@ def get_session(sid: str | None) -> dict | None:
             conn.commit()
             return None
         account_missing = row["account_username"] is None
-        account_expired = row["account_expires_at"] is not None and int(row["account_expires_at"]) <= current
         account_disabled = "account_enabled" in row.keys() and not bool(row["account_enabled"])
-        if account_missing or account_expired or account_disabled:
+        # 到期不再使会话失效：账户保持登录态（能看到期提示、等待续期），投屏与 ALAS
+        # 由各自的 user_is_active 闸门拒绝。只有停用/被删才回收会话。
+        if account_missing or account_disabled:
             _revoke_user_access(conn, row["username"])
             conn.commit()
             return None
@@ -3554,10 +3591,10 @@ def renew_session(sid: str | None) -> dict | None:
         absolute_expires_at = int(row["absolute_expires_at"] or row["created_at"] + SESSION_ABSOLUTE_SECONDS)
         effective_expires_at = min(int(row["expires_at"]), idle_expires_at, absolute_expires_at)
         account_missing = row["account_username"] is None
-        account_expired = row["account_expires_at"] is not None and int(row["account_expires_at"]) <= current
         account_disabled = "account_enabled" in row.keys() and not bool(row["account_enabled"])
-        if effective_expires_at <= current or account_missing or account_expired or account_disabled:
-            if account_missing or account_expired or account_disabled:
+        # 与 get_session 同一套语义：到期账户的会话继续续期（不封号），停用/被删则回收。
+        if effective_expires_at <= current or account_missing or account_disabled:
+            if account_missing or account_disabled:
                 _revoke_user_access(conn, row["username"])
             conn.execute("DELETE FROM sessions WHERE sid=?", (sid_hash,))
             conn.commit()
@@ -3612,7 +3649,9 @@ def authenticate(username: str, password: str) -> dict | None:
         return None
     if not verify_password(password, user["password_hash"]):
         return None
-    if not user_is_active(user):
+    # 到期账户仍可登录（付费服务可能续期/接入付款），投屏与 ALAS 由各自闸门拦截；
+    # 只有管理员显式停用才不允许登录。
+    if not user_login_allowed(user):
         return None
     if password_hash_needs_upgrade(user["password_hash"]):
         with db_connect() as conn:
@@ -3871,6 +3910,15 @@ def normalize_expires_at(value) -> int | None:
 def user_is_active(user, now: int | None = None) -> bool:
     current = now_ts() if now is None else int(now)
     return storage_users.user_is_active(user, now=current)
+
+
+def user_login_allowed(user) -> bool:
+    """到期不封号：只有管理员显式「停用」才拒绝登录。
+
+    投屏/ALAS 的闸门仍然只看 :func:`user_is_active`，所以到期账户能登录、
+    能看自己的页面和到期提示，但用不了投屏（含仅观看）和 ALAS。
+    """
+    return storage_users.user_login_allowed(user)
 
 
 def account_expiring_window_seconds(conn: sqlite3.Connection | None = None) -> int:

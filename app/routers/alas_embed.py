@@ -59,7 +59,7 @@ async def alas_embed_page(request: Request):
     redirect = redirect_to_login(request)
     if redirect:
         return redirect
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     requested = str(request.query_params.get("config") or "").strip()
     device_id = await asyncio.to_thread(alas_device_for_user, user, request.query_params.get("device_id"))
     binding = await asyncio.to_thread(
@@ -325,7 +325,7 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     if gateway_context:
         user, gateway_record = gateway_context
     else:
-        user = security.require_user(request)
+        user = security.require_active_user(request)
         gateway_record = None
     requested_device_ref = request.query_params.get("device_id")
     if gateway_record and gateway_record.device_id:

@@ -36,6 +36,8 @@
     var onOpenDevice = options.onOpenDevice || function () {};
     var onAddDevice = options.onAddDevice || function () {};
     var onNotice = options.onNotice || function () {};
+    // 卡片实际宽度变化时回调（页面用它提示「滑块受高度/宽度限制」）。
+    var onTileWidth = options.onTileWidth || null;
     var maxLive = Number(options.maxLive) > 0 ? Math.floor(Number(options.maxLive)) : DEFAULT_MAX_LIVE;
     var slotCount = Number(options.slotCount) > 0 ? Math.floor(Number(options.slotCount)) : DEFAULT_SLOT_COUNT;
     var thumbnailFps = 1;
@@ -49,7 +51,10 @@
     var order = [];
     var slots = [];
     var controls = null;
-    var batchToken = 0;
+    var TILE_CHROME_HEIGHT = 62;   // 卡片头 + 操作条 + 间距（不随宽度变）
+    var lastTileWidth = 0;          // 最近一次实际生效的卡片宽度
+    var lastTileRequestedWidth = 0; // 滑块请求的宽度（可能被高度预算压小）
+    var batchToken = 0;             // 批量操作令牌（一键全部投屏/停止/刷新）
 
     /* ---------------- 基础工具 ---------------- */
 
@@ -325,34 +330,124 @@
       return isFinite(px) && px > 0 ? px : 300;
     }
 
-    function stageHeightBudget() {
-      var viewport = Number(global.innerHeight) || 900;
-      return Math.max(220, viewport - 240);
+    /* 卡片除画面区之外的固定高度（卡片头 + 操作条 + 间距/内边距/边框）。
+       手机端按钮是 44px，这个值会明显大于桌面，所以按真实 DOM 量。 */
+    function tileChromeHeight() {
+      var tile = tileList()[0];
+      if (!tile || !tile.element) {
+        var slot = null;
+        for (var i = 0; i < slots.length; i++) { if (slots[i] && slots[i].used) { slot = slots[i]; break; } }
+        tile = slot;
+      }
+      if (!tile || !tile.element) return TILE_CHROME_HEIGHT;
+      var el = tile.element;
+      var head = el.querySelector('.mg-head');
+      var actions = el.querySelector('.mg-actions');
+      var total = 0;
+      if (head) total += head.getBoundingClientRect().height;
+      if (actions) total += actions.getBoundingClientRect().height;
+      var style = global.getComputedStyle ? global.getComputedStyle(el) : null;
+      if (style) {
+        var gap = parseFloat(style.rowGap || style.gap || '0') || 0;
+        total += gap * 2;
+        total += (parseFloat(style.paddingTop || '0') || 0) + (parseFloat(style.paddingBottom || '0') || 0);
+        total += (parseFloat(style.borderTopWidth || '0') || 0) * 2;
+      }
+      return total > 24 ? total : TILE_CHROME_HEIGHT;
     }
 
-    function applyElementWidth(element, aspect) {
-      if (!element) return;
+    var budgetCache = null;
+    var budgetCacheAt = 0;
+    /* 可用高度预算：按**宫格可视区**高度减去卡片固定开销，保证一张卡完整可见。
+       同一次渲染里所有格子必须用同一个预算（否则先渲染的格子会按旧布局算成别的宽度），
+       所以这里做 250ms 缓存，resize/syncTileWidths 时强制重算。 */
+    function stageHeightBudget(force) {
+      var now = Date.now();
+      if (!force && budgetCache !== null && now - budgetCacheAt < 250) return budgetCache;
+      var measured = host && host.clientHeight ? Number(host.clientHeight) : 0;
+      var viewport = Number(global.innerHeight) || 900;
+      var available = measured > 0 ? measured : Math.max(220, viewport - 240);
+      var budget = Math.max(60, available - tileChromeHeight());
+      budgetCache = budget;
+      budgetCacheAt = now;
+      return budget;
+    }
+
+    function applyElementWidth(element, aspect, budget) {
+      if (!element) return 0;
       var requested = tileMinWidth();
+      var usable = isFinite(budget) && budget > 0 ? budget : stageHeightBudget();
       var width = requested;
       if (isFinite(aspect) && aspect > 0) {
-        width = Math.min(requested, Math.round(stageHeightBudget() * aspect));
+        // aspect 是「宽/高」：可用高度 × 比例 = 该比例下不超高时的最大宽度。
+        width = Math.min(requested, Math.round(usable * aspect));
       }
-      element.style.setProperty('--mg-tile-w', Math.max(120, width) + 'px');
+      width = Math.max(120, width);
+      element.style.setProperty('--mg-tile-w', width + 'px');
+      // 横屏手机这类「可视区只有一两百像素高」的场景：宽度已经压到下限 120px，
+      // 单卡仍然放不下（120px 竖屏画面高约 213px）。再给画面区一个高度上限，
+      // 保证一张卡完整可见（画面按比例缩进框内，格子里不会出现半张卡）。
+      element.style.setProperty('--mg-stage-max-h', usable + 'px');
+      lastTileWidth = width;
+      lastTileRequestedWidth = requested;
+      return width;
+    }
+
+    /* 当前实际生效的卡片宽度与滑块请求值：页面据此提示「为什么不能再大」。 */
+    function tileWidthInfo() {
+      return { effective: lastTileWidth, requested: lastTileRequestedWidth, budget: stageHeightBudget() };
+    }
+
+    /* 布局稳定后再同步一次宽度：切到宫格/刚渲染时 #mg-grid 的高度还没定下来，
+       那一刻算出的预算是错的（实测手机上会算成下限 120px）。 */
+    var widthSyncTimer = 0;
+    var widthSyncRaf = 0;
+    function scheduleWidthSync() {
+      var raf = global.requestAnimationFrame ? global.requestAnimationFrame.bind(global) : function (fn) { return global.setTimeout(fn, 16); };
+      if (widthSyncRaf) return;
+      widthSyncRaf = raf(function () {
+        widthSyncRaf = 0;
+        syncTileWidths();
+        if (widthSyncTimer) global.clearTimeout(widthSyncTimer);
+        widthSyncTimer = global.setTimeout(function () { widthSyncTimer = 0; syncTileWidths(); }, 180);
+      });
     }
 
     function syncTileWidth(tile) {
       if (!tile || !tile.element) return;
       var aspect = parseFloat(tile.element.style.getPropertyValue('--mg-stage-aspect') || '0');
-      applyElementWidth(tile.element, aspect);
+      applyElementWidth(tile.element, aspect, stageHeightBudget());
     }
 
     function syncTileWidths() {
-      tileList().forEach(syncTileWidth);
+      // 先强制重算预算：同一次同步里所有格子用同一个值。
+      var budget = stageHeightBudget(true);
+      tileList().forEach(function (tile) { syncTileWidth(tile); });
       slots.forEach(function (slot) {
-        if (slot && slot.used) applyElementWidth(slot.element, PORTRAIT_ASPECT_CSS);
+        if (slot && slot.used) applyElementWidth(slot.element, PORTRAIT_ASPECT_CSS, budget);
       });
+      if (typeof onTileWidth === 'function') {
+        try { onTileWidth(tileWidthInfo()); } catch (error) {}
+      }
     }
-    if (global.addEventListener) global.addEventListener('resize', function () { syncTileWidths(); });
+    if (global.addEventListener) global.addEventListener('resize', function () { syncTileWidths(); scheduleWidthSync(); });
+    // 宫格可视区大小变化（切视图、工具条换行、手机转屏）时重算一次。
+    if (global.ResizeObserver) {
+      try {
+        var hostObserver = new global.ResizeObserver(function () { scheduleWidthSync(); });
+        // host 在 mount() 里才赋值，这里用闭包读它。
+        var observeHost = function () {
+          if (!host) return false;
+          hostObserver.observe(host);
+          return true;
+        };
+        if (!observeHost()) {
+          var observeTimer = global.setInterval(function () {
+            if (observeHost()) global.clearInterval(observeTimer);
+          }, 200);
+        }
+      } catch (error) {}
+    }
 
     function setState(tile, state, message) {
       tile.state = state;
@@ -467,6 +562,11 @@
       return true;
     }
 
+    /* ---------------- 多端投屏记录：宫格**不参与** ----------------
+       用户要求：宫格视图不参与投屏记录（宫格一路多端，混进单画面的时间线只会互相干扰）。
+       做法是让服务端认得出这是宫格连接（URL 带 view=grid，见 openSocket），
+       邀请/接入对齐都跳过它；这里也不再把宫格事件喂进记录时间线。 */
+
     function feedPacket(tile, data) {
       // 停止/错误后仍可能有在途帧到达，此时不要再重建播放器。
       if (tile.state === 'idle' || tile.state === 'error') return;
@@ -488,7 +588,9 @@
         // 中间缺失的 P 帧会让解码器输出绿屏。检测到跳号就丢弃到下一个关键帧，
         // 期间保留上一帧画面（服务端因队列丢帧时也会走到这里，语义一致）。
         var expectedSequence = (tile.lastFedSequence + 1) >>> 0;
-        if (tile.lastFedSequenceSeen && packet.sequence !== expectedSequence) tile.awaitingKeyframe = true;
+        if (tile.lastFedSequenceSeen && packet.sequence !== expectedSequence) {
+          tile.awaitingKeyframe = true;
+        }
       }
       if (tile.awaitingKeyframe && !packet.keyframe) return;
       if (!ensurePlayer(tile)) return;
@@ -567,8 +669,14 @@
 
     function openSocket(tile) {
       setState(tile, 'connecting');
-      var query = tile.viewerToken ? '?viewer_token=' + encodeURIComponent(tile.viewerToken) : '';
-      var url = wsBase() + '/ws/devices/' + encodeURIComponent(tile.deviceId) + '/video' + query;
+      var parts = [];
+      if (tile.viewerToken) parts.push('viewer_token=' + encodeURIComponent(tile.viewerToken));
+      // view=grid：服务端据此知道这是宫格观看端，投屏记录不会邀请它（宫格不参与记录）。
+      parts.push('view=grid');
+      if (global.ScrcpyGateV2 && typeof global.ScrcpyGateV2.browserDeviceId === 'function') {
+        parts.push('browser_id=' + encodeURIComponent(global.ScrcpyGateV2.browserDeviceId()));
+      }
+      var url = wsBase() + '/ws/devices/' + encodeURIComponent(tile.deviceId) + '/video?' + parts.join('&');
       var socket;
       try { socket = new global.WebSocket(url); } catch (error) {
         setState(tile, 'error', tr('无法建立视频连接'));
@@ -593,6 +701,7 @@
             resetStreamState(tile);
             setState(tile, 'connecting');
           }
+          // 多端投屏记录的邀请/上传请求等控制面通知在宫格里**一律忽略**（宫格不参与记录）。
           return;
         }
         feedPacket(tile, event.data);
@@ -639,6 +748,7 @@
       order = [];
       slots = [];
       syncToolbar();
+      scheduleWidthSync();
     }
 
     function render(devices) {
@@ -802,6 +912,7 @@
       setThumbnailFps: setThumbnailFps,
       setOrientation: setOrientation,
       syncTileWidths: syncTileWidths,
+      tileWidth: tileWidthInfo,
       destroy: destroy,
       liveCount: liveCount,
       isLive: function (deviceId) { return isLive(tiles[deviceId]); },

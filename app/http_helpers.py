@@ -194,6 +194,9 @@ def user_payload(user: dict) -> dict:
         "last_login_at": user.get("last_login_at"),
         "last_login_ip": user.get("last_login_ip") or "",
         "enabled": bool(user.get("enabled", 1)),
+        # 每个账号各自的 ALAS 可见性（有些账号用不上 ALAS，由管理员在用户列表里设置）。
+        # 只影响界面显隐，不参与任何权限判定。
+        "alas_visible": bool(user.get("alas_visible", 1)),
     }
     payload.update(storage.user_expiration_payload(user))
     return payload

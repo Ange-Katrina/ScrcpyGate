@@ -40,6 +40,9 @@ ROLE_LABELS: dict[str, str] = {
 
 # ALAS 入口只作为一级菜单里的位置锚点参与排序，没有独立开关。
 ALAS_ANCHOR = "@alas"
+# 旋转按钮：新加的功能 id。老布局里没有它时会被补回默认位置（见 normalize_layout），
+# 否则升级后用户会觉得「少了一个按钮」；仍然可以用它自己的开关真正关掉。
+ROTATE_FEATURE_ID = "rotate"
 
 WORKBENCH_FEATURE_GROUPS: tuple[dict[str, str], ...] = (
     {
@@ -95,15 +98,15 @@ WORKBENCH_TOP_STATUS_FEATURES: tuple[dict[str, object], ...] = (
         ],
     },
     {
-        "id": "status_countdown",
+        "id": "status_control",
         "group": "topbar",
         "parent": "status",
-        "label": "剩余时长",
-        "icon": "hourglass",
-        "hint": "本次投屏的剩余时长（仅在有上限时出现）",
+        "label": "控制权",
+        "icon": "shield",
+        "hint": "当前持有控制权的用户（我 / 某个用户名 / 空闲）",
         "preview": [
-            {"text": "剩余", "kind": "label"},
-            {"text": "45:00", "kind": "mono"},
+            {"text": "控制权", "kind": "label"},
+            {"text": "我 · 控制中", "kind": "state"},
         ],
     },
     {
@@ -209,6 +212,18 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "small_sample": "窗口",
     },
     {
+        "id": "rotate",
+        "group": "dock",
+        "label": "旋转画面",
+        "hint": "位置锚点，始终显示（可调整顺序）：每次点击顺时针 90°，叠加在自动摆正之上",
+        "icon": "rotate-cw",
+        "dock_group": "view",
+        "levels": [1, 2],
+        "level": 1,
+        "anchor": True,
+        "small_sample": "0°",
+    },
+    {
         "id": "shot",
         "group": "dock",
         "label": "截图",
@@ -262,6 +277,10 @@ FEATURE_IDS: tuple[str, ...] = tuple(str(item["id"]) for item in WORKBENCH_FEATU
 # 开关只覆盖真实功能（锚点没有开关）。
 SWITCH_FEATURE_IDS: tuple[str, ...] = tuple(
     str(item["id"]) for item in WORKBENCH_FEATURES if not item.get("anchor")
+)
+# 锚点：只参与排序、没有开关，且读取布局时缺了就补回默认位置（老布局不能把它弄丢）。
+ANCHOR_FEATURE_IDS: tuple[str, ...] = tuple(
+    str(item["id"]) for item in WORKBENCH_FEATURES if item.get("anchor")
 )
 DOCK_FEATURE_IDS: tuple[str, ...] = tuple(
     str(item["id"]) for item in WORKBENCH_DOCK_FEATURES
@@ -452,9 +471,20 @@ def normalize_layout(raw: object, *, strict: bool = False) -> dict[str, dict[str
         level2 = _normalize_level2(section.get("level2"), strict=strict)
         # 只允许出现在一个层级：一级优先（前端从一级拖到二级时会先移除）。
         level2 = [item for item in level2 if item not in level1]
-        if ALAS_ANCHOR not in level1:
-            default_index = default_layout()[role]["level1"].index(ALAS_ANCHOR)
-            level1.insert(min(len(level1), default_index), ALAS_ANCHOR)
+        # 锚点（@alas / rotate）必须恰好在一级出现一次：老布局里没有它时按默认位置补回，
+        # 否则升级后按钮会凭空消失。位置按「默认顺序里它后面第一个仍然存在的按钮」定，
+        # 而不是绝对下标 —— 旧布局少了别的按钮时，绝对下标会把它插到末尾去。
+        defaults = default_layout()[role]["level1"]
+        for anchor in ANCHOR_FEATURE_IDS:
+            if anchor in level1 or anchor in level2:
+                continue
+            if anchor not in defaults:
+                continue
+            following = [item for item in defaults[defaults.index(anchor) + 1:] if item in level1]
+            if following:
+                level1.insert(level1.index(following[0]), anchor)
+            else:
+                level1.append(anchor)
         layout[role] = {"level1": level1, "level2": level2}
     return layout
 
@@ -515,10 +545,12 @@ def snapshot_payload(stored_switches: object, stored_layout: object = None) -> d
 
 __all__ = [
     "ALAS_ANCHOR",
+    "ANCHOR_FEATURE_IDS",
     "DOCK_FEATURE_IDS",
     "FEATURE_IDS",
     "LAYOUT_KEY",
     "ROLE_LABELS",
+    "ROTATE_FEATURE_ID",
     "SETTING_KEY",
     "SWITCH_FEATURE_IDS",
     "WORKBENCH_DISPLAY_FEATURES",

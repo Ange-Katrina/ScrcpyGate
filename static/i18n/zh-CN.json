@@ -1527,6 +1527,7 @@
       "invalid_device": "设备无效",
       "device_view_permission_required": "绑定 ALAS 前必须先授予该用户设备观看权限",
       "account_expired_or_missing": "账户已到期或不存在",
+      "account_expired": "账户已到期：投屏与 ALAS 已停用，请联系管理员续期",
       "password_min_length": "密码至少需要 {min} 个字符",
       "password_too_common": "密码过于常见",
       "password_matches_username": "密码不能与用户名相同",

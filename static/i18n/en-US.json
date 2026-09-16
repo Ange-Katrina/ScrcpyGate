@@ -1527,6 +1527,7 @@
       "invalid_device": "Invalid device",
       "device_view_permission_required": "Device view permission is required before binding ALAS",
       "account_expired_or_missing": "Account expired or does not exist",
+      "account_expired": "The account has expired: casting and ALAS are disabled. Ask an administrator to renew it.",
       "password_min_length": "Password must contain at least {min} characters",
       "password_too_common": "Password is too common",
       "password_matches_username": "Password cannot match the username",

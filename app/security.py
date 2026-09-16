@@ -423,6 +423,25 @@ def require_admin(request: Request) -> dict:
     return user
 
 
+def require_active_user(request: Request) -> dict:
+    """需要「未到期且未停用」的账户（投屏、ALAS 这类付费功能）。
+
+    到期账户仍然可以登录并浏览自己的页面（便于续期/未来付款），但投屏（含仅观看）
+    与 ALAS 一律拒绝。这里给出统一且可翻译的拒绝原因，避免用户只看到
+    「无权访问此设备」而不知道是账户到期。
+    """
+    user = require_user(request)
+    if not storage.user_is_active(user):
+        queue_audit_event(
+            request,
+            action="authentication",
+            reason="account_expired",
+            username=str(user.get("username") or ""),
+        )
+        raise HTTPException(status_code=403, detail=i18n.translate("server.error.account_expired"))
+    return user
+
+
 def csrf_valid(request: Request, provided: str) -> bool:
     sess = get_current_session(request)
     expected = str(sess.get("csrf_token", "")) if sess else ""

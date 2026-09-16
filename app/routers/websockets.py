@@ -38,6 +38,12 @@ async def ws_video(websocket: WebSocket, device_id: str):
         await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
         return
+    # 到期账户仍可登录浏览，但投屏（含仅观看）必须拒绝；给明确的关码原因，
+    # 前端据此「不再重连」而不是当成网络抖动反复重试。
+    if not await asyncio.to_thread(storage.user_is_active, user):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="account_expired", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403, reason="account expired")
+        return
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)
         await websocket.close(code=4403)
@@ -82,6 +88,11 @@ async def ws_control(websocket: WebSocket, device_id: str):
     if not real_device_id:
         await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
+        return
+    # 与视频通道同一套语义：到期账户不能控制设备（即使它曾经有控制权限）。
+    if not await asyncio.to_thread(storage.user_is_active, user):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="account_expired", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403, reason="account expired")
         return
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "control"):
         await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)

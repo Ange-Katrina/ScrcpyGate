@@ -48,6 +48,12 @@
           name: u.name || u.displayName || u.username || '—',
           role: u.role || 'user',
           enabled: u.enabled !== false,
+          // 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
+          // 服务端可能是 0/1 或字符串，统一折算（0 表示隐藏）。
+          alasVisible: !(u.alasVisible === false || u.alas_visible === false
+            || u.alasVisible === 0 || u.alas_visible === 0
+            || u.alasVisible === '0' || u.alas_visible === '0'
+            || u.alasVisible === 'false' || u.alas_visible === 'false'),
           status: u.enabled === false ? 'disabled' : (u.status === 'disabled' ? 'disabled' : (u.status || computeStatus(u.expiry))),
           expiry: u.expiry || u.expiresAt || '',
           remainingDays: u.remainingDays == null ? (u.remaining_seconds == null ? null : Math.ceil(Number(u.remaining_seconds) / 86400)) : Number(u.remainingDays),
@@ -82,7 +88,19 @@
               canControl: permission.canControl === true || permission.can_control === true
             };
           }).filter(function (permission) { return !!permission.deviceId; }),
-          configIds: u.role === 'admin' || u.configIds === null ? null : (u.configIds || (u.configs || []).map(function (c) { return c.id || c; }))
+          configIds: u.role === 'admin' || u.configIds === null ? null : (u.configIds || (u.configs || []).map(function (c) { return c.id || c; })),
+          // 编辑弹窗要回读「绑的是哪条配置、哪台设备」，所以把关联明细一起带上。
+          configs: u.role === 'admin' ? [] : (u.configs || []).map(function (c) {
+            c = c || {};
+            return {
+              id: String(c.id || c.configId || c.config_name || ''),
+              name: String(c.name || c.id || c.configId || ''),
+              deviceId: String(c.deviceId || c.device_id || ''),
+              canRun: c.canRun !== false && c.can_run !== false,
+              canEdit: c.canEdit === true || c.can_edit === true,
+              isDefault: c.isDefault === true || c.is_default === true
+            };
+          }).filter(function (c) { return !!c.id; })
         };
       }
       function loadUsers() {
@@ -112,7 +130,12 @@
       function avatarLetter(name) { var a = Array.from(String(name || '?')); return a.length ? a[0] : '?'; }
       function statusLabel(s) { return dashboard.statusLabel ? dashboard.statusLabel(s) : (s === 'expired' ? '已到期' : (s === 'expiring' ? '即将到期' : (s === 'disabled' ? '已停用' : '正常'))); }
       function deviceCountText(u) { return u.role === 'admin' ? '全部设备' : (u.deviceIds.length + ' 台设备'); }
-      function configCountText(u) { return u.role === 'admin' ? '全部 ALAS' : (u.configIds.length + ' 个配置'); }
+      function configCountText(u) {
+        if (u.role === 'admin') return '全部 ALAS';
+        var text = u.configIds.length + ' 个配置';
+        // 显式关掉「显示 ALAS」时标出来，否则管理员会以为配置丢了。
+        return u.alasVisible === false ? text + '（ALAS 已隐藏）' : text;
+      }
       function computeStatus(expiry) {
         var today = new Date(); today.setHours(0, 0, 0, 0);
         var d = new Date(String(expiry) + 'T00:00:00');
@@ -420,8 +443,141 @@
         });
       });
 
+      /* ---------- ALAS 自动配对（设备 ↔ Runtime 配置） ----------
+         口径（用户确认）：选择设备后自动带出与之匹配的 ALAS 配置，或者选择 ALAS 配置后
+         自动带出设备；**只在第一次选择时自动匹配**，之后两边都可以各自手动改。
+         匹配规则与服务端「打开 ALAS 管理页自动补齐」完全一致（只认完全一致的 host:port，
+         回环地址跳过），数据来自 GET /api/admin/alas/config-matches。 */
+      var ALAS_MATCH = { byConfig: {}, byDevice: {}, loadedAt: 0, loading: null, ok: true };
+      function loadAlasMatches() {
+        var now = Date.now();
+        if (ALAS_MATCH.loadedAt && now - ALAS_MATCH.loadedAt < 60000) return Promise.resolve(ALAS_MATCH);
+        if (ALAS_MATCH.loading) return ALAS_MATCH.loading;
+        ALAS_MATCH.loading = window.ScrcpyGateApi.configured('alas.configMatches').then(function (payload) {
+          var data = payload && payload.data && typeof payload.data === 'object' ? payload.data : (payload || {});
+          var byConfig = {}, byDevice = {};
+          (data.matches || []).forEach(function (item) {
+            if (!item || item.state !== 'matched' || !item.device_id) return;
+            var configName = String(item.config_name || '');
+            var deviceId = String(item.device_id || '');
+            if (!configName || !deviceId) return;
+            byConfig[configName] = deviceId;
+            if (!byDevice[deviceId]) byDevice[deviceId] = [];
+            byDevice[deviceId].push(configName);
+          });
+          ALAS_MATCH = { byConfig: byConfig, byDevice: byDevice, loadedAt: Date.now(), loading: null, ok: data.ok !== false };
+          return ALAS_MATCH;
+        }).catch(function () {
+          ALAS_MATCH = { byConfig: {}, byDevice: {}, loadedAt: Date.now(), loading: null, ok: false };
+          return ALAS_MATCH;
+        });
+        return ALAS_MATCH.loading;
+      }
+      function alasConfigOwner(configName) {
+        for (var i = 0; i < USERS.length; i++) {
+          var item = USERS[i];
+          if (item.role === 'admin') continue;
+          if ((item.configIds || []).indexOf(configName) >= 0) return item.username;
+        }
+        return '';
+      }
+      // 选设备 → 建议配置：优先挑没有被别的用户占用的匹配配置。
+      function matchedConfigForDevice(deviceId, ignoreUser) {
+        var list = ALAS_MATCH.byDevice[String(deviceId)] || [];
+        var free = list.filter(function (name) {
+          var owner = alasConfigOwner(name);
+          return !owner || owner === ignoreUser;
+        });
+        return free[0] || list[0] || '';
+      }
+      function matchedDeviceForConfig(configName) {
+        return ALAS_MATCH.byConfig[String(configName)] || '';
+      }
+      function alasSelectValue(prefix, kind) {
+        var node = document.getElementById(prefix + '-alas-' + kind);
+        return node ? String(node.value || '') : '';
+      }
+      function syncAlasSummary(prefix) {
+        var summary = document.getElementById(prefix + '-alas-summary');
+        if (!summary) return;
+        var configName = alasSelectValue(prefix, 'config');
+        var deviceId = alasSelectValue(prefix, 'device');
+        if (configName && deviceId) {
+          var device = deviceById(deviceId);
+          summary.textContent = '已配对 · ' + (device ? device.name : deviceId);
+        } else if (configName) {
+          summary.textContent = '待选设备';
+        } else if (deviceId) {
+          summary.textContent = '待选配置';
+        } else {
+          summary.textContent = '未关联';
+        }
+      }
+      /* 新增用户：把设备权限列表里勾中的设备也补进 ALAS 那台设备的观看权限，
+         否则「允许运行 ALAS + 必须能观看该设备」这条约束会在保存时失败。 */
+      function ensureAddDeviceGranted(deviceId) {
+        if (!deviceId) return;
+        var permission = addPermissionState.devices[deviceId] || { canView: false, canControl: false };
+        if (permission.canView) return;
+        permission.canView = true;
+        addPermissionState.devices[deviceId] = permission;
+        renderAddDevicePermissions();
+      }
+      function ensureEditDeviceGranted(user, deviceId) {
+        if (!user || !deviceId) return Promise.resolve(true);
+        var rows = user.devicePermissions || [];
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].deviceId === deviceId) return Promise.resolve(true);
+        }
+        return window.ScrcpyGateApi.configured('devices.permissions.update', {
+          method: 'PUT',
+          body: { username: user.username, deviceId: deviceId, enabled: true, canView: true, canControl: false }
+        }).then(function () { return true; }).catch(function () { return false; });
+      }
+      // 仅首次生效的自动配对。source：'device' 表示用户在设备上做的选择，'config' 反之。
+      function autoPairAlas(prefix, source, ignoreUser) {
+        var stateKey = prefix === 'add' ? 'add' : 'edit';
+        if (stateKey === 'add') {
+          if (addAlasAutoState !== 'fresh') return false;
+          addAlasAutoState = 'done';
+        } else {
+          if (editAlasAutoState !== 'fresh') return false;
+          editAlasAutoState = 'done';
+        }
+        var configNode = document.getElementById(prefix + '-alas-config');
+        var deviceNode = document.getElementById(prefix + '-alas-device');
+        if (!configNode || !deviceNode) return false;
+        if (source === 'device') {
+          var deviceId = String(deviceNode.value || '');
+          if (!deviceId) return false;
+          var configName = matchedConfigForDevice(deviceId, ignoreUser);
+          if (!configName) { syncAlasSummary(prefix); return false; }
+          configNode.value = configName;
+          // 两个方向保持一致：配对带出来的设备同样补上观看权限（ALAS 必须绑定到可观看设备）。
+          if (prefix === 'add') ensureAddDeviceGranted(deviceId);
+          syncAlasSummary(prefix);
+          showToast('已按设备地址自动带出 ALAS 配置「' + configName + '」', 'info');
+          return true;
+        }
+        var selectedConfig = String(configNode.value || '');
+        if (!selectedConfig) { syncAlasSummary(prefix); return false; }
+        var matched = matchedDeviceForConfig(selectedConfig);
+        if (!matched) { syncAlasSummary(prefix); return false; }
+        if (prefix === 'add') ensureAddDeviceGranted(matched);
+        deviceNode.value = matched;
+        if (deviceNode.value !== matched) {
+          // 设备下拉里没有这个设备（已被其它用户独占/设备列表已变）时不要假装成功。
+          syncAlasSummary(prefix);
+          return false;
+        }
+        syncAlasSummary(prefix);
+        showToast('已按 ALAS 配置里的 ADB 地址自动带出设备', 'info');
+        return true;
+      }
+
       /* ---------- 新增用户 ---------- */
       var addPermissionState = { devices: {} };
+      var addAlasAutoState = 'fresh';
       function selectedInitialDevicePermissions() {
         return Object.keys(addPermissionState.devices).map(function (deviceId) {
           var permission = addPermissionState.devices[deviceId];
@@ -437,16 +593,16 @@
           return '<option value="' + esc(config.id) + '">' + esc(config.name) + '</option>';
         }).join('');
         if (ALAS_POOL.some(function (config) { return config.id === previousConfig; })) configSelect.value = previousConfig;
-        var selected = selectedInitialDevicePermissions();
-        deviceSelect.innerHTML = selected.length
-          ? '<option value="">选择设备</option>' + selected.map(function (permission) {
-            var device = deviceById(permission.deviceId);
-            return '<option value="' + esc(permission.deviceId) + '">' + esc(device ? device.name : permission.deviceId) + '</option>';
+        // 设备下拉列**全部设备**（不再只列已授权设备）：选中设备会同时补上观看权限，
+        // 这样「选设备自动带出 ALAS 配置」才能在新增流程里用起来。
+        deviceSelect.innerHTML = DEVICE_POOL.length
+          ? '<option value="">选择设备</option>' + DEVICE_POOL.map(function (device) {
+            return '<option value="' + esc(device.id) + '">' + esc(device.name) + '</option>';
           }).join('')
-          : '<option value="">先选择可观看设备</option>';
-        deviceSelect.disabled = !selected.length || !configSelect.value;
-        if (selected.some(function (permission) { return permission.deviceId === previousDevice; })) deviceSelect.value = previousDevice;
-        document.getElementById('add-alas-summary').textContent = configSelect.value ? '待关联' : '未关联';
+          : '<option value="">系统暂无设备</option>';
+        deviceSelect.disabled = !DEVICE_POOL.length;
+        if (DEVICE_POOL.some(function (device) { return device.id === previousDevice; })) deviceSelect.value = previousDevice;
+        syncAlasSummary('add');
       }
       function syncAddDeviceRow(row) {
         var deviceId = row.getAttribute('data-add-device');
@@ -461,6 +617,17 @@
         row.querySelector('[data-add-device-status]').textContent = permission.canControl ? '观看与控制' : permission.canView ? '仅观看' : '未授权';
         document.getElementById('add-device-count').textContent = '已选择 ' + selectedInitialDevicePermissions().length + ' 台';
         updateAddAlasOptions();
+        // 首次在设备列表里勾中某台设备时，顺手把与之匹配的 ALAS 配置带出来。
+        if (permission.canView && addAlasAutoState === 'fresh' && !alasSelectValue('add', 'config')) {
+          var matched = matchedConfigForDevice(deviceId, '');
+          if (matched) {
+            addAlasAutoState = 'done';
+            document.getElementById('add-alas-config').value = matched;
+            document.getElementById('add-alas-device').value = deviceId;
+            syncAlasSummary('add');
+            showToast('已按设备地址自动带出 ALAS 配置「' + matched + '」', 'info');
+          }
+        }
       }
       function renderAddDevicePermissions() {
         var list = document.getElementById('add-device-list');
@@ -487,6 +654,7 @@
       }
       function resetAddPermissions() {
         addPermissionState.devices = {};
+        addAlasAutoState = 'fresh';
         DEVICE_POOL.forEach(function (device) { addPermissionState.devices[device.id] = { canView: false, canControl: false }; });
         document.getElementById('add-alas-config').value = '';
         document.getElementById('add-alas-device').value = '';
@@ -496,6 +664,9 @@
         renderAddDevicePermissions();
         updateAddAlasOptions();
         updateAddPermissionRole();
+        // 打开弹窗就把「设备 ↔ 配置」配对表拉回来（60 秒内复用），
+        // 这样第一次点选设备/配置就能立刻自动配上。
+        loadAlasMatches().catch(function () {});
       }
       function saveInitialUserPermissions(username, devicePermissions, alasRelation) {
         var report = { failed: 0 };
@@ -524,9 +695,17 @@
         if (f) { f.reset(); clearErrors(f); }
         syncExpiryEditor('add-expiry');
         resetAddPermissions();
+        var alasVisibleBox = document.getElementById('add-alas-visible');
+        if (alasVisibleBox) { alasVisibleBox.checked = true; }
+        syncAlasVisibleLabel('add');
         openModal('modal-add-user');
         var u = document.getElementById('add-username');
         if (u) { setTimeout(function () { u.focus(); }, 60); }
+      }
+      function syncAlasVisibleLabel(prefix) {
+        var box = document.getElementById(prefix + '-alas-visible');
+        var label = document.getElementById(prefix + '-alas-visible-label');
+        if (box && label) { label.textContent = box.checked ? '显示' : '隐藏'; }
       }
       function submitAdd() {
         var uName = document.getElementById('add-username').value.trim();
@@ -539,6 +718,10 @@
           configId: document.getElementById('add-alas-config').value,
           deviceId: document.getElementById('add-alas-device').value
         };
+        // ALAS 必须绑定到该用户可观看的设备：配对带出来的设备若还没勾选，这里补上观看权限。
+        if (alasRelation.deviceId && !devicePermissions.some(function (item) { return item.deviceId === alasRelation.deviceId; })) {
+          devicePermissions.push({ deviceId: alasRelation.deviceId, canView: true, canControl: false });
+        }
         var ok = true;
         setError('add-username', uName ? '' : '请输入用户名');
         if (uName) {
@@ -556,7 +739,7 @@
         if (!ok) { showToast('保存失败，请检查表单填写', 'error'); return; }
         var btn = document.getElementById('add-save'); btn.disabled = true;
         var accountCreated = false;
-        window.ScrcpyGateApi.configured('users.create', { method: 'POST', body: { username: uName, password: uPass, role: uRole, expiry: uExpiry, forcePasswordChange: document.getElementById('add-force').checked } }).then(function () {
+        window.ScrcpyGateApi.configured('users.create', { method: 'POST', body: { username: uName, password: uPass, role: uRole, expiry: uExpiry, forcePasswordChange: document.getElementById('add-force').checked, alasVisible: document.getElementById('add-alas-visible').checked } }).then(function () {
           accountCreated = true;
           return saveInitialUserPermissions(uName, devicePermissions, alasRelation);
         }).then(function (report) {
@@ -572,6 +755,69 @@
 
       /* ---------- 编辑用户 ---------- */
       var editTarget = null;
+      var editAlasAutoState = 'fresh';
+      function populateEditAlas(u) {
+        var configSelect = document.getElementById('edit-alas-config');
+        var deviceSelect = document.getElementById('edit-alas-device');
+        if (!configSelect || !deviceSelect) return;
+        var bound = (u.configs || [])[0] || null;
+        var currentConfig = bound ? String(bound.id || '') : '';
+        var currentDevice = bound ? String(bound.deviceId || '') : '';
+        configSelect.innerHTML = '<option value="">不关联</option>' + ALAS_POOL.map(function (config) {
+          return '<option value="' + esc(config.id) + '">' + esc(config.name) + '</option>';
+        }).join('');
+        // 已绑定但不在 Runtime 目录里的配置（Runtime 暂时不可达）也要能回读。
+        if (currentConfig && !ALAS_POOL.some(function (config) { return config.id === currentConfig; })) {
+          configSelect.innerHTML += '<option value="' + esc(currentConfig) + '">' + esc(currentConfig) + '（目录外）</option>';
+        }
+        configSelect.value = currentConfig;
+        var deviceOptions = DEVICE_POOL.slice();
+        if (currentDevice && !deviceOptions.some(function (device) { return device.id === currentDevice; })) {
+          var boundDevice = deviceById(currentDevice);
+          deviceOptions.push({ id: currentDevice, name: boundDevice ? boundDevice.name : currentDevice });
+        }
+        deviceSelect.innerHTML = '<option value="">选择设备</option>' + deviceOptions.map(function (device) {
+          return '<option value="' + esc(device.id) + '">' + esc(device.name) + '</option>';
+        }).join('');
+        deviceSelect.disabled = !deviceOptions.length;
+        deviceSelect.value = currentDevice;
+        editAlasAutoState = 'fresh';
+        var error = document.getElementById('er-edit-permissions');
+        if (error) { error.textContent = ''; error.style.display = 'none'; }
+        var details = document.getElementById('edit-alas-details');
+        if (details) details.open = !!currentConfig;
+        syncAlasSummary('edit');
+      }
+      function editAlasRelationFromForm() {
+        return {
+          configId: alasSelectValue('edit', 'config'),
+          deviceId: alasSelectValue('edit', 'device')
+        };
+      }
+      // 编辑用户时同步 ALAS 关联：没有就建、已有就按当前设备/权限更新（权限固定为全部）。
+      function saveEditedAlasRelation(user, relation) {
+        if (!relation.configId || !relation.deviceId) return Promise.resolve({ skipped: true });
+        var owned = (user.configIds || []).indexOf(relation.configId) >= 0;
+        var isDefault = !(user.configIds || []).length;
+        return ensureEditDeviceGranted(user, relation.deviceId).then(function () {
+          var options = {
+            method: owned ? 'PATCH' : 'POST',
+            body: {
+              userId: user.username,
+              configId: relation.configId,
+              deviceId: relation.deviceId,
+              canRun: true,
+              canEdit: true,
+              isDefault: isDefault,
+              grantView: false,
+              // 设备换了一台就是「移动」：这里是管理员在弹窗里的显式选择，直接带上确认。
+              confirmMove: true
+            }
+          };
+          if (owned) options.params = { id: user.username + ':' + relation.configId };
+          return window.ScrcpyGateApi.configured(owned ? 'alas.relations.update' : 'alas.relations.create', options);
+        });
+      }
       function openEditModal(u) {
         editTarget = u;
         document.getElementById('edit-username').textContent = u.username;
@@ -583,6 +829,11 @@
         syncExpiryEditor('edit-expiry');
         document.getElementById('edit-enabled').checked = u.enabled !== false;
         document.getElementById('edit-enabled-label').textContent = u.enabled === false ? '已停用' : '已启用';
+        var editAlasVisible = document.getElementById('edit-alas-visible');
+        if (editAlasVisible) { editAlasVisible.checked = u.alasVisible !== false; }
+        syncAlasVisibleLabel('edit');
+        populateEditAlas(u);
+        loadAlasMatches().catch(function () {});
         updateRoleHint();
         clearErrors(document.getElementById('edit-form'));
         openModal('modal-edit-user');
@@ -599,14 +850,30 @@
         var e = expiryValue('edit-expiry');
         var permanent = expiryIsPermanent('edit-expiry');
         var enabled = document.getElementById('edit-enabled').checked;
+        var alasRelation = r === 'admin' ? { configId: '', deviceId: '' } : editAlasRelationFromForm();
         var ok = true;
         setError('edit-expiry', e || permanent ? '' : '请选择到期时间或勾选「永久有效」');
         if (!e && !permanent) { ok = false; }
+        var permissionError = '';
+        if (!!alasRelation.configId !== !!alasRelation.deviceId) {
+          permissionError = alasRelation.configId ? '请选择 ALAS 关联设备' : '请选择 Runtime 配置';
+        }
+        var permErrorNode = document.getElementById('er-edit-permissions');
+        if (permErrorNode) {
+          permErrorNode.textContent = permissionError;
+          permErrorNode.style.display = permissionError ? 'block' : 'none';
+        }
+        if (permissionError) { ok = false; var details = document.getElementById('edit-alas-details'); if (details) details.open = true; }
         if (!ok) { showToast('保存失败，请检查表单填写', 'error'); return; }
         var btn = document.getElementById('edit-save'); btn.disabled = true;
-        window.ScrcpyGateApi.configured('users.update', { params: { id: u.id }, method: 'PUT', body: { role: r, expiry: e, enabled: enabled } }).then(function () {
-          closeModal('modal-edit-user'); return loadUsers();
-        }).then(function () { showToast('用户信息已更新', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
+        window.ScrcpyGateApi.configured('users.update', { params: { id: u.id }, method: 'PUT', body: { role: r, expiry: e, enabled: enabled, alasVisible: document.getElementById('edit-alas-visible').checked } }).then(function () {
+          return saveEditedAlasRelation(u, alasRelation);
+        }).then(function (report) {
+          closeModal('modal-edit-user');
+          return loadUsers().then(function () { return report; });
+        }).then(function (report) {
+          showToast(report && report.skipped ? '用户信息已更新' : '用户信息与 ALAS 关联已更新', 'success');
+        }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
       /* ---------- 删除用户 ---------- */
@@ -938,16 +1205,38 @@
       document.getElementById('add-user-btn').addEventListener('click', openAddModal);
       document.getElementById('add-save').addEventListener('click', submitAdd);
       document.getElementById('add-role').addEventListener('change', updateAddPermissionRole);
+      /* ALAS 选择器：先同步摘要，再在「首次选择」时做一次自动配对。
+         配对表还没到就先拉回来再配（打开弹窗时已经预取，这里只是兜底）。 */
+      function handleAlasSelectChange(prefix, source) {
+        var run = function () {
+          var ignoreUser = prefix === 'edit' && editTarget ? editTarget.username : '';
+          autoPairAlas(prefix, source, ignoreUser);
+          syncAlasSummary(prefix);
+        };
+        if (!ALAS_MATCH.loadedAt) { loadAlasMatches().then(run, run); return; }
+        run();
+      }
       document.getElementById('add-alas-config').addEventListener('change', function () {
         updateAddAlasOptions();
         if (this.value) document.getElementById('add-alas-details').open = true;
+        handleAlasSelectChange('add', 'config');
       });
       document.getElementById('add-alas-device').addEventListener('change', function () {
-        document.getElementById('add-alas-summary').textContent = this.value ? '已选择' : (document.getElementById('add-alas-config').value ? '待关联' : '未关联');
+        handleAlasSelectChange('add', 'device');
+      });
+      document.getElementById('edit-alas-config').addEventListener('change', function () {
+        var details = document.getElementById('edit-alas-details');
+        if (details && this.value) details.open = true;
+        handleAlasSelectChange('edit', 'config');
+      });
+      document.getElementById('edit-alas-device').addEventListener('change', function () {
+        handleAlasSelectChange('edit', 'device');
       });
       document.getElementById('edit-save').addEventListener('click', submitEdit);
       document.getElementById('edit-role').addEventListener('change', updateRoleHint);
       document.getElementById('edit-enabled').addEventListener('change', function () { document.getElementById('edit-enabled-label').textContent = this.checked ? '已启用' : '已停用'; });
+      document.getElementById('add-alas-visible').addEventListener('change', function () { syncAlasVisibleLabel('add'); });
+      document.getElementById('edit-alas-visible').addEventListener('change', function () { syncAlasVisibleLabel('edit'); });
       document.getElementById('del-confirm').addEventListener('click', confirmDelete);
       document.getElementById('reset-save').addEventListener('click', submitReset);
       document.getElementById('device-pick-confirm').addEventListener('click', confirmDevicePicker);

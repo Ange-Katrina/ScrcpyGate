@@ -327,6 +327,11 @@ class ClientSession:
     username: str
     websocket: WebSocket
     viewer_token: str = ""
+    # 浏览器侧的稳定设备标识（localStorage 里的一份随机 id）：连接级 id 每次都变，
+    # 用它才能判断「是不是同一台设备」（投屏记录面板与导出都显示它）。
+    browser_id: str = ""
+    # 宫格观看端：宫格一路多端混进单画面的记录里只会互相干扰，因此不参与投屏记录。
+    grid_view: bool = False
     connected_at: int = field(default_factory=lambda: int(time.time()))
     queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=VIDEO_QUEUE_MAXSIZE))
     queue_max_bytes: int = VIDEO_QUEUE_MAX_BYTES

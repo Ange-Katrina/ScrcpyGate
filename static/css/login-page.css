@@ -15,7 +15,7 @@
       --carbon-ambient: radial-gradient(circle at 12% 10%,var(--ambient-blue),rgba(0,122,255,0) 34%),radial-gradient(circle at 88% 90%,var(--ambient-purple),rgba(138,110,255,0) 36%),radial-gradient(circle at 50% 55%,var(--ambient-blue-weak),rgba(0,122,255,0) 48%),linear-gradient(165deg,var(--carbon-top) 0%,var(--carbon-mid) 48%,var(--carbon-bottom) 100%);
       --c-border:rgba(0,0,0,.09);
       --c-surface:#ffffff; --c-surface-hover:#ececf1;
-      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#6e6e73; --c-text-faint:#8e8e93;
+      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#48484a; --c-text-faint:#66666b;
     }
 .dark {
   --carbon-top:#16161a; --carbon-mid:#0d0e11; --carbon-bottom:#070708;
@@ -164,7 +164,7 @@
   --secondary: var(--background-200);
   --secondary-foreground: var(--text-800);
   --muted: var(--background-200);
-  --muted-foreground: var(--text-500);
+  --muted-foreground: var(--text-600);
   --accent: var(--background-100);
   --accent-foreground: var(--text-800);
   --destructive: var(--state-error);

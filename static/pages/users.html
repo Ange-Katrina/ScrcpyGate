@@ -184,6 +184,7 @@
           <div class="field-error" id="er-add-expiry"></div>
         </div>
         <label class="field-check"><input type="checkbox" id="add-force">强制下次登录修改密码</label>
+        <label class="permission-switch account-state-switch"><span>显示 ALAS</span><input type="checkbox" id="add-alas-visible" checked><span class="permission-track"></span><strong id="add-alas-visible-label">显示</strong></label>
         <section class="add-permissions" aria-labelledby="add-permissions-title">
           <div class="add-permissions-head">
             <div><h4 id="add-permissions-title">初始权限</h4><p>可以留空，创建后仍可在权限管理中补充。</p></div>
@@ -201,7 +202,7 @@
                 <label class="field" for="add-alas-config"><span class="field-label">Runtime 配置</span><select class="field-select" id="add-alas-config"><option value="">不关联</option></select></label>
                 <label class="field" for="add-alas-device"><span class="field-label">关联设备</span><select class="field-select" id="add-alas-device" disabled><option value="">先选择可观看设备</option></select></label>
               </div>
-              <p class="add-alas-hint">关联后默认允许运行与编辑；ALAS 必须绑定到该用户可观看的设备。</p>
+              <p class="add-alas-hint">选设备会自动带出与之匹配的 Runtime 配置，选配置会自动带出设备（只在第一次选择时自动匹配，之后两边可以各自改）；关联后默认给「允许运行 + 允许编辑」，选中的设备会同时获得观看权限。</p>
               <div class="field-error add-permission-error" id="er-add-permissions"></div>
             </details>
           </div>
@@ -237,6 +238,16 @@
           <div class="field-error" id="er-edit-expiry"></div>
         </div>
         <label class="permission-switch account-state-switch"><span>账户状态</span><input type="checkbox" id="edit-enabled"><span class="permission-track"></span><strong id="edit-enabled-label">已启用</strong></label>
+        <label class="permission-switch account-state-switch"><span>显示 ALAS</span><input type="checkbox" id="edit-alas-visible"><span class="permission-track"></span><strong id="edit-alas-visible-label">显示</strong></label>
+        <details class="add-alas-details" id="edit-alas-details">
+          <summary><span><i data-lucide="bot"></i>ALAS 关联</span><small id="edit-alas-summary">未关联</small><i data-lucide="chevron-down"></i></summary>
+          <div class="add-alas-fields">
+            <label class="field" for="edit-alas-config"><span class="field-label">Runtime 配置</span><select class="field-select" id="edit-alas-config"><option value="">不关联</option></select></label>
+            <label class="field" for="edit-alas-device"><span class="field-label">关联设备</span><select class="field-select" id="edit-alas-device" disabled><option value="">选择设备</option></select></label>
+          </div>
+          <p class="add-alas-hint" id="edit-alas-hint">选设备会自动带出与之匹配的配置，选配置会自动带出设备（只在第一次选择时自动匹配，之后两边可以各自改）；保存后该配置给「允许运行 + 允许编辑」。留空不会解除已有绑定，如需解绑请到 ALAS 管理里移除。</p>
+          <div class="field-error add-permission-error" id="er-edit-permissions"></div>
+        </details>
       </form>
       <div class="modal-foot">
         <button class="btn-ghost" type="button" data-close>取消</button>

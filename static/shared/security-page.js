@@ -324,35 +324,76 @@
     return label + ' · ' + ip;
   }
 
+  /* 同一台设备（同一浏览器）会开多条会话：用服务端下发的浏览器设备标识归并，
+     老服务端没有该字段时退回「IP + User-Agent」，效果一样。 */
+  function sessionDeviceKey(item) {
+    var device = String(item.device_id || item.deviceId || '').trim();
+    if (device) return 'dev:' + device;
+    return 'ua:' + String(item.client_ip || '') + '|' + String(item.user_agent || '').slice(0, 160);
+  }
+
   function renderLoginSessions(payload) {
     if (!sessionList) return;
     var rows = (payload && payload.sessions) || [];
     sessionList.innerHTML = '';
-    if (!rows.length) {
+    var groups = [];
+    var index = {};
+    rows.forEach(function (item) {
+      var key = sessionDeviceKey(item);
+      var group = index[key];
+      if (!group) {
+        group = { key: key, deviceId: String(item.device_id || item.deviceId || ''), items: [] };
+        index[key] = group;
+        groups.push(group);
+      }
+      group.items.push(item);
+    });
+    if (!groups.length) {
       var empty = document.createElement('li');
       empty.className = 'table-empty';
       empty.innerHTML = '<i data-lucide="users"></i><span>当前没有登录会话</span>';
       sessionList.appendChild(empty);
     } else {
-      rows.forEach(function (item) {
+      groups.forEach(function (group) {
+        var items = group.items;
+        var currentItem = items.filter(function (item) { return item.current; })[0] || null;
+        var ips = [];
+        items.forEach(function (item) {
+          var ip = String(item.client_ip || '');
+          if (ip && ips.indexOf(ip) < 0) ips.push(ip);
+        });
+        var firstLogin = Math.min.apply(null, items.map(function (item) { return Number(item.created_at) || 0; }).filter(Boolean));
+        var lastSeen = Math.max.apply(null, items.map(function (item) { return Number(item.last_seen_at) || 0; }).filter(Boolean));
         var li = document.createElement('li');
         li.className = 'guard-locked-row';
-        var who = escapeText(item.username) + (item.role === 'admin' ? '（管理员）' : '');
-        var meta = escapeText(describeClient(item))
-          + '<br>登录于 ' + escapeText(fmtSessionTime(item.created_at))
-          + ' · 最近活动 ' + escapeText(fmtSessionTime(item.last_seen_at));
-        var action = item.current
-          ? '<span class="guard-locked-meta">当前会话</span>'
-          : '<button type="button" class="guard-unlock guard-revoke" data-session="' + escapeText(item.id) + '">踢出</button>';
-        li.innerHTML = '<span class="guard-locked-ip">' + who + '</span>'
-          + '<span class="guard-locked-meta">' + meta + '</span>'
+        var who = escapeText(items[0].username) + (items[0].role === 'admin' ? '（管理员）' : '');
+        var metaLines = [
+          escapeText(describeClient(items[0])),
+          '登录于 ' + escapeText(fmtSessionTime(firstLogin)) + ' · 最近活动 ' + escapeText(fmtSessionTime(lastSeen))
+        ];
+        if (group.deviceId) metaLines.push('设备标识 ' + escapeText(group.deviceId.slice(0, 12)));
+        if (ips.length > 1) metaLines.push('来源 IP ' + escapeText(ips.join(' / ')));
+        // 同一设备多条会话合成一行：数量写出来，操作合并成「踢出该设备」。
+        var revokeIds = items.filter(function (item) { return !item.current; }).map(function (item) { return String(item.id); });
+        var action;
+        if (!revokeIds.length) {
+          action = '<span class="guard-locked-meta">当前会话</span>';
+        } else {
+          var label = items.length > 1 ? ('踢出该设备（' + revokeIds.length + '）') : '踢出';
+          action = '<button type="button" class="guard-unlock guard-revoke" data-sessions="' + escapeText(revokeIds.join(',')) + '">' + label + '</button>';
+        }
+        li.innerHTML = '<span class="guard-locked-ip">' + who
+          + (items.length > 1 ? '<br><small class="guard-locked-meta">同一台设备 ' + items.length + ' 个会话</small>' : '')
+          + '</span>'
+          + '<span class="guard-locked-meta">' + metaLines.join('<br>') + '</span>'
           + action;
         sessionList.appendChild(li);
       });
     }
     if (sessionCount) {
       var max = Number((payload && payload.max_per_user) || 0);
-      sessionCount.textContent = rows.length + ' 个登录会话' + (max > 0 ? '（每账户上限 ' + max + '）' : '');
+      var deviceText = groups.length !== rows.length ? ('（归并自 ' + rows.length + ' 条会话 · ' + groups.length + ' 台设备）') : '';
+      sessionCount.textContent = rows.length + ' 个登录会话' + deviceText + (max > 0 ? '（每账户上限 ' + max + '）' : '');
     }
     if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
   }
@@ -368,12 +409,19 @@
     sessionList.addEventListener('click', function (event) {
       var button = event.target && event.target.closest ? event.target.closest('.guard-revoke') : null;
       if (!button || !window.ScrcpyGateApi) return;
-      var sessionId = button.getAttribute('data-session');
-      if (!sessionId) return;
-      if (!window.confirm('确认结束该登录会话？对方需要重新登录。')) return;
+      // 一行可能代表同一台设备的多条会话（data-sessions 是逗号分隔的会话 id）。
+      var ids = String(button.getAttribute('data-sessions') || button.getAttribute('data-session') || '')
+        .split(',').map(function (value) { return value.trim(); }).filter(Boolean);
+      if (!ids.length) return;
+      var question = ids.length > 1
+        ? ('确认结束这 ' + ids.length + ' 个登录会话（同一台设备）？该设备需要重新登录。')
+        : '确认结束该登录会话？对方需要重新登录。';
+      if (!window.confirm(question)) return;
       button.disabled = true;
-      window.ScrcpyGateApi.configured('login.sessions.revoke', { params: { sessionId: sessionId }, method: 'DELETE' })
-        .then(function () { loadLoginSessions(); })
+      Promise.all(ids.map(function (sessionId) {
+        return window.ScrcpyGateApi.configured('login.sessions.revoke', { params: { sessionId: sessionId }, method: 'DELETE' })
+          .catch(function () { return null; });
+      })).then(function () { loadLoginSessions(); })
         .catch(function () {
           button.disabled = false;
           if (sessionCount) sessionCount.textContent = '踢出失败';
