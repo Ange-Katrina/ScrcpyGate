@@ -836,5 +836,5 @@ html, body { margin:0; height:100%; }
     /* 弹窗与抽屉默认隐藏，防止刷新时闪烁 */
     .modal-mask:not(.open), .drawer-mask:not(.open) { opacity:0; visibility:hidden; }
     .perm-drawer:not(.open), .alas-drawer:not(.open) { transform:translateX(102%); }
-    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; transform:none!important; } }
+    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; } }
 

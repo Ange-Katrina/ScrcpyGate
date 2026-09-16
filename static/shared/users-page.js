@@ -269,6 +269,11 @@
         var pageUsers = list.slice(start, start + PAGE_SIZE);
         var tbody = document.getElementById('users-tbody');
         if (!tbody) return;
+        var active = document.activeElement;
+        var focusedRow = tbody.contains(active) && active.closest('.user-row');
+        var focusedAction = focusedRow && active.getAttribute('data-act');
+        var focusedId = focusedRow && focusedRow.getAttribute('data-id');
+        var focusedIndex = focusedRow ? Array.prototype.indexOf.call(tbody.children, focusedRow) : -1;
         var html = '';
         pageUsers.forEach(function (u) { html += rowHtml(u); });
         tbody.innerHTML = html;
@@ -279,6 +284,19 @@
         if (sub) { sub.textContent = '共 ' + list.length + ' 人'; }
         renderPager(pages);
         if (window.lucide) { lucide.createIcons(); }
+        // A save restores the opener before refreshing the table. Keep that
+        // logical action focused when refresh replaces its DOM node.
+        if (focusedAction && document.activeElement === document.body) {
+          var rows = Array.prototype.slice.call(tbody.querySelectorAll('.user-row'));
+          var row = rows.filter(function (item) { return item.getAttribute('data-id') === focusedId; })[0]
+            || rows[Math.min(focusedIndex, rows.length - 1)];
+          var target = row && Array.prototype.filter.call(row.querySelectorAll('[data-act]'), function (button) {
+            return button.getAttribute('data-act') === focusedAction && !button.disabled;
+          })[0];
+          if (!target && row) target = row.querySelector('[data-act]:not([disabled])');
+          if (!target) target = document.getElementById('add-user-btn');
+          if (target) target.focus({ preventScroll: true });
+        }
       }
       function clearFilters() {
         state.q = ''; state.role = 'all'; state.status = 'all'; state.page = 1;
@@ -289,8 +307,12 @@
       }
 
       /* ---------- 弹窗通用 ---------- */
-      function openModal(id) { var m = document.getElementById(id); if (m) { m.classList.add('open'); } }
-      function closeModal(id) { var m = document.getElementById(id); if (m) { m.classList.remove('open'); } }
+      function openModal(id) {
+        window.ScrcpyGateUi.modal.open(id, {
+          initialFocus: id === 'modal-add-user' ? '#add-username' : null
+        });
+      }
+      function closeModal(id) { window.ScrcpyGateUi.modal.close(id); }
       function setError(name, msg) {
         var w = document.getElementById('f-' + name);
         var er = document.getElementById('er-' + name);
@@ -699,8 +721,6 @@
         if (alasVisibleBox) { alasVisibleBox.checked = true; }
         syncAlasVisibleLabel('add');
         openModal('modal-add-user');
-        var u = document.getElementById('add-username');
-        if (u) { setTimeout(function () { u.focus(); }, 60); }
       }
       function syncAlasVisibleLabel(prefix) {
         var box = document.getElementById(prefix + '-alas-visible');
@@ -929,13 +949,15 @@
         }
         renderPerm();
         document.getElementById('drawer-mask').classList.add('open');
-        document.getElementById('perm-drawer').classList.add('open');
+        window.ScrcpyGateUi.modal.open('perm-drawer', {
+          initialFocus: '#perm-close', onEscape: cancelPerm, companions: ['drawer-mask']
+        });
         var body = document.getElementById('perm-body');
         if (body) { body.scrollTop = 0; }
       }
       function closePermDrawer() {
         document.getElementById('drawer-mask').classList.remove('open');
-        document.getElementById('perm-drawer').classList.remove('open');
+        window.ScrcpyGateUi.modal.close('perm-drawer');
       }
       function renderWatchHistory() {
         var u = perm.user;
@@ -1142,8 +1164,8 @@
             added++;
           }
         });
-        closeModal('modal-device-picker');
         if (added) { renderPermDevices(); }
+        closeModal('modal-device-picker');
       }
       function openConfigPicker() {
         var list = document.getElementById('config-pick-list');
@@ -1170,8 +1192,8 @@
             added++;
           }
         });
-        closeModal('modal-config-picker');
         if (added) { renderPermConfigs(); }
+        closeModal('modal-config-picker');
       }
       function cancelPerm() {
         if (perm.user && perm.user.role !== 'admin' && perm.devSnapshot) {
@@ -1325,15 +1347,6 @@
         }
         if (t.matches('[data-perm-control]')) {
           setDeviceControl(t.getAttribute('data-perm-control'), t.checked);
-        }
-      });
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-          if (document.getElementById('perm-drawer').classList.contains('open')) { cancelPerm(); }
-          else {
-            var openM = document.querySelector('.modal-mask.open');
-            if (openM) { closeModal(openM.id); }
-          }
         }
       });
 

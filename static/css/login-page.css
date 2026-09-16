@@ -417,7 +417,7 @@
       }
 
 /* Extracted from static/pages/login.html (). */
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition:none !important; animation:none !important; transform:none !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition:none !important; animation:none !important; } }
             @media (max-width:640px){
                 main { padding:16px; }
                 main > section[aria-labelledby="login-title"] { padding:24px 20px; }

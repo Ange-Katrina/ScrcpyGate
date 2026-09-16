@@ -829,4 +829,4 @@ html, body { margin:0; height:100%; }
       .filter-tabs { width:100%; }
     }
 
-    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; transform:none!important; } }
+    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; } }

@@ -830,7 +830,7 @@ html, body { margin:0; height:100%; }
     /* 弹窗与抽屉默认隐藏，防止刷新时闪烁 */
     .modal-mask:not(.open), .drawer-mask:not(.open) { opacity:0; visibility:hidden; }
     .perm-drawer:not(.open), .alas-drawer:not(.open) { transform:translateX(102%); }
-    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; transform:none!important; } }
+    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; } }
 
 /* Extracted from static/pages/users.html ( id="users-page-styles"). */
 /* ── Apple Copy 尺度令牌（本页专用，颜色仍走 admin-shell.css 的语义色）──────
@@ -1146,3 +1146,6 @@ html, body { margin:0; height:100%; }
   outline: 2px solid var(--admin-brand);
   outline-offset: 2px;
 }
+
+/* Closed drawers must also hide shadows and remain hidden without motion. */
+.perm-drawer:not(.open) { visibility:hidden; }

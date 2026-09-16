@@ -823,7 +823,7 @@ html, body { margin:0; height:100%; }
       .unit-select { height:44px; }
       .viewer-stop-control .num-control { height:44px; }
     }
-    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; transform:none!important; } }
+    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; } }
 
 /* Extracted from static/pages/quality.html ( id="quality-page-styles"). */
 /* ── Apple Copy 尺度令牌（本页专用，颜色仍走 admin-shell.css 的语义色）──────

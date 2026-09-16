@@ -171,16 +171,25 @@
           modal.setAttribute('aria-hidden', 'true');
         }, 190);
       }
+      var drawerOpeners = {};
       function openDrawer(id) {
         var maskId = id === 'alasConnDrawer' ? 'alasConnMask' : 'alasLinkMask';
+        if (!$(id).classList.contains('open')) drawerOpeners[id] = document.activeElement;
         $(id).classList.add('open');
         $(maskId).classList.add('open');
         $(id).setAttribute('aria-hidden', 'false');
         $(id).removeAttribute('inert');
         $(maskId).hidden = false;
+        var first = $(id).querySelector('button');
+        if (first) first.focus({ preventScroll: true });
       }
       function closeDrawer(id) {
         var maskId = id === 'alasConnDrawer' ? 'alasConnMask' : 'alasLinkMask';
+        if ($(id).contains(document.activeElement)) {
+          var opener = drawerOpeners[id];
+          if (opener && opener.isConnected && !opener.disabled && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
+          if ($(id).contains(document.activeElement)) document.activeElement.blur();
+        }
         $(id).classList.remove('open');
         $(maskId).classList.remove('open');
         $(id).setAttribute('aria-hidden', 'true');
@@ -443,7 +452,7 @@
           var sel = selectedUserId === u.id ? ' active' : '';
           var roleTxt = u.role === 'admin' ? '管理员' : '普通用户';
            var expiryTxt = u.role === 'admin' ? '长期有效' : (u.expiry ? (st.text === '正常' || st.text === '已停用' ? '到期 ' + u.expiry : st.text + ' ' + u.expiry) : st.text);
-          out += '<button class="alas-list-button' + sel + '" type="button" role="option" aria-selected="' + (selectedUserId === u.id) + '" data-uid="' + esc(u.id) + '">'
+          out += '<button class="alas-list-button' + sel + '" type="button" aria-pressed="' + (selectedUserId === u.id) + '" aria-controls="alasUserDetail" data-uid="' + esc(u.id) + '">'
             + '<span class="alas-list-avatar">' + userInit(u) + '</span>'
             + '<span class="alas-list-main"><strong data-i18n-skip>' + esc(u.name) + '</strong><span>' + esc(roleTxt + ' · ' + expiryTxt) + '</span></span>'
             + '<span class="alas-list-meta">' + (rels.length ? rels.length + ' 个配置' : '未关联') + '</span>'
@@ -454,6 +463,15 @@
         }
         list.innerHTML = out;
         refreshIcons();
+      }
+      function restoreListFocus(listId, attribute, value) {
+        var buttons = $(listId).querySelectorAll('.alas-list-button');
+        for (var i = 0; i < buttons.length; i++) {
+          if (buttons[i].getAttribute(attribute) === value) {
+            buttons[i].focus({ preventScroll: true });
+            return;
+          }
+        }
       }
       function runtimeText(value) {
         var state = String(value || '').toLowerCase();
@@ -598,7 +616,7 @@
           var runCls = cfg.runtime === 'running' ? 'ok' : (cfg.runtime === 'error' || cfg.runtime === 'unreachable' ? 'warn' : (cfg.runtime === 'unknown' ? 'unknown' : ''));
           var runTxt = runtimeText(cfg.runtime);
           var linkedOnly = !cfg.inRuntime && rels.length > 0;
-          out += '<button class="alas-list-button' + sel + '" type="button" role="option" aria-selected="' + (selectedCfgId === cfg.id) + '" data-cid="' + esc(cfg.id) + '">'
+          out += '<button class="alas-list-button' + sel + '" type="button" aria-pressed="' + (selectedCfgId === cfg.id) + '" aria-controls="alasCfgDetail" data-cid="' + esc(cfg.id) + '">'
             + '<span class="alas-list-main"><strong><span data-i18n-skip>' + esc(cfg.name) + '</span>' + (linkedOnly ? ' <small style="color:var(--admin-faint);font-weight:400">· 仅关联记录</small>' : '') + '</strong>'
             + '<span>' + esc(ownerTxt + ' · ' + devTxt) + '</span></span>'
             + '<span class="chip ' + runCls + '">' + runTxt + '</span>'
@@ -1158,6 +1176,7 @@
         selectedUserId = uid;
         renderUsers();
         renderUserDetail();
+        restoreListFocus('alasUserList', 'data-uid', uid);
       });
       $('alasRelList').addEventListener('click', function (e) {
         var btn = e.target.closest('[data-rel-edit-btn]');
@@ -1223,6 +1242,7 @@
         selectedCfgId = cid;
         renderConfigs();
         renderCfgDetail();
+        restoreListFocus('alasCfgList', 'data-cid', cid);
       });
       $('alasCfgPrimaryBtn').addEventListener('click', runPrimaryCfg);
       $('alasCfgAssignBtn').addEventListener('click', function () {

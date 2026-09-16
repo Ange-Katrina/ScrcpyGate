@@ -173,23 +173,23 @@
                     </div>
                     <div class="param-row" id="row-fps">
                       <div class="param-copy">
-                        <div class="param-label"><i data-lucide="gauge"></i>帧率</div>
-                        <div class="param-desc">每秒画面刷新次数，越高越流畅但更耗资源</div>
+                        <label class="param-label" for="inp-fps"><i data-lucide="gauge"></i>帧率</label>
+                        <div class="param-desc" id="desc-fps">每秒画面刷新次数，越高越流畅但更耗资源</div>
                       </div>
                       <div class="param-control">
-                        <input class="num-control" type="number" id="inp-fps" min="15" max="240" step="1" value="">
-                        <span class="unit">fps</span>
+                        <input class="num-control" type="number" id="inp-fps" min="15" max="240" step="1" value="" aria-describedby="desc-fps unit-fps" aria-errormessage="err-fps">
+                        <span class="unit" id="unit-fps">fps</span>
                         <div class="param-field-error" id="err-fps"><i data-lucide="circle-alert"></i><span>帧率需在 15-240 fps 之间</span></div>
                       </div>
                     </div>
                     <div class="param-row" id="row-bitrate">
                       <div class="param-copy">
-                        <div class="param-label"><i data-lucide="activity"></i>码率</div>
-                        <div class="param-desc">视频编码比特率，越高画质越好占用带宽越大</div>
+                        <label class="param-label" for="inp-bitrate"><i data-lucide="activity"></i>码率</label>
+                        <div class="param-desc" id="desc-bitrate">视频编码比特率，越高画质越好占用带宽越大</div>
                       </div>
                       <div class="param-control">
-                        <input class="num-control" type="number" id="inp-bitrate" min="0.5" max="10" step="0.5" value="">
-                        <span class="unit">Mbps</span>
+                        <input class="num-control" type="number" id="inp-bitrate" min="0.5" max="10" step="0.5" value="" aria-describedby="desc-bitrate unit-bitrate" aria-errormessage="err-bitrate">
+                        <span class="unit" id="unit-bitrate">Mbps</span>
                         <div class="param-field-error" id="err-bitrate"><i data-lucide="circle-alert"></i><span>码率需在 0.5-10 Mbps 之间</span></div>
                       </div>
                     </div>
