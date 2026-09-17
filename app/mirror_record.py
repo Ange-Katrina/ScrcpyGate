@@ -289,13 +289,17 @@ class MirrorRecordRegistry:
                 return {"ok": True, "active": False, "session": latest.public()}
         return {"ok": True, "active": False, "session": None}
 
-    def respond(self, session_id: str, client_id: str, username: str, accept: bool) -> dict[str, Any]:
+    def respond(self, session_id: str, client_id: str, username: str, accept: bool, *, device_id: str) -> dict[str, Any]:
         now = time.time()
         with self._lock:
             self._purge_locked(now)
             record = self._sessions.get(str(session_id))
             if record is None:
                 return {"ok": False, "error": "record_session_missing"}
+            # Bind the URL-authorized device to the selected record before
+            # changing participant state or relaying any diagnostic data.
+            if record.device_id != device_id:
+                return {"ok": False, "error": "record_not_invited"}
             participant = record.participants.get(str(client_id))
             if participant is None or participant.username != username:
                 return {"ok": False, "error": "record_not_invited"}
@@ -372,7 +376,7 @@ class MirrorRecordRegistry:
         )
         return {"ok": True, "session": state, "upload_requests": requested}
 
-    def upload(self, session_id: str, client_id: str, username: str, timeline: Any) -> dict[str, Any]:
+    def upload(self, session_id: str, client_id: str, username: str, timeline: Any, *, device_id: str) -> dict[str, Any]:
         now = time.time()
         cleaned, error = validate_timeline(timeline)
         if cleaned is None:
@@ -385,6 +389,8 @@ class MirrorRecordRegistry:
             record = self._sessions.get(str(session_id))
             if record is None:
                 return {"ok": False, "error": "record_session_missing"}
+            if record.device_id != device_id:
+                return {"ok": False, "error": "record_not_invited"}
             participant = record.participants.get(str(client_id))
             if participant is None or participant.username != username:
                 return {"ok": False, "error": "record_not_invited"}

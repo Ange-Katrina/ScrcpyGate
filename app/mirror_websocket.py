@@ -286,14 +286,11 @@ async def _video_receiver(
     session_check,
     state: _VideoStreamState,
 ) -> None:
+    # Incoming messages must not extend the authorization recheck deadline.
+    next_check = time.monotonic() + VIDEO_PERMISSION_RECHECK_SECONDS
     try:
         while True:
-            try:
-                text = await asyncio.wait_for(
-                    websocket.receive_text(),
-                    timeout=VIDEO_PERMISSION_RECHECK_SECONDS,
-                )
-            except asyncio.TimeoutError:
+            if time.monotonic() >= next_check:
                 if not await _run_session_check(session_check):
                     state.end_reason = "session_revoked"
                     log.info(
@@ -302,7 +299,10 @@ async def _video_receiver(
                         client.id,
                         username,
                     )
-                    await websocket.close(code=4403, reason="session revoked")
+                    await asyncio.wait_for(
+                        websocket.close(code=4403, reason="session revoked"),
+                        timeout=VIDEO_SEND_TIMEOUT_SECONDS,
+                    )
                     return
                 allowed = await asyncio.to_thread(storage.user_can, username, device_id, "view")
                 if not allowed:
@@ -313,8 +313,18 @@ async def _video_receiver(
                         client.id,
                         username,
                     )
-                    await websocket.close(code=4403, reason="permission revoked")
+                    await asyncio.wait_for(
+                        websocket.close(code=4403, reason="permission revoked"),
+                        timeout=VIDEO_SEND_TIMEOUT_SECONDS,
+                    )
                     return
+                next_check = time.monotonic() + VIDEO_PERMISSION_RECHECK_SECONDS
+            try:
+                text = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=max(0.001, next_check - time.monotonic()),
+                )
+            except asyncio.TimeoutError:
                 continue
             try:
                 msg = json.loads(text)

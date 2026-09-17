@@ -161,7 +161,8 @@ async def api_mirror_record_respond(device_id: str, request: Request):
     client_id = str(body.get("client_id") or "").strip()
     accept = bool(body.get("accept"))
     result = await asyncio.to_thread(
-        record_registry.respond, session_id, client_id, str(user.get("username") or ""), accept
+        record_registry.respond, session_id, client_id, str(user.get("username") or ""), accept,
+        device_id=real_device_id,
     )
     audit_request(
         request,
@@ -194,6 +195,7 @@ async def api_mirror_record_upload(device_id: str, request: Request):
         client_id,
         str(user.get("username") or ""),
         body.get("timeline"),
+        device_id=real_device_id,
     )
     audit_request(
         request,

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import math
 import secrets
 import threading
 import time
@@ -31,6 +32,7 @@ CHALLENGE_TTL_SECONDS = 120.0
 MAX_NUMBER = 1_000_000
 CHALLENGE_ISSUE_INTERVAL_SECONDS = 2.0
 ISSUE_PRUNE_EVERY = 32
+MAX_ISSUE_SOURCES = 10_000
 
 _ISSUE_LOCK = threading.Lock()
 _LAST_ISSUE_AT: dict[str, float] = {}
@@ -88,11 +90,25 @@ def issue_challenge(ip: str, username: str, failures: int) -> dict:
     now = time.time()
     interval = challenge_issue_interval_seconds()
     with _ISSUE_LOCK:
-        last = _LAST_ISSUE_AT.get(ip, 0.0)
-        if interval > 0 and now - last < interval:
-            return {"error": "challenge_rate_limited", "retry_after_ms": int((interval - (now - last)) * 1000)}
-        _LAST_ISSUE_AT[ip] = now
-        # Opportunistic pruning so the registry never grows without bound.
+        issued_at = time.monotonic()
+        # Entries stay in issuance order. Expiry uses a monotonic clock, not
+        # wall time, and capacity pressure never evicts a live rate limit.
+        while _LAST_ISSUE_AT:
+            oldest = next(iter(_LAST_ISSUE_AT))
+            if interval > 0 and issued_at - _LAST_ISSUE_AT[oldest] < interval:
+                break
+            _LAST_ISSUE_AT.pop(oldest)
+        last = _LAST_ISSUE_AT.get(ip)
+        if interval > 0:
+            if last is not None:
+                retry_ms = math.ceil((interval - (issued_at - last)) * 1000)
+                return {"error": "challenge_rate_limited", "retry_after_ms": max(1, retry_ms)}
+            if len(_LAST_ISSUE_AT) >= MAX_ISSUE_SOURCES:
+                oldest_at = next(iter(_LAST_ISSUE_AT.values()))
+                retry_ms = math.ceil((interval - (issued_at - oldest_at)) * 1000)
+                return {"error": "challenge_rate_limited", "retry_after_ms": max(1, retry_ms)}
+            _LAST_ISSUE_AT[ip] = issued_at
+        # SQLite challenge lifetime is separate from the source cooldown.
         if _ISSUE_COUNT % ISSUE_PRUNE_EVERY == 0:
             try:
                 storage.prune_login_challenges(now)

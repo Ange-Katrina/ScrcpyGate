@@ -187,6 +187,14 @@ def log_alas_websocket_close(
     )
 
 
+def _alas_binding_accessible(user: dict, binding: dict) -> bool:
+    """Authorize the stored device even when the caller omits its selector."""
+    if user.get("role") == "admin":
+        return True
+    device_id = str(binding.get("device_id") or "").strip()
+    return bool(device_id and storage.user_can(user["username"], device_id, "view"))
+
+
 def alas_binding_for_user(
     user: dict,
     allow_admin_global: bool = False,
@@ -210,6 +218,8 @@ def alas_binding_for_user(
         else:
             binding = storage.get_user_alas_config(user["username"], device_id)
     if binding and binding.get("config_name"):
+        if not _alas_binding_accessible(user, binding):
+            return None
         if user.get("role") == "admin":
             binding = {**binding, "can_run": True, "can_edit": True}
         return binding
@@ -295,7 +305,7 @@ def public_user_alas_bindings(user: dict, device_id: str | None = None) -> list[
             "is_default": bool(binding.get("is_default")),
         }
         for binding in bindings
-        if binding and binding.get("config_name")
+        if binding and binding.get("config_name") and _alas_binding_accessible(user, binding)
     ]
 
 
