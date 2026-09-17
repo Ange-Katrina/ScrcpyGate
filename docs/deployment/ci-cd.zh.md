@@ -75,6 +75,40 @@ git push origin v1.0.0
 候选版本使用 `v1.0.0-rc.1`。在 **Actions → Builds** 中确认三个阶段全部成功，
 复制摘要中的 `ghcr.io/<owner>/scrcpygate@sha256:...`。
 
+标签工作流发布的是 Docker 镜像，不会自动创建 GitHub Release。
+使用已有标签创建 Release 草稿，按[英文发行模板](../../.github/RELEASE_TEMPLATE.md)
+填写说明，并点击 GitHub 的 **Generate release notes** 生成分类后的 PR 列表。
+[编写指南](../contributing/pull-requests-and-releases.md#release-notes)说明了标签分类、
+更新亮点、升级动作和已验证镜像 digest 的填写方式。完整 PR 列表放在说明末尾，
+发布前检查草稿；候选版本同时标记为预发布。
+
+## 更新现有 bridge 部署
+
+后台系统更新面板检查 GHCR 已发布标签，并确认目标 manifest 后提供宿主机命令。
+本地构建或浮动标签可能无法按版本号比较，需要核对显示的镜像引用。
+
+在当前部署目录执行：
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.io/ange-katrina/scrcpygate:edge
+```
+
+稳定部署使用已验证的版本或 digest。不传 `--image` 时先取 `SCRCPYGATE_UPDATE_IMAGE`，
+再取 `latest`；只有发布正式版后才存在 `latest`。重复更新浮动标签会先拉取，再比较实际
+镜像 ID。此命令要求当前目录拥有正在运行的服务，以及 Docker Compose plugin；host
+网络安装请按其独立手动部署步骤更新。
+
+脚本先为原容器的实际镜像创建本地回滚标签，再拉取目标。修改配置前取得 SQLite 在线
+快照及配套 ALAS 密钥，并在归档旁保留权限受限的 `.env` 副本。无法取得一致快照就停止
+更新。显式使用 `--skip-update-backup` 只跳过数据快照，仍保留配置副本与回滚镜像。
+
+启动仅使用已下载镜像，不重建、不再次拉取。失败时尝试恢复原配置及固定镜像，并检查
+镜像身份和健康状态。退出码 2 表示镜像回滚通过，3 表示需要人工恢复。**数据库迁移不会
+自动回退**；不兼容迁移需要人工恢复配套数据备份。
+
+日志页面新增默认 30 天的按时间清理。已有行数和文件轮转上限仍生效；“不清理”只关闭
+按天删除。升级前请导出仍需保留的审计历史。审计清理保留链锚点，只删除连续过期的前缀。
+
 ## 服务器手动部署
 
 已有 bridge 模式部署可使用带健康检查和失败回滚的脚本：

@@ -270,6 +270,17 @@
     return Math.floor(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime() / 1000);
   }
   function nowTs() { return Math.floor(Date.now() / 1000); }
+  /* 「剩余天数」必须按日历日算，不能拿时长去除 86400：
+     到期时间按本地 23:59:59 存（见 expiryEpoch），时长里总带一个不足一天的零头，
+     Math.ceil 会把 30 天读成 31 天（编辑弹窗按日历日算，于是列表比弹窗多一天）。
+     取本地年月日做差，跨 DST 与「按零点存储的旧数据」都稳定。 */
+  function localDayIndex(date) {
+    return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+  }
+  function calendarDaysUntil(value) {
+    var date = timestampDate(value);
+    return date ? localDayIndex(date) - localDayIndex(new Date()) : null;
+  }
   function timeRangeBounds(timeRange, from, to) {
     var out = { fromTs: null, toTs: null };
     var toTs = to ? toEpoch(to) + 86399 : null;
@@ -1250,7 +1261,8 @@
           expiresAt: dateStr(u.expires_at),
           expirationState: u.expiration_state || 'permanent',
           remainingSeconds: u.remaining_seconds == null ? null : Number(u.remaining_seconds),
-          remainingDays: u.remaining_seconds == null ? null : Math.ceil(Number(u.remaining_seconds) / 86400),
+          /* 与 users-page.js 的编辑弹窗（expiryDayIndex - todayDayIndex）同一套日历日口径 */
+          remainingDays: u.expires_at == null ? null : calendarDaysUntil(u.expires_at),
           lastLoginAt: u.last_login_at || null,
           lastLoginIp: u.last_login_ip || '',
           watchStats: u.watch_stats || u.watchStats || {
@@ -3777,7 +3789,7 @@
 
   /* ---------------- 控制协议管道 ---------------- */
 
-  function setControlOwnership(ok, owner) {
+  function setControlOwnership(ok, owner, reason) {
     var hadOwnership = !!state.controlOwnership;
     state.controlOwnership = !!ok;
     if (hadOwnership !== state.controlOwnership) {
@@ -3798,6 +3810,11 @@
       state.pendingControlMove = null;
       stopControlKeepalive();
       destroyScrcpyInput();
+    }
+    if (hadOwnership && !ok && reason === 'taken_over') {
+      document.dispatchEvent(new CustomEvent('scrcpygate:control-lost', {
+        detail: { deviceId: state.controlSocketDevice, owner: owner || '', reason: reason }
+      }));
     }
   }
   function stopControlKeepalive() {
@@ -3887,6 +3904,14 @@
     controlSend({ type: 'control_keepalive' });
   }
 
+  // Public lock broadcasts omit the connection ID. Ask this control socket
+  // to verify its lease, including when another browser uses the same account.
+  document.addEventListener('scrcpygate:control-lock-changed', function (event) {
+    var detail = event.detail || {};
+    if (String(detail.device_id || '') !== String(state.controlSocketDevice || '')) return;
+    revalidateControlOwnership();
+  });
+
   function openControlSocket(deviceId, user) {
     if (state.controlSocket && state.controlSocket.readyState === 1) {
       // 只有同一台设备的控制通道可以复用;复用别的设备会让输入发到旧设备。
@@ -3902,8 +3927,13 @@
       ws.binaryType = 'arraybuffer';
       state.controlCurrentUser = user || '';
       var opened = false;
-      ws.onopen = function () { opened = true; resolve(ws); };
+      ws.onopen = function () {
+        if (state.controlSocket !== ws) { resolve(null); return; }
+        opened = true;
+        resolve(ws);
+      };
       ws.onmessage = function (event) {
+        if (state.controlSocket !== ws) return;
         var msg;
         try { msg = JSON.parse(event.data); } catch (e) { return; }
         if (msg.type === 'hello') {
@@ -3927,7 +3957,7 @@
               bindScrcpyInput(deviceId);
               pending.resolve({ ok: true, owner: msg.owner, expires_at: msg.expires_at });
             } else {
-              setControlOwnership(false);
+              setControlOwnership(false, msg.owner, msg.owner ? 'taken_over' : '');
               pending.resolve({ ok: false, owner: msg.owner, expires_at: msg.expires_at });
             }
             return;
@@ -3935,16 +3965,18 @@
           // 非请求回复：服务端在续租/发送被拒时回 ok:false（lease 已不属于本连接）。
           // 这里不能装作没看见 —— 否则 UI 一直显示「释放控制」但指令全被丢弃。
           if (msg.ok === false) {
-            var lostOwner = msg.lock && msg.lock.username ? String(msg.lock.username) : '';
-            if (lostOwner && state.controlCurrentUser && lostOwner !== state.controlCurrentUser) {
-              setControlOwnership(false, lostOwner);
+            var lostOwner = String(msg.owner || (msg.lock && msg.lock.username) || '');
+            if (lostOwner) {
+              // A denied lease belongs to another connection even if the
+              // username matches. Never automatically take it back.
+              setControlOwnership(false, lostOwner, 'taken_over');
               return;
             }
             recoverControlOwnership();
             return;
           }
           if (state.controlOwnership && msg.lock && state.controlCurrentUser && msg.lock.username && msg.lock.username !== state.controlCurrentUser) {
-            setControlOwnership(false, msg.lock.username);
+            setControlOwnership(false, msg.lock.username, 'taken_over');
           }
           return;
         }
@@ -3971,6 +4003,7 @@
         }
       };
       ws.onclose = function (event) {
+        if (state.controlSocket !== ws) return;
         if (state.controlSocket === ws) {
           state.controlSocket = null;
           state.controlSocketDevice = '';
@@ -4001,6 +4034,12 @@
   }
 
   function closeControlSocket() {
+    if (state.pendingControl) {
+      var pending = state.pendingControl;
+      state.pendingControl = null;
+      window.clearTimeout(pending.timer);
+      pending.reject(new Error('控制通道已断开'));
+    }
     if (state.controlMoveRetryTimer) {
       window.clearTimeout(state.controlMoveRetryTimer);
       state.controlMoveRetryTimer = null;
@@ -5845,6 +5884,58 @@
     return apiPut('/api/admin/settings', request).then(function (payload) { return accountPolicyPayload(payload); });
   }
 
+  /* 日志保存时长：同样只读写 /api/admin/settings 的一个字段（0 = 永久保留）。 */
+  function logRetentionPayload(payload) {
+    var settings = (payload && payload.settings) || payload || {};
+    var days = settings.logRetentionDays;
+    days = days == null ? 90 : Number(days);
+    if (!isFinite(days) || days < 0) days = 0;
+    return { logRetentionDays: Math.floor(days) };
+  }
+
+  function handlerLogRetention() {
+    return apiGet('/api/admin/settings').then(function (payload) { return logRetentionPayload(payload); });
+  }
+
+  function handlerLogRetentionUpdate(opts) {
+    var body = (opts && opts.body) || {};
+    if (body.logRetentionDays === undefined) return handlerUnsupported('没有需要保存的日志保留设置');
+    return apiPut('/api/admin/settings', { logRetentionDays: Number(body.logRetentionDays) })
+      .then(function (payload) { return logRetentionPayload(payload); });
+  }
+
+  /* 系统更新检查（只读）：后台只显示当前/最新版本与宿主机更新命令，
+     不提供下载或应用按钮——应用更新由宿主机 deploy.sh --update 完成。 */
+  function updateCheckPayload(payload) {
+    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+    var latest = data.latest && typeof data.latest === 'object' ? data.latest : null;
+    return {
+      ok: data.ok === true,
+      reachable: data.reachable !== false && data.ok === true,
+      noRelease: data.noRelease === true || data.no_release === true,
+      checkedAt: data.checkedAt == null ? (data.checked_at == null ? null : Number(data.checked_at)) : Number(data.checkedAt),
+      cached: data.cached === true,
+      currentVersion: String(((data.current || {}).version) || 'dev'),
+      currentImage: String(((data.current || {}).image) || ''),
+      image: String(data.image || ''),
+      repository: String(data.repository || ''),
+      latestVersion: latest ? String(latest.version || latest.tag || '') : '',
+      latestSource: latest ? String(latest.source || '') : '',
+      latestPublishedAt: latest ? String(latest.published_at || '') : '',
+      latestUrl: latest ? String(latest.url || '') : '',
+      updateAvailable: data.updateAvailable === undefined ? data.update_available : data.updateAvailable,
+      hostCommand: String(data.hostCommand || data.host_command || ''),
+      releaseUrl: String(data.releaseUrl || data.release_url || ''),
+      error: String(data.error || '')
+    };
+  }
+
+  function handlerSystemUpdate(opts) {
+    var query = {};
+    if (opts && (opts.refresh || (opts.query && opts.query.refresh))) query.refresh = 1;
+    return apiGet('/api/admin/update-check', query).then(function (payload) { return updateCheckPayload(payload); });
+  }
+
   function handlerAuthLogout() {
     return apiPost('/api/auth/logout', {}).then(function (payload) {
       return payload || { ok: true };
@@ -5883,6 +5974,9 @@
     'login.guard.unlock': handlerLoginGuardUnlock,
     'account.policy': handlerAccountPolicy,
     'account.policy.update': handlerAccountPolicyUpdate,
+    'logs.retention': handlerLogRetention,
+    'logs.retention.update': handlerLogRetentionUpdate,
+    'system.update': handlerSystemUpdate,
     'users.permissions': handlerUsersPermissions,
     'dashboard.overview': handlerDashboardOverview,
     'workbench.snapshot': handlerWorkbenchSnapshot,

@@ -985,6 +985,114 @@
         loadDashboard({ force: true, runtime: true });
       }, DASHBOARD_REFRESH_MS);
     }
+    /* ---------- 系统更新（只读）：只显示当前/最新版本与宿主机更新命令 ----------
+       应用本身跑在只读镜像里、没有 Docker 访问权，所以这里刻意不提供下载或
+       「一键更新」按钮：检查走 /api/admin/update-check，应用由宿主机
+       `deploy.sh --update` 完成（先备份、只换镜像、失败回滚）。 */
+    var updateCheckInFlight = false;
+    function updateCommandText(info) {
+      return (info && info.hostCommand) || '—';
+    }
+    function renderUpdateCheck(info) {
+      if (!info) return;
+      setDash('update-current', info.currentVersion || '—');
+      setDash('update-latest', info.latestVersion || '—');
+      var state = document.getElementById('update-state');
+      var text;
+      var highlighted = false;
+      if (!info.ok) {
+        text = dashLocal('无法检查（离线或上游不可达）', 'Check unavailable (offline)');
+      } else if (info.noRelease) {
+        text = dashLocal('暂无已发布版本', 'No published release yet');
+      } else if (info.updateAvailable === true) {
+        text = dashLocal('有可用更新', 'Update available');
+        highlighted = true;
+      } else if (info.updateAvailable === false) {
+        text = dashLocal('已是最新', 'Up to date');
+      } else {
+        text = dashLocal('无法按版本号比较，请核对镜像引用', 'Versions cannot be compared; check the image reference');
+      }
+      if (state) {
+        state.textContent = text;
+        state.classList.toggle('is-new', highlighted);
+      }
+      setDash('update-command', updateCommandText(info));
+      var copyButton = document.getElementById('update-copy');
+      if (copyButton) copyButton.disabled = !info.hostCommand;
+      var hint = document.getElementById('update-hint');
+      if (hint) {
+        if (!info.ok) {
+          hint.textContent = dashLocal('检查失败：', 'Check failed: ') + (info.error || '')
+            + dashLocal('。可稍后点「检查更新」重试；离线部署出现这一行属正常。',
+              '. Retry with “Check for updates” later; this is expected for an offline deployment.');
+        } else if (info.noRelease) {
+          hint.textContent = dashLocal('镜像仓库可达，但尚无稳定版本、latest 或 edge 镜像。',
+            'The registry is reachable, but has no stable version, latest, or edge image.');
+        } else if (info.updateAvailable === true) {
+          hint.textContent = dashLocal('新版本 ', 'New release ')
+            + (info.latestVersion || '') + dashLocal('。在服务器上执行下面的命令应用更新；',
+              '. Apply it on the server with the command below; ')
+            + dashLocal('更新前备份数据库、配套密钥与 .env；失败时尝试恢复原镜像。数据库迁移不会自动回退。',
+              'it backs up the database, matching key, and .env, then attempts image rollback on failure. Database migrations are not rolled back automatically.');
+        } else {
+          hint.textContent = dashLocal('请在对应 bridge 部署目录执行命令。浮动标签需拉取后比较镜像；镜像回滚不会恢复数据库迁移。',
+            'Run the command in the matching bridge deployment directory. Floating tags require pulling to compare images; image rollback does not reverse database migrations.');
+        }
+      }
+      if (window.lucide) { window.lucide.createIcons(); }
+    }
+    function loadUpdateCheck(refresh) {
+      if (updateCheckInFlight) return Promise.resolve();
+      var api = window.ScrcpyGateApi;
+      if (!api || typeof api.isConfigured !== 'function' || !api.isConfigured('system.update')) {
+        setDash('update-state', dashLocal('接口未配置', 'Endpoint not configured'));
+        return Promise.resolve();
+      }
+      updateCheckInFlight = true;
+      setDash('update-state', dashLocal('检查中…', 'Checking…'));
+      return api.configured('system.update', refresh ? { refresh: 1 } : {})
+        .then(function (payload) { renderUpdateCheck(payload); })
+        .catch(function (error) {
+          setDash('update-state', dashLocal('无法检查', 'Check unavailable'));
+          var message = api.errorMessage ? api.errorMessage(error) : '';
+          setDash('update-hint', message || dashLocal('检查更新失败，请稍后重试。', 'Update check failed; retry later.'));
+        })
+        .finally(function () { updateCheckInFlight = false; });
+    }
+    function copyUpdateCommand() {
+      var code = document.getElementById('update-command');
+      var button = document.getElementById('update-copy');
+      if (!code) return;
+      var done = function () {
+        var label = button ? button.querySelector('span') : null;
+        if (!label) return;
+        var original = label.textContent;
+        label.textContent = dashLocal('已复制', 'Copied');
+        window.setTimeout(function () { label.textContent = original; }, 1600);
+      };
+      var text = code.textContent || '';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {});
+        return;
+      }
+      // 没有剪贴板权限时退化成选中文本，用户可自行复制（只读展示不受影响）。
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } catch (error) {
+        /* ignore */
+      }
+    }
+    (function wireUpdateCheck() {
+      var button = document.getElementById('update-check-btn');
+      if (button) button.addEventListener('click', function () { loadUpdateCheck(true); });
+      var copy = document.getElementById('update-copy');
+      if (copy) copy.addEventListener('click', copyUpdateCommand);
+    })();
+
     function loadDashboard(options) {
       options = options || {};
       if (document.visibilityState && document.visibilityState !== 'visible') {
@@ -1285,5 +1393,6 @@
       }, { passive: true });
     }
     renderDashDevices([]); renderDashSessions([]); loadDashboard({ force: true, runtime: true });
+    loadUpdateCheck(false);
     if (window.ScrcpyGateSession) { window.ScrcpyGateSession.start().catch(function () {}); }
   })();

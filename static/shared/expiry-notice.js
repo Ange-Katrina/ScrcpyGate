@@ -38,14 +38,19 @@
     return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
   }
 
+  /* 按日历日算「还剩几天」：到期时间落在本地 23:59:59，用时长除 86400 向上取整
+     会把 30 天说成 31 天（与用户列表/编辑弹窗的口径不一致）。 */
+  function dayIndex(ms) {
+    var date = new Date(ms);
+    return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+  }
+
   function daysLeft(user, now) {
-    var remaining = Number(user && user.remaining_seconds);
-    if (!isFinite(remaining)) remaining = 0;
-    if (remaining > 0) return Math.max(1, Math.ceil(remaining / 86400));
     var expiresAt = Number(user && user.expires_at);
     if (!isFinite(expiresAt) || expiresAt <= 0) return 0;
-    var diff = expiresAt - Math.floor((now || Date.now()) / 1000);
-    return diff > 0 ? Math.max(1, Math.ceil(diff / 86400)) : 0;
+    var today = now || Date.now();
+    var days = dayIndex(expiresAt * 1000) - dayIndex(today);
+    return days > 0 ? days : 0;
   }
 
   function dismissKey(user, now) {

@@ -11,7 +11,7 @@ import hmac
 import ipaddress
 import uuid
 
-from .logging_config import sanitize_log_text, sanitize_log_value
+from .logging_config import prune_rotated_log_files, sanitize_log_text, sanitize_log_value
 from .alas_secrets import (
     AlasTokenError,
     TOKEN_KEY_ENV,
@@ -115,6 +115,11 @@ AUDIT_MAX_ROWS = _bounded_env_int("AUDIT_MAX_ROWS", 100000, 1000, 5000000)
 AUDIT_ALERT_MAX_ROWS = _bounded_env_int("AUDIT_ALERT_MAX_ROWS", 20000, 100, 5000000)
 # Viewer watch history retention in days (0 = keep forever).
 VIEWER_WATCH_RETENTION_DAYS = _bounded_env_int("VIEWER_WATCH_RETENTION_DAYS", 180, 0, 3650)
+# 「日志保存时长」由管理员在后台设置：固定档位（0 = 不清理，永久保留）。
+# 档位而不是任意天数，是为了让「保存多久」在界面上是明确、可预期的一组选择。
+LOG_RETENTION_DAY_OPTIONS = (0, 1, 3, 7, 15, 30)
+LOG_RETENTION_DEFAULT_DAYS = 30
+LOG_RETENTION_STATE_SETTING = "_log_retention_last_run_day"
 AUDIT_PRUNE_BATCH = 1000
 AUDIT_OUTCOMES = {"success", "failure", "denied", "error", "unknown"}
 AUDIT_SEVERITIES = {"debug", "info", "warning", "error", "critical"}
@@ -178,6 +183,9 @@ DEFAULT_SETTINGS = {
     "ui_theme_mode": "system",
     "expiry_reminder_days": "3",
     "stop_alas_on_expiry": "false",
+    # 日志保存时长（天，0 = 永久保留）：同时约束审计日志行与运行日志的轮转段。
+    # 运行日志仍保留按体积轮转（LOG_MAX_BYTES / LOG_BACKUP_COUNT）作为上限。
+    "log_retention_days": "30",
 }
 
 # The legacy ``data/.env`` file is an import source, not a second settings
@@ -1619,6 +1627,142 @@ def prune_viewer_watch_history(now_ms: int | None = None) -> int:
     return removed
 
 
+def prune_audit_log_by_age(days: int, now: float | None = None) -> int:
+    """Trim audit rows older than the retention window without breaking the chain.
+
+    审计哈希链要求「删前缀 + 前移锚点」，所以这里沿用 :func:`_prune_audit_prefix`
+    的记账方式（锚点、event_count、pruned_count、告警投影链接），只是把「按行数超限」
+    换成「按天超龄」。``days <= 0`` 表示永久保留。
+    """
+    days = max(0, int(days))
+    if days <= 0:
+        return 0
+    cutoff = int(now if now is not None else time.time()) - days * 86400
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        state = conn.execute("SELECT * FROM audit_integrity_state WHERE singleton=1").fetchone()
+        if state is None:
+            conn.commit()
+            return 0
+        # Wall-clock corrections can put a newer event before an older one.
+        # Only remove a contiguous expired prefix, never a retained event.
+        boundary = conn.execute(
+            """SELECT id, event_hash FROM audit_log
+               WHERE ts < ? AND id < COALESCE(
+                   (SELECT MIN(id) FROM audit_log WHERE ts >= ?),
+                   (SELECT COALESCE(MAX(id), 0) + 1 FROM audit_log)
+               ) ORDER BY id DESC LIMIT 1""",
+            (cutoff, cutoff),
+        ).fetchone()
+        if boundary is None:
+            conn.commit()
+            return 0
+        cutoff_id = int(boundary["id"])
+        prune_count = int(
+            conn.execute("SELECT COUNT(*) FROM audit_log WHERE id <= ?", (cutoff_id,)).fetchone()[0]
+        )
+        if prune_count <= 0:
+            conn.commit()
+            return 0
+        # 与按行数裁剪同样的自检：记账行数与实际行数不一致时宁可不裁剪。
+        actual_count = int(conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0])
+        current_count = max(0, int(state["event_count"] or 0))
+        if actual_count != current_count:
+            conn.commit()
+            AUDIT_LOGGER.critical(
+                "AUDIT_AGE_RETENTION_SKIPPED state_count=%s row_count=%s",
+                current_count,
+                actual_count,
+                extra={"event_name": "audit.retention_skipped"},
+            )
+            return 0
+        conn.execute("DELETE FROM audit_log WHERE id <= ?", (cutoff_id,))
+        conn.execute(
+            "UPDATE audit_alerts SET log_url='' WHERE audit_id <= ? AND log_url <> ''",
+            (cutoff_id,),
+        )
+        _prune_audit_alerts(conn)
+        conn.execute(
+            """
+            UPDATE audit_integrity_state
+            SET anchor_event_id=?, anchor_event_hash=?,
+                event_count=event_count-?, pruned_count=pruned_count+?, updated_at=?
+            WHERE singleton=1
+            """,
+            (
+                cutoff_id,
+                str(boundary["event_hash"] or ""),
+                prune_count,
+                prune_count,
+                now_ts(),
+            ),
+        )
+        conn.commit()
+    AUDIT_LOGGER.info(
+        "AUDIT_AGE_RETENTION_PRUNED count=%s days=%s",
+        prune_count,
+        days,
+        extra={
+            "event_name": "audit.age_retention_pruned",
+            "event_fields": {"pruned_count": prune_count, "retention_days": days},
+        },
+    )
+    return prune_count
+
+
+def normalize_log_retention_days(value: object) -> int:
+    """把任意存量/输入值收敛到允许的档位。
+
+    合法档位直接返回；非数字退回默认档位；其余按「不超过它的最大档位」收敛
+    （2 → 1、45 → 30、负数 → 0），这样老库里留下的任意天数不会让维护逻辑拿到
+    一个界面无法表达的值。
+    """
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return LOG_RETENTION_DEFAULT_DAYS
+    if days in LOG_RETENTION_DAY_OPTIONS:
+        return days
+    if days <= 0:
+        return 0
+    allowed = [option for option in LOG_RETENTION_DAY_OPTIONS if 0 < option <= days]
+    return max(allowed) if allowed else LOG_RETENTION_DAY_OPTIONS[-1]
+
+
+def log_retention_days() -> int:
+    """Current 「日志保存时长」in days (0 = 不清理 / keep forever)."""
+    return normalize_log_retention_days(get_setting("log_retention_days", LOG_RETENTION_DEFAULT_DAYS))
+
+
+def run_log_retention(now: float | None = None, *, force: bool = False) -> dict:
+    """按「日志保存时长」清理审计日志与运行日志轮转段（每天最多一次）。
+
+    维护循环每 10 秒调用一次 :func:`run_storage_maintenance`，所以这里用持久化的
+    「上次执行日期」做闸门：既不会每次维护都全表扫描，也不会因重启反复裁剪。
+    """
+    days = log_retention_days()
+    if days <= 0:
+        return {"log_retention": "disabled", "audit_rows": 0, "log_files": 0}
+    current = time.localtime(now if now is not None else time.time())
+    today = time.strftime("%Y-%m-%d", current)
+    if not force and str(get_setting(LOG_RETENTION_STATE_SETTING, "") or "") == today:
+        return {"log_retention": "skipped", "audit_rows": 0, "log_files": 0}
+    audit_rows = prune_audit_log_by_age(days, now)
+    log_files = prune_rotated_log_files(days, now)
+    set_setting(LOG_RETENTION_STATE_SETTING, today)
+    if log_files:
+        AUDIT_LOGGER.info(
+            "RUNTIME_LOG_RETENTION_PRUNED files=%s days=%s",
+            log_files,
+            days,
+            extra={
+                "event_name": "runtime_log.retention_pruned",
+                "event_fields": {"removed_files": log_files, "retention_days": days},
+            },
+        )
+    return {"log_retention": "pruned", "audit_rows": audit_rows, "log_files": log_files, "days": days}
+
+
 def run_storage_maintenance() -> dict:
     """Periodic retention sweep (startup + the account monitor loop).
 
@@ -1629,6 +1773,7 @@ def run_storage_maintenance() -> dict:
         "sessions": prune_expired_sessions(),
         "watch_sessions": prune_viewer_watch_history(),
     }
+    result.update(run_log_retention())
     return result
 
 
@@ -2152,6 +2297,7 @@ UI_SETTING_KEYS = (
     "ui_theme_mode",
     "expiry_reminder_days",
     "stop_alas_on_expiry",
+    "log_retention_days",
 )
 
 
@@ -2170,6 +2316,7 @@ def get_ui_settings() -> dict[str, object]:
         "ui_theme_mode": str(settings.get("ui_theme_mode") or "system").strip() or "system",
         "expiry_reminder_days": _int_setting(settings, "expiry_reminder_days", 3),
         "stop_alas_on_expiry": str(settings.get("stop_alas_on_expiry") or "false").lower() in ("1", "true", "yes", "on"),
+        "log_retention_days": normalize_log_retention_days(settings.get("log_retention_days")),
     }
 
 

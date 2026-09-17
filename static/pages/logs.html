@@ -112,6 +112,28 @@
             </div>
           </section>
 
+          <section class="panel" id="log-retention-panel" aria-labelledby="log-retention-title">
+            <div class="panel-header">
+              <h2 class="panel-title" id="log-retention-title">日志保存时长<span class="panel-subtitle">审计日志与运行日志的保留天数</span></h2>
+              <span class="refresh-meta" id="log-retention-state">读取中…</span>
+            </div>
+            <div class="log-retention-grid">
+              <label class="log-retention-field" for="log-retention-days">
+                <span class="log-retention-label">保存时长</span>
+                <select class="field-input" id="log-retention-days" aria-describedby="log-retention-hint">
+                  <option value="0">不清理</option>
+                  <option value="1">1 天</option>
+                  <option value="3">3 天</option>
+                  <option value="7">7 天</option>
+                  <option value="15">15 天</option>
+                  <option value="30">30 天</option>
+                </select>
+              </label>
+              <span class="log-retention-hint" id="log-retention-hint">「不清理」仅关闭按天清理，行数与文件轮转上限仍生效。审计日志清理连续过期记录并保留校验链；运行日志只清理超期轮转段。</span>
+              <button class="btn-primary" type="button" id="log-retention-save"><i data-lucide="save"></i><span>保存</span></button>
+            </div>
+          </section>
+
           <section class="panel" id="logs-panel" aria-labelledby="logs-panel-title">
             <div class="panel-header">
               <h2 class="panel-title" id="logs-panel-title">运行日志与安全审计<span class="panel-subtitle">实时记录 · 按需刷新</span></h2>

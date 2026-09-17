@@ -100,6 +100,10 @@
     </aside>
     <div class="mobile-scrim" id="mobile-scrim" aria-hidden="true"></div>
     <div class="workspace overflow-y-auto" id="workspace" data-scroll-region="primary">
+      <div class="control-loss-notice" id="control-loss-notice" hidden>
+        <span id="control-loss-text" role="status" aria-live="polite" aria-atomic="true"></span>
+        <button id="control-loss-dismiss" type="button" aria-label="关闭提示" title="关闭提示"><i data-lucide="x" aria-hidden="true"></i></button>
+      </div>
       <div class="status-pill" id="status-pill" role="region" tabindex="0" aria-label="设备状态">
         <span class="pill-block" id="pill-device"><span class="pill-label" id="mirror-device-label">设备连接</span><b id="mirror-device-name">未选择</b><i class="dot off" id="mirror-device-dot"></i><span id="mirror-device-status">等待数据</span></span>
         <span class="pill-sep"></span>
@@ -192,7 +196,7 @@
           <div class="mg-controls" role="group" aria-label="宫格显示设置">
             <div class="mg-control" id="mg-zoom" title="画面缩放（百分比）">
               <i data-lucide="move-horizontal" aria-hidden="true"></i>
-              <input class="mg-zoom-range" id="mg-zoom-range" type="range" min="25" max="150" step="5" value="80" aria-label="宫格画面缩放百分比">
+              <input class="mg-zoom-range" id="mg-zoom-range" type="range" min="40" max="150" step="5" value="80" aria-label="宫格画面缩放百分比">
               <span class="mg-zoom-value" id="mg-zoom-value">80%</span>
             </div>
             <span class="mg-control-sep" aria-hidden="true"></span>

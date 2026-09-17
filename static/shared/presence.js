@@ -65,7 +65,14 @@
       retryIndex = 0;
       schedulePing();
     };
-    next.onmessage = function () {};
+    next.onmessage = function (event) {
+      if (socket !== next) return;
+      var message;
+      try { message = JSON.parse(event.data); } catch (error) { return; }
+      if (message && message.type === 'control_lock') {
+        global.document.dispatchEvent(new CustomEvent('scrcpygate:control-lock-changed', { detail: message }));
+      }
+    };
     next.onerror = function () {
       if (socket !== next) return;
       try { next.close(); } catch (error) {}

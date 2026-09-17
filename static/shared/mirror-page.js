@@ -151,6 +151,7 @@ document.addEventListener('DOMContentLoaded',function(){
           else if(focusInside && document.activeElement && typeof document.activeElement.blur==='function') document.activeElement.blur();
         }
         moreMenuReturnFocus=null;
+        if(wasOpen) scheduleDockDensity();
       }
       function closeFixedPops(except){
         var morePop=document.getElementById('cb-pop');
@@ -247,6 +248,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var moreActionBusy=false;
       var keyboardOn=false;
       var dockHidden=false;
+      var windowDockHidden=false;
       var controlState='unknown';
       // 控制权持有者（用户名）：状态栏「控制权」胶囊显示「我 / 某人 / 空闲」。
       var controlOwner='';
@@ -341,17 +343,15 @@ document.addEventListener('DOMContentLoaded',function(){
       /* 服务端快照里的 control_lock 只有用户名，没有 client_id：
          「持有者是我」并不等于「这条连接持有」——同一账号在别的标签页/浏览器里的锁也会显示成我。
          所以只有在本地控制通道确实持有（controlOwnership）时才认 'self'；
-         同账号但非本连接按 'free' 处理，让按钮显示「获取控制」并能真正拿到（见 v2-adapter 的
-         「同账号陈旧锁先释放再重试」）。 */
+         同账号的另一端也按 'other' 处理，接管前同样需要确认。 */
       function selfHoldsControl(){
         return !!(window.ScrcpyGateV2&&window.ScrcpyGateV2.state&&window.ScrcpyGateV2.state.controlOwnership===true);
       }
       function snapshotControlState(owner){
         if(selfHoldsControl()) return 'self';
-        var username=currentMirrorUsername();
         var name=owner?String(owner):'';
         if(!name) return 'free';
-        return username&&name===username?'free':'other';
+        return 'other';
       }
       /* 控制权的持有者用户名（状态栏要显示「谁在控制」）。 */
       function noteControlOwner(owner){
@@ -390,7 +390,7 @@ document.addEventListener('DOMContentLoaded',function(){
           onOpenDevice:function(deviceId,options){ openDeviceFromGrid(deviceId,options); },
           onAddDevice:function(){ addAdbDevice(); },
           onNotice:function(message){ showToast(message); },
-          // 卡片宽度实际生效值变化时刷新缩放标签（含「被高度限制」的提示）。
+          // 卡片实际宽度变化时刷新缩放标签。
           onTileWidth:function(){ refreshGridZoomLabel(); }
         });
         gridView.mount(host,{
@@ -588,6 +588,7 @@ document.addEventListener('DOMContentLoaded',function(){
         options=options||{};
         var previousId=selectedDevice&&selectedDevice.id;
         var sameDevice=previousId!=null&&String(previousId)===String(id);
+        if(!sameDevice) clearControlNotice();
         var preserveSession=options.preserveSession!==false&&sameDevice&&!!currentSession&&
           (watchState==='connecting'||watchState==='playing'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming');
         selectedDevice=deviceById(id); renderDeviceList();
@@ -692,7 +693,7 @@ document.addEventListener('DOMContentLoaded',function(){
           keyboardBtn.classList.toggle('held',keyboardOn);
           keyboardBtn.title=keyboardOn?'关闭键盘':'开启键盘输入';
           keyboardBtn.setAttribute('aria-label',keyboardOn?'关闭键盘':'开启键盘输入');
-          keyboardBtn.setAttribute('aria-pressed',String(keyboardOn));
+          setDockTogglePressed(keyboardBtn,keyboardOn);
           keyboardBtn.setAttribute('aria-busy',moreActionBusy?'true':'false');
           keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+keyboardLabel+'</span>';
         }
@@ -722,10 +723,10 @@ document.addEventListener('DOMContentLoaded',function(){
           ctrlState.innerHTML='<i data-lucide="'+(self?'shield-check':(controlState==='other'?'lock':'shield'))+'"></i>'+escHtml(ctext);
         }
         if(window.lucide) lucide.createIcons();
-        // 按钮文案/可见性变了，控制栏宽度也会变：重新判定是否需要收文字/换行。
+        // 按钮文案/可见性改变后，重新分配单排工具栏和更多菜单。
         syncDockDensity();
         // 全屏里「获取控制」可能就藏在收起的把手后面，把手要跟着状态点亮。
-        if(fullscreenActive) updateFullscreenDockToggle();
+        updateFullscreenDockToggle();
       }
       function stopCountdown(){
         clearInterval(cdTimer);
@@ -795,6 +796,7 @@ document.addEventListener('DOMContentLoaded',function(){
         videoSurface.classList.toggle('show',watching);
         // 实测码率：投屏中（含连接/重连）一直占着这一格，停止投屏才收起并清零。
         var live=LIVE_WATCH_STATES.indexOf(s)>=0;
+        if(!live) clearControlNotice();
         if(live!==rateShown){
           rateShown=live;
           if(!live){ measuredMbps=0; measuredFps=0; }
@@ -907,10 +909,10 @@ document.addEventListener('DOMContentLoaded',function(){
         });
       }
       /* 宫格画面缩放：滑块按百分比调格子宽度（100% = 300px），列数仍由宽度自适应。
-         范围 25%–150%（默认 80%）：再大单格子会顶满视口高度，再小就看不清缩略图。 */
+         范围 40%–150%（默认 80%）：最小 120px，保留两个完整的触控按钮。 */
       var GRID_ZOOM_KEY='scrcpygate-grid-zoom';
       var GRID_ZOOM_BASE=300;
-      var GRID_ZOOM_MIN=25;
+      var GRID_ZOOM_MIN=40;
       var GRID_ZOOM_MAX=150;
       var GRID_ZOOM_STEP=5;
       var GRID_ZOOM_DEFAULT=80;
@@ -943,22 +945,20 @@ document.addEventListener('DOMContentLoaded',function(){
         refreshGridZoomLabel();
         return value;
       }
-      /* 滑块给的是**请求宽度**；手机上还会被「可用宽/可用高」压小。
-         标签里把实际生效的宽度写出来，否则用户会以为滑块坏了（用户反馈：
-         「无法调整卡片大小」就是被 ≤640px 的满宽规则吃掉了）。 */
+      // 卡片仅在超过容器宽度时受限；较高的卡片通过宫格滚动查看。
       function refreshGridZoomLabel(){
         if(!gridZoomValue) return;
         var value=clampGridZoom(gridZoomRange?gridZoomRange.value:savedGridZoom());
         var info=gridView&&typeof gridView.tileWidth==='function'?gridView.tileWidth():null;
         var requested=gridZoomPx(value);
         var effective=info&&info.effective?Number(info.effective):requested;
-        gridZoomValue.textContent=effective<requested-1
-          ?(value+'%（实际 '+effective+'px）')
+        gridZoomValue.textContent=Math.abs(effective-requested)>1
+          ?(value+'%'+tr('（实际 {0}px）').replace('{0}',effective))
           :(value+'%');
         if(gridZoomValue.title!==undefined){
-          gridZoomValue.title=effective<requested-1
-            ?'当前卡片宽 '+effective+'px（受可用高度/宽度限制，滑块请求 '+requested+'px）'
-            :'当前卡片宽 '+effective+'px';
+          gridZoomValue.title=tr(effective<requested-1
+            ?'当前卡片宽 {0}px（受可用宽度限制，滑块请求 {1}px）'
+            :'当前卡片宽 {0}px').replace('{0}',effective).replace('{1}',requested);
         }
       }
       if(gridZoomRange){
@@ -1229,13 +1229,31 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('scrcpygate:controlstate',function(event){
         var active=!!(event&&event.detail&&event.detail.active);
         var owner=event&&event.detail&&event.detail.owner?String(event.detail.owner):'';
-        if(active){ controlState='self'; controlOwner=currentMirrorUsername()||'我'; }
-        else if(controlState==='self') controlState=(owner&&owner!==currentMirrorUsername())?'other':'free';
+        if(active){ controlState='self'; controlOwner=currentMirrorUsername()||'我'; clearControlNotice(); }
+        else if(controlState==='self') controlState=owner?'other':'free';
         if(owner) noteControlOwner(owner);
         else if(controlState==='free') controlOwner='';
         rawState('control_state',{active:active,owner:owner,state:controlState});
         renderControl();
       });
+      function clearControlNotice(){
+        var notice=document.getElementById('control-loss-notice');
+        if(notice) notice.hidden=true;
+      }
+      document.addEventListener('scrcpygate:control-lost',function(event){
+        var detail=event.detail||{};
+        if(!selectedDevice||String(detail.deviceId)!==String(selectedDevice.id)||!streamLive()) return;
+        var message=detail.owner===currentMirrorUsername()
+          ?tr('控制权已被此账号的另一端接管，当前仍可观看。')
+          :tr('控制权已被 {0} 接管，当前仍可观看。').replace('{0}',detail.owner||tr('其他用户'));
+        var notice=document.getElementById('control-loss-notice');
+        notice.hidden=false;
+        document.getElementById('control-loss-text').textContent=message;
+        setFullscreenDockHidden(false);
+      });
+      document.getElementById('control-loss-dismiss').addEventListener('click',clearControlNotice);
+      document.addEventListener('scrcpygate:viewer-stopped',clearControlNotice);
+      document.addEventListener('scrcpygate:session-stopped',clearControlNotice);
       document.getElementById('expired-renew').addEventListener('click',function(){
         configuredCall(['account.renewal.request','users.renewal.request'],{method:'POST',body:{deviceId:selectedDevice && selectedDevice.id,sessionId:currentSession && currentSession.id}}).then(function(){ showToast('续期申请已提交'); }).catch(function(error){ showToast(apiErrorText(error)); });
       });
@@ -1371,7 +1389,7 @@ document.addEventListener('DOMContentLoaded',function(){
         keyboardOn=active;
         if(keyboardBtn){
           keyboardBtn.classList.toggle('held',active);
-          keyboardBtn.setAttribute('aria-pressed',String(active));
+          setDockTogglePressed(keyboardBtn,active);
           keyboardBtn.setAttribute('aria-label',active?'关闭键盘':'开启键盘输入');
           keyboardBtn.title=active?'关闭键盘':'开启键盘输入';
           keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+(active?'关闭键盘':'键盘')+'</span>';
@@ -1763,7 +1781,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!fullscreenBtn) return;
         var label=fullscreenActive?'退出全屏':'全屏显示';
         var state=fullscreenActive?'全屏':'窗口';
-        fullscreenBtn.setAttribute('aria-pressed',String(fullscreenActive));
+        setDockTogglePressed(fullscreenBtn,fullscreenActive);
         fullscreenBtn.setAttribute('aria-label',label);
         fullscreenBtn.title=label;
         fullscreenBtn.classList.toggle('held',fullscreenActive);
@@ -1831,17 +1849,17 @@ document.addEventListener('DOMContentLoaded',function(){
         fullscreenOrientationTarget='';
         if(!next){
           fullscreenOrientationTarget='';
-          dockHidden=false;
+          dockHidden=windowDockHidden;
         }
         // 全屏是沉浸式播放：控制栏默认收进边缘，只留一条细把手，点一下才展开
         // （需要手动点「获取控制」的情况由 autoAcquireControlOnFullscreen 兜底摊开）。
-        if(next&&!wasActive) dockHidden=true;
+        if(next&&!wasActive){ windowDockHidden=dockHidden; dockHidden=true; }
         app.classList.toggle('is-fullscreen',next);
-        app.classList.toggle('dock-menu-collapsed',next&&dockHidden);
+        app.classList.toggle('dock-menu-collapsed',dockHidden);
         app.setAttribute('data-fullscreen',String(next));
-        if(ctrlDock) ctrlDock.classList.toggle('dock-hidden',next&&dockHidden);
+        if(ctrlDock){ ctrlDock.classList.toggle('dock-hidden',dockHidden); ctrlDock.inert=dockHidden; }
         placeMoreMenuForFullscreen(next);
-        // 全屏里控制栏只留图标（见 CSS），宽度变了要重新判定是否需要换行 —— 放在切换
+        // 全屏里控制栏只留图标（见 CSS），宽度变了要重新分配更多菜单 —— 放在切换
         // is-fullscreen 之后，密度判定读到的才是切换后的真实宽度。
         syncDockDensity();
         // 全屏留白就是纯黑（#000）：不拉伸、不裁切，也不加任何背景层。
@@ -1869,7 +1887,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
       function updateFullscreenDockToggle(){
         if(!fullscreenDockToggle) return;
-        var visible=fullscreenActive;
+        var visible=viewMode!=='grid';
         fullscreenDockToggle.setAttribute('aria-hidden',String(!visible));
         fullscreenDockToggle.tabIndex=visible?0:-1;
         fullscreenDockToggle.setAttribute('aria-expanded',String(!dockHidden));
@@ -1878,11 +1896,16 @@ document.addEventListener('DOMContentLoaded',function(){
         // 可读名称与提示走 aria-label / title，状态用 .is-attention 点亮。
         var label=attention?'展开控制栏并获取控制':'展开控制栏';
         if(!dockHidden) label='收起控制栏';
-        var hint=label+'（拖动可沿屏幕左右侧移动，双击或按 0 回到右侧中间）';
-        fullscreenDockToggle.setAttribute('aria-label',hint);
-        fullscreenDockToggle.title=hint;
+        var hint=fullscreenActive?label+'（拖动可沿屏幕左右侧移动，双击或按 0 回到右侧中间）':label;
+        fullscreenDockToggle.setAttribute('aria-label',tr(hint));
+        fullscreenDockToggle.title=tr(hint);
         fullscreenDockToggle.classList.toggle('is-attention',attention);
-        if(fullscreenDockToggle.firstChild) fullscreenDockToggle.textContent='';
+        var toggleIcon=fullscreenActive?'':(dockHidden?'chevron-up':'chevron-down');
+        if(fullscreenDockToggle.dataset.icon!==toggleIcon){
+          fullscreenDockToggle.dataset.icon=toggleIcon;
+          fullscreenDockToggle.innerHTML=toggleIcon?'<i data-lucide="'+toggleIcon+'" aria-hidden="true"></i>':'';
+          if(window.lucide) lucide.createIcons();
+        }
       }
 
       var DOCK_AUTO_HIDE_MS=4000;
@@ -1983,13 +2006,18 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('wheel',noteDockActivity,{capture:true,passive:true});
 
       function setFullscreenDockHidden(hidden){
-        if(!fullscreenActive) return;
+        if(hidden){
+          closeMoreMenu(false);
+          if(ctrlDock&&ctrlDock.contains(document.activeElement)&&fullscreenDockToggle) fullscreenDockToggle.focus({preventScroll:true});
+        }
         if(mirrorControlTools) mirrorControlTools.setDockHidden(!!hidden); else dockHidden=!!hidden;
-        if(ctrlDock) ctrlDock.classList.toggle('dock-hidden',dockHidden);
+        if(!fullscreenActive) windowDockHidden=dockHidden;
+        if(ctrlDock){ ctrlDock.classList.toggle('dock-hidden',dockHidden); ctrlDock.inert=dockHidden; }
         app.classList.toggle('dock-menu-collapsed',dockHidden);
-        if(dockHidden) closeMoreMenu(true);
         updateFullscreenDockToggle();
         applyDockAnchor();
+        scheduleDockDensity();
+        scheduleAdaptiveFrameRefresh();
         // 展开/收起会改变「画面该不该让位」，等布局稳定后再算位移（见下面的让位逻辑）。
         scheduleFullscreenDockLift();
         // 展开后空闲一段时间自动收回边缘；收起时不再计时。
@@ -2066,21 +2094,54 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       document.addEventListener('fullscreenchange',scheduleFullscreenDockLift);
 
-      /* ---------- 控制栏密度：先收文字，再换行，绝不让按钮被裁掉 ----------
-         窄屏上控制栏原来是「固定一条 + 横向滚动」，于是最左边/最右边的按钮会被裁一半，
-         而且「获取控制」拿到焦点时浏览器会把容器滚过去，把最左边的「开始投屏」推出可视区。
-         这里按实际宽度分两档降级：① 隐藏文字标签、按钮变方形（图标 + aria-label）；
-         ② 仍然放不下才换行。宽度够时保持原来的「图标 + 文字」胶囊样式。 */
+      /* 单排工具栏：先收文字，仍放不下时将次要操作移入「更多」。 */
       function dockOverflow(){
         if(!ctrlDock) return 0;
         return Math.max(0,(Number(ctrlDock.scrollWidth)||0)-(Number(ctrlDock.clientWidth)||0));
       }
+      function setDockTogglePressed(button,pressed){
+        button.setAttribute(button.getAttribute('role')==='menuitemcheckbox'?'aria-checked':'aria-pressed',String(pressed));
+      }
       function syncDockDensity(){
-        if(!ctrlDock) return;
-        ctrlDock.classList.remove('dock-compact','dock-wrap');
+        if(!ctrlDock||dockHidden||!ctrlDock.offsetWidth||(cbPop&&cbPop.classList.contains('open'))) return;
+        restoreDockOverflow();
+        ctrlDock.classList.remove('dock-compact');
         if(dockOverflow()<=0) return;
         ctrlDock.classList.add('dock-compact');
-        if(dockOverflow()>0) ctrlDock.classList.add('dock-wrap');
+        // Keep one row with full touch targets. Move the actual buttons so
+        // handlers, permission flags and changing labels stay in sync.
+        var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-tasks','cb-back','cb-home','cb-fullscreen','cb-watch','cb-acquire'];
+        Array.prototype.forEach.call(ctrlDock.querySelectorAll(':scope > button'),function(el){
+          if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
+        });
+        candidates.some(function(id){
+          if(dockOverflow()<=0) return true;
+          var el=document.getElementById(id);
+          if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return false;
+          var anchor=document.createComment('dock action');
+          el.before(anchor);
+          var toggle=el.hasAttribute('aria-pressed');
+          dockOverflowItems.push({element:el,anchor:anchor,role:el.getAttribute('role'),toggle:toggle});
+          el.setAttribute('role',toggle?'menuitemcheckbox':'menuitem');
+          if(toggle){ el.setAttribute('aria-checked',el.getAttribute('aria-pressed')); el.removeAttribute('aria-pressed'); }
+          cbPop.appendChild(el);
+          var moreWrap=document.getElementById('cb-more');
+          if(dockOverflowItems.length===1) dockMoreWasOff=moreWrap.hasAttribute('data-feature-off');
+          moreWrap.removeAttribute('data-feature-off');
+          moreBtn.disabled=false;
+          return false;
+        });
+      }
+      var dockOverflowItems=[];
+      var dockMoreWasOff=false;
+      function restoreDockOverflow(){
+        if(dockOverflowItems&&dockOverflowItems.length&&dockMoreWasOff) document.getElementById('cb-more').setAttribute('data-feature-off','');
+        (dockOverflowItems||[]).forEach(function(item){
+          item.anchor.replaceWith(item.element);
+          if(item.role) item.element.setAttribute('role',item.role); else item.element.removeAttribute('role');
+          if(item.toggle){ item.element.setAttribute('aria-pressed',item.element.getAttribute('aria-checked')); item.element.removeAttribute('aria-checked'); }
+        });
+        dockOverflowItems=[];
       }
       var dockDensityRaf=0;
       function scheduleDockDensity(){
@@ -2391,7 +2452,7 @@ document.addEventListener('DOMContentLoaded',function(){
       window.addEventListener('resize',function(){ syncVideoOrientation(); applyDockAnchor(); });
 
       function moreMenuItems(){
-        return Array.prototype.slice.call(cbPop ? cbPop.querySelectorAll('[role^="menuitem"]') : []).filter(function(item){ return !item.disabled; });
+        return Array.prototype.slice.call(cbPop ? cbPop.querySelectorAll('[role^="menuitem"]') : []).filter(function(item){ return !item.disabled&&item.getBoundingClientRect().width>0; });
       }
       function openMoreMenu(){
         if(!cbPop || moreBtn.disabled) return;
@@ -4493,6 +4554,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var dock=document.getElementById('ctrl-dock');
         var pop=document.getElementById('cb-pop');
         if(!dock||!pop) return;
+        restoreDockOverflow();
         var layout=dockMenuLayout();
         var level1=dockLayout?layout.level1.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level1.slice();
         var level2=dockLayout?layout.level2.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level2.slice();
@@ -4636,7 +4698,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var failed=alasStateIsFault(state);
         var available=!!cfg && apDevice() && cfg.can_run!==false && !blocked;
         apBottomToggle.disabled=!available || apBusy;
-        apBottomToggle.setAttribute('aria-pressed',state==='running'?'true':'false');
+        setDockTogglePressed(apBottomToggle,state==='running');
         apBottomToggle.classList.toggle('is-active',state==='running');
         // 异常状态用红色标出来：以前这里只有「运行中」有颜色，error/unreachable 落到默认灰。
         apBottomToggle.classList.toggle('is-error',failed);

@@ -895,7 +895,32 @@
     .ctrl-dock.dock-compact > .ctrl-sep { display:none; }
     .ctrl-dock.dock-compact { gap:1px; padding-left:4px; padding-right:4px; }
     .app.is-fullscreen .ctrl-dock { gap:1px; padding-left:4px; padding-right:4px; }
-    .ctrl-dock.dock-wrap { flex-wrap:wrap; justify-content:center; height:auto; max-width:100%; overflow-x:visible; border-radius:20px; row-gap:4px; }
+    /* One row at every size; JS moves overflow actions into More. */
+    .app .ctrl-dock { flex-wrap:nowrap; min-height:52px; height:auto; gap:4px; padding:4px; overflow:visible; }
+    .app:not(.is-fullscreen) .ctrl-dock { max-width:calc(100% - 64px); margin-left:0; margin-right:auto; }
+    .app .ctrl-dock > .cb-btn, .app .ctrl-dock > .cb-item,
+    .app .ctrl-dock > .cb-more > .cb-btn { flex:0 0 auto; min-width:44px; min-height:44px; }
+    .app .ctrl-dock.dock-compact > .cb-btn, .app .ctrl-dock.dock-compact > .cb-item,
+    .app .ctrl-dock.dock-compact > .cb-more > .cb-btn,
+    .app.is-fullscreen .ctrl-dock > .cb-btn, .app.is-fullscreen .ctrl-dock > .cb-item,
+    .app.is-fullscreen .ctrl-dock > .cb-more > .cb-btn { width:44px; min-width:44px; padding:0; }
+    .app .ctrl-dock.dock-compact > .cb-item > span,
+    .app .ctrl-dock.dock-compact > .cb-item > small { display:none; }
+    .app:not(.is-fullscreen) .ctrl-dock.dock-hidden { display:none; }
+    .cb-pop .cb-btn { min-height:44px; }
+    .cb-pop { max-height:calc(100dvh - 96px); overflow-y:auto; }
+    .cb-pop [aria-checked="true"], .cb-pop [aria-checked="true"]:hover { color:#187a39; }
+    .dark .cb-pop [aria-checked="true"], .dark .cb-pop [aria-checked="true"]:hover { color:#30d158; }
+    .cb-pop [aria-checked="true"] small { color:inherit; }
+    .app:not(.is-fullscreen) .fullscreen-dock-toggle { display:flex; position:absolute; right:12px; bottom:calc(12px + env(safe-area-inset-bottom)); width:44px; min-width:44px; height:44px; min-height:44px; transform:none; opacity:1; color:var(--c-text); border:1px solid var(--c-border); border-radius:50%; background:var(--c-glass-strong); touch-action:manipulation; }
+    .app:not(.is-fullscreen) .fullscreen-dock-toggle::before { display:none; }
+    .app:not(.is-fullscreen) .fullscreen-dock-toggle [data-lucide] { width:20px; height:20px; }
+    .app:not(.is-fullscreen) .fullscreen-dock-toggle:focus-visible { outline:2px solid var(--brand-500); outline-offset:2px; }
+    .control-loss-notice { position:absolute; top:52px; left:50%; transform:translateX(-50%); z-index:125; display:flex; align-items:center; gap:8px; width:max-content; max-width:calc(100% - 24px); padding:4px 4px 4px 12px; border:1px solid var(--c-border); border-radius:12px; background:var(--c-pop); color:var(--c-text-strong); box-shadow:0 8px 24px var(--c-shadow); font-size:13px; }
+    .control-loss-notice[hidden] { display:none; }
+    .control-loss-notice > span { min-width:0; overflow-wrap:anywhere; }
+    .control-loss-notice > button { flex:0 0 44px; width:44px; height:44px; border:0; border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
+    .control-loss-notice > button [data-lucide] { width:18px; height:18px; }
     @media (max-width:640px){
       .app { grid-template-columns:minmax(0,1fr); grid-template-rows:48px minmax(0,1fr); }
       .topnav { padding:0 8px; }
@@ -1155,10 +1180,8 @@
     .mg-refresh.mg-primary:hover:not(:disabled) { background:#0a6cd6; color:#fff; }
     .mg-refresh:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #007aff; }
     .mg-refresh [data-lucide] { width:12px; height:12px; }
-    .mg-grid { display:flex; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; justify-content:flex-start; gap:8px; min-height:0; overflow-y:auto; padding-bottom:8px; scrollbar-width:thin; }
-    /* 设备格子：安静的内容卡（1px 边框定界，阴影只在悬停/播放时出现）。
-       宽度取「滑块值」与「高度预算 × 画面比例」的较小值（--mg-tile-w 由播放器写入），
-       竖屏设备在放大档位下也不会高过视口。 */
+    .mg-grid { display:flex; flex:1 1 0; width:100%; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; justify-content:flex-start; gap:8px; min-height:0; overflow-y:auto; padding-bottom:8px; scrollbar-width:thin; }
+    /* 卡片宽度跟随滑块与可用宽度，较高的卡片在宫格内滚动查看。 */
     .mg-tile { flex:0 0 var(--mg-tile-w,var(--mg-tile-min,300px)); min-width:0; max-width:100%; display:flex; flex-direction:column; gap:5px; padding:4px; border:1px solid var(--c-border); border-radius:13px; background:var(--c-surface); transition:border-color var(--motion-fast) var(--ease-fade),box-shadow var(--motion-fast) var(--ease-fade),transform var(--motion-fast) var(--ease-standard); }
     .mg-tile:hover { border-color:var(--c-text-faint-hover); box-shadow:0 10px 28px -14px var(--c-shadow); }
     .mg-tile.is-playing { border-color:#007aff; box-shadow:0 10px 28px -14px rgba(0,122,255,.45); }
@@ -1170,10 +1193,8 @@
     @keyframes mg-pulse { 0%,100% { box-shadow:0 0 0 3px rgba(52,199,89,.16); } 50% { box-shadow:0 0 0 6px rgba(52,199,89,.05); } }
     .mg-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; color:var(--c-text-strong); letter-spacing:-.01em; }
     .mg-meta { margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; color:var(--c-text-sub); }
-    /* 屏幕区按画面比例自适应（--mg-stage-aspect 由播放器写入），默认 16:9。
-       --mg-stage-max-h：可用高度上限（播放器按宫格可视区算），保证一张卡完整可见 ——
-       横屏手机这类「可视区只有一两百像素高」时画面按比例缩进框内，不再只露半张卡。 */
-    .mg-stage { position:relative; aspect-ratio:var(--mg-stage-aspect,16 / 9); max-height:var(--mg-stage-max-h,none); overflow:hidden; border-radius:9px; background:#0b0b0e; box-shadow:inset 0 0 0 1px rgba(255,255,255,.05); transition:aspect-ratio var(--motion-layout) var(--ease-standard); }
+    /* 屏幕保持设备比例；超出可视高度时由宫格容器滚动。 */
+    .mg-stage { position:relative; aspect-ratio:var(--mg-stage-aspect,16 / 9); overflow:hidden; border-radius:9px; background:#0b0b0e; box-shadow:inset 0 0 0 1px rgba(255,255,255,.05); transition:aspect-ratio var(--motion-layout) var(--ease-standard); }
     .mg-video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:transparent; opacity:0; transition:opacity 160ms var(--ease-fade); }
     /* 横屏画面放进竖格子时旋转 90°：元素取「格子高 × 格子宽」再转 90°，
        正好铺满格子；旋转后比例仍不合的（例如 18:9）用 cover 铺满裁切，避免黑边。
@@ -1195,6 +1216,20 @@
     .mg-actions::-webkit-scrollbar { display:none; }
     .mg-actions-main, .mg-actions-end { display:inline-flex; align-items:center; flex-wrap:nowrap; gap:6px; min-width:0; }
     .mg-actions-end { margin-left:auto; }
+    .mg-tile { container-type:inline-size; container-name:mirror-tile; }
+    .mg-actions { overflow:visible; }
+    .mg-actions-main, .mg-actions-end { flex-shrink:0; }
+    .mg-actions .mg-btn { min-width:44px; min-height:44px; flex-shrink:0; }
+    @container mirror-tile (max-width:280px) {
+      .mg-actions .mg-btn { width:44px; padding:0; }
+      .mg-actions .mg-btn-text { display:none; }
+      .mg-slot .mg-actions-main { width:100%; }
+      .mg-slot .mg-btn { width:100%; }
+      .mg-meta { display:none; }
+    }
+    @container mirror-tile (min-width:180px) and (max-width:280px) {
+      .mg-slot .mg-btn-text { display:inline; }
+    }
     .mg-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:32px; padding:0 11px; border:1px solid var(--c-line); border-radius:999px; background:var(--c-hover); color:var(--c-text); font:inherit; font-size:11.5px; font-weight:600; line-height:1; white-space:nowrap; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); transition:background-color 150ms var(--ease-standard),border-color 150ms var(--ease-standard),color 150ms var(--ease-standard),box-shadow 150ms var(--ease-standard),transform 150ms var(--ease-standard); }
     .mg-btn [data-lucide] { width:14px; height:14px; }
     .mg-btn-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }

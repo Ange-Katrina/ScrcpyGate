@@ -40,6 +40,7 @@ def admin_ui_settings_payload() -> dict:
             "themeMode": theme,
             "expiryReminderDays": settings["expiry_reminder_days"],
             "stopAlasOnExpiry": settings["stop_alas_on_expiry"],
+            "logRetentionDays": settings["log_retention_days"],
         },
         "system": {"version": "2.0.0", "build": ""},
         "version": "2.0.0",
@@ -60,6 +61,8 @@ _UI_SETTING_FIELDS = (
     ("themeMode", "ui_theme_mode", "theme"),
     ("expiryReminderDays", "expiry_reminder_days", ("int", 0, 90)),
     ("stopAlasOnExpiry", "stop_alas_on_expiry", "bool"),
+    # 日志保存时长：固定档位（0 = 不清理），不是任意天数。
+    ("logRetentionDays", "log_retention_days", ("choice", storage.LOG_RETENTION_DAY_OPTIONS)),
 )
 
 
@@ -92,6 +95,19 @@ def _normalize_ui_setting_updates(payload: dict) -> dict:
                     status_code=400,
                     detail=i18n.translate("server.error.invalid_setting_value"),
                 ) from None
+        elif kind[0] == "choice":
+            # 只接受列出的档位；不在这里做「就近收敛」，避免静默改写管理员的选择。
+            allowed = tuple(int(option) for option in kind[1])
+            try:
+                candidate = int(str(value).strip())
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=i18n.translate("server.error.invalid_setting_value"),
+                ) from None
+            if candidate not in allowed:
+                raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+            updates[key] = candidate
         else:
             low, high = kind[1], kind[2]
             try:
@@ -436,6 +452,7 @@ def _admin_ui_settings_export_payload() -> dict:
             "themeMode": export_theme,
             "expiryReminderDays": settings["expiry_reminder_days"],
             "stopAlasOnExpiry": settings["stop_alas_on_expiry"],
+            "logRetentionDays": settings["log_retention_days"],
         },
         "video": video,
         "alas": alas.public_settings(),

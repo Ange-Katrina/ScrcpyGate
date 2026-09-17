@@ -96,6 +96,49 @@ Use `v1.0.0-rc.1` for a prerelease. In **Actions > Builds**, wait for all three
 stages to succeed, then copy the `ghcr.io/<owner>/scrcpygate@sha256:...`
 reference from the summary.
 
+The tag build publishes a Docker image; it does not create a GitHub Release.
+Prepare the Release as a draft using the existing tag, the
+[release template](../../.github/RELEASE_TEMPLATE.md), and GitHub's **Generate
+release notes**. The [writing guide](../contributing/pull-requests-and-releases.md#release-notes)
+explains the categories and how to add highlights, upgrade instructions and
+the verified image digest above the full PR list. Review the draft before
+publishing; mark release candidates as prereleases.
+
+## Update an existing bridge deployment
+
+The administrator dashboard checks GHCR tags and confirms the selected manifest
+before offering a host command. Local builds and floating tags may not have
+comparable version numbers; check the displayed image reference.
+
+From the existing deployment directory, run:
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.io/ange-katrina/scrcpygate:edge
+```
+
+Use a verified version or digest for a stable deployment. Without `--image`, the
+script uses `SCRCPYGATE_UPDATE_IMAGE`, then `latest`; `latest` exists only after a
+stable release. Repeated updates pull floating tags and compare actual image IDs.
+This command requires a running service owned by that directory and Docker Compose
+plugin. Host-network installations must follow their separate manual procedure.
+
+The script preserves the actual old image under a local rollback tag, pulls before
+changing configuration, and creates an online SQLite snapshot with its matching
+ALAS key. A protected `.env` copy stays beside the data archive. If an online
+snapshot cannot be obtained, the update stops. `--skip-update-backup` skips the
+data snapshot but retains the configuration backup and rollback image.
+
+Startup uses the downloaded image without rebuilding or pulling again. On failure,
+the script attempts to restore the previous configuration and pinned image and
+checks its identity and health. Exit code 2 means image rollback passed; 3 means
+recovery needs attention. Database migrations are **not** automatically reversed:
+an incompatible migration requires restoring the matching data backup manually.
+
+The Logs page now defaults to 30 days of age-based retention. Existing row-count
+and file-rotation limits still apply. Choose **Do not clean up** to disable only
+age-based deletion; export any audit history needed before upgrading. Audit cleanup
+preserves the chain anchor and only removes a continuous expired prefix.
+
 ## Deploy manually
 
 For an existing bridge-mode deployment, use the health-gated deployment

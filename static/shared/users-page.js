@@ -23,6 +23,25 @@
       function deviceById(id) { for (var i = 0; i < DEVICE_POOL.length; i++) { if (DEVICE_POOL[i].id === id) return DEVICE_POOL[i]; } return null; }
       function configById(id) { for (var i = 0; i < ALAS_POOL.length; i++) { if (ALAS_POOL[i].id === id) return ALAS_POOL[i]; } return null; }
       function apiError(error) { return window.ScrcpyGateApi ? window.ScrcpyGateApi.errorMessage(error) : '数据服务不可用'; }
+      /* 到期「剩余天数」统一按日历日算：到期时间按本地 23:59:59 存，
+         用时长除 86400 再向上取整会多出一天（列表 31 天 vs 编辑弹窗 30 天）。
+         与编辑弹窗的 expiryDayIndex - todayDayIndex 保持同一口径。 */
+      function localDayIndex(date) {
+        return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+      }
+      function calendarDaysUntil(value) {
+        if (value == null || value === '') return null;
+        var date;
+        if (typeof value === 'number' || /^[+-]?\d+(?:\.\d+)?$/.test(String(value).trim())) {
+          var numeric = Number(value);
+          if (!isFinite(numeric)) return null;
+          date = new Date(Math.abs(numeric) >= 1000000000000 ? numeric : numeric * 1000);
+        } else {
+          var m = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+          date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(String(value).replace(' ', 'T'));
+        }
+        return isNaN(date.getTime()) ? null : localDayIndex(date) - localDayIndex(new Date());
+      }
       function catalogStatus(value) {
         if (value && typeof value === 'object') {
           if (typeof value.online === 'boolean') return value.online ? 'online' : 'offline';
@@ -56,7 +75,9 @@
             || u.alasVisible === 'false' || u.alas_visible === 'false'),
           status: u.enabled === false ? 'disabled' : (u.status === 'disabled' ? 'disabled' : (u.status || computeStatus(u.expiry))),
           expiry: u.expiry || u.expiresAt || '',
-          remainingDays: u.remainingDays == null ? (u.remaining_seconds == null ? null : Math.ceil(Number(u.remaining_seconds) / 86400)) : Number(u.remainingDays),
+          remainingDays: u.remainingDays != null
+            ? Number(u.remainingDays)
+            : calendarDaysUntil(u.expiresAt != null ? u.expiresAt : (u.expires_at != null ? u.expires_at : (u.expiry || ''))),
           expirationState: u.expirationState || u.expiration_state || '',
           lastLoginAt: u.lastLoginAt || u.last_login_at || null,
           lastLoginIp: u.lastLoginIp || u.last_login_ip || '',
@@ -196,7 +217,9 @@
         if (u.role === 'admin' || u.expirationState === 'permanent' || u.remainingDays === null || isNaN(u.remainingDays)) return '<span class="expiry-chip good">长期有效</span>';
         var days = Math.max(0, Math.floor(Number(u.remainingDays)));
         var cls = u.status === 'expired' || u.status === 'disabled' || days <= 7 ? 'danger' : (days <= 30 ? 'warn' : 'good');
-        return '<span class="expiry-chip ' + cls + '">' + (u.status === 'expired' ? '已到期' : days + ' 天') + '</span>';
+        /* 0 天与编辑弹窗一致读作「今天到期」 */
+        var text = u.status === 'expired' ? '已到期' : (days === 0 ? '今天到期' : days + ' 天');
+        return '<span class="expiry-chip ' + cls + '">' + text + '</span>';
       }
 
       /* ---------- toast ---------- */

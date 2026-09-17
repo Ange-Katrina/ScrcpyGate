@@ -1,6 +1,10 @@
 ARG PYTHON_IMAGE=python:3.12-alpine
 FROM ${PYTHON_IMAGE}
 
+# 版本标记：CI 发布时用 --build-arg SCRCPYGATE_VERSION=<tag> 盖上；本地构建默认 dev。
+# 后台「系统更新」面板读它显示当前版本，compose 也会用 .env 的值覆盖。
+ARG SCRCPYGATE_VERSION=dev
+
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,9 +12,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     WEB_SCRCPY_DATA_DIR=/app/data \
     PATH="/app/venv/bin:$PATH" \
-    HOME=/app/data
+    HOME=/app/data \
+    SCRCPYGATE_VERSION=${SCRCPYGATE_VERSION}
 
-RUN apk add --no-cache android-tools libstdc++ libffi curl && \
+RUN printf '%s\n' "$SCRCPYGATE_VERSION" > /app/VERSION && \
+    apk add --no-cache android-tools libstdc++ libffi curl && \
     addgroup -S app && \
     adduser -S -G app app
 

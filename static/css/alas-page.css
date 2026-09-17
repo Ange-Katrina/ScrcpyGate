@@ -594,7 +594,7 @@ html, body { margin:0; height:100%; }
     .account-menu.open .menu-panel { opacity:1; transform:translateY(0); visibility:visible; pointer-events:auto; transition:opacity var(--motion-base) var(--ease-fade),transform var(--motion-base) var(--ease-standard),visibility 0s linear 0s; }
     .menu-head { display:flex; align-items:center; gap:9px; padding:8px 10px 10px; border-bottom:1px solid var(--admin-line); margin-bottom:6px; }
     .menu-head b { display:block; font-size:13px; font-weight:600; color:var(--admin-text); }
-    .menu-head span { display:block; margin-top:2px; font-size:11px; color:var(--admin-muted); }
+    .menu-head div span { display:block; margin-top:2px; font-size:11px; color:var(--admin-muted); }
     .menu-item { display:flex; align-items:center; gap:9px; width:100%; height:32px; padding:0 10px; border:0; border-radius:8px; color:var(--admin-muted); background:transparent; font-size:12.5px; cursor:pointer; text-align:left; }
     .menu-item:hover { color:var(--admin-text); background:var(--admin-hover); }
     .menu-item [data-lucide] { width:14px; height:14px; flex:0 0 auto; }

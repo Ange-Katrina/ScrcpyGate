@@ -58,6 +58,9 @@ ENDPOINTS_MAP = {
     # 账户到期策略（提醒提前天数 / 到期自动停止 ALAS），读写 /api/admin/settings 的两个字段。
     "account.policy": {"path": "/api/admin/settings", "method": "GET"},
     "account.policy.update": {"path": "/api/admin/settings", "method": "PUT"},
+    # 日志保存时长（/logs 页面）：与账户策略共用同一个系统设置端点，只读写字段时间不同。
+    "logs.retention": {"path": "/api/admin/settings", "method": "GET"},
+    "logs.retention.update": {"path": "/api/admin/settings", "method": "PUT"},
     # 设备 / 会话 / 控制
     "devices.list": {"path": "/api/devices", "method": "GET"},
     "sessions.list": {"path": "/api/devices", "method": "GET"},
@@ -116,6 +119,8 @@ ENDPOINTS_MAP = {
     "alerts.list": {"path": "/api/admin/alerts", "method": "GET"},
     "alerts.resolve": {"path": "/api/admin/alerts/:id/resolve", "method": "POST"},
     "admin.dashboard.snapshot": {"path": "/api/admin/dashboard/snapshot", "method": "GET"},
+    # 系统更新检查（只读）：后台只显示「有没有更新」，应用更新在宿主机跑 deploy.sh --update。
+    "system.update": {"path": "/api/admin/update-check", "method": "GET"},
     "logs.export": {"path": "/api/admin/logs/export", "method": "POST"},
     "logs.integrity": {"path": "/api/admin/logs/integrity-check", "method": "POST"},
     "alas.overview": {"path": "/api/admin/alas/permissions", "method": "GET"},

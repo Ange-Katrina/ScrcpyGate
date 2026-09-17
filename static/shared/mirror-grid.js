@@ -36,7 +36,7 @@
     var onOpenDevice = options.onOpenDevice || function () {};
     var onAddDevice = options.onAddDevice || function () {};
     var onNotice = options.onNotice || function () {};
-    // 卡片实际宽度变化时回调（页面用它提示「滑块受高度/宽度限制」）。
+    // 卡片实际宽度变化时回调（页面用它提示「滑块受可用宽度限制」）。
     var onTileWidth = options.onTileWidth || null;
     var maxLive = Number(options.maxLive) > 0 ? Math.floor(Number(options.maxLive)) : DEFAULT_MAX_LIVE;
     var slotCount = Number(options.slotCount) > 0 ? Math.floor(Number(options.slotCount)) : DEFAULT_SLOT_COUNT;
@@ -51,9 +51,8 @@
     var order = [];
     var slots = [];
     var controls = null;
-    var TILE_CHROME_HEIGHT = 62;   // 卡片头 + 操作条 + 间距（不随宽度变）
     var lastTileWidth = 0;          // 最近一次实际生效的卡片宽度
-    var lastTileRequestedWidth = 0; // 滑块请求的宽度（可能被高度预算压小）
+    var lastTileRequestedWidth = 0; // 滑块请求的宽度
     var batchToken = 0;             // 批量操作令牌（一键全部投屏/停止/刷新）
 
     /* ---------------- 基础工具 ---------------- */
@@ -165,7 +164,7 @@
           '</div>' +
           '<footer class="mg-actions">' +
             '<span class="mg-actions-main">' +
-              '<button class="mg-btn mg-btn-primary mg-slot-add" type="button" title="' + addLabel + '" aria-label="' + addLabel + '"><i data-lucide="plus" aria-hidden="true"></i><span class="mg-btn-text">' + addLabel + '</span></button>' +
+              '<span class="mg-btn mg-btn-primary mg-slot-add" aria-hidden="true"><i data-lucide="plus" aria-hidden="true"></i><span class="mg-btn-text">' + addLabel + '</span></span>' +
             '</span>' +
           '</footer>' +
         '</article>';
@@ -178,7 +177,7 @@
       wrapper.innerHTML = slotMarkup();
       var element = wrapper.firstChild;
       var slot = { element: element };
-      // 整卡点击（含底部按钮）都走同一个动作：键盘 Enter/空格在按钮上同样冒泡到这里。
+      // 整卡是唯一交互目标，避免嵌套按钮造成重复键盘焦点。
       element.addEventListener('click', function () { onAddDevice(); });
       element.addEventListener('keydown', function (event) {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -201,7 +200,7 @@
         if (!slot.used && slot.element.parentNode) slot.element.parentNode.removeChild(slot.element);
         if (slot.used) {
           slot.element.style.setProperty('--mg-stage-aspect', String(PORTRAIT_ASPECT_CSS));
-          applyElementWidth(slot.element, PORTRAIT_ASPECT_CSS);
+          applyElementWidth(slot.element);
         }
       }
       for (var extra = slotCount; extra < slots.length; extra += 1) {
@@ -320,86 +319,25 @@
       tileList().forEach(applyStageAspect);
     }
 
-    /* 竖屏设备在放大档位下高度会失控（600px 宽 → 约 1060px 高）。这里按视口
-       高度给格子宽度封顶：宽度取「滑块宽度」与「高度预算 × 画面比例」的较小值，
-       画面仍然铺满格子，不会出现上下黑边。设备卡与空坑位共用同一套计算，
-       同一档位下所有格子宽度一致（避免个别卡片突然比同屏其他卡片大）。 */
-    function tileMinWidth() {
-      if (!host) return 300;
-      var px = parseFloat(host.style.getPropertyValue('--mg-tile-min') || '300px');
-      return isFinite(px) && px > 0 ? px : 300;
-    }
-
-    /* 卡片除画面区之外的固定高度（卡片头 + 操作条 + 间距/内边距/边框）。
-       手机端按钮是 44px，这个值会明显大于桌面，所以按真实 DOM 量。 */
-    function tileChromeHeight() {
-      var tile = tileList()[0];
-      if (!tile || !tile.element) {
-        var slot = null;
-        for (var i = 0; i < slots.length; i++) { if (slots[i] && slots[i].used) { slot = slots[i]; break; } }
-        tile = slot;
-      }
-      if (!tile || !tile.element) return TILE_CHROME_HEIGHT;
-      var el = tile.element;
-      var head = el.querySelector('.mg-head');
-      var actions = el.querySelector('.mg-actions');
-      var total = 0;
-      if (head) total += head.getBoundingClientRect().height;
-      if (actions) total += actions.getBoundingClientRect().height;
-      var style = global.getComputedStyle ? global.getComputedStyle(el) : null;
-      if (style) {
-        var gap = parseFloat(style.rowGap || style.gap || '0') || 0;
-        total += gap * 2;
-        total += (parseFloat(style.paddingTop || '0') || 0) + (parseFloat(style.paddingBottom || '0') || 0);
-        total += (parseFloat(style.borderTopWidth || '0') || 0) * 2;
-      }
-      return total > 24 ? total : TILE_CHROME_HEIGHT;
-    }
-
-    var budgetCache = null;
-    var budgetCacheAt = 0;
-    /* 可用高度预算：按**宫格可视区**高度减去卡片固定开销，保证一张卡完整可见。
-       同一次渲染里所有格子必须用同一个预算（否则先渲染的格子会按旧布局算成别的宽度），
-       所以这里做 250ms 缓存，resize/syncTileWidths 时强制重算。 */
-    function stageHeightBudget(force) {
-      var now = Date.now();
-      if (!force && budgetCache !== null && now - budgetCacheAt < 250) return budgetCache;
-      var measured = host && host.clientHeight ? Number(host.clientHeight) : 0;
-      var viewport = Number(global.innerHeight) || 900;
-      var available = measured > 0 ? measured : Math.max(220, viewport - 240);
-      var budget = Math.max(60, available - tileChromeHeight());
-      budgetCache = budget;
-      budgetCacheAt = now;
-      return budget;
-    }
-
-    function applyElementWidth(element, aspect, budget) {
+    // Width follows the slider and the available inline space. Never derive
+    // it from the grid's content height: that creates a shrinking feedback loop.
+    // Tall cards remain proportional and can be scrolled into view.
+    function applyElementWidth(element) {
       if (!element) return 0;
-      var requested = tileMinWidth();
-      var usable = isFinite(budget) && budget > 0 ? budget : stageHeightBudget();
-      var width = requested;
-      if (isFinite(aspect) && aspect > 0) {
-        // aspect 是「宽/高」：可用高度 × 比例 = 该比例下不超高时的最大宽度。
-        width = Math.min(requested, Math.round(usable * aspect));
-      }
-      width = Math.max(120, width);
+      var requested = parseFloat(host.style.getPropertyValue('--mg-tile-min')) || 300;
+      var available = host.clientWidth || requested;
+      var width = Math.min(Math.max(120, requested), available);
       element.style.setProperty('--mg-tile-w', width + 'px');
-      // 横屏手机这类「可视区只有一两百像素高」的场景：宽度已经压到下限 120px，
-      // 单卡仍然放不下（120px 竖屏画面高约 213px）。再给画面区一个高度上限，
-      // 保证一张卡完整可见（画面按比例缩进框内，格子里不会出现半张卡）。
-      element.style.setProperty('--mg-stage-max-h', usable + 'px');
       lastTileWidth = width;
       lastTileRequestedWidth = requested;
       return width;
     }
 
-    /* 当前实际生效的卡片宽度与滑块请求值：页面据此提示「为什么不能再大」。 */
     function tileWidthInfo() {
-      return { effective: lastTileWidth, requested: lastTileRequestedWidth, budget: stageHeightBudget() };
+      return { effective: lastTileWidth, requested: lastTileRequestedWidth };
     }
 
-    /* 布局稳定后再同步一次宽度：切到宫格/刚渲染时 #mg-grid 的高度还没定下来，
-       那一刻算出的预算是错的（实测手机上会算成下限 120px）。 */
+    // 视图切换或容器尺寸稳定后再同步一次可用宽度。
     var widthSyncTimer = 0;
     var widthSyncRaf = 0;
     function scheduleWidthSync() {
@@ -415,16 +353,13 @@
 
     function syncTileWidth(tile) {
       if (!tile || !tile.element) return;
-      var aspect = parseFloat(tile.element.style.getPropertyValue('--mg-stage-aspect') || '0');
-      applyElementWidth(tile.element, aspect, stageHeightBudget());
+      applyElementWidth(tile.element);
     }
 
     function syncTileWidths() {
-      // 先强制重算预算：同一次同步里所有格子用同一个值。
-      var budget = stageHeightBudget(true);
       tileList().forEach(function (tile) { syncTileWidth(tile); });
       slots.forEach(function (slot) {
-        if (slot && slot.used) applyElementWidth(slot.element, PORTRAIT_ASPECT_CSS, budget);
+        if (slot && slot.used) applyElementWidth(slot.element);
       });
       if (typeof onTileWidth === 'function') {
         try { onTileWidth(tileWidthInfo()); } catch (error) {}

@@ -302,6 +302,17 @@ ScrcpyGate 引导式安装与管理脚本
   ./deploy.sh --pull         更新基础镜像后安装或更新
   ./deploy.sh --skip-build   复用已有 scrcpygate:local 镜像
 
+更新到已发布的镜像:
+  ./deploy.sh --update [--image <引用>] [--skip-update-backup]
+      从 GHCR 拉取已发布镜像并原地更新（**不重新构建源码**）：
+      先备份数据目录与 .env，写入 SCRCPYGATE_IMAGE/SCRCPYGATE_VERSION，
+      再 docker compose up -d --no-build 并过健康检查；
+      拉取失败或健康检查不通过时保留配置与数据，自动回滚到更新前的镜像，
+      不会退回源码构建。--image 支持 tag（ghcr.io/owner/scrcpygate:v1.2.3）
+      或 digest（ghcr.io/owner/scrcpygate@sha256:...）；默认取 .env 的
+      SCRCPYGATE_UPDATE_IMAGE，未设置时用 ghcr.io/ange-katrina/scrcpygate:latest。
+      更新前备份默认开启，--skip-update-backup 可跳过。
+
 服务管理:
   ./deploy.sh --start | --stop | --restart
   ./deploy.sh --status | --logs [行数] | --reset-admin
@@ -358,6 +369,8 @@ pull_images=false
 auto_install_deps=${SCRCPYGATE_AUTO_INSTALL_DEPS:-false}
 LOG_LINES=""
 CANDIDATE_MANIFEST=""
+UPDATE_IMAGE=""
+UPDATE_SKIP_BACKUP=false
 PURGE=false
 PORT_OCCUPANCY_STATUS=unknown
 PORT_OCCUPANCY_TOOL=""
@@ -372,6 +385,24 @@ while [ "$#" -gt 0 ]; do
     --install-deps) ACTION=install; auto_install_deps=true ;;
     --pull) ACTION=install; pull_images=true ;;
     --skip-build) ACTION=install; skip_build=true ;;
+    --update) ACTION=update ;;
+    --image)
+      ACTION=update
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) die "--image 需要镜像引用 / --image requires an image reference" ;;
+          *) UPDATE_IMAGE=$2; shift ;;
+        esac
+      else
+        die "--image 需要镜像引用 / --image requires an image reference"
+      fi
+      ;;
+    --image=*)
+      ACTION=update
+      UPDATE_IMAGE=${1#--image=}
+      [ -n "$UPDATE_IMAGE" ] || die "--image 需要镜像引用 / --image requires an image reference"
+      ;;
+    --skip-update-backup) UPDATE_SKIP_BACKUP=true ;;
     --start) ACTION=start ;;
     --stop) ACTION=stop ;;
     --restart) ACTION=restart ;;
@@ -1620,7 +1651,9 @@ existing_instance_can_be_managed() {
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_SERVICE" != scrcpygate ]; then ownership_error="Compose 服务不匹配"; fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_WORKING_DIR" != "$SCRIPT_DIR" ]; then ownership_error="Compose 工作目录不匹配"; fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_CONFIG_FILES" != "$expected_config" ]; then ownership_error="Compose 配置文件不匹配"; fi
-  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != scrcpygate:local ]; then ownership_error="容器镜像不匹配"; fi
+  managed_image=$(dotenv_value SCRCPYGATE_IMAGE)
+  managed_image=${managed_image:-scrcpygate:local}
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != "$managed_image" ]; then ownership_error="容器镜像不匹配"; fi
   if [ -z "${ownership_error:-}" ]; then
     if expected_data=$(configured_data_dir_from_disk); then
       if actual_data=$(existing_container_data_dir); then
@@ -1663,7 +1696,10 @@ scrcpygate_container_identity_is_safe() {
   esac
   case "${EXISTING_SCRCPYGATE_IMAGE:-}" in
     scrcpygate:*) ;;
-    *) return 1 ;;
+    *)
+      identity_image=$(dotenv_value SCRCPYGATE_IMAGE)
+      [ -n "$identity_image" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" = "$identity_image" ] || return 1
+      ;;
   esac
   case "${EXISTING_SCRCPYGATE_SERVICE:-}" in
     ""|scrcpygate) ;;
@@ -1677,7 +1713,8 @@ scrcpygate_container_matches_current_project() {
   [ "${EXISTING_SCRCPYGATE_PROJECT:-}" = scrcpygate ] || return 1
   [ "${EXISTING_SCRCPYGATE_SERVICE:-}" = scrcpygate ] || return 1
   [ "${EXISTING_SCRCPYGATE_WORKING_DIR:-}" = "$SCRIPT_DIR" ] || return 1
-  [ "${EXISTING_SCRCPYGATE_IMAGE:-}" = scrcpygate:local ] || return 1
+  current_project_image=$(dotenv_value SCRCPYGATE_IMAGE)
+  [ "${EXISTING_SCRCPYGATE_IMAGE:-}" = "${current_project_image:-scrcpygate:local}" ] || return 1
   return 0
 }
 
@@ -2696,6 +2733,94 @@ install_with_pull_service() {
   install_service
 }
 
+# 更新到已发布的 GHCR 镜像：只换镜像，不动源码、不动数据。
+# 失败时保留 .env 与数据，自动回滚到更新前的镜像；任何路径都不会退回源码构建。
+update_service() {
+  prepare_readonly_deployment
+  docker compose version >/dev/null 2>&1 || die "镜像更新需要 Docker Compose plugin"
+  detect_scrcpygate_instance
+  [ "${EXISTING_SCRCPYGATE_STATE:-}" = running ] || die "更新需要已运行的服务；首次部署请使用安装流程"
+  existing_instance_can_be_managed || die "当前容器不属于此 bridge 部署；请按对应部署文档更新"
+  prepare_data_directory
+  up_current_ref=$EXISTING_SCRCPYGATE_IMAGE
+  up_current_id=$(docker inspect --format '{{.Image}}' scrcpygate) || die "无法读取当前镜像 ID"
+  [ -n "$up_current_id" ] || die "当前镜像 ID 为空"
+  up_target_ref=${UPDATE_IMAGE:-}
+  [ -n "$up_target_ref" ] || up_target_ref=$(dotenv_value SCRCPYGATE_UPDATE_IMAGE)
+  [ -n "$up_target_ref" ] || up_target_ref="ghcr.io/ange-katrina/scrcpygate:latest"
+  case "$up_target_ref" in
+    ''|*[!a-zA-Z0-9._/@:-]*) die "无效的镜像引用 / invalid image reference" ;;
+  esac
+  # Pin the actual container image before pulling a mutable tag.
+  up_stamp="$(date -u +%Y%m%d-%H%M%S)-$$"
+  up_rollback_ref="scrcpygate:rollback-$up_stamp"
+  docker image tag "$up_current_id" "$up_rollback_ref" || die "无法保留回滚镜像"
+  panel_top "更新到已发布镜像"
+  panel_line "当前镜像" "$(safe_display "$up_current_ref")"
+  panel_line "目标镜像" "$(safe_display "$up_target_ref")"
+  log "正在拉取目标镜像；不会退回源码构建"
+  run_docker_pull "$up_target_ref" || die "拉取失败；当前服务与配置保持原状"
+  up_target_id=$(docker image inspect --format '{{.Id}}' "$up_target_ref") || die "无法读取目标镜像 ID"
+  if [ "$up_target_id" = "$up_current_id" ]; then
+    success_msg "当前已运行相同镜像，无需重建 / already running this image"
+    return 0
+  fi
+  # Persist a registry digest where available; otherwise retain the local ID.
+  up_pinned_ref=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$up_target_id" | head -n 1)
+  [ -n "$up_pinned_ref" ] || up_pinned_ref=$up_target_id
+  up_version_label=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$up_target_id" |
+    sed -n 's/^SCRCPYGATE_VERSION=//p' | head -n 1)
+  case "$up_version_label" in *[!a-zA-Z0-9._/-]*) up_version_label="" ;; esac
+  if [ "$UPDATE_SKIP_BACKUP" = true ]; then
+    warn_msg "已跳过数据备份；仍保留部署配置与回滚镜像"
+    up_env_backup=".env.update-$up_stamp.bak"
+  else
+    up_archive=$(backup_archive_path "")
+    [ ! -e "$up_archive" ] || die "备份文件已存在，未覆盖"
+    create_backup_archive "$DATA_DIR" "$up_archive" pre-update running
+    prune_backups "$(dirname -- "$up_archive")" "$up_archive"
+    up_env_backup="$up_archive.env"
+    success_msg "更新前数据备份: $(safe_display "$up_archive")"
+  fi
+  [ ! -e "$up_env_backup" ] && [ ! -L "$up_env_backup" ] || die "配置备份路径已存在"
+  ( umask 077; set -C; cat .env > "$up_env_backup" ) || die "无法备份 .env"
+  chmod 600 "$up_env_backup" || die "无法保护 .env 备份"
+  # Subshell confines fatal configuration-write errors to the update attempt.
+  if (
+    set_env_value SCRCPYGATE_IMAGE "$up_pinned_ref"
+    set_env_value SCRCPYGATE_VERSION "$up_version_label"
+    unset SCRCPYGATE_IMAGE SCRCPYGATE_VERSION
+    compose up -d --no-build --pull never scrcpygate || exit 1
+    wait_for_health
+    [ "$(docker inspect --format '{{.Image}}' scrcpygate)" = "$up_target_id" ]
+  ); then
+    success_msg "更新完成：$(display_url "$PUBLIC_BASE_URL")"
+    panel_line "运行镜像" "$(safe_display "$up_pinned_ref")"
+    panel_line "配置备份" "$(safe_display "$up_env_backup")"
+    panel_line "回滚镜像" "$up_rollback_ref"
+    log "镜像回滚不恢复数据库；不兼容迁移需要人工恢复配套数据备份"
+    return 0
+  fi
+  warn_msg "更新失败，正在恢复原配置与固定回滚镜像"
+  if (
+    cp -p "$up_env_backup" .env || exit 1
+    chmod 600 .env || exit 1
+    set_env_value SCRCPYGATE_IMAGE "$up_rollback_ref"
+    unset SCRCPYGATE_IMAGE SCRCPYGATE_VERSION
+    compose up -d --no-build --pull never scrcpygate || exit 1
+    wait_for_health
+    [ "$(docker inspect --format '{{.Image}}' scrcpygate)" = "$up_current_id" ]
+  ); then
+    error_msg "更新失败，原镜像已恢复健康；数据未自动回退"
+    log "配置备份: $(safe_display "$up_env_backup")"
+    return 2
+  fi
+  error_msg "更新失败且无法确认回滚健康；请用配置和数据备份人工恢复"
+  log "配置备份: $(safe_display "$up_env_backup")"
+  show_diagnostics
+  return 3
+}
+
 start_service() {
   prepare_deployment
   ensure_startup_conflicts
@@ -2872,6 +2997,7 @@ create_backup_archive() {
     if export_running_sqlite "$bk_staging/data/webscrcpy.db"; then
       bk_sqlite_mode="online-backup"
     else
+      [ "$bk_kind" != pre-update ] || die "更新前无法取得一致的数据库快照；已停止更新"
       warn_msg "在线备份接口不可用，回退为直接复制数据库文件"
     fi
   fi
@@ -2953,7 +3079,7 @@ prune_backups() {
     if [ "$bk_prune_victim" = "$bk_prune_current" ]; then
       continue
     fi
-    if rm -f "$bk_prune_victim" "$bk_prune_victim.sha256"; then
+    if rm -f "$bk_prune_victim" "$bk_prune_victim.sha256" "$bk_prune_victim.env"; then
       bk_prune_removed=$((bk_prune_removed + 1))
       log "  已清理旧备份: $(basename -- "$bk_prune_victim")"
     fi
@@ -3807,6 +3933,7 @@ show_menu() {
     menu_item 1 "引导配置并安装" "$C_GREEN"
     menu_item 2 "使用当前配置安装/更新" "$C_GREEN"
     menu_item 3 "更新基础镜像并重新安装" "$C_YELLOW"
+    menu_item 24 "更新到已发布镜像（GHCR，不重建源码）" "$C_YELLOW"
 
     menu_group "服务管理"
     menu_item 4 "启动服务" "$C_GREEN"
@@ -3848,6 +3975,15 @@ show_menu() {
         ;;
       2) run_menu_action install_current_service || true; pause_menu ;;
       3) run_menu_action install_with_pull_service || true; pause_menu ;;
+      24)
+        printf '\n%s>%s 目标镜像引用（留空=按 .env/默认 latest，支持 tag 或 @sha256:digest）: ' "$C_YELLOW" "$C_RESET"
+        IFS= read -r image_choice || exit 1
+        image_choice=$(printf '%s' "$image_choice" | tr -d '\r')
+        UPDATE_IMAGE=$image_choice
+        run_menu_action update_service || true
+        UPDATE_IMAGE=""
+        pause_menu
+        ;;
       4) run_menu_action start_service || true; pause_menu ;;
       5) run_menu_action stop_service || true; pause_menu ;;
       6) run_menu_action restart_service || true; pause_menu ;;
@@ -3933,7 +4069,7 @@ fi
 # interactive menu acquires it per action so an idle menu does not block a
 # second operator from running a read-only command.
 case "$ACTION" in
-  configure|install|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore)
+  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore)
     acquire_deploy_lock
     ;;
 esac
@@ -3942,6 +4078,7 @@ case "$ACTION" in
   menu) show_menu ;;
   configure) configure_only_flow ;;
   install) install_service ;;
+  update) update_service ;;
   start) start_service ;;
   stop) stop_service ;;
   restart) restart_service ;;
