@@ -1,9 +1,8 @@
 ARG PYTHON_IMAGE=python:3.12-alpine
 FROM ${PYTHON_IMAGE}
 
-# 版本标记：CI 发布时用 --build-arg SCRCPYGATE_VERSION=<tag> 盖上；本地构建默认 dev。
-# 后台「系统更新」面板读它显示当前版本，compose 也会用 .env 的值覆盖。
-ARG SCRCPYGATE_VERSION=dev
+# Local builds use VERSION; CI supplies a validated release/development version.
+ARG SCRCPYGATE_VERSION
 
 WORKDIR /app
 
@@ -12,11 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     WEB_SCRCPY_DATA_DIR=/app/data \
     PATH="/app/venv/bin:$PATH" \
-    HOME=/app/data \
-    SCRCPYGATE_VERSION=${SCRCPYGATE_VERSION}
+    HOME=/app/data
 
-RUN printf '%s\n' "$SCRCPYGATE_VERSION" > /app/VERSION && \
-    apk add --no-cache android-tools libstdc++ libffi curl && \
+RUN apk add --no-cache android-tools libstdc++ libffi curl && \
     addgroup -S app && \
     adduser -S -G app app
 
@@ -33,9 +30,11 @@ RUN python -m venv /app/venv && \
 
 COPY app/ app/
 COPY static/ static/
-COPY LICENSE THIRD_PARTY.md ./
+COPY LICENSE THIRD_PARTY.md VERSION ./
 COPY adb_manager.py scrcpy.py scrcpy-server docker-entrypoint.sh ./
 COPY adb/linux/ adb/linux/
+
+RUN python -c 'import os; from pathlib import Path; from app.version import validate_version; p = Path("/app/VERSION"); value = os.environ.get("SCRCPYGATE_VERSION") or p.read_text().strip(); p.write_text(validate_version(value) + "\n", encoding="utf-8")'
 
 RUN mkdir -p /app/data /tmp && \
     chmod +x /app/adb/linux/adb || true && \

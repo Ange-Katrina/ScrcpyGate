@@ -19,6 +19,7 @@ ROOT_FILES = (
     "Dockerfile",
     "LICENSE",
     "THIRD_PARTY.md",
+    "VERSION",
     "adb_manager.py",
     "compose.host.yaml",
     "compose.yaml",

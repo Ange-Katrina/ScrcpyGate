@@ -13,12 +13,28 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*))?")
+VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
 LOCAL_DIRECTORIES = {
     ".agents", ".claude", ".codex", ".git", ".venv", "__pycache__",
     "backups", "browser-data", "data", "node_modules", "output",
     "playwright-report", "skill", "snapshots", "test-results", "test-tools", "tests",
 }
+
+
+def validate_release_tag(tag: str) -> re.Match[str]:
+    match = VERSION.fullmatch(tag)
+    if not match or len(tag) > 128:
+        raise ValueError("Release tags must use vMAJOR.MINOR.PATCH[-prerelease]")
+    prerelease = match.group(4)
+    if prerelease and any(part.isdigit() and len(part) > 1 and part.startswith("0") for part in prerelease.split(".")):
+        raise ValueError("Numeric prerelease identifiers must not have leading zeroes")
+    return match
+
+
+def source_version() -> str:
+    value = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    validate_release_tag("v" + value)
+    return value
 
 
 def image_metadata(event: str, ref: str, sha: str, repository: str) -> dict[str, object]:
@@ -27,27 +43,33 @@ def image_metadata(event: str, ref: str, sha: str, repository: str) -> dict[str,
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Invalid repository name")
     image = f"ghcr.io/{repository.split('/')[0].lower()}/scrcpygate"
+    source = source_version()
+    channel = "pr" if event == "pull_request" else "preview"
+    if ref in {"refs/heads/main", "refs/heads/dev"}:
+        channel = ref.rsplit("/", 1)[-1]
+    build_version = f"{source}-dev.{channel}.g{sha[:12]}"
     publish = event in {"push", "workflow_dispatch"}
     tags = [f"{image}:sha-{sha}"]
     if ref in {"refs/heads/main", "refs/heads/dev"}:
         tags.append(f"{image}:{'edge' if ref.endswith('/main') else 'dev'}")
     elif ref.startswith("refs/tags/"):
         version = ref.removeprefix("refs/tags/")
-        match = VERSION.fullmatch(version)
-        if not match or len(version) > 128:
-            raise ValueError("Release tags must use vMAJOR.MINOR.PATCH[-prerelease]")
+        match = validate_release_tag(version)
+        if version != "v" + source:
+            raise ValueError("Release tag must match the version recorded in VERSION")
+        build_version = source
         prerelease = match.group(4)
-        if prerelease and any(part.isdigit() and len(part) > 1 and part.startswith("0") for part in prerelease.split(".")):
-            raise ValueError("Numeric prerelease identifiers must not have leading zeroes")
         tags.append(f"{image}:{version}")
         if prerelease is None:
             tags.append(f"{image}:latest")
     else:
         publish = False
-    return {"image": image, "publish": str(publish).lower(), "tags": tags if publish else []}
+    validate_release_tag("v" + build_version)
+    return {"image": image, "version": build_version, "publish": str(publish).lower(), "tags": tags if publish else []}
 
 
 def check_files() -> None:
+    source_version()
     names = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode("utf-8").split("\0")
     failures = []
     checked = 0
@@ -89,7 +111,7 @@ def main() -> None:
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with Path(output).open("a", encoding="utf-8") as handle:
-            handle.write(f"image={metadata['image']}\npublish={metadata['publish']}\n")
+            handle.write(f"image={metadata['image']}\nversion={metadata['version']}\npublish={metadata['publish']}\n")
             handle.write("tags<<SCRCPYGATE_IMAGE_TAGS\n")
             handle.write("\n".join(metadata["tags"]) + "\nSCRCPYGATE_IMAGE_TAGS\n")
     print(json.dumps(metadata))

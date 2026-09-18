@@ -221,6 +221,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 CI/CD 验证 amd64 和 arm64 镜像后发布到 GHCR，服务器手动部署。
 版本标签、包权限、镜像证明和部署步骤见 [CI/CD 与手动部署](docs/deployment/ci-cd.zh.md)。
 
+产品版本统一定义在 [`VERSION`](VERSION)，版本递增、开发镜像标识与显示规则见
+[版本号规范](docs/contributing/versioning.zh.md)。
+
 健康检查：`GET /healthz`；日志：stdout（JSON，`LOG_FORMAT=json`），可选写入数据目录。
 
 画面出问题（"黑一下""卡住""自己停了"）时，管理员可以在工作台侧边栏打开**投屏记录**：按时间

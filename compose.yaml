@@ -8,8 +8,7 @@ services:
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-alpine}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-        # 本地构建默认 dev；CI 发布会用 --build-arg 盖上 <tag>。
-        SCRCPYGATE_VERSION: ${SCRCPYGATE_VERSION:-dev}
+        # 本地构建读取源码 VERSION，避免复用旧部署的版本标记。
     image: ${SCRCPYGATE_IMAGE:-scrcpygate:local}
     container_name: scrcpygate
     restart: unless-stopped
@@ -19,7 +18,7 @@ services:
       - "${WEB_SCRCPY_BIND:-127.0.0.1}:${WEB_SCRCPY_PORT:-5000}:5000"
     environment:
       WEB_SCRCPY_DATA_DIR: /app/data
-      # 运行镜像与版本标记：后台「系统更新」面板用它显示「当前版本」。
+      # 镜像引用用于更新检查；产品版本优先读取镜像内的 VERSION。
       # SCRCPYGATE_IMAGE 由 compose 自身插值（可含 @sha256:digest），
       # SCRCPYGATE_VERSION 由 deploy.sh --update 写入 .env（tag 或 sha256-<前 12 位>）。
       SCRCPYGATE_IMAGE: ${SCRCPYGATE_IMAGE:-scrcpygate:local}

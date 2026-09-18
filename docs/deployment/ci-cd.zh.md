@@ -65,14 +65,17 @@
 
 ## 发布版本
 
-代码合入 `main` 后创建版本标签，例如：
+在发布 PR 中将根目录 `VERSION` 改为目标版本（例如 `1.0.0`）。验证并合入
+`main` 后，创建与文件内容匹配的版本标签；两者不一致时 CI 会拒绝发布：
 
 ```sh
 git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
-候选版本使用 `v1.0.0-rc.1`。在 **Actions → Builds** 中确认三个阶段全部成功，
+候选版本需要先将 `VERSION` 改为 `1.0.0-rc.1`，再使用标签 `v1.0.0-rc.1`。
+递增规则和开发镜像标识见[版本号规范](../contributing/versioning.zh.md)。
+在 **Actions → Builds** 中确认三个阶段全部成功，
 复制摘要中的 `ghcr.io/<owner>/scrcpygate@sha256:...`。
 
 标签工作流发布的是 Docker 镜像，不会自动创建 GitHub Release。
@@ -85,7 +88,8 @@ git push origin v1.0.0
 ## 更新现有 bridge 部署
 
 后台系统更新面板检查 GHCR 已发布标签，并确认目标 manifest 后提供宿主机命令。
-本地构建或浮动标签可能无法按版本号比较，需要核对显示的镜像引用。
+当前镜像和本地构建读取内置 `VERSION`；旧镜像可能仍只有非版本号标记。
+请同时核对产品版本与显示的镜像引用。
 
 在当前部署目录执行：
 

@@ -242,6 +242,10 @@ CI/CD publishes verified amd64 and arm64 images to GHCR; servers are deployed
 manually. See [CI/CD and manual deployment](docs/deployment/ci-cd.md) for
 release tags, package permissions, image attestations, and deployment commands.
 
+The product version is defined in [`VERSION`](VERSION). See the
+[versioning guide](docs/contributing/versioning.md) for release numbering,
+development builds, and version display.
+
 Health endpoint `GET /healthz`; logs are JSON on stdout (`LOG_FORMAT=json`) with optional file
 logging in the data directory.
 

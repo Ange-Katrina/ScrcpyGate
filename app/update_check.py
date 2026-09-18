@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import threading
 import time
 import urllib.error
 import urllib.request
+
+from .version import get_version
 
 DEFAULT_REPO = "Ange-Katrina/ScrcpyGate"
 DEFAULT_IMAGE = "ghcr.io/ange-katrina/scrcpygate"
@@ -27,7 +28,6 @@ _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _STABLE_TAG_RE = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 _request_context = threading.local()
-VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
 
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"payload": None, "expires_at": 0.0}
@@ -58,15 +58,8 @@ def image_reference() -> str:
 
 
 def current_version() -> dict[str, str]:
-    version = _env("SCRCPYGATE_VERSION")
-    if not version or version in {"dev", "latest", "edge", "main"} or version.startswith("sha256-"):
-        try:
-            version = VERSION_FILE.read_text(encoding="utf-8").strip() or version
-        except OSError:
-            pass
-    version = version or "dev"
     image = _env("SCRCPYGATE_IMAGE") or "scrcpygate:local"
-    return {"version": version, "image": image}
+    return {"version": get_version(), "image": image}
 
 
 def _semver_key(value: str) -> tuple[int, int, int] | None:

@@ -11,6 +11,7 @@ from . import security, web_ui
 from .logging_config import setup_logging
 from .middleware import LocaleContextMiddleware, SelectiveGZipMiddleware, security_middleware
 from .runtime import install_runtime, lifespan
+from .version import get_version
 from .routers import (
     admin_access,
     admin_alas,
@@ -38,7 +39,7 @@ def create_app() -> FastAPI:
     api_docs_enabled = security.env_bool("ENABLE_API_DOCS", False)
     app = FastAPI(
         title="ScrcpyGate",
-        version="0.1.0",
+        version=get_version(),
         docs_url="/docs" if api_docs_enabled else None,
         redoc_url="/redoc" if api_docs_enabled else None,
         openapi_url="/openapi.json" if api_docs_enabled else None,

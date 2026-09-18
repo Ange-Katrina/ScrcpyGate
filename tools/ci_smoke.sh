@@ -19,10 +19,15 @@ check_running() {
             && curl --fail --silent --max-time 5 "$base_url/healthz" >/dev/null \
             && curl --fail --silent --max-time 5 "$base_url/login" >/dev/null; then
             [ "$(docker exec "$name" id -u)" != 0 ]
-            docker exec "$name" python -c '
+            docker exec -e EXPECTED_VERSION="${EXPECTED_VERSION:-}" "$name" python -c '
 import os, shutil, subprocess
 from pathlib import Path
 from adb_manager import ADBManager
+from app.version import get_version, validate_version
+version = validate_version(Path("/app/VERSION").read_text().strip())
+assert get_version() == version
+if os.environ.get("EXPECTED_VERSION"):
+    assert version == os.environ["EXPECTED_VERSION"]
 adb = ADBManager().adb_path
 assert adb == shutil.which("adb") and os.access(adb, os.X_OK)
 subprocess.run([adb, "version"], check=True, stdout=subprocess.DEVNULL)

@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import i18n
 from .static_assets import asset_url
+from .version import get_version
 
 STATIC_PAGES = Path(__file__).resolve().parent.parent / "static" / "pages"
 
@@ -338,6 +339,11 @@ def _make_handler(file: str, admin_only: bool):
         # 每响应一次性 nonce：页面构建产物中的内联脚本在服务时附加，CSP 据此去掉 unsafe-inline。
         nonce = secrets.token_urlsafe(16)
         html = path.read_text(encoding="utf-8")
+        version = escape_html(get_version())
+        label = f"v{version}" if version != "dev" else version
+        html = html.replace('<div class="side-version">ScrcpyGate</div>', f'<div class="side-version" data-product-version>ScrcpyGate {label}</div>')
+        if file == "login.html":
+            html = html.replace("© ScrcpyGate", f"© ScrcpyGate · {label}")
         html = canonicalize_asset_paths(html)
         html = _INLINE_SCRIPT_RE.sub(lambda match: f'<script{match.group(1)} nonce="{nonce}">', html)
         head_injection = _prefetch_head_injection(file, nonce)

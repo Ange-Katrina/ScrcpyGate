@@ -85,14 +85,18 @@ to distinguish authorization errors from other registry or network failures.
 
 ## Publish a release
 
-After merging the desired source to `main`, create and push a version tag:
+Set the root `VERSION` file to the intended version (for example `1.0.0`) in
+the release PR. After merging the verified source to `main`, create and push
+the matching version tag. CI rejects tags that disagree with `VERSION`:
 
 ```sh
 git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
-Use `v1.0.0-rc.1` for a prerelease. In **Actions > Builds**, wait for all three
+For a prerelease, set `VERSION` to `1.0.0-rc.1` and use tag `v1.0.0-rc.1`.
+See [Versioning](../contributing/versioning.md) for bump rules and development
+image identifiers. In **Actions > Builds**, wait for all three
 stages to succeed, then copy the `ghcr.io/<owner>/scrcpygate@sha256:...`
 reference from the summary.
 
@@ -107,8 +111,9 @@ publishing; mark release candidates as prereleases.
 ## Update an existing bridge deployment
 
 The administrator dashboard checks GHCR tags and confirms the selected manifest
-before offering a host command. Local builds and floating tags may not have
-comparable version numbers; check the displayed image reference.
+before offering a host command. Current images and local builds read their
+baked `VERSION`; older images may still report an unversioned marker. Check
+the displayed image reference as well as the product version.
 
 From the existing deployment directory, run:
 
