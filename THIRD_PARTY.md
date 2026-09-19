@@ -62,3 +62,38 @@ Update the version, hash, and bundled license when replacing this file.
 
 Only the symbols used by the product shell are vendored. Keep the bundled ISC
 license and this attribution when updating or redistributing the sprite.
+
+## maxminddb
+
+- Package: `maxminddb==3.2.0` (`requirements.txt`)
+- Upstream: https://github.com/maxmind/MaxMind-DB-Reader-python
+- Purpose: Read local MaxMind DB (MMDB) files for the optional region restriction
+  feature. The reader never performs network lookups; it opens a local file.
+- License: Apache License 2.0
+
+## GeoLite2 Country data (not bundled)
+
+- The optional region restriction feature can download the **GeoLite2-Country**
+  database from MaxMind at runtime. **No MMDB file is shipped with this
+  repository or the container image**, and no license key is bundled: the key is
+  supplied with `GEO_ACCOUNT_ID` through the `GEO_LICENSE_KEY` environment variable,
+  or configured through the admin console in a private data-volume file. It is
+  never written to SQLite, logs, responses, or image layers. See the README for
+  file permissions and backup handling.
+- Using GeoLite2 (including the download itself) requires accepting MaxMind's
+  GeoLite2 End User License Agreement and having a MaxMind account with a
+  license key: https://www.maxmind.com/en/geolite2/eula
+- Attribution requirement: applications using GeoLite2 data must be accompanied
+  by the notice *"This product includes GeoLite2 data created by MaxMind,
+  available from https://www.maxmind.com"*. The admin console shows this
+  attribution in the region-restriction card, and it must stay in place when the
+  feature is used.
+- Version retention: MaxMind's EULA requires ceasing use and destroying old versions
+  within 30 days after an updated version is released. ScrcpyGate additionally applies
+  a conservative 30-day build-age cutoff and cleans its managed active/backup files.
+  Operators maintain externally managed files and archived backups; the application
+  does not delete files from an external read-only directory.
+- Operators who may not redistribute or host the data can mount an external
+  read-only directory (`./geoip:/app/data/geoip:ro`) and set
+  `GEO_UPDATE_ENABLED=false`; the in-container updater then stays off and only
+  reads the file the operator provides.

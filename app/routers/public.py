@@ -59,6 +59,13 @@ from ..video_options import (
 log = logging.getLogger("webscrcpy.main")
 router = APIRouter()
 
+
+@router.get("/api/access-status")
+@router.get("/alas/access-status")
+async def access_status(request: Request):
+    """Diagnostic for failed WS handshakes; HTTP middleware enforces BAN/GEO."""
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
 @router.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -91,10 +98,18 @@ async def api_auth_challenge(request: Request):
             content={"challenge": None, "captcha_required": False},
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
+    if request.query_params.get("status") == "1":
+        return JSONResponse(
+            content={"challenge": None, "captcha_required": status["captcha_required"]},
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
     username = (request.query_params.get("user") or "").strip()[:64]
     issued = await asyncio.to_thread(
         login_guard.issue_challenge, security.client_ip(request), username, status["failures"]
     )
+    if issued.get("error") == "provider_unavailable":
+        return JSONResponse(status_code=503, content={"code": "CAPTCHA_UNAVAILABLE", "message": "Verification unavailable"},
+                            headers={"Retry-After": "5", "Cache-Control": "no-store"})
     if issued.get("error") == "challenge_rate_limited":
         return JSONResponse(
             status_code=429,
@@ -139,7 +154,7 @@ async def api_auth_login(request: Request):
     # 失败 1 次起要求验证码：先校验签名挑战与 PoW，再做密码校验。
     if security.login_captcha_enabled() and status["captcha_required"]:
         proof = data.get("proof")
-        if not isinstance(proof, dict):
+        if not isinstance(proof, str) or not proof:
             audit_request(
                 request,
                 username or "anonymous",

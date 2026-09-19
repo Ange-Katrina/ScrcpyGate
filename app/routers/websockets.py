@@ -24,8 +24,11 @@ router = APIRouter()
 
 @router.websocket("/ws/devices/{device_id}/video")
 async def ws_video(websocket: WebSocket, device_id: str):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/video")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/devices/*/video")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)
@@ -75,8 +78,11 @@ async def ws_video(websocket: WebSocket, device_id: str):
 
 @router.websocket("/ws/devices/{device_id}/control")
 async def ws_control(websocket: WebSocket, device_id: str):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/control")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/devices/*/control")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)
@@ -137,8 +143,11 @@ async def ws_control(websocket: WebSocket, device_id: str):
 
 @router.websocket("/ws/events")
 async def ws_events(websocket: WebSocket):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/events")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/events")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)

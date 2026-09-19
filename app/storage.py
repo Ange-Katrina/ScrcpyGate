@@ -25,8 +25,11 @@ from .alas_secrets import (
     token_summary,
 )
 from . import (
+    access_log,
+    storage_access,
     storage_alas,
     storage_audit,
+    storage_bans,
     storage_core,
     storage_notifications,
     storage_schema,
@@ -107,7 +110,7 @@ AUDIT_SCHEMA_VERSION = 2
 # :func:`init_db` and into the machine-readable contract in
 # ``tests/fixtures/phase7_storage_schema_manifest.json``.  Bump it whenever the
 # storage schema changes so operators can tell which generation a database is.
-SCHEMA_GENERATION = 2
+SCHEMA_GENERATION = 3
 AUDIT_MAX_ROWS = _bounded_env_int("AUDIT_MAX_ROWS", 100000, 1000, 5000000)
 # Retention for the durable alert projection.  Only alerts that are already
 # handled or hidden are pruned — the visible unhandled ones are the operator's
@@ -120,6 +123,16 @@ VIEWER_WATCH_RETENTION_DAYS = _bounded_env_int("VIEWER_WATCH_RETENTION_DAYS", 18
 LOG_RETENTION_DAY_OPTIONS = (0, 1, 3, 7, 15, 30)
 LOG_RETENTION_DEFAULT_DAYS = 30
 LOG_RETENTION_STATE_SETTING = "_log_retention_last_run_day"
+# 访问记录（VIS）：保留档位与上限来自 app.access_log，避免两处各写一套。
+ACCESS_RETENTION_DAY_OPTIONS = access_log.RETENTION_DAY_OPTIONS
+ACCESS_RETENTION_DEFAULT_DAYS = access_log.DEFAULT_RETENTION_DAYS
+ACCESS_MAX_DETAIL_ROWS = access_log.MAX_DETAIL_ROWS
+ACCESS_RETENTION_STATE_SETTING = "_access_retention_last_run_day"
+ACCESS_DROPPED_TOTAL_SETTING = "_access_log_dropped_total"
+ACCESS_LAST_DROP_TS_SETTING = "_access_log_last_drop_ts"
+# IP 封禁（BAN）：自定义时长上限 365 天，事件保留期与审计日志同量级。
+BAN_MAX_SECONDS = storage_bans.MAX_BAN_SECONDS
+BAN_EVENT_RETENTION_DAYS = storage_bans.DEFAULT_BAN_EVENT_RETENTION_DAYS
 AUDIT_PRUNE_BATCH = 1000
 AUDIT_OUTCOMES = {"success", "failure", "denied", "error", "unknown"}
 AUDIT_SEVERITIES = {"debug", "info", "warning", "error", "critical"}
@@ -186,6 +199,17 @@ DEFAULT_SETTINGS = {
     # 日志保存时长（天，0 = 永久保留）：同时约束审计日志行与运行日志的轮转段。
     # 运行日志仍保留按体积轮转（LOG_MAX_BYTES / LOG_BACKUP_COUNT）作为上限。
     "log_retention_days": "30",
+    # 访问记录（VIS）：默认开启；明细保留 7 天（0 = 不按时间清理，仍受行数上限约束）。
+    "access_log_enabled": "true",
+    "access_retention_days": "7",
+    # 地域限制（GEO）：默认关闭；国家清单默认 CN（HK/MO/TW 是彼此独立的值）。
+    "geo_mode": "off",
+    "geo_allowed_countries": "CN",
+    "geo_unknown_action": "deny",
+    "geo_allow_cidrs": "",
+    # 采样丢弃的累计计数（写入失败也要能被管理员看到「记录不完整」）。
+    "_access_log_dropped_total": "0",
+    "_access_log_last_drop_ts": "0",
 }
 
 # The legacy ``data/.env`` file is an import source, not a second settings
@@ -619,6 +643,8 @@ def _init_db_locked() -> bool:
         _migrate_audit_log(conn)
         storage_schema.ensure_compatibility_schema(conn, logger=AUDIT_LOGGER)
         for key, value in DEFAULT_SETTINGS.items():
+            if key.startswith("geo_"):
+                continue  # Absence means env/default; explicit UI settings remain authoritative.
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value))
         _migrate_video_defaults(conn)
         # 一次性：把历史上明文存储的会话换成哈希存储形态（见 session_token_hash）。
@@ -1763,6 +1789,148 @@ def run_log_retention(now: float | None = None, *, force: bool = False) -> dict:
     return {"log_retention": "pruned", "audit_rows": audit_rows, "log_files": log_files, "days": days}
 
 
+def normalize_access_retention_days(value: object) -> int:
+    """把存量/输入值收敛到允许的保留档位（与日志保留同一套「就近」规则）。"""
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return ACCESS_RETENTION_DEFAULT_DAYS
+    if days in ACCESS_RETENTION_DAY_OPTIONS:
+        return days
+    if days <= 0:
+        return 0
+    allowed = [option for option in ACCESS_RETENTION_DAY_OPTIONS if 0 < option <= days]
+    return max(allowed) if allowed else ACCESS_RETENTION_DAY_OPTIONS[-1]
+
+
+def access_retention_days() -> int:
+    """当前访问明细保留天数（0 = 不按时间清理，仅受行数上限约束）。"""
+    return normalize_access_retention_days(get_setting("access_retention_days", ACCESS_RETENTION_DEFAULT_DAYS))
+
+
+def access_log_enabled() -> bool:
+    return str(get_setting("access_log_enabled", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def access_drop_state() -> dict:
+    """累计丢弃数与最近丢弃时间（演示「记录不完整」状态，不冒充总数）。"""
+    try:
+        total = int(str(get_setting(ACCESS_DROPPED_TOTAL_SETTING, "0") or "0"))
+    except (TypeError, ValueError):
+        total = 0
+    try:
+        last_ts = int(str(get_setting(ACCESS_LAST_DROP_TS_SETTING, "0") or "0"))
+    except (TypeError, ValueError):
+        last_ts = 0
+    return {"dropped_total": max(0, total), "last_drop_ts": max(0, last_ts), "sampled": total > 0}
+
+
+def record_access_batch(records: list, dropped: int = 0, dropped_ts: int = 0) -> int:
+    """写入一批访问明细（+ 汇总 upsert）；由单写线程调用。"""
+    return storage_access.record_access_batch(
+        records, connect=db_connect, dropped=dropped, dropped_ts=dropped_ts, max_rows=ACCESS_MAX_DETAIL_ROWS
+    )
+
+
+def query_access_records(**kwargs) -> dict:
+    return storage_access.query_access_records(connect=db_connect, **kwargs)
+
+
+def query_access_ip_summaries(**kwargs) -> dict:
+    return storage_access.query_access_ip_summaries(connect=db_connect, **kwargs)
+
+
+def access_status_counts(**kwargs) -> dict:
+    return storage_access.access_status_counts(connect=db_connect, **kwargs)
+
+
+def access_scan_hints(**kwargs) -> dict:
+    return storage_access.access_scan_hints(connect=db_connect, **kwargs)
+
+
+def prune_access_records(days: int, now: float | None = None) -> dict:
+    return storage_access.prune_access_records(
+        connect=db_connect, days=days, now=now, max_rows=ACCESS_MAX_DETAIL_ROWS
+    )
+
+
+# ---------------------------------------------------------------- IP 封禁（BAN）
+
+def get_ban(ip: str) -> dict | None:
+    return storage_bans.get_ban(connect=db_connect, ip=ip)
+
+
+def get_active_ban(ip: str, now: int | None = None) -> dict | None:
+    return storage_bans.get_active_ban(connect=db_connect, ip=ip, now=now)
+
+
+def active_bans(now: int | None = None, limit: int | None = None) -> list:
+    return storage_bans.active_bans(connect=db_connect, now=now, limit=limit)
+
+
+def list_bans(**kwargs) -> dict:
+    return storage_bans.list_bans(connect=db_connect, **kwargs)
+
+
+def upsert_ban(**kwargs) -> dict:
+    return storage_bans.upsert_ban(connect=db_connect, **kwargs)
+
+
+def revoke_ban(**kwargs) -> dict | None:
+    return storage_bans.revoke_ban(connect=db_connect, **kwargs)
+
+
+def record_ban_event(**kwargs) -> int:
+    return storage_bans.record_ban_event(connect=db_connect, **kwargs)
+
+
+def expire_bans(now: int | None = None, batch: int = storage_bans.PRUNE_BATCH) -> int:
+    return storage_bans.expire_bans(connect=db_connect, now=now, batch=batch)
+
+
+def list_ban_events(**kwargs) -> dict:
+    return storage_bans.list_ban_events(connect=db_connect, **kwargs)
+
+
+def ban_counters(now: int | None = None) -> dict:
+    return storage_bans.ban_counters(connect=db_connect, now=now)
+
+
+def prune_ban_history(retention_days: int | None = None, now: int | None = None) -> int:
+    days = BAN_EVENT_RETENTION_DAYS if retention_days is None else int(retention_days)
+    return storage_bans.prune_ban_history(connect=db_connect, retention_days=days, now=now)
+
+
+def run_access_retention(now: float | None = None, *, force: bool = False) -> dict:
+    """按「访问记录保留天数」清理明细与汇总（每天最多一次，分批有界）。"""
+    days = access_retention_days()
+    current = time.localtime(now if now is not None else time.time())
+    today = time.strftime("%Y-%m-%d", current)
+    if not force and str(get_setting(ACCESS_RETENTION_STATE_SETTING, "") or "") == today:
+        removed = prune_access_records(0, now)
+        return {"access_retention": "capacity_checked", **removed}
+    removed = prune_access_records(days, now)
+    if not removed.get("pending_age"):
+        set_setting(ACCESS_RETENTION_STATE_SETTING, today)
+    total_removed = int(removed.get("records_removed_by_age") or 0) + int(removed.get("records_removed_by_cap") or 0)
+    if total_removed or removed.get("summary_rows_removed"):
+        AUDIT_LOGGER.info(
+            "ACCESS_RETENTION_PRUNED records=%s summary=%s days=%s",
+            total_removed,
+            removed.get("summary_rows_removed"),
+            days,
+            extra={
+                "event_name": "access.retention_pruned",
+                "event_fields": {
+                    "removed_records": total_removed,
+                    "removed_summary_rows": int(removed.get("summary_rows_removed") or 0),
+                    "retention_days": days,
+                },
+            },
+        )
+    return {"access_retention": "pruned" if total_removed else "clean", "records_removed": total_removed, **removed}
+
+
 def run_storage_maintenance() -> dict:
     """Periodic retention sweep (startup + the account monitor loop).
 
@@ -1774,6 +1942,7 @@ def run_storage_maintenance() -> dict:
         "watch_sessions": prune_viewer_watch_history(),
     }
     result.update(run_log_retention())
+    result.update(run_access_retention())
     return result
 
 
@@ -2101,6 +2270,47 @@ def prune_login_challenges(now: float) -> int:
         return max(0, cursor.rowcount)
 
 
+def create_pow_challenge(challenge_id: str, provider: str, fingerprint: str,
+                         expires: float, ip: str, username: str) -> bool:
+    """Bound persistent state globally and per source, including used proofs.
+
+    BEGIN IMMEDIATE prevents concurrent issuance from overshooting either cap.
+    Expired entries are pruned via an index; live replay state is never evicted.
+    """
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM login_pow_challenges WHERE expires<=?", (time.time(),))
+        total = conn.execute("SELECT COUNT(*) FROM login_pow_challenges").fetchone()[0]
+        source = conn.execute("SELECT COUNT(*) FROM login_pow_challenges WHERE ip=?", (ip,)).fetchone()[0]
+        if total >= 10_000 or source >= 64:
+            conn.commit()
+            return False
+        conn.execute(
+            "INSERT INTO login_pow_challenges(challenge_id,provider,fingerprint,expires,ip,username) VALUES(?,?,?,?,?,?)",
+            (challenge_id, provider, fingerprint, expires, ip, username),
+        )
+        conn.commit()
+        return True
+
+
+def get_pow_challenge(challenge_id: str) -> dict | None:
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM login_pow_challenges WHERE challenge_id=?", (challenge_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def consume_pow_challenge(challenge_id: str, fingerprint: str, ip: str, username: str) -> bool:
+    """Consume only a verified, unexpired proof; concurrent replay wins once."""
+    with db_connect() as conn:
+        cursor = conn.execute(
+            "UPDATE login_pow_challenges SET used=1 WHERE challenge_id=? AND fingerprint=? "
+            "AND ip=? AND username=? AND used=0 AND expires>?",
+            (challenge_id, fingerprint, ip, username, time.time()),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+
 def save_login_guard_state(
     failures: dict[str, list[tuple[str, float]]],
     locked_until: dict[str, float],
@@ -2239,6 +2449,8 @@ def get_settings(keys: list[str] | None = None) -> dict:
         else:
             rows = conn.execute("SELECT key,value FROM settings").fetchall()
     data = dict(DEFAULT_SETTINGS)
+    for key in ("geo_mode", "geo_allowed_countries", "geo_unknown_action", "geo_allow_cidrs"):
+        data[key] = os.environ.get(key.upper(), DEFAULT_SETTINGS[key])
     data.update({row["key"]: row["value"] for row in rows})
     return data
 
@@ -2298,6 +2510,12 @@ UI_SETTING_KEYS = (
     "expiry_reminder_days",
     "stop_alas_on_expiry",
     "log_retention_days",
+    "access_log_enabled",
+    "access_retention_days",
+    "geo_mode",
+    "geo_allowed_countries",
+    "geo_unknown_action",
+    "geo_allow_cidrs",
 )
 
 
@@ -2310,6 +2528,9 @@ def _int_setting(settings: dict, key: str, default: int) -> int:
 
 def get_ui_settings() -> dict[str, object]:
     settings = get_settings(list(UI_SETTING_KEYS))
+    for key in ("geo_mode", "geo_allowed_countries", "geo_unknown_action", "geo_allow_cidrs"):
+        if key not in settings:
+            settings[key] = os.environ.get(key.upper(), DEFAULT_SETTINGS[key])
     return {
         "ui_system_name": str(settings.get("ui_system_name") or "ScrcpyGate").strip() or "ScrcpyGate",
         "ui_language": str(settings.get("ui_language") or "").strip(),
@@ -2317,6 +2538,12 @@ def get_ui_settings() -> dict[str, object]:
         "expiry_reminder_days": _int_setting(settings, "expiry_reminder_days", 3),
         "stop_alas_on_expiry": str(settings.get("stop_alas_on_expiry") or "false").lower() in ("1", "true", "yes", "on"),
         "log_retention_days": normalize_log_retention_days(settings.get("log_retention_days")),
+        "access_log_enabled": str(settings.get("access_log_enabled") or "true").lower() in ("1", "true", "yes", "on"),
+        "access_retention_days": normalize_access_retention_days(settings.get("access_retention_days")),
+        "geo_mode": str(settings.get("geo_mode") or DEFAULT_SETTINGS["geo_mode"]).strip().lower(),
+        "geo_allowed_countries": str(settings.get("geo_allowed_countries") or DEFAULT_SETTINGS["geo_allowed_countries"]).strip().upper(),
+        "geo_unknown_action": str(settings.get("geo_unknown_action") or DEFAULT_SETTINGS["geo_unknown_action"]).strip().lower(),
+        "geo_allow_cidrs": str(settings.get("geo_allow_cidrs") or "").strip(),
     }
 
 
@@ -2327,7 +2554,11 @@ def save_ui_settings(updates: dict[str, object]) -> None:
             raise ValueError("invalid ui setting: " + str(key))
         if key in ("ui_system_name", "ui_language", "ui_theme_mode"):
             values[key] = str(value or "").strip()
-        elif key == "stop_alas_on_expiry":
+        elif key in ("geo_mode", "geo_unknown_action", "geo_allowed_countries", "geo_allow_cidrs"):
+            # GEO 的档位与清单按文本存储；取值合法性由调用方（admin_settings）校验，
+            # 这里只做长度防御，避免超长设置把 DB 撑大。
+            values[key] = str(value or "").strip()[:2000]
+        elif key in ("stop_alas_on_expiry", "access_log_enabled"):
             if isinstance(value, str):
                 parsed = value.strip().lower() in ("1", "true", "yes", "on")
             else:

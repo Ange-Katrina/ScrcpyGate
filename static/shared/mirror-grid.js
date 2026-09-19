@@ -645,11 +645,21 @@
         if (tile.ws !== socket) return;
         try { socket.close(); } catch (error) {}
       };
-      socket.onclose = function (event) {
+      socket.onclose = async function (event) {
         if (tile.ws !== socket) return;
         tile.ws = null;
         if (tile.state === 'idle') return;
         var code = event && Number(event.code);
+        if (global.ScrcpyGateAccess && (code === 1006 || code === 4403)) {
+          var accessResult = await global.ScrcpyGateAccess.check();
+          if (tile.ws || tile.state === 'idle') return;
+          if (accessResult.blocked) {
+            setState(tile, 'error', tr('访问已被拒绝，请检查访问权限'));
+            destroyPlayer(tile);
+            tile.viewerToken = '';
+            return;
+          }
+        }
         if (code === 4401 || code === 4403 || code === 4410 || code === 4411 || code === 4412) {
           setState(tile, 'error', tr('观看已结束，请重新开始投屏'));
           destroyPlayer(tile);

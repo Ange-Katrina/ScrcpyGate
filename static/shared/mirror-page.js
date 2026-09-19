@@ -440,8 +440,32 @@ document.addEventListener('DOMContentLoaded',function(){
         if(window.lucide) lucide.createIcons();
         return stopped;
       }
+      /* 深链：/mirror?device=<public id>（管理后台设备列表「打开」用的入口）。
+         参数只消费一次并立刻从地址栏清掉，避免刷新/后退重复应用或重复起流；
+         它优先于「上次视图」——否则管理员上次用过宫格就会被恢复成宫格（NAV 明确要求不进宫格）。 */
+      function readRequestedDeviceRef(){
+        try{
+          var ref=new URLSearchParams(window.location.search).get('device');
+          return ref?String(ref).trim():'';
+        }catch(error){
+          return '';
+        }
+      }
+      function clearRequestedDeviceRef(){
+        try{
+          if(window.history&&window.history.replaceState){
+            window.history.replaceState(null,'',window.location.pathname);
+          }
+        }catch(error){}
+      }
+      var requestedDeviceRef=readRequestedDeviceRef();
+      var deviceDeepLink=!!requestedDeviceRef;
       function restoreViewMode(){
         // 刷新后保持管理员上次选择的视图（localStorage，按浏览器保存）。
+        if(deviceDeepLink){
+          if(viewMode==='grid') setViewMode('single');
+          return;
+        }
         if(savedViewMode()!=='grid') return;
         if(!mirrorIsAdmin()) return;
         setViewMode('grid');
@@ -622,12 +646,29 @@ document.addEventListener('DOMContentLoaded',function(){
           deviceRenderSignature=nextSignature;
           if(deviceListStale && !options.silent) showToast('设备列表可能已过期,将在下一次刷新时重试');
           if(deviceItems.length){
-            var nextId=deviceById(previousId) ? previousId : deviceItems[0].id;
+            /* 深链目标优先；解析不到（已删除/无权限/标识过期）时给出可理解提示并回落到默认设备。 */
+            var requestedId=requestedDeviceRef && deviceById(requestedDeviceRef) ? requestedDeviceRef : '';
+            if(requestedDeviceRef && !requestedId){
+              showToast('未找到该设备，可能已被删除或你没有访问权限');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
+            var nextId=requestedId ? requestedId : (deviceById(previousId) ? previousId : deviceItems[0].id);
             if(shouldRender) selectDevice(nextId);
             else selectedDevice=deviceById(nextId);
+            if(requestedId){
+              if(viewMode==='grid') setViewMode('single');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
           }else{
             selectedDevice=null;
             if(shouldRender) renderDeviceList();
+            if(requestedDeviceRef){
+              showToast('未找到该设备，可能已被删除或你没有访问权限');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
           }
           // 列表签名未变化时 selectDevice/renderDeviceList 不会执行，这里补一次视图同步。
           syncViewSwitch();
@@ -5253,14 +5294,19 @@ document.addEventListener('DOMContentLoaded',function(){
           var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||null;
           var devices=d&&(d.devices||d.items||d.list)||(Array.isArray(d)?d:null)||[];
           var items=devices.filter(function(device){
-            return device && device.enabled !== false && device.can_view !== false;
+            return device && device.enabled !== false && device.can_view !== false && device.noPermission !== true;
           }).map(function(device){
+            // 页面里的设备对象由适配层规范化过：控制权限是驼峰 canControl，蛇形
+            // can_control 只存在于裸接口响应里。此前只看 can_control，导致每一行都
+            // 落回「观看」（连管理员也一样）。只认显式 true —— 字段缺失时按仅观看
+            // 显示，不虚报控制权。
+            var canControl=device.canControl===true||device.can_control===true;
             return {
               device:device.name||device.display_name||device.displayName||device.id||device.device_id||'—',
               deviceId:device.id||device.device_id||'',
-              permission:device.can_control===true?'control':'watch',
-              canView:device.can_view!==false,
-              canControl:device.can_control===true
+              permission:canControl?'control':'watch',
+              canView:device.can_view!==false&&device.noPermission!==true,
+              canControl:canControl
             };
           });
           upRenderPerms(items);

@@ -18,6 +18,9 @@ SESSION_REVOKED_CLOSE_CODE = 4403
 SESSION_REVOKED_CLOSE_REASON = "session revoked"
 PERMISSION_REVOKED_CLOSE_CODE = 4403
 PERMISSION_REVOKED_CLOSE_REASON = "permission revoked"
+# 来源 IP 被封禁：与上面几个 4403 语义一致，客户端见到 4403 会停止重连。
+IP_BANNED_CLOSE_CODE = 4403
+IP_BANNED_CLOSE_REASON = "ip banned"
 DEFAULT_EXPIRATION_CHECK_INTERVAL = 10.0
 DEFAULT_CONNECTION_CLOSE_TIMEOUT = 1.0
 
@@ -33,6 +36,9 @@ class _RegisteredConnection:
     websocket: Any
     session_id: str | None = None
     device_id: str | None = None
+    # 注册时记录来源 IP：封禁某个地址时要在同一个进程里找到它的长连接并关闭。
+    # 这里只保存规范化后的字符串（判定与展示都由 ip_ban 负责）。
+    source_ip: str = ""
 
 
 def _state_is_disconnected(state: Any) -> bool:
@@ -97,14 +103,18 @@ class UserConnectionRegistry:
         session_id: str | None = None,
         *,
         device_id: str | None = None,
+        source_ip: str | None = None,
     ) -> None:
         normalized = self._normalize_username(username)
         if websocket is None:
             raise ValueError("websocket is required")
+        from .ip_ban import normalize_ip
+
         registration = _RegisteredConnection(
             websocket,
             self._normalize_session_id(session_id),
             self._normalize_device_id(device_id),
+            normalize_ip(source_ip),
         )
         async with self._lock:
             self._connections.setdefault(normalized, set()).add(registration)
@@ -253,6 +263,63 @@ class UserConnectionRegistry:
         await self._discard_closed(successful)
         return len(indexed_connections)
 
+    async def enforce_ip_bans(self) -> None:
+        from . import ip_ban
+
+        async with self._lock:
+            sources = {entry.source_ip for entries in self._connections.values() for entry in entries if entry.source_ip}
+        def banned_sources():
+            return [source for source in sources if ip_ban.is_banned(source)]
+        for source in await asyncio.to_thread(banned_sources):
+            await self.close_ip_connections(source)
+
+    async def close_ip_connections(
+        self,
+        source_ip: str,
+        *,
+        code: int = IP_BANNED_CLOSE_CODE,
+        reason: str = IP_BANNED_CLOSE_REASON,
+    ) -> int:
+        """按来源 IP 关闭长连接（封禁生效后清理已有连接）。
+
+        只关闭来源 IP 匹配的连接：同一账户从别的地址连进来的观看端不受影响
+        （任务书 A10「不影响其他观看端」）。返回**匹配到**的连接数，
+        不管关闭调用本身是否成功——调用方据此提示「已清理 N 条」。
+        """
+        target = str(source_ip or "").strip()
+        if not target:
+            return 0
+        async with self._lock:
+            batches = {
+                username: tuple(
+                    registration
+                    for registration in connections
+                    if registration.source_ip and registration.source_ip == target
+                )
+                for username, connections in self._connections.items()
+            }
+            batches = {username: connections for username, connections in batches.items() if connections}
+            for username, connections in batches.items():
+                self._pending_revocations.setdefault(username, set()).update(connections)
+        indexed = tuple(
+            (username, registration)
+            for username, connections in batches.items()
+            for registration in connections
+        )
+        if not indexed:
+            return 0
+        closed = await self._close_connections(
+            (registration for _username, registration in indexed),
+            code=code,
+            reason=reason,
+        )
+        successful: dict[str, list[_RegisteredConnection]] = {}
+        for (username, registration), success in zip(indexed, closed):
+            if success:
+                successful.setdefault(username, []).append(registration)
+        await self._discard_closed(successful)
+        return len(indexed)
+
     async def _snapshot_for_revocation(
         self,
         usernames: Iterable[str],
@@ -387,6 +454,7 @@ async def account_expiration_monitor(
         except Exception:
             log.exception("ACCOUNT_EXPIRATION_MONITOR_ERROR")
         try:
+            await registry.enforce_ip_bans()
             await registry.retry_pending_revocations(code=code, reason=reason)
         except asyncio.CancelledError:
             raise

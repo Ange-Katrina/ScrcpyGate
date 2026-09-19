@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-quality">
           <div class="page-heading">
             <h1>画质与传输</h1>
             <p>画质档位、传输链路与会话策略</p>
@@ -94,6 +94,13 @@
             <button class="quality-seg sg-seg" type="button" role="tab" id="seg-transport" data-seg="transport" aria-selected="false" aria-controls="seg-panel-transport" tabindex="-1"><i data-lucide="route"></i><span>传输链路</span></button>
             <button class="quality-seg sg-seg" type="button" role="tab" id="seg-session" data-seg="session" aria-selected="false" aria-controls="seg-panel-session" tabindex="-1"><i data-lucide="hourglass"></i><span>会话策略</span></button>
           </div>
+
+            <div class="quality-overview" role="status" aria-live="polite">
+              <div class="active-config">
+                <div class="active-config-label"><i data-lucide="check-circle"></i>默认画质预设</div>
+                <div class="active-config-value" id="active-config-text">正在加载</div>
+              </div>
+            </div>
 
           <div class="quality-grid" id="seg-panel-quality" data-seg-panel="quality" role="tabpanel" aria-labelledby="seg-quality">
             <div class="preset-col">
@@ -194,8 +201,8 @@
                       </div>
                     </div>
                   </div>
-                  <div class="param-group">
-                    <div class="param-group-title"><i data-lucide="users"></i>用户画质控制</div>
+                  <details class="admin-disclosure param-group">
+                    <summary class="param-group-title"><i data-lucide="users"></i>用户画质控制</summary>
                     <div class="param-row" id="row-default-preset">
                       <div class="param-copy">
                         <div class="param-label"><i data-lucide="star"></i>普通用户默认预设</div>
@@ -236,7 +243,7 @@
                         <label class="field-check"><input type="checkbox" class="sg-switch-input" id="chk-user-tuning">允许普通用户微调</label>
                       </div>
                     </div>
-                  </div>
+                  </details>
                 </div>
               </section>
             </div>
@@ -446,7 +453,7 @@
                   <div class="param-group-title"><i data-lucide="hourglass"></i>会话时限</div>
                   <div class="param-row" id="row-idle-stop">
                     <div class="param-copy">
-                      <div class="param-label"><i data-lucide="timer"></i>无观看端自动停止时间</div>
+                      <label class="param-label" for="inp-idle-stop"><i data-lucide="timer"></i>无观看端自动停止时间</label>
                       <div class="param-desc">最后一个观看端离开后，超过该时长自动停止投屏；0 表示仅保留 5 秒重连宽限</div>
                     </div>
                     <div class="param-control">
@@ -459,7 +466,7 @@
                   </div>
                   <div class="param-row" id="row-session-limit">
                     <div class="param-copy">
-                      <div class="param-label"><i data-lucide="timer-reset"></i>连续投屏时间上限</div>
+                      <label class="param-label" for="inp-session-limit"><i data-lucide="timer-reset"></i>连续投屏时间上限</label>
                       <div class="param-desc">单次投屏会话允许的最长持续时间，到达后自动结束；0 表示不限制</div>
                     </div>
                     <div class="param-control">
@@ -527,20 +534,12 @@
                 <button class="q-btn" id="btn-restart-later" type="button">稍后手动处理</button>
               </div>
             </div>
-            <!-- 默认画质预设（原「当前生效」）放在待保存变更摘要卡片正上方：
-                 先看现在生效的是什么，再看这次改了什么，最后才是保存按钮。 -->
-            <div class="quality-overview" role="status" aria-live="polite">
-              <div class="active-config">
-                <div class="active-config-label"><i data-lucide="check-circle"></i>默认画质预设</div>
-                <div class="active-config-value" id="active-config-text">正在加载</div>
-              </div>
-            </div>
             <div class="quality-actions">
-              <div class="change-box">
-                <div class="change-head"><i data-lucide="list-checks"></i>待保存变更摘要<span class="change-scope" id="change-scope" hidden></span><span class="change-count" id="change-count">0</span></div>
+              <details class="admin-disclosure change-box">
+                <summary class="change-head"><i data-lucide="list-checks"></i>待保存变更摘要<span class="change-scope" id="change-scope" hidden></span><span class="change-count" id="change-count">0</span></summary>
                 <div class="change-list" id="change-list" hidden></div>
                 <div class="change-empty" id="change-empty">暂无未保存的变更</div>
-              </div>
+              </details>
               <div class="quality-actions-btns">
                 <button class="q-btn" id="btn-reset" type="button"><i data-lucide="rotate-ccw"></i>重置为默认设置</button>
                 <button class="q-btn q-btn-primary" id="btn-save" type="button"><i data-lucide="check"></i>保存设置</button>

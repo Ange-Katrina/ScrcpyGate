@@ -897,7 +897,10 @@
     .app.is-fullscreen .ctrl-dock { gap:1px; padding-left:4px; padding-right:4px; }
     /* One row at every size; JS moves overflow actions into More. */
     .app .ctrl-dock { flex-wrap:nowrap; min-height:52px; height:auto; gap:4px; padding:4px; overflow:visible; }
-    .app:not(.is-fullscreen) .ctrl-dock { max-width:calc(100% - 64px); margin-left:0; margin-right:auto; }
+    /* 底部控制栏在内容区里居中（此前贴左：margin-left:0 / margin-right:auto）。
+       右下角浮着「收起/展开菜单」圆钮（绝对定位，右 12px + 宽 44px），所以左右各留
+       56px 对称安全边距：居中结果与圆钮互不遮挡；放不下的按钮由 JS 收进「更多」。 */
+    .app:not(.is-fullscreen) .ctrl-dock { max-width:calc(100% - 112px); margin-left:auto; margin-right:auto; }
     .app .ctrl-dock > .cb-btn, .app .ctrl-dock > .cb-item,
     .app .ctrl-dock > .cb-more > .cb-btn { flex:0 0 auto; min-width:44px; min-height:44px; }
     .app .ctrl-dock.dock-compact > .cb-btn, .app .ctrl-dock.dock-compact > .cb-item,
@@ -1372,6 +1375,13 @@
     .menu-item .rec-dot[hidden] { display:none; }
     @media (prefers-reduced-motion: reduce) { .menu-item .rec-dot { animation:none; } }
     /* 状态栏帧率：紧挨分辨率，低帧率时给个醒目色。 */
+    .status-pill:focus-visible { outline:2px solid var(--brand-blue); outline-offset:2px; }
+    @media (max-width:767px) {
+      .workspace .status-pill { border-radius:10px; box-shadow:none; scrollbar-width:thin; height:38px; min-height:38px; max-height:38px; }
+      .workspace .status-pill::-webkit-scrollbar { display:block; height:3px; }
+      .workspace .status-pill::-webkit-scrollbar-thumb { background:var(--c-border); border-radius:3px; }
+      .workspace .pill-block { flex-shrink:0; }
+    }
     .pill-fps { font-variant-numeric:tabular-nums; color:var(--c-text-sub); }
     .pill-fps[hidden] { display:none; }
     .pill-fps.is-low { color:#d97706; }

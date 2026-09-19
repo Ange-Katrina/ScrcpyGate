@@ -14,7 +14,11 @@ from . import alas_gateway, i18n, storage
 from .booleans import InvalidBooleanValue, parse_bool_strict
 
 SESSION_COOKIE = "wsid"
-PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip")
+# 会触发「来源边界校验」的转发类头。`forwarded`（RFC 7239）**不参与来源判定**
+# （client_ip 只读 X-Forwarded-For），但同样必须出现在这个集合里：不可信对端发任何
+# 转发头都应当被明确拒绝（403），而不是因为「我们没解析它」而静默放行——
+# 静默放行会让「到底谁在代理」这件事在排查时完全看不出来。
+PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip", "forwarded")
 log = logging.getLogger("webscrcpy.security")
 _LOGIN_FAILURES: dict[str, list[tuple[str, float]]] = {}
 _LOGIN_LOCKOUTS: dict[str, float] = {}
@@ -155,7 +159,7 @@ def is_alas_origin_request(connection: Request | WebSocket) -> bool:
 
 def alas_route_allowed(path: str) -> bool:
     normalized = str(path or "")
-    return normalized == "/healthz" or normalized in {"/alas/gateway", "/alas/gateway/"} or normalized.startswith(
+    return normalized == "/healthz" or normalized in {"/alas/gateway", "/alas/gateway/", "/alas/access-status"} or normalized.startswith(
         "/alas/embed/proxy"
     )
 
@@ -363,6 +367,24 @@ def get_current_session(request: Request) -> dict | None:
     return session
 
 
+def session_role(session: dict | None) -> str:
+    """已确认会话对应的角色。
+
+    会话行是 ``SELECT s.*`` + 账户的几个字段，**不含 role**，所以要按用户名查一次用户表。
+    只用于展示/分类（访问记录身份），绝不作为授权判断依据——授权一律走 ``require_*``。
+    """
+    if not session:
+        return ""
+    username = str(session.get("username") or "")
+    if not username:
+        return ""
+    try:
+        user = storage.get_user(username)
+    except Exception:  # pragma: no cover - 查角色失败不应影响请求
+        return ""
+    return str(user["role"] if user else "")
+
+
 def get_current_user(request: Request) -> dict | None:
     state = request.state
     cached = getattr(state, "current_user_cache", _REQUEST_CACHE_MISS)
@@ -528,6 +550,32 @@ def websocket_origin_allowed(ws: WebSocket) -> bool:
     return True
 
 
+def websocket_access_decision(ws: WebSocket):
+    """WebSocket 握手前的统一判定：先来源/Origin 校验，再走访问网关（BAN → GEO）。
+
+    WS 握手**不经过 HTTP 中间件**，所以这里的顺序必须和 ``app.access_gate`` 里
+    写给 HTTP 的那份完全一致；两处不一致就是最容易被绕过的口子。返回值是
+    ``access_gate.GateDecision``：``allowed=False`` 时调用方必须在 ``accept()``
+    之前 ``close(code=4403)``（uvicorn 会把这种拒绝变成握手阶段的 HTTP 403）。
+    """
+    from . import access_gate
+
+    if not websocket_origin_allowed(ws):
+        return access_gate.GateDecision(
+            allowed=False,
+            decision="deny_origin",
+            status_code=403,
+            reason="origin_denied",
+        )
+    remote = ws.client.host if ws.client else ""
+    return access_gate.evaluate(
+        source_ip=client_ip(ws),
+        method="GET",
+        path=ws.url.path,
+        peer_ip=remote,
+    )
+
+
 def secure_cookie_enabled() -> bool:
     configured = os.environ.get("SESSION_COOKIE_SECURE", "").strip()
     if configured:
@@ -553,6 +601,13 @@ LOGIN_GUARD_FIELDS: dict[str, tuple[str, str, object, int, int, str]] = {
     "lockout_seconds": ("login_guard_lockout_seconds", "LOGIN_LOCKOUT_SECONDS", 300, 10, 86400, "int"),
     "captcha_ttl_seconds": ("login_guard_captcha_ttl_seconds", "LOGIN_CAPTCHA_TTL_SECONDS", 120, 10, 3600, "int"),
     "captcha_issue_interval_seconds": ("login_guard_captcha_issue_interval_seconds", "LOGIN_CAPTCHA_ISSUE_INTERVAL_SECONDS", 2, 0, 60, "int"),
+    # 工作量证明难度阶梯：首题 base bits，之后每多失败一次 +step，封顶 max。默认
+    # 14/2/18 与历史硬编码阶梯完全一致（0-1 次失败 14、2 次 16、3 次及以上 18）。
+    # bits 是期望 2^bits 次 SHA-256，直接决定攻击者单次尝试的成本；上限 28 已经
+    # 超出寻常浏览器可等待的范围，这里留出 26/28 供极端场景，但界面上会给出耗时预警。
+    "captcha_bits_base": ("login_guard_captcha_bits_base", "LOGIN_CAPTCHA_BITS_BASE", 14, 8, 26, "int"),
+    "captcha_bits_step": ("login_guard_captcha_bits_step", "LOGIN_CAPTCHA_BITS_STEP", 2, 0, 8, "int"),
+    "captcha_bits_max": ("login_guard_captcha_bits_max", "LOGIN_CAPTCHA_BITS_MAX", 18, 8, 28, "int"),
 }
 LOGIN_GUARD_SETTING_KEYS = tuple(field[0] for field in LOGIN_GUARD_FIELDS.values())
 
@@ -653,6 +708,10 @@ def normalize_login_guard_config(payload: object, base: dict[str, object] | None
             if not minimum <= parsed <= maximum:
                 raise ValueError("invalid_login_guard_value")
             config[name] = parsed
+    # 难度阶梯自洽性：首题难度高于上限是自相矛盾的配置（阶梯无处可升）。
+    # 递增步长不设限：超过「上限 - 首题」时阶梯一步到顶，这是合法配置。
+    if int(config["captcha_bits_base"]) > int(config["captcha_bits_max"]):
+        raise ValueError("invalid_login_guard_difficulty")
     if not config["enabled"]:
         config["captcha_enabled"] = False
     return config
@@ -1072,7 +1131,10 @@ def login_guard_snapshot() -> dict:
         for key, entries in sorted(_LOGIN_FAILURES.items()):
             if key.startswith("ip:") and entries:
                 active.append({"key": key, "ip": key[len("ip:"):], "failures": len(entries)})
+    from .pow_provider import get_provider
+
     return {
+        "pow_provider": get_provider().name,
         "locked": locked,
         "active": active,
         "config": login_guard_config(),

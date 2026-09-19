@@ -2,6 +2,88 @@
    并管理当前按 IP 的封禁与失败计数。用不到的部署可整体关闭。
    通过 login.guard / login.guard.update / login.guard.unlock 端点工作。 */
 (function () {
+  // Page sections stay mounted: switching views must not discard unsaved inputs.
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-security-tab]'));
+  var aliases = { 'access-log': 'access', 'ip-ban': 'bans', 'login-protection': 'login' };
+  function selectSection(key, moveFocus) {
+    key = aliases[key] || key;
+    if (!tabs.some(function (tab) { return tab.dataset.securityTab === key; })) key = 'access';
+    tabs.forEach(function (tab) {
+      var active = tab.dataset.securityTab === key;
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      var section = document.getElementById(tab.getAttribute('aria-controls'));
+      if (section) section.hidden = !active;
+      if (active && moveFocus) tab.focus({ preventScroll: true });
+    });
+    return key;
+  }
+  function showSection(key, moveFocus) {
+    key = selectSection(key, moveFocus);
+    try { history.replaceState(null, '', '#' + key); } catch (_) {}
+  }
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener('click', function () { showSection(tab.dataset.securityTab, false); });
+    tab.addEventListener('keydown', function (event) {
+      var next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+        : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+          : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      showSection(tabs[next].dataset.securityTab, true);
+    });
+  });
+  window.addEventListener('hashchange', function () { selectSection(location.hash.slice(1), true); });
+  selectSection(location.hash.slice(1), false);
+
+  var confirmation = document.getElementById('security-confirm');
+  var confirmationResolve = null;
+  function translate(text) { return window.ScrcpyGateI18n ? window.ScrcpyGateI18n.t(text) : text; }
+  function confirmAction(options) {
+    if (!confirmation || !confirmation.showModal) return Promise.resolve(window.confirm(translate(options.message + '\n' + (options.detail || ''))));
+    if (confirmationResolve) return Promise.resolve(false);
+    document.getElementById('security-confirm-title').textContent = translate(options.title);
+    document.getElementById('security-confirm-message').textContent = translate(options.message);
+    document.getElementById('security-confirm-detail').textContent = translate(options.detail || '');
+    document.getElementById('security-confirm-accept').textContent = translate(options.accept || '确认');
+    confirmation.returnValue = '';
+    confirmation.showModal();
+    return new Promise(function (resolve) { confirmationResolve = resolve; });
+  }
+  if (confirmation) confirmation.addEventListener('close', function () {
+    var resolve = confirmationResolve;
+    confirmationResolve = null;
+    if (resolve) resolve(confirmation.returnValue === 'confirm');
+  });
+  window.ScrcpyGateSecurity = { show: showSection, confirm: confirmAction };
+  document.querySelectorAll('.sec-export').forEach(function (menu) {
+    var trigger = menu.querySelector('summary');
+    menu.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { menu.open = false; trigger.focus(); event.stopPropagation(); }
+    });
+    menu.addEventListener('click', function (event) {
+      if (event.target.closest('button')) { menu.open = false; trigger.focus(); }
+    });
+    document.addEventListener('click', function (event) { if (!menu.contains(event.target)) menu.open = false; });
+    menu.addEventListener('focusout', function (event) { if (event.relatedTarget && !menu.contains(event.relatedTarget)) menu.open = false; });
+  });
+  document.querySelectorAll('.sec-scroll-table').forEach(function (wrap) {
+    var hint = document.createElement('p');
+    hint.className = 'sec-scroll-hint';
+    hint.textContent = translate('表格可横向滚动，查看其余列。');
+    hint.hidden = true;
+    wrap.insertAdjacentElement('afterend', hint);
+    function updateOverflow() {
+      var overflow = wrap.clientWidth > 0 && wrap.scrollWidth > wrap.clientWidth + 1;
+      hint.hidden = !overflow;
+      wrap.classList.toggle('has-overflow', overflow);
+    }
+    if (window.ResizeObserver) new ResizeObserver(updateOverflow).observe(wrap);
+    if (window.MutationObserver) new MutationObserver(updateOverflow).observe(wrap, { childList: true, subtree: true });
+    window.addEventListener('resize', updateOverflow);
+    updateOverflow();
+  });
+
   var panel = document.querySelector('.sec-layout');
   if (!panel) return;
   var list = document.getElementById('security-locked-list');
@@ -10,6 +92,13 @@
   var statusNode = document.getElementById('security-guard-status');
   var saveBtn = document.getElementById('security-guard-save');
   var resetBtn = document.getElementById('security-guard-reset');
+  var powSummary = document.getElementById('security-pow-summary');
+  var powMath = document.getElementById('security-pow-math');
+  var powBenchResult = document.getElementById('security-pow-bench-result');
+  var powBenchmarkBtn = document.getElementById('security-pow-benchmark');
+  // 本机试算结果（单次哈希毫秒数）。只用于界面估算，不参与任何服务端判定；
+  // 难度与服务端签名绑定，浏览器算出来多少都不影响挑战本身。
+  var powBench = null;
 
   var FIELDS = [
     { name: 'enabled', kind: 'bool', id: 'security-guard-enabled' },
@@ -19,13 +108,16 @@
     { name: 'failure_window_seconds', kind: 'minutes', id: 'security-guard-window-minutes' },
     { name: 'lockout_seconds', kind: 'minutes', id: 'security-guard-lockout-minutes' },
     { name: 'captcha_ttl_seconds', kind: 'int', id: 'security-guard-captcha-ttl' },
-    { name: 'captcha_issue_interval_seconds', kind: 'int', id: 'security-guard-issue-interval' }
+    { name: 'captcha_issue_interval_seconds', kind: 'int', id: 'security-guard-issue-interval' },
+    { name: 'captcha_bits_base', kind: 'int', id: 'security-pow-bits-base' },
+    { name: 'captcha_bits_step', kind: 'int', id: 'security-pow-bits-step' },
+    { name: 'captcha_bits_max', kind: 'int', id: 'security-pow-bits-max' }
   ];
   var PRESETS = {
     off: { enabled: false },
-    lenient: { enabled: true, captcha_enabled: true, captcha_after_failures: 3, lockout_threshold: 10, failure_window_seconds: 1800, lockout_seconds: 300 },
-    standard: { enabled: true, captcha_enabled: true, captcha_after_failures: 1, lockout_threshold: 3, failure_window_seconds: 900, lockout_seconds: 300 },
-    strict: { enabled: true, captcha_enabled: true, captcha_after_failures: 1, lockout_threshold: 2, failure_window_seconds: 3600, lockout_seconds: 900 }
+    lenient: { enabled: true, captcha_enabled: true, captcha_after_failures: 3, lockout_threshold: 10, failure_window_seconds: 1800, lockout_seconds: 300, captcha_bits_base: 12, captcha_bits_step: 1, captcha_bits_max: 14 },
+    standard: { enabled: true, captcha_enabled: true, captcha_after_failures: 1, lockout_threshold: 3, failure_window_seconds: 900, lockout_seconds: 300, captcha_bits_base: 14, captcha_bits_step: 2, captcha_bits_max: 18 },
+    strict: { enabled: true, captcha_enabled: true, captcha_after_failures: 1, lockout_threshold: 2, failure_window_seconds: 3600, lockout_seconds: 900, captcha_bits_base: 16, captcha_bits_step: 3, captcha_bits_max: 22 }
   };
   var snapshot = { config: {}, defaults: {}, locked: [], active: [] };
 
@@ -109,7 +201,7 @@
 
   function syncPresetState() {
     // 预置是「当前取值属于哪一档」的显示，不单独存状态：手动改数值后高亮立即跟随。
-    panel.querySelectorAll('.guard-preset').forEach(function (button) {
+    panel.querySelectorAll('.guard-preset:not(.pow-bench)').forEach(function (button) {
       var preset = PRESETS[button.getAttribute('data-preset')];
       var active = false;
       if (preset) {
@@ -138,12 +230,15 @@
     if (saveBtn) saveBtn.disabled = !changed;
     setStatus(changed ? '有未保存的修改' : '未修改', changed ? 'warn' : '');
     syncPresetState();
+    renderPow();
+    renderPowBenchResult();
   }
 
   function renderConfig() {
     FIELDS.forEach(function (field) { writeControl(field, snapshot.config[field.name]); });
     applyDisabledState();
     syncPresetState();
+    renderPow();
     if (saveBtn) saveBtn.disabled = !dirty();
   }
 
@@ -180,6 +275,8 @@
 
   function renderSummary() {
     var config = snapshot.config || {};
+    var providerLabel = document.getElementById('security-pow-provider');
+    if (providerLabel) providerLabel.textContent = snapshot.pow_provider === 'builtin' ? translate('内置 PoW') : String(snapshot.pow_provider || '—');
     if (!summary) return;
     if (config.enabled === false) {
       summary.textContent = '已关闭';
@@ -188,6 +285,125 @@
     } else {
       summary.textContent = '人机验证已启用';
     }
+  }
+
+  /* ---- 工作量证明难度：摘要、计算量换算与本机试算 ---- */
+
+  function fieldByName(name) {
+    return FIELDS.filter(function (item) { return item.name === name; })[0];
+  }
+
+  function powNumbers() {
+    var base = Number(readControl(fieldByName('captcha_bits_base')));
+    var step = Number(readControl(fieldByName('captcha_bits_step')));
+    var ceiling = Number(readControl(fieldByName('captcha_bits_max')));
+    if (!isFinite(base) || !isFinite(step) || !isFinite(ceiling)) return null;
+    if (base <= 0 || ceiling <= 0) return null;
+    return { base: base, step: step, max: ceiling };
+  }
+
+  function fmtHashCount(bits) {
+    // 顺序搜索的期望尝试次数就是 2^bits（每次尝试等价一次 SHA-256）。
+    var value = Math.pow(2, bits);
+    if (value >= 1e6) return (value / 1e6).toFixed(value / 1e6 >= 10 ? 0 : 1) + 'M';
+    if (value >= 1e3) return (value / 1e3).toFixed(value / 1e3 >= 10 ? 0 : 1) + 'k';
+    return String(Math.round(value));
+  }
+
+  function fmtDuration(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return '—';
+    if (seconds < 1) return Math.max(1, Math.round(seconds * 1000)) + ' ms';
+    if (seconds < 60) return seconds.toFixed(seconds < 10 ? 1 : 0) + ' s';
+    return (seconds / 60).toFixed(1) + ' min';
+  }
+
+  function powTimeRange(bits) {
+    if (!powBench || !powBench.msPerHash) return '';
+    var expected = Math.pow(2, bits) * powBench.msPerHash / 1000;
+    // 单次实测抖动大，给 0.5x–3x 的区间而不是看起来精确的单点。
+    return fmtDuration(expected * 0.5) + '–' + fmtDuration(expected * 3);
+  }
+
+  function renderPow() {
+    var values = powNumbers();
+    // 动态部分刻意只用 2^n / k / ms 这类与语言无关的记号，静态句子留在 HTML 里走 i18n。
+    if (powSummary) {
+      powSummary.textContent = values ? (values.base + ' → ' + values.max + ' bits') : '—';
+    }
+    var feedback = document.getElementById('security-pow-feedback');
+    if (feedback) {
+      var high = values && values.max > 20;
+      feedback.dataset.tone = high ? 'warn' : '';
+      feedback.textContent = values && values.base > values.max ? translate('首题难度不能高于难度上限。')
+        : high ? translate('高难度可能让手机验证超过 30 秒计算期限；建议降低上限并实测。')
+          : values ? translate('难度阶梯') + ': ' + [0, 1, 2, 3].map(function (index) { return Math.min(values.max, values.base + index * values.step); }).join(' → ') + ' bits' : '';
+    }
+    document.querySelectorAll('[data-pow-preset]').forEach(function (button) {
+      var parts = button.dataset.powPreset.split(',').map(Number);
+      button.setAttribute('aria-pressed', String(!!values && values.base === parts[0] && values.step === parts[1] && values.max === parts[2]));
+    });
+    if (powMath) {
+      powMath.textContent = values
+        ? ('2^' + values.base + ' ≈ ' + fmtHashCount(values.base) + ' · 2^' + values.max + ' ≈ ' + fmtHashCount(values.max))
+        : '—';
+    }
+  }
+
+  document.querySelectorAll('[data-pow-preset]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var values = button.dataset.powPreset.split(',').map(Number);
+      ['captcha_bits_base', 'captcha_bits_step', 'captcha_bits_max'].forEach(function (name, index) {
+        var node = control(fieldByName(name));
+        node.value = String(values[index]);
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    });
+  });
+
+  function renderPowBenchResult() {
+    if (!powBenchResult) return;
+    var values = powNumbers();
+    if (!powBench || !values) {
+      powBenchResult.textContent = '';
+      return;
+    }
+    powBenchResult.textContent = 'ref 2^' + powBench.referenceBits + ' = ' + Math.round(powBench.elapsedMs) + ' ms → '
+      + '2^' + values.base + ' ≈ ' + powTimeRange(values.base)
+      + ' · 2^' + values.max + ' ≈ ' + powTimeRange(values.max);
+  }
+
+  function runPowBenchmark() {
+    if (!powBenchmarkBtn) return;
+    var solver = window.ScrcpyGatePow;
+    if (!solver || typeof solver.benchmark !== 'function') {
+      if (powBenchResult) powBenchResult.textContent = 'webcrypto_unavailable';
+      return;
+    }
+    // 基准难度取 12 bits（期望 4096 次哈希），几十毫秒出结果；再用
+    // 「单次哈希耗时 × 2^bits」推算目标难度，避免真去算配置里的 18+ bits。
+    var REFERENCE_BITS = 12;
+    powBenchmarkBtn.disabled = true;
+    powBenchmarkBtn.textContent = '试算中…';
+    var started = performance.now();
+    function finish() {
+      powBenchmarkBtn.disabled = false;
+      powBenchmarkBtn.textContent = '重新试算';
+    }
+    solver.benchmark().then(function (result) {
+      powBench = {
+        msPerHash: (performance.now() - started) / Math.max(1, result.hashes),
+        hashes: result.hashes,
+        elapsedMs: performance.now() - started,
+        referenceBits: REFERENCE_BITS
+      };
+      renderPow();
+      renderPowBenchResult();
+      finish();
+    })['catch'](function () {
+      powBench = null;
+      if (powBenchResult) powBenchResult.textContent = 'benchmark_failed';
+      finish();
+    });
   }
 
   function render(payload) {
@@ -245,7 +461,7 @@
     }
   });
 
-  panel.querySelectorAll('.guard-preset').forEach(function (button) {
+  panel.querySelectorAll('.guard-preset:not(.pow-bench)').forEach(function (button) {
     button.addEventListener('click', function () {
       var preset = PRESETS[button.getAttribute('data-preset')];
       if (!preset) return;
@@ -257,6 +473,9 @@
       syncSaveState();
     });
   });
+
+  // 试算按钮复用 guard-preset 的样式，但不是「强度预置」，所以不进预置选择器。
+  if (powBenchmarkBtn) powBenchmarkBtn.addEventListener('click', runPowBenchmark);
 
   if (saveBtn) saveBtn.addEventListener('click', function () {
     // 只提交被修改过的字段：未触碰的项保持服务端当前值，避免把按秒存储的

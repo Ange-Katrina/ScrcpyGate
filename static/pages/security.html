@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <meta name="color-scheme" content="light dark"/>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>安全机制 - ScrcpyGate</title>
@@ -83,118 +84,1132 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+<div class="admin-content security-content">
+ <div class="page-heading sec-head">
+  <div class="page-heading-copy">
+   <h1>
+    安全机制
+   </h1>
+   <p>
+    查看访问情况，管理来源限制与登录保护。
+   </p>
+  </div>
+  <a class="sec-help-link" href="/logs">
+   <i aria-hidden="true" data-lucide="scroll-text">
+   </i>
+   操作审计
+   <i aria-hidden="true" data-lucide="arrow-up-right">
+   </i>
+  </a>
+ </div>
+ <div aria-label="安全管理分区" class="sec-tabs" role="tablist">
+  <button aria-controls="sec-panel-access" aria-selected="true" class="sec-tab" data-security-tab="access" id="sec-tab-access" role="tab" tabindex="0" type="button">
+   <i aria-hidden="true" data-lucide="activity">
+   </i>
+   <span>
+    访问记录
+   </span>
+  </button>
+  <button aria-controls="sec-panel-bans" aria-selected="false" class="sec-tab" data-security-tab="bans" id="sec-tab-bans" role="tab" tabindex="-1" type="button">
+   <i aria-hidden="true" data-lucide="shield-ban">
+   </i>
+   <span>
+    IP 封禁
+   </span>
+  </button>
+  <button aria-controls="sec-panel-geo" aria-selected="false" class="sec-tab" data-security-tab="geo" id="sec-tab-geo" role="tab" tabindex="-1" type="button">
+   <i aria-hidden="true" data-lucide="globe">
+   </i>
+   <span>
+    地域限制
+   </span>
+  </button>
+  <button aria-controls="sec-panel-login" aria-selected="false" class="sec-tab" data-security-tab="login" id="sec-tab-login" role="tab" tabindex="-1" type="button">
+   <i aria-hidden="true" data-lucide="lock-keyhole">
+   </i>
+   <span>
+    登录保护
+   </span>
+  </button>
+ </div>
+ <div aria-labelledby="sec-tab-access" class="sec-tab-panel" id="sec-panel-access" role="tabpanel" tabindex="0">
+  <section aria-labelledby="vis-title" class="panel sec-card vis-card" data-card="access-log">
+   <div class="panel-header">
+    <h2 class="panel-title" id="vis-title">
+     访问记录
+     <span class="panel-subtitle" id="vis-health">
+      加载中…
+     </span>
+    </h2>
+    <div aria-label="访问记录操作" class="guard-presets vis-actions" role="group">
+     <button class="guard-preset" id="vis-refresh" type="button">
+      刷新
+     </button>
+     <details class="sec-export">
+      <summary>导出<i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+      <div class="sec-export-options">
+       <button class="guard-preset" id="vis-export-csv" type="button">导出 CSV</button>
+       <button class="guard-preset" id="vis-export-json" type="button">导出 JSON</button>
+      </div>
+     </details>
+    </div>
+   </div>
+   <div class="guard-body">
+    <span aria-live="polite" class="guard-status vis-status" id="vis-status" role="status">
+    </span>
+    <p aria-live="polite" class="sec-observation-note" id="vis-note" role="status">
+     加载中…
+    </p>
+    <details class="sec-disclosure" id="vis-settings">
+     <summary>
+      采集与保留设置
+      <i aria-hidden="true" data-lucide="chevron-down">
+      </i>
+     </summary>
+     <p class="sec-hint">
+      这里的更改自动保存。关闭采集不会停止 IP 封禁或地域限制。
+     </p>
+     <div class="guard-row" data-field="access_log_enabled">
+      <div class="guard-copy">
+       <b>
+        记录访问
+       </b>
+       <span>
+        包含未登录访客；不记录查询参数、正文或 Cookie。
+       </span>
+      </div>
+      <button aria-checked="true" aria-label="记录访问" class="guard-switch sg-switch" data-field="access_log_enabled" id="vis-enabled" role="switch" type="button">
+       <i>
+       </i>
+      </button>
+     </div>
+     <div class="guard-row" data-field="access_retention_days">
+      <div class="guard-copy">
+       <b>
+        记录保留时长
+       </b>
+       <span>
+        过期记录自动清理；选择不清理时仍受总行数上限保护。
+       </span>
+      </div>
+      <div class="guard-field">
+       <select aria-label="访问记录保留天数" data-field="access_retention_days" id="vis-retention">
+        <option value="0">
+         不清理
+        </option>
+        <option value="1">
+         1 天
+        </option>
+        <option value="3">
+         3 天
+        </option>
+        <option value="7">
+         7 天
+        </option>
+        <option value="15">
+         15 天
+        </option>
+        <option value="30">
+         30 天
+        </option>
+       </select>
+      </div>
+     </div>
+    </details>
+    <ul aria-label="访问统计" class="vis-stats" id="vis-stats">
+    </ul>
+    <div class="vis-hints" hidden="" id="vis-hints">
+     <div class="vis-hints-head">
+      <i data-lucide="scan-search">
+      </i>
+      <b>
+       可疑访问线索
+      </b>
+      <span id="vis-hints-note">
+      </span>
+     </div>
+     <ul id="vis-hints-list">
+     </ul>
+    </div>
+    <div aria-label="访问记录筛选" class="vis-filters" role="group">
+     <label class="vis-filter">
+      <span>
+       来源 IP
+      </span>
+      <input aria-label="按来源 IP 筛选" id="vis-filter-ip" placeholder="IPv4 或 IPv6 地址" type="text"/>
+     </label>
 
-          <div class="page-heading sec-head">
-            <div class="page-heading-copy">
-              <h1>安全机制</h1>
-              <p>登录爆破防护的开关、阈值与时长；用不到的部署可以整体关闭</p>
-            </div>
-          </div>
+     <label class="vis-filter">
+      <span>
+       时间范围
+      </span>
+      <select aria-label="按时间范围筛选" id="vis-filter-window">
+       <option value="3600">
+        最近 1 小时
+       </option>
+       <option value="21600">
+        最近 6 小时
+       </option>
+       <option selected="" value="86400">
+        最近 24 小时
+       </option>
+       <option value="604800">
+        最近 7 天
+       </option>
+       <option value="2678400">
+        最近 31 天
+       </option>
+      </select>
+     </label>
+     <button class="guard-preset" id="vis-apply" type="button">
+      应用筛选
+     </button>
+     <button class="guard-btn ghost" hidden="" id="vis-reset-filters" type="button">
+      清除筛选
+     </button>
+    </div>
+    <span aria-live="polite" class="sec-filter-feedback" hidden="" id="vis-filter-feedback" role="status">
+    </span>
+    <details class="sec-disclosure sec-filter-extra" id="vis-extra-filters">
+     <summary>
+      更多筛选
+      <i aria-hidden="true" data-lucide="chevron-down">
+      </i>
+     </summary>
+     <div class="vis-extra-grid">
+    <label class="vis-filter">
+      <span>
+       状态
+      </span>
+      <select aria-label="按状态筛选" id="vis-filter-status">
+       <option value="">
+        全部
+       </option>
+       <option value="4xx">
+        仅 4xx
+       </option>
+       <option value="5xx">
+        仅 5xx
+       </option>
+      </select>
+     </label>
+      <label class="vis-filter">
+       <span>
+        国家/地区
+       </span>
+       <input aria-label="国家/地区代码" id="vis-filter-country" maxlength="2" placeholder="CN"/>
+      </label>
+      <label class="vis-filter">
+       <span>
+        状态码
+       </span>
+       <input aria-label="精确状态码" id="vis-filter-code" max="599" min="100" placeholder="403" type="number"/>
+      </label>
+      <label class="vis-filter">
+       <span>
+        拦截原因
+       </span>
+       <select id="vis-filter-decision">
+        <option value="">
+         全部
+        </option>
+        <option value="deny_ban">
+         IP 封禁
+        </option>
+        <option value="deny_geo">
+         地域限制
+        </option>
+        <option value="db_unavailable">
+         地区库不可用
+        </option>
+       </select>
+      </label>
+      <label class="vis-filter">
+       <span>
+        封禁状态
+       </span>
+       <select id="vis-filter-ban">
+        <option value="">
+         全部
+        </option>
+        <option value="active">
+         生效中
+        </option>
+        <option value="clear">
+         未封禁
+        </option>
+       </select>
+      </label>
+      <label class="vis-check">
+       <input id="vis-filter-admin-poll" type="checkbox"/>
+       <span>
+        包含后台自动轮询
+       </span>
+      </label>
+     </div>
+    </details>
+    <p class="sec-table-hint">
+     按来源 IP 汇总。选择明细查看请求，或直接管理封禁。
+    </p>
+    <div aria-label="访问记录表格" class="vis-table-wrap sec-scroll-table" role="region" tabindex="0">
+     <table class="vis-table">
+      <caption class="sr-only">
+       按来源 IP 汇总；点「明细」查看该地址的逐条记录
+      </caption>
+      <thead>
+       <tr>
+        <th scope="col">
+         来源 IP
+        </th>
+        <th scope="col">
+         归属
+        </th>
+        <th scope="col">
+         请求
+        </th>
+        <th scope="col">
+         4xx
+        </th>
+        <th scope="col">
+         5xx
+        </th>
+        <th scope="col">
+         拦截
+        </th>
+        <th scope="col">
+         首次
+        </th>
+        <th scope="col">
+         最近
+        </th>
+        <th scope="col">
+         操作
+        </th>
+       </tr>
+      </thead>
+      <tbody id="vis-ip-rows">
+       <tr>
+        <td class="table-empty" colspan="9">
+         <i data-lucide="inbox">
+         </i>
+         <span>
+          加载中…
+         </span>
+        </td>
+       </tr>
+      </tbody>
+     </table>
+    </div>
+    <button class="guard-btn ghost" hidden="" id="vis-more" type="button">
+     加载更多来源
+    </button>
+    <div class="vis-detail" hidden="" id="vis-detail">
+     <div class="vis-detail-head">
+      <b id="vis-detail-title" tabindex="-1">
+       明细
+      </b>
+      <label class="vis-filter">
+       <span>
+        身份
+       </span>
+       <select aria-label="按身份筛选明细" id="vis-filter-identity">
+        <option value="">
+         全部
+        </option>
+        <option value="admin">
+         管理员
+        </option>
+        <option value="account">
+         已登录账户
+        </option>
+        <option value="anonymous">
+         未登录
+        </option>
+       </select>
+      </label>
+      <label class="vis-filter">
+       <span>
+        类型
+       </span>
+       <select aria-label="按请求类型筛选明细" id="vis-filter-kind">
+        <option value="">
+         全部
+        </option>
+        <option value="page">
+         页面
+        </option>
+        <option value="api">
+         接口
+        </option>
+        <option value="static">
+         静态资源
+        </option>
+        <option value="websocket">
+         长连接
+        </option>
+       </select>
+      </label>
+      <button class="guard-btn ghost" id="vis-detail-apply" type="button">
+       应用
+      </button>
+      <button class="guard-btn ghost" id="vis-detail-close" type="button">
+       关闭明细
+      </button>
+     </div>
+     <div aria-label="访问记录表格" class="vis-table-wrap sec-scroll-table" role="region" tabindex="0">
+      <table class="vis-table">
+       <thead>
+        <tr>
+         <th scope="col">
+          时间
+         </th>
+         <th scope="col">
+          方法
+         </th>
+         <th scope="col">
+          路径
+         </th>
+         <th scope="col">
+          状态
+         </th>
+         <th scope="col">
+          身份
+         </th>
+         <th scope="col">
+          耗时
+         </th>
+         <th scope="col">
+          客户端
+         </th>
+        </tr>
+       </thead>
+       <tbody id="vis-detail-rows">
+       </tbody>
+      </table>
+     </div>
+     <button class="guard-btn ghost" hidden="" id="vis-detail-more" type="button">
+      加载更多记录
+     </button>
+    </div>
 
-          <p class="sec-hint">保存后立即生效；未自定义的项目沿用环境变量默认值。「停用」表示登录不再有任何限制（不计数、不要求人机验证、不封禁）。</p>
+   </div>
+  </section>
+ </div>
+ <div aria-labelledby="sec-tab-bans" class="sec-tab-panel" hidden="" id="sec-panel-bans" role="tabpanel" tabindex="0">
+  <section aria-labelledby="ban-title" class="panel sec-card ban-card" data-card="ip-ban">
+   <div class="panel-header">
+    <h2 class="panel-title" id="ban-title">
+     IP 封禁
+     <span class="panel-subtitle" id="ban-summary">
+      加载中…
+     </span>
+    </h2>
+    <div aria-label="封禁操作" class="guard-presets vis-actions" role="group">
+     <button class="guard-preset" id="ban-refresh" type="button">
+      刷新
+     </button>
+     <button class="guard-btn primary" id="ban-new" type="button" aria-controls="ban-editor" aria-expanded="false">
+      <i aria-hidden="true" data-lucide="plus">
+      </i>
+      新建封禁
+     </button>
+    </div>
+   </div>
+   <div class="guard-body">
+    <span aria-live="polite" class="guard-status" id="ban-status" role="status">
+    </span>
+    <p class="sec-hint">
+     封禁会立即断开该地址的现有连接，到期后自动恢复访问。
+    </p>
+    <ul aria-label="封禁计数" class="vis-stats" id="ban-counters">
+    </ul>
 
-          <div class="sec-layout">
-            <div class="sec-col">
-              <section class="panel sec-card" data-card="switch" aria-labelledby="sec-switch-title">
-                <div class="panel-header">
-                  <h2 class="panel-title" id="sec-switch-title">总开关<span class="panel-subtitle" id="security-guard-summary">加载中…</span></h2>
-                </div>
-                <div class="guard-body">
-                  <div class="guard-row" data-field="enabled">
-                    <div class="guard-copy"><b>登录保护</b><span>失败计数、人机验证与封禁的总开关；关闭后登录不再有任何限制</span></div>
-                    <button type="button" class="guard-switch sg-switch" role="switch" aria-checked="true" id="security-guard-enabled" data-field="enabled" aria-label="登录保护"><i></i></button>
-                  </div>
-                  <div class="guard-row" data-field="captcha_enabled">
-                    <div class="guard-copy"><b>人机验证</b><span>失败后要求完成滑块 + 工作量证明；关闭则只保留失败计数与封禁</span></div>
-                    <button type="button" class="guard-switch sg-switch" role="switch" aria-checked="true" id="security-guard-captcha" data-field="captcha_enabled" aria-label="人机验证"><i></i></button>
-                  </div>
-                </div>
-              </section>
+    <p class="ban-self-warning" hidden="" id="ban-self-warning" role="alert">
+    </p>
+    <div aria-label="封禁记录表格" class="vis-table-wrap sec-scroll-table" role="region" tabindex="0">
+     <table class="vis-table">
+      <caption class="sr-only">
+       封禁列表；开启「显示已解除与已过期」可查历史。
+      </caption>
+      <thead>
+       <tr>
+        <th scope="col">
+         来源 IP
+        </th>
+        <th scope="col">
+         期限
+        </th>
+        <th scope="col">
+         剩余
+        </th>
+        <th scope="col">
+         原因
+        </th>
+        <th scope="col">
+         操作者
+        </th>
+        <th scope="col">
+         操作
+        </th>
+       </tr>
+      </thead>
+      <tbody id="ban-rows">
+       <tr>
+        <td class="table-empty" colspan="6">
+         <i data-lucide="shield-off">
+         </i>
+         <span>
+          加载中…
+         </span>
+        </td>
+       </tr>
+      </tbody>
+     </table>
+    </div>
+    <div class="sec-pagination">
+     <label class="vis-check">
+      <input id="ban-include-inactive" type="checkbox"/>
+      <span>
+       显示已解除与已过期
+      </span>
+     </label>
+     <button class="guard-preset" id="ban-prev" type="button">
+      上一页
+     </button>
+     <span aria-live="polite" id="ban-page">
+      1
+     </span>
+     <button class="guard-preset" id="ban-next" type="button">
+      下一页
+     </button>
+    </div>
+    <div class="vis-detail" hidden="" id="ban-events">
+     <div class="vis-detail-head">
+      <b id="ban-events-title">
+       事件
+      </b>
+      <button class="guard-btn ghost" id="ban-events-close" type="button">
+       关闭
+      </button>
+     </div>
+     <ul aria-label="封禁事件流" class="guard-locked" id="ban-events-list">
+     </ul>
+    </div>
+   </div>
+  </section>
+ </div>
+ <div aria-labelledby="sec-tab-geo" class="sec-tab-panel" hidden="" id="sec-panel-geo" role="tabpanel" tabindex="0">
+  <section aria-labelledby="geo-title" class="panel sec-card geo-card" data-card="geo">
+   <div class="panel-header">
+    <h2 class="panel-title" id="geo-title">
+     地域限制
+     <span class="panel-subtitle" id="geo-summary">
+      加载中…
+     </span>
+    </h2>
+    <div aria-label="地域限制操作" class="guard-presets vis-actions" role="group">
+     <button class="guard-preset" id="geo-refresh" type="button">
+      刷新
+     </button>
+    </div>
+   </div>
+   <div class="guard-body">
+    <span aria-live="polite" class="guard-status" id="geo-status" role="status">
+    </span>
+    <p class="sec-hint" id="geo-policy-notice" role="status" hidden></p>
+    <p class="sec-hint">
+     按国家或地区管理访问。建议先只观察，再预演自己的来源，最后开启强制执行。
+    </p>
+    <div class="guard-row" data-field="geo_mode">
+     <div class="guard-copy">
+      <b>
+       地域限制模式
+      </b>
+      <span>
+       关闭 / 只观察（记录但不拦） / 强制执行
+      </span>
+     </div>
+     <div class="guard-field">
+      <select aria-label="地域限制模式" id="geo-mode">
+       <option value="off">
+        不启用
+       </option>
+       <option value="observe">
+        只观察
+       </option>
+       <option value="enforce">
+        强制执行
+       </option>
+      </select>
+     </div>
+    </div>
+    <div class="guard-row" data-field="geo_countries">
+     <div class="guard-copy">
+      <b>
+       允许的国家/地区
+      </b>
+      <span>
+       两位 ISO 码，逗号分隔；HK、MO、TW 与 CN 彼此独立（只写 CN 不会放行港澳台）
+      </span>
+     </div>
+     <div class="guard-field geo-wide">
+      <input aria-label="允许的国家或地区代码" id="geo-countries" placeholder="CN" type="text"/>
+     </div>
+    </div>
+    <div class="guard-row" data-field="geo_unknown">
+     <div class="guard-copy">
+      <b>
+       无法定位来源
+      </b>
+      <span>
+       查不到国家时如何处理；内网地址也走这一条，局域网部署请配合下面的例外网段
+      </span>
+     </div>
+     <div class="guard-field">
+      <select aria-label="无法定位来源的处理方式" id="geo-unknown">
+       <option value="deny">
+        拒绝
+       </option>
+       <option value="allow">
+        放行
+       </option>
+      </select>
+     </div>
+    </div>
+    <div class="guard-row" data-field="geo_cidrs">
+     <div class="guard-copy">
+      <b>
+       例外网段
+      </b>
+      <span>
+       CIDR，逗号分隔；这些地址不受地域限制（仍然受 IP 封禁约束，封禁优先）
+      </span>
+     </div>
+     <div class="guard-field geo-wide">
+      <input aria-label="例外网段 CIDR 列表" id="geo-cidrs" placeholder="192.168.0.0/16" type="text"/>
+     </div>
+    </div>
+    <div aria-label="地域预演" class="vis-filters geo-preview" role="group">
+     <div class="sec-block-copy">
+      <h3>
+       保存前预演
+      </h3>
+      <p>
+       使用当前表单检查访问结果，不会保存或改变策略。
+      </p>
+     </div>
+     <label class="vis-filter">
+      <span>
+       预演来源
+      </span>
+      <input aria-label="预演用的来源地址" id="geo-sim-ip" placeholder="留空 = 我当前的来源" type="text"/>
+     </label>
+     <button class="guard-preset" id="geo-sim-run" type="button">
+      预演
+     </button>
+     <span aria-live="polite" class="guard-status" id="geo-sim-result" role="status">
+     </span>
+    </div>
+    <p class="ban-self-warning" hidden="" id="geo-self-warning" role="alert">
+    </p>
+    <label class="vis-check" hidden="" id="geo-confirm-wrap">
+     <input id="geo-confirm" type="checkbox"/>
+     <span>
+      我确认：启用后我自己的来源也会被拒绝，我会用服务器上的
+      <code>
+       ./deploy.sh --geo-off
+      </code>
+      或
+      <code>
+       GEO_ENFORCE_DISABLED=true
+      </code>
+      恢复
+     </span>
+    </label>
+    <div aria-label="保存地域设置" class="sec-foot geo-foot" role="group">
+     <span class="sec-hint">
+      设置只在点击保存后生效。
+     </span>
+     <button class="guard-btn primary" id="geo-save" type="button">
+      保存地域设置
+     </button>
+    </div>
+    <details class="sec-disclosure geo-database">
+     <summary>
+      地区库与自动更新
+      <i aria-hidden="true" data-lucide="chevron-down">
+      </i>
+     </summary>
+     <p class="sec-hint" id="geo-database-note"></p>
+     <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off">
+      <p class="sec-hint">配置 MaxMind 下载凭据，不需要提供账户登录密码。留空保留已保存的值；更换 Account ID 时须同时填写新 Key。</p>
+      <div class="geo-credentials-fields">
+       <label class="vis-filter"><span>Account ID</span><input id="geo-account-id" name="account_id" type="text" inputmode="numeric" pattern="[0-9]{1,20}" maxlength="20" placeholder="MaxMind Account ID" autocomplete="off"/></label>
+       <label class="vis-filter"><span>License Key</span><input id="geo-license-key" name="license_key" type="password" maxlength="256" placeholder="填写新 Key；留空保留" autocomplete="new-password" spellcheck="false"/></label>
+      </div>
+      <p class="sec-hint" id="geo-credentials-source"></p>
+      <div class="sec-inline-actions">
+       <button class="guard-btn primary" id="geo-credentials-save" type="submit">保存下载凭据</button>
+       <button class="guard-btn ghost" id="geo-credentials-clear" type="button" disabled>清除已保存凭据</button>
+       <a href="https://www.maxmind.com/en/accounts/current/license-key" target="_blank" rel="noopener noreferrer">获取 License Key</a>
+      </div>
+      <p class="guard-status" id="geo-credentials-status" role="status" aria-live="polite"></p>
+     </form>
+     <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats">
+     </ul>
+     <div class="sec-inline-actions">
+      <button class="guard-preset" id="geo-check" type="button">
+       立即检查更新
+      </button>
+     </div>
+     <p class="sec-hint">
+      保存凭据后，默认每 12 小时自动检查（附加随机延迟）；也可立即检查。手动检查至少间隔 10 分钟，每日最多尝试 30 次。地区库不可用时，强制执行会拒绝访问。
+     </p>
+     <p class="sec-hint">IP 地域是估算结果，代理、VPN 和移动网络可能造成偏差。建议先使用「只观察」并预演当前来源，再启用强制执行。</p>
+     <p class="sec-hint"><a href="https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases" target="_blank" rel="noopener noreferrer">MaxMind 更新文档</a> · 凭据保存在私有数据卷，保留数据重装会保留配置；清除凭据不会删除现有地区库或取消地域策略。</p>
+     <p class="sec-hint">
+      本产品使用 GeoLite2 数据，来源：
+      <a href="https://www.maxmind.com" rel="noopener noreferrer" target="_blank">
+       MaxMind
+      </a>
+      。
+     </p>
+    </details>
+   </div>
+  </section>
+ </div>
+ <div aria-labelledby="sec-tab-login" class="sec-tab-panel" hidden="" id="sec-panel-login" role="tabpanel" tabindex="0">
+  <p class="sec-hint sec-section-intro">
+   只管理登录验证与失败限制。访问记录、IP 封禁和地域限制分别设置，不受登录保护开关影响。
+  </p>
+  <div class="sec-layout">
+   <div class="sec-col">
+    <section aria-labelledby="sec-switch-title" class="panel sec-card" data-card="switch">
+     <div class="panel-header">
+      <h2 class="panel-title" id="sec-switch-title">
+       登录保护
+       <span class="panel-subtitle" id="security-guard-summary">
+        加载中…
+       </span>
+      </h2>
+     </div>
+     <div class="guard-body">
+      <div class="guard-row" data-field="enabled">
+       <div class="guard-copy">
+        <b>
+         登录保护
+        </b>
+        <span>
+         失败计数、人机验证与封禁的总开关；关闭后登录不再有任何限制
+        </span>
+       </div>
+       <button aria-checked="true" aria-label="登录保护" class="guard-switch sg-switch" data-field="enabled" id="security-guard-enabled" role="switch" type="button">
+        <i>
+        </i>
+       </button>
+      </div>
+      <div class="guard-row" data-field="captcha_enabled">
+       <div class="guard-copy">
+        <b>
+         人机验证
+        </b>
+        <span>
+         失败后要求完成滑块 + 工作量证明；关闭则只保留失败计数与封禁
+        </span>
+       </div>
+       <button aria-checked="true" aria-label="人机验证" class="guard-switch sg-switch" data-field="captcha_enabled" id="security-guard-captcha" role="switch" type="button">
+        <i>
+        </i>
+       </button>
+      </div>
+     </div>
+    </section>
+    <section aria-labelledby="sec-limits-title" class="panel sec-card" data-card="limits">
+     <div class="panel-header">
+      <h2 class="panel-title" id="sec-limits-title">
+       阈值与时长
+       <span class="panel-subtitle">
+        失败累计后触发验证与封禁
+       </span>
+      </h2>
+      <div aria-label="常用强度预设" class="guard-presets" role="group">
+       <button aria-pressed="false" class="guard-preset" data-preset="off" type="button">
+        停用
+       </button>
+       <button aria-pressed="false" class="guard-preset" data-preset="lenient" type="button">
+        宽松
+       </button>
+       <button aria-pressed="false" class="guard-preset" data-preset="standard" type="button">
+        标准
+       </button>
+       <button aria-pressed="false" class="guard-preset" data-preset="strict" type="button">
+        严格
+       </button>
+      </div>
+     </div>
+     <div class="guard-body">
+      <div class="guard-row" data-field="captcha_after_failures">
+       <div class="guard-copy">
+        <b>
+         触发人机验证
+        </b>
+        <span>
+         连续失败多少次后开始要求验证码
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="触发人机验证的失败次数" data-field="captcha_after_failures" id="security-guard-captcha-after" max="100" min="1" step="1" type="number"/>
+        <span class="guard-unit">
+         次
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="lockout_threshold">
+       <div class="guard-copy">
+        <b>
+         封禁阈值
+        </b>
+        <span>
+         统计窗口内失败多少次后暂时封禁来源 IP
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="封禁阈值次数" data-field="lockout_threshold" id="security-guard-lockout-threshold" max="100" min="1" step="1" type="number"/>
+        <span class="guard-unit">
+         次
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="failure_window_seconds">
+       <div class="guard-copy">
+        <b>
+         统计窗口
+        </b>
+        <span>
+         失败次数在这个时间窗内累计
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="统计窗口分钟数" data-field="failure_window_seconds" id="security-guard-window-minutes" max="1440" min="1" step="1" type="number"/>
+        <span class="guard-unit">
+         分钟
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="lockout_seconds">
+       <div class="guard-copy">
+        <b>
+         封禁时长
+        </b>
+        <span>
+         达到阈值后拒绝该 IP 登录的时长（期间正确密码也拒绝）
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="封禁时长分钟数" data-field="lockout_seconds" id="security-guard-lockout-minutes" max="1440" min="1" step="1" type="number"/>
+        <span class="guard-unit">
+         分钟
+        </span>
+       </div>
+      </div>
+     </div>
+    </section>
+    <section aria-labelledby="sec-pow-title" class="panel sec-card" data-card="pow">
+     <div class="panel-header">
+      <h2 class="panel-title" id="sec-pow-title">
+       工作量证明难度
+       <span class="panel-subtitle" id="security-pow-summary">
+        加载中…
+       </span>
+      </h2>
+     </div>
+     <div class="guard-body">
+      <div class="guard-row">
+       <div class="guard-copy"><b>验证提供方</b><span>通过部署配置选择，切换后需重启。</span></div>
+       <span id="security-pow-provider" data-i18n-skip>—</span>
+      </div>
+      <p class="guard-hint">本机试算仅对应内置 PoW，不代表其他提供方的性能。</p>
+      <div class="guard-row" data-field="captcha_bits_base">
+       <div class="guard-copy">
+        <b>
+         首题难度
+        </b>
+        <span>
+         触发人机验证后第一道题的难度；每 +1 表示期望计算量翻倍
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="首题工作量证明难度（bits）" data-field="captcha_bits_base" id="security-pow-bits-base" max="26" min="8" step="1" type="number"/>
+        <span class="guard-unit">
+         bits
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="captcha_bits_step">
+       <div class="guard-copy">
+        <b>
+         失败递增
+        </b>
+        <span>
+         每多失败一次追加的难度；设为 0 表示所有题目同难度
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="每次失败追加的难度（bits）" data-field="captcha_bits_step" id="security-pow-bits-step" max="8" min="0" step="1" type="number"/>
+        <span class="guard-unit">
+         bits
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="captcha_bits_max">
+       <div class="guard-copy">
+        <b>
+         难度上限
+        </b>
+        <span>
+         阶梯封顶值；越高越能挡住脚本，但慢设备登录也会更久
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="工作量证明难度上限（bits）" data-field="captcha_bits_max" id="security-pow-bits-max" max="28" min="8" step="1" type="number"/>
+        <span class="guard-unit">
+         bits
+        </span>
+       </div>
+      </div>
+      <div class="pow-presets" role="group" aria-label="PoW 难度预设">
+       <button class="guard-preset" data-pow-preset="12,1,14" type="button">轻量 · 12–14 bits</button>
+       <button class="guard-preset" data-pow-preset="14,2,18" type="button">均衡 · 14–18 bits</button>
+       <button class="guard-preset" data-pow-preset="16,2,20" type="button">加强 · 16–20 bits</button>
+      </div>
+      <p class="sec-hint">以上预设只调整计算难度。每增加 1 bit，期望计算量约翻倍；建议先试算，再用手机验证登录体验。点击「保存登录设置」后对新挑战生效。</p>
+      <p class="pow-feedback" id="security-pow-feedback" role="status" aria-live="polite"></p>
+      <div class="guard-row" id="security-pow-bench-row">
+       <div class="guard-copy">
+        <b>
+         本机试算
+        </b>
+        <span>
+         按期望计算量估算；点右侧按钮用本机浏览器把难度换算成真实耗时
+        </span>
+        <span class="pow-math" id="security-pow-math">
+         —
+        </span>
+        <span class="pow-math" id="security-pow-bench-result">
+        </span>
+       </div>
+       <div class="guard-field">
+        <button class="guard-preset pow-bench" id="security-pow-benchmark" type="button">
+         开始试算
+        </button>
+       </div>
+      </div>
+     </div>
+    </section>
+    <details class="sec-disclosure sec-advanced">
+     <summary>
+      高级登录设置
+      <i aria-hidden="true" data-lucide="chevron-down">
+      </i>
+     </summary>
+     <div class="guard-body">
+      <div class="guard-row" data-field="captcha_ttl_seconds">
+       <div class="guard-copy">
+        <b>
+         验证码有效期
+        </b>
+        <span>
+         签发的挑战在多少秒内有效
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="验证码有效期秒数" data-field="captcha_ttl_seconds" id="security-guard-captcha-ttl" max="3600" min="10" step="10" type="number"/>
+        <span class="guard-unit">
+         秒
+        </span>
+       </div>
+      </div>
+      <div class="guard-row" data-field="captcha_issue_interval_seconds">
+       <div class="guard-copy">
+        <b>
+         挑战签发间隔
+        </b>
+        <span>
+         同一 IP 两次签发挑战的最小间隔；设为 0 表示不限流
+        </span>
+       </div>
+       <div class="guard-field">
+        <input aria-label="挑战签发间隔秒数" data-field="captcha_issue_interval_seconds" id="security-guard-issue-interval" max="60" min="0" step="1" type="number"/>
+        <span class="guard-unit">
+         秒
+        </span>
+       </div>
+      </div>
+     </div>
+    </details>
+   </div>
+   <div class="sec-col">
+    <section aria-labelledby="sec-locked-title" class="panel sec-card" data-card="locked">
+     <div class="panel-header">
+      <h2 class="panel-title" id="sec-locked-title">
+       自动登录限制
+       <span class="panel-subtitle" id="security-locked-count">
+        等待数据
+       </span>
+      </h2>
+     </div>
+     <div class="guard-body">
+      <ul aria-label="当前封禁与失败计数" class="guard-locked" id="security-locked-list">
+       <li class="table-empty">
+        <i data-lucide="shield">
+        </i>
+        <span>
+         等待数据
+        </span>
+       </li>
+      </ul>
+     </div>
+    </section>
+    <details aria-labelledby="sec-login-sessions-title" class="panel sec-card sec-disclosure" data-card="login-sessions">
+     <summary class="panel-header">
+      <h2 class="panel-title" id="sec-login-sessions-title">
+       登录会话
+       <span class="panel-subtitle" id="login-sessions-count">
+        等待数据
+       </span>
+      </h2>
+      <i data-lucide="chevron-down" aria-hidden="true"></i>
+     </summary>
+     <div class="guard-body">
+      <p class="sec-hint">
+       按会话结束登录：被踢出的浏览器立即失效（包括它正在投屏的页面）。列表只显示会话标识，不显示登录令牌。
+      </p>
+      <ul aria-label="登录会话列表" class="guard-locked" id="login-sessions-list">
+       <li class="table-empty">
+        <i data-lucide="users">
+        </i>
+        <span>
+         等待数据
+        </span>
+       </li>
+      </ul>
+      <button class="guard-btn ghost" id="login-sessions-refresh" type="button">
+       刷新
+      </button>
+     </div>
+    </details>
+   </div>
+  </div>
+  <div aria-label="保存安全设置" class="sec-foot" role="group">
+   <span aria-live="polite" class="guard-status" id="security-guard-status" role="status">
+    未修改
+   </span>
+   <span aria-hidden="true" class="sec-foot-spacer">
+   </span>
+   <button class="guard-btn ghost" id="security-guard-reset" type="button">
+    恢复默认
+   </button>
+   <button class="guard-btn primary" disabled="" id="security-guard-save" type="button">
+    保存登录设置
+   </button>
+  </div>
+ </div>
+ <dialog class="sec-confirm ban-dialog" id="ban-dialog" aria-labelledby="ban-dialog-title" aria-describedby="ban-dialog-help">
+  <div class="sec-confirm-heading"><h2 id="ban-dialog-title">封禁 IP</h2></div>
+  <p id="ban-dialog-help">选择期限并填写原因，确认后立即生效。</p>
+    <details class="sec-disclosure ban-editor" id="ban-editor">
+     <summary id="ban-editor-title">
+      新建封禁
+      <i aria-hidden="true" data-lucide="chevron-down">
+      </i>
+     </summary>
+     <div aria-label="新建封禁" class="vis-filters ban-editor-fields" role="group">
+      <label class="vis-filter">
+       <span>
+        来源 IP
+       </span>
+       <input aria-label="要封禁的来源 IP" id="ban-ip" placeholder="例如 203.0.113.7" type="text"/>
+      </label>
+      <label class="vis-filter">
+       <span>
+        时长
+       </span>
+       <select aria-label="封禁时长预设" id="ban-preset">
+        <option value="15m">
+         15 分钟
+        </option>
+        <option selected="" value="1h">
+         1 小时
+        </option>
+        <option value="24h">
+         24 小时
+        </option>
+        <option value="7d">
+         7 天
+        </option>
+        <option value="permanent">
+         永久
+        </option>
+        <option value="custom">
+         自定义…
+        </option>
+       </select>
+      </label>
+      <label class="vis-filter" hidden="" id="ban-custom-wrap">
+       <span>
+        自定义时长
+       </span>
+       <span class="ban-custom">
+        <input aria-label="自定义封禁分钟数" id="ban-custom" max="525600" min="1" step="1" type="number" value="60"/>
+        <span class="guard-unit">
+         分钟
+        </span>
+       </span>
+      </label>
+      <label class="vis-filter">
+       <span>
+        原因（可选）
+       </span>
+       <input aria-label="封禁原因" id="ban-reason" maxlength="200" placeholder="例如 持续扫描 /wp-admin" type="text"/>
+      </label>
+      <button class="guard-btn ghost" id="ban-cancel" type="button">
+       取消
+      </button>
+      <button class="guard-btn primary" id="ban-submit" type="button">
+       封禁该地址
+      </button>
+     </div>
+     <p class="sec-hint">
+      确认后会立即断开该地址的现有连接。若封禁自己的来源，将失去访问权限；可在服务器执行 ./deploy.sh --unban IP 恢复。本机与可信代理地址受保护。
+     </p>
+    </details>
+  <p id="ban-dialog-status" class="guard-status" role="status" aria-live="polite"></p>
+  <p id="ban-dialog-warning" class="ban-self-warning" role="alert" hidden></p>
+ </dialog>
+ <dialog aria-describedby="security-confirm-message" aria-labelledby="security-confirm-title" class="sec-confirm" id="security-confirm">
+  <form method="dialog">
+   <div class="sec-confirm-heading">
+    <i aria-hidden="true" data-lucide="shield-alert">
+    </i>
+    <h2 id="security-confirm-title">
+    </h2>
+   </div>
+   <p id="security-confirm-message">
+   </p>
+   <p class="sec-confirm-detail" id="security-confirm-detail">
+   </p>
+   <div class="sec-confirm-actions">
+    <button autofocus="" class="guard-btn ghost" type="submit" value="cancel">
+     取消
+    </button>
+    <button class="guard-btn primary" id="security-confirm-accept" type="submit" value="confirm">
+     确认
+    </button>
+   </div>
+  </form>
+ </dialog>
+</div>
 
-              <section class="panel sec-card" data-card="advanced" aria-labelledby="sec-advanced-title">
-                <div class="panel-header">
-                  <h2 class="panel-title" id="sec-advanced-title">高级<span class="panel-subtitle">一般无需修改</span></h2>
-                </div>
-                <div class="guard-body">
-                  <div class="guard-row" data-field="captcha_ttl_seconds">
-                    <div class="guard-copy"><b>验证码有效期</b><span>签发的挑战在多少秒内有效</span></div>
-                    <div class="guard-field"><input type="number" min="10" max="3600" step="10" id="security-guard-captcha-ttl" data-field="captcha_ttl_seconds" aria-label="验证码有效期秒数"><span class="guard-unit">秒</span></div>
-                  </div>
-                  <div class="guard-row" data-field="captcha_issue_interval_seconds">
-                    <div class="guard-copy"><b>挑战签发间隔</b><span>同一 IP 两次签发挑战的最小间隔；设为 0 表示不限流</span></div>
-                    <div class="guard-field"><input type="number" min="0" max="60" step="1" id="security-guard-issue-interval" data-field="captcha_issue_interval_seconds" aria-label="挑战签发间隔秒数"><span class="guard-unit">秒</span></div>
-                  </div>
-                </div>
-              </section>
-            </div>
-            <div class="sec-col">
-              <section class="panel sec-card" data-card="limits" aria-labelledby="sec-limits-title">
-                <div class="panel-header">
-                  <h2 class="panel-title" id="sec-limits-title">阈值与时长<span class="panel-subtitle">失败累计后触发验证与封禁</span></h2>
-                  <div class="guard-presets" role="group" aria-label="常用强度预设">
-                    <button type="button" class="guard-preset" data-preset="off" aria-pressed="false">停用</button>
-                    <button type="button" class="guard-preset" data-preset="lenient" aria-pressed="false">宽松</button>
-                    <button type="button" class="guard-preset" data-preset="standard" aria-pressed="false">标准</button>
-                    <button type="button" class="guard-preset" data-preset="strict" aria-pressed="false">严格</button>
-                  </div>
-                </div>
-                <div class="guard-body">
-                  <div class="guard-row" data-field="captcha_after_failures">
-                    <div class="guard-copy"><b>触发人机验证</b><span>连续失败多少次后开始要求验证码</span></div>
-                    <div class="guard-field"><input type="number" min="1" max="100" step="1" id="security-guard-captcha-after" data-field="captcha_after_failures" aria-label="触发人机验证的失败次数"><span class="guard-unit">次</span></div>
-                  </div>
-                  <div class="guard-row" data-field="lockout_threshold">
-                    <div class="guard-copy"><b>封禁阈值</b><span>统计窗口内失败多少次后暂时封禁来源 IP</span></div>
-                    <div class="guard-field"><input type="number" min="1" max="100" step="1" id="security-guard-lockout-threshold" data-field="lockout_threshold" aria-label="封禁阈值次数"><span class="guard-unit">次</span></div>
-                  </div>
-                  <div class="guard-row" data-field="failure_window_seconds">
-                    <div class="guard-copy"><b>统计窗口</b><span>失败次数在这个时间窗内累计</span></div>
-                    <div class="guard-field"><input type="number" min="1" max="1440" step="1" id="security-guard-window-minutes" data-field="failure_window_seconds" aria-label="统计窗口分钟数"><span class="guard-unit">分钟</span></div>
-                  </div>
-                  <div class="guard-row" data-field="lockout_seconds">
-                    <div class="guard-copy"><b>封禁时长</b><span>达到阈值后拒绝该 IP 登录的时长（期间正确密码也拒绝）</span></div>
-                    <div class="guard-field"><input type="number" min="1" max="1440" step="1" id="security-guard-lockout-minutes" data-field="lockout_seconds" aria-label="封禁时长分钟数"><span class="guard-unit">分钟</span></div>
-                  </div>
-                </div>
-              </section>
-
-              <section class="panel sec-card" data-card="locked" aria-labelledby="sec-locked-title">
-                <div class="panel-header">
-                  <h2 class="panel-title" id="sec-locked-title">当前封禁<span class="panel-subtitle" id="security-locked-count">等待数据</span></h2>
-                </div>
-                <div class="guard-body">
-                  <ul class="guard-locked" id="security-locked-list" aria-label="当前封禁与失败计数">
-                    <li class="table-empty"><i data-lucide="shield"></i><span>等待数据</span></li>
-                  </ul>
-                </div>
-              </section>
-
-              <section class="panel sec-card" data-card="login-sessions" aria-labelledby="sec-login-sessions-title">
-                <div class="panel-header">
-                  <h2 class="panel-title" id="sec-login-sessions-title">登录会话<span class="panel-subtitle" id="login-sessions-count">等待数据</span></h2>
-                </div>
-                <div class="guard-body">
-                  <p class="sec-hint">按会话结束登录：被踢出的浏览器立即失效（包括它正在投屏的页面）。列表只显示会话标识，不显示登录令牌。</p>
-                  <ul class="guard-locked" id="login-sessions-list" aria-label="登录会话列表">
-                    <li class="table-empty"><i data-lucide="users"></i><span>等待数据</span></li>
-                  </ul>
-                  <button class="guard-btn ghost" type="button" id="login-sessions-refresh">刷新</button>
-                </div>
-              </section>
-            </div>
-          </div>
-
-          <!-- 保存动作放到底部（Apple Copy：卡片动作在内容之后，而不是压在标题栏上），
-               状态文字跟着按钮走，未修改/已保存的反馈和保存按钮始终在同一行。 -->
-          <div class="sec-foot" role="group" aria-label="保存安全设置">
-            <span class="guard-status" id="security-guard-status" role="status" aria-live="polite">未修改</span>
-            <span class="sec-foot-spacer" aria-hidden="true"></span>
-            <button class="guard-btn ghost" type="button" id="security-guard-reset">恢复默认</button>
-            <button class="guard-btn primary" type="button" id="security-guard-save" disabled>保存</button>
-          </div>
-
-        </div>
       </div>
     </section>
 

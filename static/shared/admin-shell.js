@@ -184,4 +184,20 @@
         });
       });
 
+      // Keep wide data tables discoverable and keyboard-scrollable without changing their data.
+      document.querySelectorAll('[data-scroll-table]').forEach(function (region) {
+        var note = document.createElement('p');
+        note.className = 'table-scroll-note';
+        var message = '横向滚动查看完整列与操作';
+        note.textContent = window.ScrcpyGateI18n ? window.ScrcpyGateI18n.t(message) : message;
+        region.insertAdjacentElement('afterend', note);
+        function syncOverflow() { note.hidden = region.scrollWidth <= region.clientWidth + 1; }
+        if (window.ResizeObserver) {
+          var observer = new ResizeObserver(syncOverflow);
+          observer.observe(region);
+          if (region.firstElementChild) observer.observe(region.firstElementChild);
+        }
+        window.addEventListener('resize', syncOverflow);
+        syncOverflow();
+      });
     })();

@@ -1,0 +1,145 @@
+/* Shared task hierarchy for administration pages. Existing page tokens remain authoritative. */
+.workspace-refined { --workspace-gap:16px; }
+.workspace-refined .page-heading { margin-bottom:20px; }
+.workspace-refined .page-heading h1 { letter-spacing:-.025em; }
+.workspace-refined .page-heading p { max-width:70ch; line-height:1.6; }
+.workspace-refined .panel-title { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
+.workspace-refined .panel-subtitle { margin-left:0; line-height:1.5; }
+.workspace-refined .panel-header { gap:12px; }
+.workspace-refined .panel-tools { gap:8px; }
+.workspace-refined .admin-disclosure { min-width:0; }
+.workspace-refined .admin-disclosure > summary { display:flex; align-items:center; gap:12px; min-height:48px; cursor:pointer; list-style:none; color:var(--admin-text); }
+.workspace-refined .admin-disclosure > summary::-webkit-details-marker { display:none; }
+.workspace-refined .admin-disclosure > summary::after { content:""; width:7px; height:7px; flex:0 0 7px; margin-left:auto; margin-right:4px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg) translateY(-2px); }
+.workspace-refined .admin-disclosure[open] > summary::after { transform:rotate(225deg) translate(-2px,-2px); }
+.workspace-refined .admin-disclosure:not([open]) > summary { border-bottom-color:transparent; }
+.workspace-refined .admin-disclosure > summary:focus-visible,
+.workspace-refined [data-scroll-table]:focus-visible { outline:2px solid var(--admin-brand); outline-offset:-3px; border-radius:8px; }
+.workspace-refined .admin-disclosure > summary:hover { background:var(--admin-hover); }
+.workspace-refined .admin-disclosure > summary .panel-title { flex:1 1 auto; }
+.workspace-refined .admin-disclosure > summary .page-info,
+.workspace-refined .admin-disclosure > summary .refresh-meta { margin-left:auto; min-height:0; padding:0; border:0; background:none; }
+.workspace-refined .admin-disclosure > summary .panel-subtitle { display:none; }
+.workspace-refined .admin-disclosure[open] > summary .panel-subtitle { display:inline; }
+.workspace-refined .table-scroll-note { margin:0; padding:8px 14px; border-top:1px solid var(--admin-border); color:var(--admin-muted); font-size:12px; }
+.workspace-refined [hidden] { display:none; }
+.workspace-refined [data-scroll-table] { scrollbar-width:thin; overscroll-behavior-x:contain; }
+
+/* Overview: keep maintenance compact and the device list close to the summary. */
+.page-admin #update-panel { margin-bottom:16px; }
+.page-admin .panel-health[data-state="warning"] { color:var(--admin-muted); }
+.page-admin #update-panel > summary { flex-wrap:nowrap; }
+.page-admin .update-tools { margin-left:auto; }
+.page-admin .update-check-row { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.page-admin #update-check-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:8px 12px; min-height:36px; border:1px solid var(--admin-border); border-radius:8px; }
+.page-admin #update-check-btn svg { width:16px; height:16px; }
+.page-admin #devices .search-box { width:clamp(140px,18vw,240px); }
+
+/* Users: the list is the primary task, account policy is a secondary disclosure. */
+.page-users #users-toolbar-panel { border-bottom-left-radius:0; border-bottom-right-radius:0; margin-bottom:-16px; }
+.page-users #users { border-top-left-radius:0; border-top-right-radius:0; }
+.page-users #account-policy-panel { margin-top:0; }
+.page-users .user-table { min-width:1150px; }
+.page-users .user-table th, .page-users .user-table td { padding:12px; }
+.page-users .user-cell { min-width:128px; }
+.page-users .row-actions { flex-wrap:wrap; justify-content:flex-end; gap:6px; min-width:180px; }
+
+/* Logs: filters stay attached to the records; infrequent filters have their own row. */
+.page-logs #log-retention-panel { margin-bottom:16px; }
+.page-logs .logs-filter-bar { align-items:center; flex-wrap:wrap; gap:8px; }
+.page-logs .logs-filter-bar > .search-box { flex:1 1 220px; width:auto; max-width:420px; }
+.page-logs .filter-disclosure { flex:1 0 100%; order:3; border-top:1px solid var(--admin-border); }
+.page-logs .filter-disclosure > summary { justify-content:flex-start; min-height:40px; font-size:12px; color:var(--admin-muted); }
+.page-logs .filter-disclosure > summary::after { margin-left:0; }
+.page-logs .filter-extra { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:4px 0 12px; }
+.page-logs .filter-extra .search-box { flex:1 1 180px; max-width:320px; width:auto; }
+.page-logs .filter-active-count { color:var(--admin-brand); font-variant-numeric:tabular-nums; }
+.page-logs .filter-reset { margin-left:auto; }
+.page-logs #logs-panel > .panel-header { align-items:flex-start; }
+.page-logs #refresh-meta { border:0; background:none; padding:0; }
+.page-logs .custom-range { flex-wrap:wrap; }
+.page-logs .custom-range input { min-width:0; max-width:100%; }
+
+/* Resource pages: visible refresh labels and compact, readable status summaries. */
+.page-devices .dev-head-actions, .page-alas .alas-head-actions { gap:8px; }
+.page-devices .dev-head-actions > button, .page-alas .alas-head-actions > button { flex:0 0 auto; }
+.page-devices .dev-head-actions .btn-ghost, .page-alas .alas-head-actions .btn-ghost { min-width:44px; }
+.page-devices .dev-maintenance { padding-top:12px; }
+.page-devices .dev-card.admin-disclosure > summary { padding:0; }
+.page-alas .alas-features-hint { max-width:80ch; line-height:1.7; }
+.page-alas .alas-visibility-warning { color:var(--admin-text); }
+
+/* Quality: a compact save dock, with change details available on demand. */
+.page-quality .quality-actions .change-box { flex:1 1 260px; }
+.page-quality .change-box > summary { min-height:40px; padding:8px 12px; flex-wrap:wrap; }
+.page-quality .change-scope { order:3; flex:1 0 100%; }
+.page-quality .change-box .change-list { max-height:120px; }
+.page-quality .quality-dock { gap:6px; }
+.page-quality .quality-overview { box-shadow:none; }
+.page-quality .quality-overview .active-config { flex-wrap:wrap; gap:4px 12px; }
+.page-quality .active-config-value { white-space:normal; overflow-wrap:anywhere; line-height:1.5; }
+.page-quality .quality-actions { gap:12px; padding:10px 12px; border-radius:12px; }
+.page-quality .param-group.admin-disclosure { padding:0; }
+.page-quality .param-group.admin-disclosure > summary { padding:12px 16px; margin:0; }
+.page-quality .param-group.admin-disclosure > .param-row { margin:0 16px; }
+.page-quality .change-item { flex-wrap:wrap; }
+.page-quality .change-item .val { white-space:normal; overflow-wrap:anywhere; }
+.page-quality .mode-default-tag { color:var(--admin-text); background:var(--admin-brand-soft); }
+
+/* Workbench settings: selected role leads; save actions share one compact row. */
+.page-mirror-admin .wb-toolbar { gap:12px; }
+.page-mirror-admin .wb-roletabs { order:-1; }
+.page-mirror-admin .wb-hint { max-width:70ch; font-size:12px; line-height:1.65; }
+.page-mirror-admin .wb-foot { position:sticky; bottom:0; z-index:10; margin-top:16px; padding:12px 16px; box-shadow:0 2px 12px var(--c-shadow); }
+
+@media (max-width:767px) {
+  .workspace-refined .page-heading { margin-bottom:16px; }
+  .workspace-refined .admin-disclosure > summary { flex-wrap:wrap; gap:4px 12px; padding-top:12px; padding-bottom:12px; }
+  .workspace-refined .admin-disclosure > summary .panel-title { flex:1; min-width:0; }
+  .workspace-refined .admin-disclosure > summary .page-info,
+  .workspace-refined .admin-disclosure > summary .refresh-meta { order:3; width:100%; margin:0; font-size:11px; }
+  .workspace-refined .stats-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0; overflow:hidden; border:1px solid var(--admin-border); border-radius:12px; background:var(--admin-surface); }
+  .workspace-refined .stats-grid .stat-card { min-height:0; padding:12px; border:0; border-radius:0; box-shadow:none; background:transparent; }
+  .workspace-refined .stats-grid .stat-card:nth-child(odd) { border-right:1px solid var(--admin-border); }
+  .workspace-refined .stats-grid .stat-card:nth-child(n+3) { border-top:1px solid var(--admin-border); }
+  .workspace-refined .stat-top { gap:8px; }
+  .workspace-refined .stat-icon { width:24px; height:24px; border-radius:6px; }
+  .workspace-refined .stat-main { margin-top:8px; }
+  .workspace-refined .stat-value { font-size:22px; line-height:1.2; }
+  .workspace-refined .stat-note { margin-top:4px; line-height:1.5; }
+  .page-admin #devices .panel-tools { width:100%; }
+  .page-admin #devices .search-box { flex:1; min-width:0; width:auto; }
+  .page-admin .update-tools { max-width:65%; font-size:11px; }
+  .page-users .users-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .page-users .toolbar-search { grid-column:1/-1; width:100%; }
+  .page-users .toolbar-spacer { display:none; }
+  .page-users #add-user-btn { grid-column:1/-1; justify-self:end; }
+  .page-users .users-toolbar select { width:100%; }
+  .page-logs #logs-panel > .panel-header .panel-tools { width:100%; flex-wrap:wrap; }
+  .page-logs #refresh-meta { width:100%; min-height:24px; }
+  .page-logs .logs-filter-bar > .search-box { flex-basis:100%; max-width:none; }
+  .page-logs .filter-extra { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 8px; }
+  .page-logs .filter-extra .filter-field { min-width:0; display:flex; flex-direction:column; align-items:stretch; gap:4px; }
+  .page-logs .filter-extra .select-wrap, .page-logs .filter-extra select { max-width:100%; width:100%; }
+  .page-logs .filter-extra .search-box { grid-column:1/-1; max-width:none; }
+  .page-logs .filter-disclosure > summary { min-height:44px; }
+  .page-devices .alas-status-strip, .page-alas .alas-status-strip { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; border-radius:12px; }
+  .page-devices .alas-status-item, .page-alas .alas-status-item { min-width:0; padding:10px 12px; border:0; }
+  .page-devices .alas-status-item strong, .page-alas .alas-status-item strong { white-space:normal; overflow-wrap:anywhere; }
+  .page-devices .alas-status-item:last-child, .page-alas .alas-status-item:last-child { grid-column:1/-1; border-top:1px solid var(--admin-border); }
+  .page-devices .alas-status-item:last-child > div, .page-alas .alas-status-item:last-child > div { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; }
+  .page-alas .alas-tabs { border-radius:10px; }
+  .page-alas .alas-tab { gap:4px; padding:8px; font-size:12px; }
+  .page-quality .quality-actions { flex-direction:column; align-items:stretch; gap:8px; }
+  .page-quality .quality-actions .change-box { flex:none; width:100%; }
+  .page-quality .quality-actions-btns { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+  .page-quality .quality-actions-btns .q-btn { flex:1; justify-content:center; padding:0 8px; font-size:12px; }
+  .page-quality .quality-dock:has(.change-box[open]) { position:static; }
+  .page-quality .change-box .change-list { max-height:none; }
+  .page-mirror-admin .wb-foot { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .page-mirror-admin .wb-status { grid-column:1/-1; }
+  .page-mirror-admin .wb-foot .wb-btn { width:100%; }
+}
+@media (max-height:600px) {
+  .page-quality .quality-dock, .page-mirror-admin .wb-foot { position:static; }
+}

@@ -17,6 +17,8 @@ from fastapi import FastAPI
 
 from . import security, storage
 from . import alas_visibility
+from .access_log import AccessLogWriter, QUEUE_MAX as ACCESS_QUEUE_MAX
+from . import access_gate, geo_access, geo_updater
 from .account_access import account_expiration_monitor
 from .adb_monitor import adb_monitor
 from .audit_dispatcher import AuditDispatcher
@@ -37,6 +39,7 @@ class RuntimeState:
     """Mutable resources owned by one FastAPI application instance."""
 
     audit_dispatcher: AuditDispatcher | None = None
+    access_writer: AccessLogWriter | None = None
     mirror_autostop_task: asyncio.Task | None = None
     account_expiration_task: asyncio.Task | None = None
     alas_status_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = field(default_factory=dict)
@@ -170,6 +173,31 @@ def persist_audit_event_checked(**event):
     return result
 
 
+def persist_access_batch_checked(records: list) -> None:
+    """Write one batch of visitor access records (single-writer thread only)."""
+    result = storage.record_access_batch(records)
+    if result is None:
+        raise RuntimeError("access record persistence failed")
+
+
+def persist_access_drops(total: int, last_ts: float) -> None:
+    """Persist a drop delta atomically; counts remain monotonic across restarts."""
+    storage.record_access_batch([], dropped=int(total), dropped_ts=int(last_ts))
+
+
+def _run_storage_maintenance() -> None:
+    """既有存储维护 + GEO 旧库清理（MaxMind 条款要求删除过期版本）。"""
+    storage.run_storage_maintenance()
+    from . import ip_ban
+
+    ip_ban.expire_due()
+    storage.prune_ban_history()
+    try:
+        geo_updater.cleanup_old()
+    except Exception:  # pragma: no cover - 清理失败不能影响其它维护
+        log.exception("GEO_OLD_DATABASE_CLEANUP_FAILED")
+
+
 def revoke_expired_access_with_audit() -> set[str]:
     expired = storage.revoke_expired_access()
     for username in expired:
@@ -223,6 +251,28 @@ async def lifespan(app: FastAPI):
         maxsize=security.env_int("AUDIT_QUEUE_SIZE", 512, 16, 65536),
     )
     state.audit_dispatcher = dispatcher
+    access_writer_factory = overrides.get("AccessLogWriter", AccessLogWriter)
+    access_writer = access_writer_factory(
+        persist_access_batch_checked,
+        on_drops=persist_access_drops,
+        maxsize=security.env_int("ACCESS_LOG_QUEUE_SIZE", ACCESS_QUEUE_MAX, 64, 65536),
+    )
+    state.access_writer = access_writer
+    # 地域限制（GEO）：把求值器注册进网关，并让访问记录能带上国家码/库版本。
+    # 策略为 off 时求值器立刻返回「不表态」，因此没有额外开销。
+    access_gate.set_geo_evaluator(geo_access.evaluate)
+    geo_status = geo_access.self_check()
+    log_event(
+        log,
+        "geo_policy_loaded",
+        level=logging.INFO,
+        mode=geo_status["mode"],
+        enforcing=geo_status["enforcing"],
+        database_available=geo_status["database_available"],
+        database_error=geo_status["database_error"],
+    )
+    # 自动更新：12 小时 + 抖动；未配置 License Key 时不启动（不产生任何外部请求）。
+    geo_updater.start()
     primary_error: BaseException | None = None
     cleanup_error: BaseException | None = None
 
@@ -240,10 +290,11 @@ async def lifespan(app: FastAPI):
 
     try:
         dispatcher.start()
+        access_writer.start()
         await adb_monitor.start()
         state.mirror_autostop_task = asyncio.create_task(autostop_loop())
         state.account_expiration_task = asyncio.create_task(
-            expiration_monitor(revoke_expired, maintenance=storage.run_storage_maintenance)
+            expiration_monitor(revoke_expired, maintenance=_run_storage_maintenance)
         )
         yield
     except BaseException as exc:
@@ -276,11 +327,29 @@ async def lifespan(app: FastAPI):
         except BaseException as exc:
             note_cleanup_error("adb_monitor", exc)
         state.audit_dispatcher = None
+        state.access_writer = None
         try:
             stopped = await asyncio.to_thread(dispatcher.stop, 5.0)
             if not stopped:
                 log.critical("AUDIT_QUEUE_STOP_TIMEOUT")
         except BaseException as exc:
             note_cleanup_error("audit_dispatcher", exc)
+        try:
+            # 停之前先把队列里剩下的访问记录写完（stop 会等残余条目落库）。
+            stopped = await asyncio.to_thread(access_writer.stop, 5.0)
+            if not stopped:
+                log.critical("ACCESS_QUEUE_STOP_TIMEOUT")
+        except BaseException as exc:
+            note_cleanup_error("access_writer", exc)
+        # GEO reader 持有文件句柄：关掉它，避免热替换库之后旧句柄占用（Windows 上会阻止replace）。
+        access_gate.set_geo_evaluator(None)
+        try:
+            await asyncio.to_thread(geo_updater.stop)
+        except BaseException as exc:  # pragma: no cover - 停止失败不影响退出
+            note_cleanup_error("geo_updater", exc)
+        try:
+            await asyncio.to_thread(geo_access.close)
+        except BaseException as exc:  # pragma: no cover - 关闭失败不影响退出
+            note_cleanup_error("geo_reader", exc)
         if cleanup_error is not None and primary_error is None:
             raise cleanup_error

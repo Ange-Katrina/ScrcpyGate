@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import time
+import threading
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -41,6 +43,12 @@ def admin_ui_settings_payload() -> dict:
             "expiryReminderDays": settings["expiry_reminder_days"],
             "stopAlasOnExpiry": settings["stop_alas_on_expiry"],
             "logRetentionDays": settings["log_retention_days"],
+            "accessLogEnabled": settings["access_log_enabled"],
+            "accessRetentionDays": settings["access_retention_days"],
+            "geoMode": settings["geo_mode"],
+            "geoAllowedCountries": settings["geo_allowed_countries"],
+            "geoUnknownAction": settings["geo_unknown_action"],
+            "geoAllowCidrs": settings["geo_allow_cidrs"],
         },
         "system": {"version": "2.0.0", "build": ""},
         "version": "2.0.0",
@@ -63,7 +71,113 @@ _UI_SETTING_FIELDS = (
     ("stopAlasOnExpiry", "stop_alas_on_expiry", "bool"),
     # 日志保存时长：固定档位（0 = 不清理），不是任意天数。
     ("logRetentionDays", "log_retention_days", ("choice", storage.LOG_RETENTION_DAY_OPTIONS)),
+    # 访问记录（VIS）：采集开关与保留档位，与日志同样是固定档位。
+    ("accessLogEnabled", "access_log_enabled", "bool"),
+    ("accessRetentionDays", "access_retention_days", ("choice", storage.ACCESS_RETENTION_DAY_OPTIONS)),
+    # 地域限制（GEO）：模式与 unknown 处理是固定档位；国家清单与例外 CIDR 是受限长度的列表。
+    ("geoMode", "geo_mode", ("choice", ("off", "observe", "enforce"))),
+    ("geoUnknownAction", "geo_unknown_action", ("choice", ("deny", "allow"))),
+    ("geoAllowedCountries", "geo_allowed_countries", ("csv", 600)),
+    ("geoAllowCidrs", "geo_allow_cidrs", ("csv", 2000)),
 )
+
+
+_geo_settings_lock = threading.RLock()
+
+
+def _save_ui_settings_guarded(request: Request, payload: dict, updates: dict) -> None:
+    with _geo_settings_lock:
+        _guard_geo_self_lockout(request, payload, updates)
+        storage.save_ui_settings(updates)
+        _invalidate_geo_policy(updates)
+
+
+def _guard_geo_self_lockout(request: Request, payload: dict, updates: dict) -> None:
+    """启用 enforce 前先预演「调用者自己会不会被拒绝」。
+
+    场景很现实：管理员在境外/内网打开后台，一点「启用」就把自己关在门外（而且可能
+    是唯一的管理员）。这里按**即将写入的设置**预演调用者自己的来源地址，会拒绝时返回 409，
+    要求显式携带 `geoConfirmSelfLock=true` 再提交；这个确认同时写进审计（谁在知道自己会被
+    拒绝的情况下仍然启用）。
+    """
+    if not any(key.startswith("geo_") for key in updates):
+        return
+    from .. import geo_access
+
+    current = geo_access.policy(force=True)
+    if current.forced_off or updates.get("geo_mode", current.mode) != "enforce":
+        # 已被环境变量强制关闭：无论如何都不会真的拦人，无需确认。
+        return
+    preview = geo_access.provisional(
+        security.client_ip(request),
+        mode="enforce",
+        allowed_countries=updates.get("geo_allowed_countries"),
+        unknown_action=updates.get("geo_unknown_action"),
+        allow_cidrs=updates.get("geo_allow_cidrs"),
+    )
+    if not preview.get("database_available") or preview.get("status_code") == 503:
+        raise HTTPException(status_code=409, detail=i18n.translate("server.error.geo_database_unavailable"), headers={"X-Geo-Error": "database_unavailable"})
+    if preview.get("would") in ("allow", "observe_only"):
+        return
+    if payload.get("geoConfirmSelfLock") is True:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail=i18n.translate("server.error.geo_self_lockout"),
+        headers={
+            "X-Geo-Self-Lockout": "1",
+            "X-Geo-Self-Result": str(preview.get("would") or "deny"),
+        },
+    )
+
+
+def _invalidate_geo_policy(updates: dict) -> None:
+    """GEO 相关设置改动后立刻让策略生效（否则要等策略缓存 TTL）。"""
+    if not any(str(key).startswith("geo_") for key in updates):
+        return
+    from .. import geo_access
+
+    geo_access.invalidate_policy()
+
+
+def _normalize_csv_setting(key: str, text: str) -> str:
+    """逗号分隔清单的逐项校验（GEO 国家码 / 例外 CIDR）。
+
+    非法项必须报错而不是丢弃：静默丢弃会让管理员以为已经放行。规范化后再存，
+    避免同一份策略因为空格/大小写不同而出现两种写法。
+    """
+    from .. import geo_access
+
+    if not text:
+        return ""
+    items = [item.strip() for item in text.replace("，", ",").split(",") if item.strip()]
+    if key == "geo_allowed_countries":
+        codes = []
+        for item in items:
+            code = geo_access.normalize_country(item)
+            if not code:
+                raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+            if code not in codes:
+                codes.append(code)
+        if len(codes) > geo_access.MAX_ALLOWED_COUNTRIES:
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+        return ",".join(codes)
+    if key == "geo_allow_cidrs":
+        nets = []
+        for item in items:
+            try:
+                network = ipaddress.ip_network(item, strict=False)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail=i18n.translate("server.error.invalid_setting_value")
+                ) from None
+            if network.prefixlen == 0:
+                raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+            nets.append(str(network))
+        if len(nets) > geo_access.MAX_ALLOW_CIDRS:
+            raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+        return ",".join(nets)
+    return text
 
 
 def _normalize_ui_setting_updates(payload: dict) -> dict:
@@ -97,17 +211,29 @@ def _normalize_ui_setting_updates(payload: dict) -> dict:
                 ) from None
         elif kind[0] == "choice":
             # 只接受列出的档位；不在这里做「就近收敛」，避免静默改写管理员的选择。
-            allowed = tuple(int(option) for option in kind[1])
-            try:
-                candidate = int(str(value).strip())
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=i18n.translate("server.error.invalid_setting_value"),
-                ) from None
+            allowed = tuple(int(option) for option in kind[1]) if all(
+                str(option).lstrip("-").isdigit() for option in kind[1]
+            ) else tuple(str(option) for option in kind[1])
+            candidate: object = str(value).strip()
+            if allowed and isinstance(allowed[0], int):
+                try:
+                    candidate = int(candidate)
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=i18n.translate("server.error.invalid_setting_value"),
+                    ) from None
             if candidate not in allowed:
                 raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
             updates[key] = candidate
+        elif kind[0] == "csv":
+            # 逗号分隔的清单（国家码 / CIDR）。逐项校验：非法项直接 400，不静默丢弃，
+            # 否则管理员会以为「已经放行了」但实际没有。
+            text = str(value or "").strip()
+            if len(text) > int(kind[1]):
+                raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value"))
+            normalized = _normalize_csv_setting(key, text)
+            updates[key] = normalized
         else:
             low, high = kind[1], kind[2]
             try:
@@ -338,11 +464,13 @@ async def admin_save_ui_settings(request: Request):
     security.verify_csrf(request)
     admin = security.require_admin(request)
     payload = await parse_body(request)
+    payload = payload if isinstance(payload, dict) else {}
     updates = _normalize_ui_setting_updates(payload)
     try:
-        await asyncio.to_thread(storage.save_ui_settings, updates)
+        await asyncio.to_thread(_save_ui_settings_guarded, request, payload, updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_setting_value")) from exc
+    _invalidate_geo_policy(updates)
     audit_request(
         request,
         admin,
@@ -453,6 +581,12 @@ def _admin_ui_settings_export_payload() -> dict:
             "expiryReminderDays": settings["expiry_reminder_days"],
             "stopAlasOnExpiry": settings["stop_alas_on_expiry"],
             "logRetentionDays": settings["log_retention_days"],
+            "accessLogEnabled": settings["access_log_enabled"],
+            "accessRetentionDays": settings["access_retention_days"],
+            "geoMode": settings["geo_mode"],
+            "geoAllowedCountries": settings["geo_allowed_countries"],
+            "geoUnknownAction": settings["geo_unknown_action"],
+            "geoAllowCidrs": settings["geo_allow_cidrs"],
         },
         "video": video,
         "alas": alas.public_settings(),
@@ -524,7 +658,7 @@ async def admin_ui_settings_import(request: Request):
 
     applied_sections = ["settings"]
     try:
-        await asyncio.to_thread(storage.save_ui_settings, updates)
+        await asyncio.to_thread(_save_ui_settings_guarded, request, payload, updates)
         if video_updates:
             await asyncio.to_thread(storage.set_settings, video_updates)
             applied_sections.append("video")

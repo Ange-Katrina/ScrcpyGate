@@ -333,7 +333,7 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 
 - Host / Origin 白名单、可选的反向代理信任（显式 CIDR）、写操作 CSRF 令牌、`SameSite`/secure
   会话 Cookie，生产默认关闭 API 文档。
-- 登录防护：失败计数、封禁窗口、连续失败后要求滑块 + 工作量证明验证码。
+- 登录防护：失败计数、封禁窗口、连续失败后要求内置 PoW 点击验证。
 - 设备按用户授权；观看与控制是两种权限；控制是显式租约，可释放也可被接管（两者都进审计）。
 - ALAS：出站请求受主机/CIDR 白名单与响应体积上限约束；嵌入式界面执行可见性策略，被拒绝的动作
   记审计。
@@ -345,6 +345,26 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
   踢出会同时关闭该会话正在使用的 WebSocket；`MAX_SESSIONS_PER_USER` 限制单账户并发会话数，
   超出时在登录那一刻淘汰最旧的会话。
 - 容器以非 root 运行；compose 样例丢弃全部 capabilities 并启用 `no-new-privileges`。
+
+登录默认使用 ScrcpyGate 自身的 SHA-256 PoW：点击验证按钮后显示加载动画，完成后显示勾选。四道有界小题降低等待波动；签名挑战绑定账号和来源、有有效期且只能成功使用一次。PoW 用来提高自动化成本，不能证明用户是真人，也不能代替限流、TLS 或 WAF。
+
+需要 HTTPS（本机测试可用 localhost）以使用 WebCrypto。默认构建不包含 ALTCHA/Cap 源码或依赖，也不请求外部验证码服务。`LOGIN_POW_PROVIDER=builtin` 选择内置实现；其他提供方需单独安装受信任的适配器包（`scrcpygate.pow` entry point、API v1、专用静态目录及 `client.js`、`issue`/`verify` 方法），仅安装上游库不能直接兼容。Docker 应在派生镜像里安装适配器，再配置其 entry-point 名称并重启。未安装或不兼容的扩展会阻止启动，不会跳过验证。切换后须重新取得挑战；登录限流仍包含进程内状态，不支持多 Worker/多副本部署。
+
+### 后台安全配置
+
+- **访问记录**：点击「明细」原地展开并平滑定位；点击「封禁」弹窗选择时长与原因，改期保留已有原因。封禁会断开现有连接；封禁自己的来源会失去访问权限，可在服务器执行 `./deploy.sh --unban <ip>` 恢复。
+- **登录保护**：可调整 PoW 首题难度、失败递增、难度上限、挑战有效期、签发间隔与失败阈值。轻量／均衡／加强预设只修改计算难度，每增加 1 bit 期望计算量约翻倍。先试算并用手机验证；内置计算期限为 30 秒。保存后对新签发的挑战生效。
+- **地域限制 → 地区库与自动更新**：填写 MaxMind **Account ID 与 License Key**，无需账户密码。留空保留原值，更换 Account ID 时须同时填写新 Key。保存后点击「立即检查更新」验证下载权限；仅保存不会验证 MaxMind 凭据，也不会开启强制执行。
+
+后台凭据作为私有配置文件保存在 `data/.geo-credentials.json`（或自定义数据目录），**不做文件内容加密**。Linux 权限为 `0600`；Windows 请限制数据目录 ACL。接口不会回显 Key，凭据不进入 Git、Docker 构建上下文、SQLite 或设置导出。`deploy.sh` 会将其纳入私有数据备份，备份须按密钥管理。保留数据重装会保留配置，彻底清理数据会删除配置；仅在后台清除凭据，不会删除地区库或取消地域策略。
+
+环境变量 `GEO_ACCOUNT_ID` 或 `GEO_LICENSE_KEY` 任一非空时，整个环境凭据对优先，因此两项均须配置，不会与后台值混用；后台不能覆盖环境凭据。`GEO_UPDATE_ENABLED=false` 时，即使保存凭据也不会下载，适用于外部管理的只读地区库。
+
+默认每 12 小时附加随机延迟检查一次，通过官方 HTTPS 下载并限制重定向目标。检查共用 10 分钟冷却和每日 30 次尝试上限（UTC 日期，失败计入）。远端版本未变时不重复下载，下载或校验失败保留最后可用库。构建超过 30 天的地区库被本项目新鲜度策略视为不可用；强制执行模式下会拒绝访问，启用前请确认更新可用。
+
+建议先「只观察」并预演当前来源。使用 WAF/CDN 时正确配置可信代理网段，不要无条件信任转发头。VPN、代理和移动网络可能影响定位准确性，地域限制不能替代认证与 IP 封禁。误锁恢复：`./deploy.sh --geo-off`，或配置 `GEO_ENFORCE_DISABLED=true` 并重启。
+
+MaxMind 官方文档：[创建 License Key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [下载与更新周期](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases)。GeoLite Country 当前通常每周二、周五更新；定期检查不代表每次都会发布新库。
 
 ---
 

@@ -551,12 +551,15 @@
         var detail = String(rawDetail || '').trim();
         if (detail) reason = '<div class="device-note" title="' + escDash(detail) + '">' + escDash(detail) + '</div>';
       }
-      var deviceLink = '/devices?device=' + encodeURIComponent(String(d.public_id || d.publicId || d.id || ''));
+      /* 「打开」直接进入该设备的投屏页（/mirror?device=<public id>）单画面视图：
+         任务书 NAV 要求「进入该设备对应的现有独立设备/投屏页面，不进入宫格列表」。
+         设备管理页仍可从左侧导航进入，URL 仍带 public_id（/api/devices 只暴露 public id）。 */
+      var deviceLink = '/mirror?device=' + encodeURIComponent(String(d.public_id || d.publicId || d.id || ''));
       return '<tr class="device-row" data-device-id="' + escDash(String(d.id || '')) + '" data-online="' + (online ? '1' : (deviceState === 'offline' ? '0' : 'unknown')) + '" data-offline="' + (deviceState === 'offline' ? '1' : '0') + '" data-unknown="' + (deviceState === 'unknown' ? '1' : '0') + '" data-mirroring="' + (streaming ? '1' : '0') + '" data-alas-err="' + (alasTone === 'error' ? '1' : '0') + '">' +
         '<td><div class="device-cell"><span class="device-glyph">' + icon('smartphone') + '</span><div style="min-width:0"><div class="device-name-row"><div class="device-name">' + escDash(name) + '</div>' + tags + '</div><div class="device-model" title="' + escDash(meta) + '">' + escDash(meta) + '</div></div></div></td>' +
         '<td><div class="device-status">' + status + reason + '</div></td><td class="tabular-nums">' + escDash(viewers) + '</td><td>' + escDash(controller) + '</td>' +
         '<td><span class="status-chip ' + alasCls + '"><span class="mini-dot" aria-hidden="true"></span>' + escDash(alas) + '</span></td>' +
-        '<td class="tabular-nums">' + escDash(d.heartbeat || d.lastSeen || '—') + '</td><td><div class="row-actions"><a class="row-btn open" href="' + escDash(deviceLink) + '" aria-label="' + escDash(dashLocal('打开该设备的详情页', 'Open this device in device management')) + '"><i data-lucide="monitor-up" aria-hidden="true"></i><span class="btn-text">' + dashLocal('打开', 'Open') + '</span></a>' + dashDeviceActionsHtml(d) + '</div></td></tr>';
+        '<td class="tabular-nums">' + escDash(d.heartbeat || d.lastSeen || '—') + '</td><td><div class="row-actions"><a class="row-btn open" href="' + escDash(deviceLink) + '" aria-label="' + escDash(dashLocal('打开该设备的投屏页', 'Open this device in the mirror workspace')) + '"><i data-lucide="monitor-up" aria-hidden="true"></i><span class="btn-text">' + dashLocal('打开', 'Open') + '</span></a>' + dashDeviceActionsHtml(d) + '</div></td></tr>';
     }
     function dashAlasTone(value) {
       var state = dashStatusKey(value);

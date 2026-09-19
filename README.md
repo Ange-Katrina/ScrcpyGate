@@ -365,7 +365,7 @@ itself never does).
 
 - Host/Origin allow-lists, optional proxy trust with explicit CIDRs, CSRF tokens on mutations,
   `SameSite`/secure session cookies, and no API docs in production by default.
-- Login guard: failure counting, lockout windows, and a slider + proof-of-work captcha after
+- Login guard: failure counting, lockout windows, and a click-to-verify, built-in proof-of-work check after
   repeated failures.
 - Device access is granted per user; watching and controlling are separate permissions, and
   control is an explicit lease that can be released or taken over (with an audit trail).
@@ -382,6 +382,26 @@ itself never does).
   `MAX_SESSIONS_PER_USER` caps concurrent sessions per account by dropping the oldest at login.
 - The container runs as a non-root user; the sample compose files drop all capabilities and
   enable `no-new-privileges`.
+
+Login verification uses ScrcpyGate's own SHA-256 PoW by default: click the verification button, wait for the spinner, then sign in after the checkmark appears. Four small bounded puzzles reduce wait-time variance. Signed challenges expire and can be used only once for the bound account/source. PoW raises automation cost; it is not proof of human identity or a replacement for rate limiting, TLS, or a WAF.
+
+HTTPS (or localhost for testing) is required for WebCrypto. The default build bundles no ALTCHA/Cap code and makes no CAPTCHA service requests. `LOGIN_POW_PROVIDER=builtin` selects the default. Other providers require a separately installed, trusted adapter package exporting the `scrcpygate.pow` entry point (API v1), a dedicated static directory with `client.js`, and `issue`/`verify` methods; simply installing an upstream library is insufficient. Docker users install the adapter in a derived image. Select its entry-point name and restart; missing/invalid adapters stop startup rather than bypassing verification. Provider changes require fresh challenges; deployments with multiple workers/replicas remain unsupported by the process-local login limits.
+
+### Security controls in the admin console
+
+- **Access records:** open request details in place, or select **Ban** to choose a duration and reason in a dialog. Rescheduling preserves the existing reason. Bans disconnect existing connections; banning your own source also removes your access. Recover on the server with `./deploy.sh --unban <ip>`.
+- **Login protection:** customize initial PoW difficulty, escalation, ceiling, challenge lifetime, issuance interval, and failure thresholds. The light/balanced/stronger PoW presets change difficulty only. Each additional bit approximately doubles expected work. Benchmark locally and test on a phone before raising the ceiling; the built-in solver has a 30-second compute deadline. Save to apply to newly issued challenges.
+- **Regional restrictions → Database and automatic updates:** enter a MaxMind **Account ID and License Key**, not your MaxMind password. Blank fields keep saved values; changing the Account ID requires a new Key. Save, then check for updates to verify download access. Saving alone does not validate the credentials with MaxMind or enable enforcement.
+
+Saved MaxMind credentials live in `data/.geo-credentials.json` (or the configured data directory), as a private configuration file, **not encrypted**. Linux permissions are `0600`; Windows operators must restrict the data directory ACL. The API never returns the Key, and credentials are excluded from Git, Docker build inputs, and SQLite/settings exports. `deploy.sh` includes the file in private data backups; protect those backups as secrets. Keeping data on reinstall preserves the configuration; purging data removes it. Removing saved credentials leaves the existing country database and region policy intact.
+
+`GEO_ACCOUNT_ID` or `GEO_LICENSE_KEY` in the environment takes precedence for the **entire pair**, so both must be configured; environment and saved values are never mixed. Backend edits cannot override environment credentials. `GEO_UPDATE_ENABLED=false` disables downloads even if credentials are saved; use this with an externally managed, read-only database.
+
+The built-in updater checks every 12 hours by default, with jitter, using official HTTPS downloads and bounded redirects. Checks share a ten-minute cooldown and a local limit of 30 attempts per UTC day, including failures. Unchanged remote versions avoid a full download; invalid downloads keep the last usable database. A database older than 30 days is considered unavailable by this application's freshness policy. In enforce mode an unavailable database denies access, so configure and test updates before enabling enforcement.
+
+Start with **Observe**, preview your source, and configure trusted proxy CIDRs correctly if using a WAF or CDN. Never trust arbitrary forwarded headers. IP geolocation can be inaccurate for VPNs, proxies, and mobile networks; it supplements authentication and IP bans. Recovery: `./deploy.sh --geo-off`, or set `GEO_ENFORCE_DISABLED=true` and restart.
+
+MaxMind documentation: [generate a license key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [database downloads and update schedule](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases). GeoLite Country currently updates on Tuesdays and Fridays; checking more often does not imply a new database each time.
 
 ---
 

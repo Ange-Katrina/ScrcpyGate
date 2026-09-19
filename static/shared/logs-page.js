@@ -720,6 +720,7 @@
     else if (k === 'result') { state.result = 'all'; $('logs-result').value = 'all'; }
     else if (k === 'actor') { state.actor = 'all'; $('logs-actor').value = 'all'; }
     else if (k === 'target') { state.target = ''; $('logs-target').value = ''; }
+    syncExtraFilterCounts();
     loadActive({ show:false }).catch(function () {});
   }
   function clearAllFilters() {
@@ -738,7 +739,19 @@
     state.actor = 'all'; $('logs-actor').value = 'all';
     state.target = ''; $('logs-target').value = '';
     toggleCustomRange(); toggleAuditRange();
+    syncExtraFilterCounts();
     loadActive({ show:false }).catch(function () {});
+  }
+
+  function syncExtraFilterCounts() {
+    document.querySelectorAll('.filter-disclosure').forEach(function (details) {
+      var count = Array.from(details.querySelectorAll('select, input')).filter(function (field) {
+        return field.value && field.value !== 'all';
+      }).length;
+      var badge = details.querySelector('.filter-active-count');
+      badge.textContent = count ? '(' + count + ')' : '';
+      badge.hidden = !count;
+    });
   }
 
   function updateRefreshUI() {
@@ -922,6 +935,13 @@
   $('integrity-modal-mask').addEventListener('click', function (e) { if (e.target === this) this.classList.remove('open'); });
   $('logs-empty-clear').addEventListener('click', clearAllFilters);
   $('audit-empty-clear').addEventListener('click', clearAllFilters);
+  document.querySelectorAll('[data-clear-log-filters]').forEach(function (button) {
+    button.addEventListener('click', clearAllFilters);
+  });
+  document.querySelectorAll('.filter-extra').forEach(function (filters) {
+    filters.addEventListener('input', syncExtraFilterCounts);
+    filters.addEventListener('change', syncExtraFilterCounts);
+  });
 
   document.addEventListener('click', function (e) {
     var viewBtn = e.target.closest ? e.target.closest('.logs-table .row-btn.view') : null;

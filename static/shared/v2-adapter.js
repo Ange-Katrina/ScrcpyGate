@@ -2935,6 +2935,7 @@
       }
       // 权限撤销或服务端明确终止当前观看时，不再自动重连；普通网络抖动仍走退避重连。
       if (event && [4403, 4410, 4411, 4412].indexOf(event.code) >= 0) {
+        if (event.code === 4403 && window.ScrcpyGateAccess) window.ScrcpyGateAccess.check();
         giveUpVideoWatch();
         emitViewerUpdate(state.session, deviceId);
         return;
@@ -2943,7 +2944,13 @@
         state.videoRetryCount = 0;
       }
       emitVideoLifecycle('scrcpygate:videodrop');
-      attemptVideoReconnect();
+      if (window.ScrcpyGateAccess) {
+        window.ScrcpyGateAccess.check().then(function (result) {
+          if (state.videoSocket || !state.watchActive || state.videoSocketDevice !== deviceId) return;
+          if (result.blocked) { giveUpVideoWatch(); return; }
+          attemptVideoReconnect();
+        });
+      } else attemptVideoReconnect();
     };
     ws.onerror = function () {
       if (state.videoSocket !== ws) return;
@@ -4016,6 +4023,7 @@
           pending.reject(new Error('控制通道已断开'));
         }
         var closeReason = String(event && event.reason || '').toLowerCase();
+        if (window.ScrcpyGateAccess && event && (event.code === 1006 || event.code === 4403)) window.ScrcpyGateAccess.check();
         if (event && (event.code === 4401 || (event.code === 4403 && /session|auth|login/.test(closeReason)))) {
           invalidateAuthentication();
         } else if (event && event.code === 4403 && /account/.test(closeReason)) {
@@ -5936,6 +5944,339 @@
     return apiGet('/api/admin/update-check', query).then(function (payload) { return updateCheckPayload(payload); });
   }
 
+  /* 访问记录（VIS）：IP 汇总 + 明细 + 线索 + 观测健康 + 导出。
+     服务端已在写入时脱敏（无 query/Referer/body），这里只做形状归一化。 */
+  function accessPayload(payload) {
+    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+    var page = data.page || {};
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      page: page,
+      hasMore: page.hasMore === true || page.has_more === true,
+      nextBeforeId: page.nextBeforeId != null ? page.nextBeforeId : (page.next_before_id != null ? page.next_before_id : null),
+      offset: Number(page.offset) || 0,
+      window: data.window || {},
+      stats: data.stats || {},
+      hints: data.hints || null,
+      observation: data.observation || null,
+      settings: data.settings || null
+    };
+  }
+
+  function handlerAccessSummary(opts) {
+    var query = (opts && opts.query) || {};
+    return apiGet('/api/admin/access/summary', query).then(function (payload) { return accessPayload(payload); });
+  }
+
+  function handlerAccessRecords(opts) {
+    var query = (opts && opts.query) || {};
+    return apiGet('/api/admin/access/records', query).then(function (payload) { return accessPayload(payload); });
+  }
+
+  function handlerAccessHints(opts) {
+    var query = (opts && opts.query) || {};
+    return apiGet('/api/admin/access/hints', query).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return {
+        hints: Array.isArray(data.hints) ? data.hints : [],
+        window: data.window || {},
+        thresholds: data.thresholds || {},
+        note: String(data.note || '')
+      };
+    });
+  }
+
+  function handlerAccessStatus(opts) {
+    return apiGet('/api/admin/access/status', {}).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return {
+        enabled: data.enabled !== false,
+        writer: data.writer || {},
+        retentionDays: data.retentionDays != null ? data.retentionDays : (data.retention_days != null ? data.retention_days : null),
+        rowCap: data.rowCap != null ? data.rowCap : (data.row_cap != null ? data.row_cap : null),
+        dropped: data.dropped || {},
+        degraded: data.degraded === true
+      };
+    });
+  }
+
+  /* 访问记录导出：与审计日志导出同样只取 JSON 分支，再由客户端合成目标格式。
+     服务端确实有 text/csv 分支，但附件响应在个别浏览器（headless Chrome）会被
+     吞成空响应，且 api.js 对非 JSON 响应只保留前 240 字符。 */
+  var ACCESS_CSV_COLUMNS = ['ts', 'source_ip', 'ip_version', 'country', 'identity', 'account', 'method',
+    'kind', 'route_template', 'path_sample', 'status', 'duration_ms', 'decision', 'request_id', 'user_agent'];
+
+  function accessCsvCell(value) {
+    if (value === null || value === undefined) return '';
+    var text = String(value);
+    // 防表格公式注入：与审计日志导出一致的处理。
+    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+    return text;
+  }
+
+  function accessCsvEscape(text) {
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  }
+
+  function accessToCsv(records) {
+    var rows = [ACCESS_CSV_COLUMNS.join(',')];
+    (records || []).forEach(function (item) {
+      rows.push(ACCESS_CSV_COLUMNS.map(function (column) {
+        return accessCsvEscape(accessCsvCell(item[column]));
+      }).join(','));
+    });
+    return '\ufeff' + rows.join('\r\n');
+  }
+
+  function handlerAccessExport(opts) {
+    var body = (opts && opts.body) || {};
+    var format = body.format === 'json' ? 'json' : 'csv';
+    var reqBody = { format: 'json' };
+    ['from_ts', 'to_ts', 'source_ip', 'country', 'ban_state', 'identity', 'status', 'status_class',
+      'decision', 'kind', 'account', 'request_id', 'q', 'include_admin_poll'].forEach(function (key) {
+        if (body[key] !== undefined && body[key] !== null && body[key] !== '') reqBody[key] = body[key];
+      });
+    return apiPost('/api/admin/access/export', reqBody).then(function (payload) {
+      var records = (payload && Array.isArray(payload.records)) ? payload.records : [];
+      var truncated = !!(payload && payload.truncated);
+      if (format === 'json') {
+        return {
+          content: JSON.stringify({ records: records, exported_count: records.length, truncated: truncated }, null, 2),
+          filename: 'scrcpygate-access.json',
+          count: records.length,
+          truncated: truncated
+        };
+      }
+      return { content: accessToCsv(records), filename: 'scrcpygate-access.csv', count: records.length, truncated: truncated };
+    });
+  }
+
+  /* 访问记录设置（采集开关 + 保留档位）：走 /api/admin/settings，与日志保留同一通道。
+     只提交显式给出的字段，避免把另一项也一起回写。 */
+  function accessSettingsPayload(payload) {
+    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+    var settings = data.settings || {};
+    return {
+      ok: true,
+      enabled: settings.accessLogEnabled !== false,
+      retentionDays: settings.accessRetentionDays == null ? null : Number(settings.accessRetentionDays)
+    };
+  }
+
+  function handlerAccessSettingsUpdate(opts) {
+    var body = (opts && opts.body) || {};
+    var request = {};
+    if (body.accessLogEnabled !== undefined) request.accessLogEnabled = body.accessLogEnabled === true;
+    if (body.accessRetentionDays !== undefined) request.accessRetentionDays = Number(body.accessRetentionDays);
+    if (!Object.keys(request).length) return handlerUnsupported('没有需要保存的访问记录设置');
+    return apiPut('/api/admin/settings', request).then(accessSettingsPayload);
+  }
+
+  /* ---- IP 封禁（BAN）---- */
+  function banRow(row) {
+    return {
+      ip: String(row.ip || ''),
+      active: row.active !== false,
+      permanent: row.permanent === true,
+      expiresTs: row.expires_ts == null ? null : Number(row.expires_ts),
+      remainingSeconds: row.remaining_seconds == null ? null : Number(row.remaining_seconds),
+      reason: String(row.reason || ''),
+      actor: String(row.actor || ''),
+      createdTs: Number(row.created_ts || 0),
+      updatedTs: Number(row.updated_ts || 0),
+      revokedTs: row.revoked_ts == null ? null : Number(row.revoked_ts)
+    };
+  }
+
+  function handlerBanList(opts) {
+    var query = (opts && opts.query) || {};
+    return apiGet('/api/admin/ip-bans', query).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      var page = data.page || {};
+      return {
+        items: (Array.isArray(data.items) ? data.items : []).map(banRow),
+        hasMore: page.has_more === true || page.hasMore === true,
+        offset: Number(page.offset) || 0,
+        counters: data.counters || {},
+        presets: Array.isArray(data.presets) ? data.presets : [],
+        maxSeconds: Number(data.max_seconds || 0),
+        snapshotTtlSeconds: Number(data.snapshot_ttl_seconds || 0)
+      };
+    });
+  }
+
+  function handlerBanCreate(opts) {
+    var body = (opts && opts.body) || {};
+    var request = { ip: String(body.ip || '').trim() };
+    if (body.preset) request.preset = String(body.preset);
+    if (body.seconds !== undefined && body.seconds !== null && body.seconds !== '') request.seconds = Number(body.seconds);
+    if (body.reason) request.reason = String(body.reason).slice(0, 200);
+    if (body.confirmSelfBan === true) request.confirmSelfBan = true;
+    return apiPost('/api/admin/ip-bans', request).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return {
+        ok: data.ok !== false,
+        ban: data.ban ? banRow(data.ban) : null,
+        closedConnections: Number(data.closed_connections || 0),
+        selfBan: data.self_ban === true,
+        counters: data.counters || {}
+      };
+    });
+  }
+
+  function handlerBanLift(opts) {
+    var body = (opts && opts.body) || {};
+    return apiDelete('/api/admin/ip-bans/' + encodeURIComponent(String(body.ip || '').trim())).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return { ok: data.ok !== false, ban: data.ban ? banRow(data.ban) : null, counters: data.counters || {} };
+    });
+  }
+
+  function handlerBanEvents(opts) {
+    var query = (opts && opts.query) || {};
+    var ip = String(query.ip || '').trim();
+    if (!ip) return handlerUnsupported('缺少要查询的 IP 地址');
+    var request = {};
+    if (query.limit) request.limit = Number(query.limit);
+    if (query.offset) request.offset = Number(query.offset);
+    return apiGet('/api/admin/ip-bans/' + encodeURIComponent(ip) + '/events', request).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return {
+        ip: ip,
+        items: (Array.isArray(data.items) ? data.items : []).map(function (item) {
+          return {
+            id: Number(item.id || 0),
+            ts: Number(item.ts || 0),
+            action: String(item.action || ''),
+            actor: String(item.actor || ''),
+            detail: item.detail && typeof item.detail === 'object' ? item.detail : {}
+          };
+        }),
+        hasMore: data.has_more === true || data.hasMore === true
+      };
+    });
+  }
+
+  /* ---- 地域限制（GEO）---- */
+  function geoStatusPayload(payload) {
+    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+    var database = data.database || {};
+    var policy = data.policy || {};
+    return {
+      ok: true,
+      running: data.running === true,
+      jobState: String(data.job_state || 'idle'),
+      credentialSource: String(data.credential_source || "none"),
+      credentialsManaged: data.credentials_managed === true,
+      credentialsSaved: data.credentials_saved === true,
+      credentialsError: String(data.credentials_error || ""),
+      accountIdPresent: data.account_id_present === true,
+      enabled: data.enabled !== false,
+      licenseKeyPresent: data.license_key_present === true,
+      downloadBase: String(data.download_base || ''),
+      edition: String(data.edition || ''),
+      intervalHours: Number(data.interval_hours || 0),
+      jitterSeconds: Number(data.jitter_seconds || 0),
+      minManualIntervalSeconds: Number(data.min_manual_interval_seconds || 0),
+      maxDownloadsPerDay: Number(data.max_downloads_per_day || 0),
+      downloadsToday: Number(data.downloads_today || 0),
+      attemptsToday: Number(data.attempts_today || 0),
+      canUpdateNow: data.can_update_now === true,
+      blockedReason: String(data.blocked_reason || ''),
+      lastSuccessTs: Number(data.last_success_ts || 0),
+      lastError: String(data.last_error || ''),
+      lastErrorTs: Number(data.last_error_ts || 0),
+      nextDueTs: Number(data.next_due_ts || 0),
+      removedOldDatabases: Number(data.removed_old_databases || 0),
+      oldDatabaseMaxAgeDays: Number(data.old_database_max_age_days || 0),
+      databaseAvailable: database.available === true,
+      databaseFile: String(database.file || ''),
+      databaseEpoch: Number(database.epoch || 0),
+      databaseSizeBytes: Number(database.size_bytes || 0),
+      databaseError: String(database.error || ''),
+      mode: String(policy.mode || 'off'),
+      forcedOff: policy.forced_off === true,
+      allowedCountries: Array.isArray(policy.allowed_countries) ? policy.allowed_countries : [],
+      unknownAction: String(policy.unknown_action || 'deny'),
+      allowCidrs: Array.isArray(policy.allow_cidrs) ? policy.allow_cidrs : [],
+      maxAllowedCountries: Number(data.max_allowed_countries || 0),
+      maxAllowCidrs: Number(data.max_allow_cidrs || 0)
+    };
+  }
+
+  function geoSimulation(payload) {
+    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+    var sim = data.simulation && typeof data.simulation === 'object' ? data.simulation : data;
+    return {
+      ok: true,
+      ip: String(sim.ip || ''),
+      ipClass: String(sim.ip_class || ''),
+      country: String(sim.country || ''),
+      would: String(sim.would || ''),
+      reason: String(sim.reason || ''),
+      mode: String(sim.mode || ''),
+      self: sim.self === true,
+      databaseAvailable: sim.database_available === true,
+      databaseError: String(sim.database_error || '')
+    };
+  }
+
+  function handlerGeoStatus() {
+    return apiGet('/api/admin/geo/status', {}).then(geoStatusPayload);
+  }
+
+  function handlerGeoCheck() {
+    return apiPost('/api/admin/geo/check', {}).then(function (payload) {
+      var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
+      return { ok: data.ok !== false, status: geoStatusPayload(data.status || {}) };
+    });
+  }
+
+  function handlerGeoSimulate(opts) {
+    var query = (opts && opts.query) || {};
+    var request = {};
+    ['ip', 'mode', 'countries', 'unknown_action', 'allow_cidrs'].forEach(function (key) {
+      if (query[key] !== undefined && query[key] !== null) request[key] = query[key];
+    });
+    return apiGet('/api/admin/geo/simulate', request).then(geoSimulation);
+  }
+
+  function handlerGeoPreview(opts) {
+    var body = (opts && opts.body) || {};
+    return apiPost('/api/admin/geo/preview', body).then(geoSimulation);
+  }
+
+  /* 地域设置走 /api/admin/settings；被自锁预检拦下（409）时把状态回传给界面，
+     由界面显示警告并要求显式确认后再提交（绝不能默默拦住不说原因）。 */
+  function handlerGeoSettingsUpdate(opts) {
+    var body = (opts && opts.body) || {};
+    var request = {};
+    if (body.geoMode !== undefined) request.geoMode = String(body.geoMode);
+    if (body.geoAllowedCountries !== undefined) request.geoAllowedCountries = String(body.geoAllowedCountries);
+    if (body.geoUnknownAction !== undefined) request.geoUnknownAction = String(body.geoUnknownAction);
+    if (body.geoAllowCidrs !== undefined) request.geoAllowCidrs = String(body.geoAllowCidrs);
+    if (body.geoConfirmSelfLock === true) request.geoConfirmSelfLock = true;
+    if (!Object.keys(request).length) return handlerUnsupported('没有需要保存的地域设置');
+    return apiPut('/api/admin/settings', request).then(function () {
+      // 保存本身已经成功。这里再取一次状态只为刷新界面：如果管理员刚把自己锁在外面，
+      // 这次刷新必然 403——不能因此把「保存成功」报成失败（那会让人以为设置没生效而反复重试）。
+      return handlerGeoStatus().then(function (status) {
+        return { ok: true, status: status };
+      }).catch(function () {
+        return { ok: true, status: null, refreshFailed: true };
+      });
+    }).catch(function (error) {
+      var detail = error && error.detail ? error.detail : {};
+      var status = Number(detail.status || 0);
+      var headers = detail.headers || {};
+      var selfLock = String(headers['x-geo-self-lockout'] || headers['X-Geo-Self-Lockout'] || '') === '1';
+      if (selfLock || (status === 409 && /自锁|self.lock|lockout|自己的来源/i.test((error && error.message) || ""))) {
+        return { ok: false, selfLockBlocked: true, message: (error && error.message) || '' };
+      }
+      throw error;
+    });
+  }
+
   function handlerAuthLogout() {
     return apiPost('/api/auth/logout', {}).then(function (payload) {
       return payload || { ok: true };
@@ -5977,6 +6318,23 @@
     'logs.retention': handlerLogRetention,
     'logs.retention.update': handlerLogRetentionUpdate,
     'system.update': handlerSystemUpdate,
+    'access.summary': handlerAccessSummary,
+    'access.records': handlerAccessRecords,
+    'access.hints': handlerAccessHints,
+    'access.status': handlerAccessStatus,
+    'access.export': handlerAccessExport,
+    'access.settings.update': handlerAccessSettingsUpdate,
+    'ban.list': handlerBanList,
+    'ban.create': handlerBanCreate,
+    'ban.lift': handlerBanLift,
+    'ban.events': handlerBanEvents,
+    'geo.credentials.save': function (opts) { return apiPut('/api/admin/geo/credentials', (opts && opts.body) || {}); },
+    'geo.credentials.clear': function () { return apiDelete('/api/admin/geo/credentials'); },
+    'geo.status': handlerGeoStatus,
+    'geo.check': handlerGeoCheck,
+    'geo.simulate': handlerGeoSimulate,
+    'geo.preview': handlerGeoPreview,
+    'geo.settings.update': handlerGeoSettingsUpdate,
     'users.permissions': handlerUsersPermissions,
     'dashboard.overview': handlerDashboardOverview,
     'workbench.snapshot': handlerWorkbenchSnapshot,

@@ -319,6 +319,15 @@ ScrcpyGate 引导式安装与管理脚本
   ./deploy.sh --uninstall [--purge]   卸载服务；默认保留数据和配置
   ./deploy.sh --uninstall --purge      卸载服务并删除镜像、数据和配置（不可恢复）
 
+服务器侧安全恢复（管理员把自己封了、或后台进不去时用）:
+  ./deploy.sh --ban-list           列出 IP 封禁（含已过期/已解除）
+  ./deploy.sh --unban <ip>         解除某个来源 IP 的封禁
+  ./deploy.sh --ban <ip> [--preset 15m|1h|24h|7d|permanent] [--seconds N] [--reason 文本]
+      直接改数据库；运行中的进程按内存快照判定，跨进程改动最多 5 秒后生效。
+      环回/本机/可信代理地址会被拒绝（避免把健康探针或反向代理一起封掉）。
+  ./deploy.sh --geo-status        输出现行地域策略与库状态（不含 License Key）
+  ./deploy.sh --geo-off           强制把地域策略改回关闭（误锁时唯一的自救出口）
+
 凭据与候选制品:
   ./deploy.sh --token-status       输出脱敏的 ALAS Token 迁移状态
   ./deploy.sh --migrate-alas-token 执行迁移/轮换并输出脱敏状态
@@ -368,6 +377,11 @@ skip_build=false
 pull_images=false
 auto_install_deps=${SCRCPYGATE_AUTO_INSTALL_DEPS:-false}
 LOG_LINES=""
+UNBAN_IP=""
+BAN_IP=""
+BAN_PRESET=""
+BAN_SECONDS=""
+BAN_REASON=""
 CANDIDATE_MANIFEST=""
 UPDATE_IMAGE=""
 UPDATE_SKIP_BACKUP=false
@@ -435,6 +449,51 @@ while [ "$#" -gt 0 ]; do
       fi
       ;;
     --reset-admin) ACTION=reset_admin ;;
+    --ban-list) ACTION=ban_list ;;
+    --geo-status) ACTION=geo_status ;;
+    --geo-off) ACTION=geo_off ;;
+    --unban)
+      ACTION=unban
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) UNBAN_IP=$2; shift ;;
+        esac
+      fi
+      ;;
+    --ban)
+      ACTION=ban
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_IP=$2; shift ;;
+        esac
+      fi
+      ;;
+    --preset)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_PRESET=$2; shift ;;
+        esac
+      fi
+      ;;
+    --seconds)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_SECONDS=$2; shift ;;
+        esac
+      fi
+      ;;
+    --reason)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_REASON=$2; shift ;;
+        esac
+      fi
+      ;;
     --backup)
       ACTION=backup
       if [ "$#" -gt 1 ]; then
@@ -2087,6 +2146,11 @@ prepare_data_directory() {
   case "$SCRIPT_DIR/" in "$DATA_DIR/"*) die "拒绝使用项目父目录作为数据目录" ;; esac
   # 幂等收紧：数据目录含数据库（会话/令牌/审计），无论是否新建都不应组/其他可读。
   chmod 700 "$DATA_DIR" 2>/dev/null || warn_msg "无法限制数据目录权限"
+  # 地域库目录：容器内的自动更新要在这里做原子替换，因此必须可写（默认 700，随数据目录一起收紧）。
+  # 若操作员改用外部只读挂载，这一步不影响（目录已存在时不会被动过）。
+  if [ ! -d "$DATA_DIR/geoip" ]; then
+    mkdir -p "$DATA_DIR/geoip" 2>/dev/null || warn_msg "无法创建地域库目录（GEO 自动更新将不可用）"
+  fi
 }
 
 generate_persisted_alas_token_key() {
@@ -2482,6 +2546,18 @@ ensure_data_permissions() {
   if ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -w /app/data' >/dev/null 2>&1; then
     data_permissions_need_fix=true
   fi
+  # 地域库目录单独检查：容器内的自动更新要在这里做原子替换，父目录可写不代表它可写
+  # （常见于先建了 data 再手工建 geoip 的场景）。发现不可写时走同一套递归 chown 修复。
+  if [ -d "$DATA_DIR/geoip" ] && ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -w /app/data/geoip' >/dev/null 2>&1; then
+    data_permissions_need_fix=true
+  fi
+  if [ -f "$DATA_DIR/.geo-credentials.json" ]; then
+    [ ! -L "$DATA_DIR/.geo-credentials.json" ] || die "地域下载凭据不能是符号链接"
+    chmod 600 "$DATA_DIR/.geo-credentials.json" || die "无法限制地域下载凭据权限"
+    if ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -r /app/data/.geo-credentials.json' >/dev/null 2>&1; then
+      data_permissions_need_fix=true
+    fi
+  fi
   key_file="$DATA_DIR/.alas-token-encryption-key"
   key_permissions_need_fix=false
   if [ -f "$key_file" ] && ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -r /app/data/.alas-token-encryption-key' >/dev/null 2>&1; then
@@ -2867,6 +2943,66 @@ show_logs() {
   docker logs --tail="$lines" scrcpygate 2>/dev/null || warn_msg "暂无容器日志"
 }
 
+# ---- 服务器侧安全恢复（BAN）----
+# 与 reset-admin 同样走「运行中就用 exec，否则用一次性容器」，
+# 这样即使服务起不来（例如管理员把自己封了导致后台进不去）也能恢复。
+ban_cli() {
+  # $1..: python -m app.cli 之后的参数
+  prepare_deployment
+  prepare_data_directory
+  ensure_data_permissions
+  container_state=$(docker inspect --format '{{.State.Status}}' scrcpygate 2>/dev/null || true)
+  if [ "$container_state" = running ]; then
+    compose exec -T scrcpygate python -m app.cli "$@"
+  else
+    warn_msg "容器未运行，将使用一次性容器执行"
+    compose run --rm --no-deps scrcpygate python -m app.cli "$@"
+  fi
+}
+
+ban_list() {
+  ban_output=$(ban_cli ban-list) || die "读取封禁列表失败"
+  panel_top "IP 封禁（含已过期/已解除）"
+  printf '%s\n' "$ban_output"
+  print_rule
+}
+
+unban() {
+  [ -n "$UNBAN_IP" ] || die "--unban 需要 IP / --unban requires an IP address"
+  unban_output=$(ban_cli unban "$UNBAN_IP") || die "解封失败（地址不在封禁列表中，或参数无效）"
+  panel_top "已解除封禁"
+  printf '%s\n' "$unban_output"
+  print_rule
+}
+
+ban() {
+  [ -n "$BAN_IP" ] || die "--ban 需要 IP / --ban requires an IP address"
+  [ -n "$BAN_PRESET" ] || [ -n "$BAN_SECONDS" ] \
+    || die "--ban 需要 --preset 或 --seconds / --ban requires --preset or --seconds"
+  set -- ban "$BAN_IP"
+  [ -n "$BAN_PRESET" ] && set -- "$@" --preset "$BAN_PRESET"
+  [ -n "$BAN_SECONDS" ] && set -- "$@" --seconds "$BAN_SECONDS"
+  [ -n "$BAN_REASON" ] && set -- "$@" --reason "$BAN_REASON"
+  ban_output=$(ban_cli "$@") || die "封禁失败（地址无效、时长非法，或属于保护地址）"
+  panel_top "已写入封禁"
+  printf '%s\n' "$ban_output"
+  print_rule
+}
+
+geo_status() {
+  geo_output=$(ban_cli geo-status) || die "读取地域策略状态失败"
+  panel_top "地域限制（GEO）状态"
+  printf '%s\n' "$geo_output"
+  print_rule
+}
+
+geo_off() {
+  geo_output=$(ban_cli geo-off) || die "关闭地域策略失败"
+  panel_top "地域策略已关闭"
+  printf '%s\n' "$geo_output"
+  print_rule
+}
+
 reset_admin() {
   prepare_deployment
   prepare_data_directory
@@ -3011,6 +3147,15 @@ create_backup_archive() {
     done
   fi
 
+  # Back up write-only GeoIP credentials with the private data, never with source releases.
+  if [ -L "$bk_source_dir/.geo-credentials.json" ]; then
+    die "地域下载凭据不能是符号链接"
+  fi
+  if [ -f "$bk_source_dir/.geo-credentials.json" ]; then
+    cp -p "$bk_source_dir/.geo-credentials.json" "$bk_staging/data/.geo-credentials.json" || die "无法复制地域下载凭据"
+    chmod 600 "$bk_staging/data/.geo-credentials.json" || die "无法保护地域下载凭据备份"
+  fi
+
   bk_key_included=false
   if [ -f "$bk_source_dir/.alas-token-encryption-key" ]; then
     cp -p "$bk_source_dir/.alas-token-encryption-key" "$bk_staging/data/.alas-token-encryption-key" || die "无法复制 ALAS 令牌密钥"
@@ -3028,7 +3173,7 @@ create_backup_archive() {
     printf 'sqlite_mode=%s\n' "$bk_sqlite_mode"
     printf 'data_dir_name=%s\n' "$(basename -- "$bk_source_dir")"
     printf 'alas_key_included=%s\n' "$bk_key_included"
-    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key; do
+    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key .geo-credentials.json; do
       if [ -f "$bk_staging/data/$bk_name" ]; then
         bk_file_bytes=$(wc -c < "$bk_staging/data/$bk_name" | tr -d ' ')
         bk_file_sha=$(sha256_of "$bk_staging/data/$bk_name" || printf 'unavailable')
@@ -3356,6 +3501,33 @@ check_service() {
     fi
   else
     warn_msg "数据目录不存在: $(safe_display "$WEB_SCRCPY_DATA_HOST")"
+  fi
+  # 访问安全（VIS/BAN/GEO）自检：只报告「有没有配置/有没有库」，**绝不打印 License Key**。
+  if [ -f .env ]; then
+    geo_mode=$(dotenv_value_from_file .env GEO_MODE)
+    geo_key=$(dotenv_value_from_file .env GEO_LICENSE_KEY)
+    geo_account=$(dotenv_value_from_file .env GEO_ACCOUNT_ID)
+    if [ -n "$geo_account" ]; then
+      panel_line "GeoIP Account ID" "已配置（不显示内容）"
+    else
+      warn_msg "GeoIP Account ID 未配置；内置地域库更新不会联网"
+    fi
+    case "$geo_mode" in
+      observe|enforce) panel_line "地域限制模式" "$geo_mode" ;;
+      *) panel_line "地域限制模式" "off（默认关闭）" ;;
+    esac
+    if [ -n "$geo_key" ]; then
+      panel_line "GeoIP License Key" "已配置（不显示内容）"
+    else
+      panel_line "GeoIP License Key" "未配置（不联网、不自动更新）"
+    fi
+    if [ -n "$data_dir" ] && [ -d "$data_dir/geoip" ]; then
+      geo_db_count=$(find "$data_dir/geoip" -maxdepth 1 -name '*.mmdb' 2>/dev/null | wc -l | tr -d ' ')
+      panel_line "地域库文件" "${geo_db_count} 个"
+    fi
+    if [ -n "$data_dir" ] && [ -d "$data_dir/geoip" ] && [ ! -w "$data_dir/geoip" ]; then
+      warn_msg "地域库目录不可写: $data_dir/geoip（容器内的自动更新会失败；可设 GEO_UPDATE_ENABLED=false 或修复权限）"
+    fi
   fi
   if command -v docker >/dev/null 2>&1; then
     panel_line "Docker" "$(docker --version 2>/dev/null | head -1)"
@@ -4085,6 +4257,11 @@ case "$ACTION" in
   status) show_status ;;
   logs) show_logs ;;
   reset_admin) reset_admin ;;
+  ban_list) ban_list ;;
+  geo_status) geo_status ;;
+  geo_off) geo_off ;;
+  unban) unban ;;
+  ban) ban ;;
   backup) backup_service ;;
   list_backups) list_backups_service ;;
   restore) restore_service ;;
