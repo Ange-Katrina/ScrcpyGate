@@ -127,6 +127,16 @@ stable release. Repeated updates pull floating tags and compare actual image IDs
 This command requires a running service owned by that directory and Docker Compose
 plugin. Host-network installations must follow their separate manual procedure.
 
+For an interactive update, run `./deploy.sh --menu` and choose **Update to a
+published image**. The menu queries the public GHCR registry and lists existing
+`latest` (stable), `edge` (development), and the ten highest stable version tags.
+Choose a number, review the full image reference, and confirm to start the update.
+Discovery uses host Python 3 and requires no GitHub login. If discovery fails,
+the configured default and manual tag/digest entry remain available. A custom
+`SCRCPYGATE_UPDATE_IMAGE` is preserved as the default; discovery lists only the
+official ScrcpyGate package. Tag discovery does not replace the subsequent image
+pull and health checks. Canceling the selector makes no deployment changes.
+
 The script preserves the actual old image under a local rollback tag, pulls before
 changing configuration, and creates an online SQLite snapshot with its matching
 ALAS key. A protected `.env` copy stays beside the data archive. If an online

@@ -311,6 +311,7 @@ ScrcpyGate 引导式安装与管理脚本
       不会退回源码构建。--image 支持 tag（ghcr.io/owner/scrcpygate:v1.2.3）
       或 digest（ghcr.io/owner/scrcpygate@sha256:...）；默认取 .env 的
       SCRCPYGATE_UPDATE_IMAGE，未设置时用 ghcr.io/ange-katrina/scrcpygate:latest。
+      管理菜单可自动查询 GHCR 版本并按编号选择，也可手动输入；确认后才更新。
       更新前备份默认开启，--skip-update-backup 可跳过。
 
 服务管理:
@@ -2600,7 +2601,7 @@ initialize_admin() {
     panel_top "检测到现有管理员账号"
     panel_line "用户名" "admin"
     panel_line "密码" "保持原密码（安全原因不会重复显示）"
-    panel_line "后续重置" "管理菜单 10，或 ./deploy.sh --reset-admin"
+    panel_line "后续重置" "“配置与账号 → 重置管理员密码”，或 ./deploy.sh --reset-admin"
     print_rule
     if is_interactive && prompt_confirm_no "是否立即生成并显示新的 admin 密码？"; then
       reset_output=$(compose run --rm --no-deps -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.cli reset-admin) \
@@ -2759,7 +2760,7 @@ configure_and_install_flow() {
     panel_line "将执行" "构建 scrcpygate:local 镜像 → 初始化 admin → 启动容器并等待健康检查"
     print_rule
     if ! prompt_confirm_no "开始安装？"; then
-      warn_msg "配置已保存，已取消安装；稍后可用菜单 2 或 ./deploy.sh --install 继续"
+      warn_msg "配置已保存，已取消安装；稍后可用“使用当前配置安装/更新”或 ./deploy.sh --install 继续"
       return 0
     fi
     INSTALL_INSTANCE_CHECKED=true
@@ -2809,6 +2810,155 @@ install_with_pull_service() {
   install_service
 }
 
+default_update_image() {
+  default_image=$(dotenv_value SCRCPYGATE_UPDATE_IMAGE)
+  printf '%s\n' "${default_image:-ghcr.io/ange-katrina/scrcpygate:latest}"
+}
+
+# Discover public image tags, not Git tags: a source tag may not have a
+# successfully published image. Never load Docker credentials for discovery.
+published_update_images() {
+  image_python=$(python_command 2>/dev/null) || return 1
+  "$image_python" - <<'PY'
+import json
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+opener = urllib.request.build_opener(NoRedirect)
+deadline = time.monotonic() + 20
+repository = "ange-katrina/scrcpygate"
+
+
+def read_json(url, token=None):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("discovery deadline")
+    headers = {"User-Agent": "ScrcpyGate-deploy", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    with opener.open(urllib.request.Request(url, headers=headers), timeout=min(5, remaining)) as response:
+        data = response.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024 or time.monotonic() > deadline:
+        raise ValueError("discovery limit")
+    return json.loads(data)
+
+
+try:
+    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
+    token = read_json("https://ghcr.io/token?" + query)["token"]
+    if not isinstance(token, str) or not token or len(token) > 16384:
+        raise ValueError("invalid registry token")
+    tags = set()
+    last = ""
+    for _ in range(5):
+        query = urllib.parse.urlencode({"n": 1000, "last": last})
+        page = read_json(f"https://ghcr.io/v2/{repository}/tags/list?{query}", token)
+        batch = page.get("tags") or []
+        if not isinstance(batch, list) or len(batch) > 1000:
+            raise ValueError("invalid tag page")
+        if any(not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag) for tag in batch):
+            raise ValueError("invalid tag")
+        tags.update(batch)
+        if len(batch) < 1000:
+            break
+        if batch[-1] == last:
+            raise ValueError("repeated page")
+        last = batch[-1]
+    else:
+        raise ValueError("too many tag pages")
+    versions = sorted(
+        (tag for tag in tags if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag)),
+        key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
+        reverse=True,
+    )
+    choices = [tag for tag in ("latest", "edge") if tag in tags] + versions[:10]
+    for tag in choices:
+        print(f"ghcr.io/{repository}:{tag}")
+except Exception:
+    # Do not echo network exceptions, proxy URLs, or registry bearer tokens.
+    sys.exit(1)
+PY
+}
+
+select_update_image() {
+  UPDATE_IMAGE=""
+  menu_default_image=$(default_update_image)
+  panel_top "选择更新镜像"
+  panel_line "默认目标" "$menu_default_image"
+  log "正在查询 GHCR 已发布版本…"
+  if menu_published_images=$(published_update_images); then
+    [ -n "$menu_published_images" ] || warn_msg "暂无可列出的稳定版或开发版镜像"
+  else
+    menu_published_images=""
+    warn_msg "无法获取版本列表（网络、仓库权限或 Python 不可用）；可使用配置或手动输入"
+  fi
+  while :; do
+    menu_group "更新目标"
+    menu_item 1 "使用默认目标（配置优先，未设置则 latest；可用性以拉取结果为准）" "$C_CYAN"
+    menu_image_index=2
+    while IFS= read -r menu_image_ref; do
+      [ -n "$menu_image_ref" ] || continue
+      menu_image_tag=${menu_image_ref##*:}
+      case "$menu_image_tag" in
+        latest) menu_image_label="latest — 稳定版（最近完成发布）" ;;
+        edge) menu_image_label="edge — 开发版（main 分支，非稳定版）" ;;
+        *) menu_image_label="$menu_image_tag — 固定版本" ;;
+      esac
+      menu_item "$menu_image_index" "$menu_image_label" "$C_GREEN"
+      menu_image_index=$((menu_image_index + 1))
+    done <<EOF
+$menu_published_images
+EOF
+    menu_item m "手动输入完整镜像引用（tag / digest）" "$C_GRAY"
+    menu_item 0 "取消，返回主菜单" "$C_GRAY"
+    printf '\n%s>%s 请选择 [默认 1]: ' "$C_YELLOW" "$C_RESET"
+    IFS= read -r menu_image_choice || return 1
+    menu_image_choice=$(printf '%s' "$menu_image_choice" | tr -d '\r')
+    case "$menu_image_choice" in
+      0|q|Q) return 1 ;;
+      ''|1) UPDATE_IMAGE=$menu_default_image ;;
+      m|M)
+        log "示例：ghcr.io/ange-katrina/scrcpygate:latest；也可使用完整 @sha256:digest 引用"
+        printf '%s>%s 完整镜像引用（留空取消）: ' "$C_YELLOW" "$C_RESET"
+        IFS= read -r UPDATE_IMAGE || return 1
+        UPDATE_IMAGE=$(printf '%s' "$UPDATE_IMAGE" | tr -d '\r')
+        [ -n "$UPDATE_IMAGE" ] || return 1
+        case "$UPDATE_IMAGE" in
+          */*:*|*/*@sha256:*) ;;
+          *) warn_msg "请输入带仓库路径和 tag/digest 的完整镜像引用，不能只填版本名"; UPDATE_IMAGE=""; continue ;;
+        esac
+        ;;
+      *)
+        # Compare menu strings rather than evaluating untrusted shell arithmetic.
+        UPDATE_IMAGE=$(printf '%s\n' "$menu_published_images" |
+          awk -v selection="$menu_image_choice" 'NF && ("x" (NR + 1)) == ("x" selection) { print; exit }')
+        if [ -z "$UPDATE_IMAGE" ]; then
+          warn_msg "请输入列表中的编号、m 或 0"
+          continue
+        fi
+        ;;
+    esac
+    case "$UPDATE_IMAGE" in
+      ''|*[!a-zA-Z0-9._/@:-]*) warn_msg "镜像引用格式无效"; UPDATE_IMAGE=""; continue ;;
+    esac
+    panel_line "目标镜像" "$UPDATE_IMAGE"
+    if prompt_confirm_no "确认备份数据并更新到此镜像？"; then
+      return 0
+    fi
+    UPDATE_IMAGE=""
+    return 1
+  done
+}
+
 # 更新到已发布的 GHCR 镜像：只换镜像，不动源码、不动数据。
 # 失败时保留 .env 与数据，自动回滚到更新前的镜像；任何路径都不会退回源码构建。
 update_service() {
@@ -2822,8 +2972,7 @@ update_service() {
   up_current_id=$(docker inspect --format '{{.Image}}' scrcpygate) || die "无法读取当前镜像 ID"
   [ -n "$up_current_id" ] || die "当前镜像 ID 为空"
   up_target_ref=${UPDATE_IMAGE:-}
-  [ -n "$up_target_ref" ] || up_target_ref=$(dotenv_value SCRCPYGATE_UPDATE_IMAGE)
-  [ -n "$up_target_ref" ] || up_target_ref="ghcr.io/ange-katrina/scrcpygate:latest"
+  [ -n "$up_target_ref" ] || up_target_ref=$(default_update_image)
   case "$up_target_ref" in
     ''|*[!a-zA-Z0-9._/@:-]*) die "无效的镜像引用 / invalid image reference" ;;
   esac
@@ -4105,39 +4254,41 @@ show_menu() {
     menu_item 1 "引导配置并安装" "$C_GREEN"
     menu_item 2 "使用当前配置安装/更新" "$C_GREEN"
     menu_item 3 "更新基础镜像并重新安装" "$C_YELLOW"
-    menu_item 24 "更新到已发布镜像（GHCR，不重建源码）" "$C_YELLOW"
+    menu_item 4 "更新到已发布镜像（GHCR，不重建源码）" "$C_YELLOW"
 
     menu_group "服务管理"
-    menu_item 4 "启动服务" "$C_GREEN"
-    menu_item 5 "停止服务" "$C_RED"
-    menu_item 6 "重启服务" "$C_YELLOW"
-    menu_item 7 "查看状态" "$C_CYAN"
-    menu_item 8 "查看最近日志" "$C_CYAN"
+    menu_item 5 "启动服务" "$C_GREEN"
+    menu_item 6 "停止服务" "$C_RED"
+    menu_item 7 "重启服务" "$C_YELLOW"
+    menu_item 8 "查看状态" "$C_CYAN"
+    menu_item 9 "查看最近日志" "$C_CYAN"
 
     menu_group "配置与账号"
-    menu_item 9 "修改部署配置" "$C_CYAN"
-    menu_item 10 "重置管理员密码" "$C_RED"
+    menu_item 10 "修改部署配置" "$C_CYAN"
+    menu_item 11 "重置管理员密码" "$C_RED"
 
     menu_group "备份与凭据"
-    menu_item 16 "备份数据目录" "$C_GREEN"
-    menu_item 17 "从备份恢复" "$C_YELLOW"
-    menu_item 18 "查看已有备份" "$C_CYAN"
-    menu_item 19 "查看 ALAS 令牌迁移状态" "$C_CYAN"
-    menu_item 20 "导入/轮换 ALAS 令牌" "$C_YELLOW"
-    menu_item 23 "清空 ALAS 令牌（密钥丢失时的恢复出口）" "$C_RED"
+    menu_item 12 "备份数据目录" "$C_GREEN"
+    menu_item 13 "从备份恢复" "$C_YELLOW"
+    menu_item 14 "查看已有备份" "$C_CYAN"
+    menu_item 15 "查看 ALAS 令牌迁移状态" "$C_CYAN"
+    menu_item 16 "导入/轮换 ALAS 令牌" "$C_YELLOW"
+    menu_item 17 "清空 ALAS 令牌（密钥丢失时的恢复出口）" "$C_RED"
     menu_group "诊断与帮助"
-    menu_item 11 "检查/安装 Docker 与 Compose" "$C_CYAN"
-    menu_item 12 "查看命令帮助" "$C_GRAY"
-    menu_item 14 "环境检查" "$C_CYAN"
-    menu_item 15 "检测端口占用和旧容器" "$C_YELLOW"
-    menu_item 21 "生产边界校验" "$C_CYAN"
-    menu_item 22 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
+    menu_item 18 "检查/安装 Docker 与 Compose" "$C_CYAN"
+    menu_item 19 "查看命令帮助" "$C_GRAY"
+    menu_item 20 "环境检查" "$C_CYAN"
+    menu_item 21 "检测端口占用和旧容器" "$C_YELLOW"
+    menu_item 22 "生产边界校验" "$C_CYAN"
+    menu_item 23 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
 
     menu_group "卸载"
-    menu_item 13 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
+    menu_item 24 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
+    printf '\n'
+    print_rule
     menu_item 0 "退出" "$C_GRAY"
 
-    printf '\n%s>%s 请选择 / Choose: ' "$C_YELLOW" "$C_RESET"
+    printf '\n%s>%s 请选择 [0-24] / Choose: ' "$C_YELLOW" "$C_RESET"
     IFS= read -r choice || exit 1
     choice=$(printf '%s' "$choice" | tr -d '\r')
     case "$choice" in
@@ -4147,34 +4298,26 @@ show_menu() {
         ;;
       2) run_menu_action install_current_service || true; pause_menu ;;
       3) run_menu_action install_with_pull_service || true; pause_menu ;;
-      24)
-        printf '\n%s>%s 目标镜像引用（留空=按 .env/默认 latest，支持 tag 或 @sha256:digest）: ' "$C_YELLOW" "$C_RESET"
-        IFS= read -r image_choice || exit 1
-        image_choice=$(printf '%s' "$image_choice" | tr -d '\r')
-        UPDATE_IMAGE=$image_choice
-        run_menu_action update_service || true
+      4)
+        if select_update_image; then
+          run_menu_action update_service || true
+        else
+          log "已取消镜像更新"
+        fi
         UPDATE_IMAGE=""
         pause_menu
         ;;
-      4) run_menu_action start_service || true; pause_menu ;;
-      5) run_menu_action stop_service || true; pause_menu ;;
-      6) run_menu_action restart_service || true; pause_menu ;;
-      7) (show_status) || true; pause_menu ;;
-      8) (show_logs) || true; pause_menu ;;
-      9) run_menu_action configure_only_flow || true; pause_menu ;;
-      10)
+      5) run_menu_action start_service || true; pause_menu ;;
+      6) run_menu_action stop_service || true; pause_menu ;;
+      7) run_menu_action restart_service || true; pause_menu ;;
+      8) (show_status) || true; pause_menu ;;
+      9) (show_logs) || true; pause_menu ;;
+      10) run_menu_action configure_only_flow || true; pause_menu ;;
+      11)
         if prompt_confirm_no "确认重置 admin 密码？"; then run_menu_action reset_admin || true; fi
         pause_menu
         ;;
-      11) run_menu_action check_system_dependencies || true; pause_menu ;;
-      12) usage; pause_menu ;;
-      13)
-        run_menu_action uninstall_menu_service || true
-        pause_menu
-        ;;
-      14) (check_service) || true; pause_menu ;;
-      15) run_menu_action check_conflicts_service || true; pause_menu ;;
-      16)
+      12)
         printf '\n%s>%s 保留最近几份备份（留空=不清理旧备份）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r keep_choice || exit 1
         keep_choice=$(printf '%s' "$keep_choice" | tr -d '\r')
@@ -4187,7 +4330,7 @@ show_menu() {
         BACKUP_KEEP=""
         pause_menu
         ;;
-      17)
+      13)
         list_backups_service
         printf '\n%s>%s 备份文件名或完整路径（留空取消）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r restore_choice || exit 1
@@ -4203,14 +4346,13 @@ show_menu() {
         fi
         pause_menu
         ;;
-      18) list_backups_service; pause_menu ;;
-      19) run_menu_action token_status_service || true; pause_menu ;;
-      20)
+      14) list_backups_service; pause_menu ;;
+      15) run_menu_action token_status_service || true; pause_menu ;;
+      16)
         if prompt_confirm_no "确认导入/轮换 ALAS 令牌？"; then run_menu_action migrate_alas_token_service || true; fi
         pause_menu
         ;;
-      21) (check_production_boundary) || true; pause_menu ;;
-      23)
+      17)
         if prompt_confirm_no "确认清空 ALAS 令牌？（除非你有对应密钥备份，否则无法恢复）"; then
           run_menu_action clear_alas_token_service || true
         else
@@ -4218,7 +4360,12 @@ show_menu() {
         fi
         pause_menu
         ;;
-      22)
+      18) run_menu_action check_system_dependencies || true; pause_menu ;;
+      19) usage; pause_menu ;;
+      20) (check_service) || true; pause_menu ;;
+      21) run_menu_action check_conflicts_service || true; pause_menu ;;
+      22) (check_production_boundary) || true; pause_menu ;;
+      23)
         printf '\n%s>%s 清单输出路径（留空=写入 output/release-manifest/…）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r manifest_choice || exit 1
         manifest_choice=$(printf '%s' "$manifest_choice" | tr -d '\r')
@@ -4227,8 +4374,12 @@ show_menu() {
         CANDIDATE_MANIFEST=""
         pause_menu
         ;;
+      24)
+        run_menu_action uninstall_menu_service || true
+        pause_menu
+        ;;
       0|q|Q|quit|exit) exit 0 ;;
-      *) error_msg "无效选项 / invalid choice: $choice"; pause_menu ;;
+      *) error_msg "无效选项：请输入 0–24 / invalid choice: $choice"; pause_menu ;;
     esac
   done
 }
