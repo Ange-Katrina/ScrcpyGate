@@ -877,7 +877,17 @@ html, body { margin:0; height:100%; }
     .preset-meta { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
     .preset-meta-chip { display:inline-flex; align-items:center; height:var(--page-h-badge); padding:0 7px; border-radius:var(--page-radius-pill); background:var(--glass-field); color:var(--admin-muted); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .preset-item.selected .preset-meta-chip { background:var(--glass-hover); }
-    .preset-ops { display:flex; align-items:center; gap:4px; margin-top:2px; }
+    .preset-ops { display:flex; flex-wrap:wrap; align-items:center; gap:6px 4px; margin-top:6px; }
+    .preset-ops > .preset-switch { flex:0 0 100%; }
+    .preset-ops > .preset-op-btn,
+    .preset-ops > .preset-op-state { flex:0 0 auto; white-space:nowrap; line-height:1.4; }
+    .preset-switch-label { white-space:nowrap; line-height:1.4; }
+    .preset-ops [data-lucide] { flex-shrink:0; }
+    @media (max-width:767px), (pointer:coarse) {
+      .preset-ops > .preset-switch,
+      .preset-ops > .preset-op-btn,
+      .preset-ops > .preset-op-state { min-height:44px; }
+    }
     .preset-op-btn { display:inline-flex; align-items:center; gap:4px; height:var(--page-h-mini); padding:0 8px; border:1px solid transparent; border-radius:var(--page-radius-xs); color:var(--admin-muted); background:transparent; font-size:11px; cursor:pointer; transition:background-color var(--motion-fast) var(--ease-fade),color var(--motion-fast) var(--ease-fade); }
     .preset-op-btn:hover { color:var(--admin-text); background:var(--admin-hover); }
     .preset-op-btn.primary { color:var(--admin-brand); border-color:var(--brand-border-hover); background:var(--admin-brand-soft); font-weight:600; }
