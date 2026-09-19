@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from .. import i18n, security, storage
+from .. import geo_access, i18n, security, storage
 from ..http_helpers import parse_body
 from ..runtime import runtime_for
 from ..services.audit_service import SQLITE_INT_MAX, audit_csv_cell, audit_request
@@ -26,6 +26,17 @@ ACCESS_EXPORT_MAX_ROWS = 10_000
 ACCESS_EXPORT_MAX_SECONDS = 31 * 24 * 60 * 60
 ACCESS_LIST_MAX_PAGE = 200
 ACCESS_EXPORT_FORMATS = {"csv", "json"}
+
+
+def _current_attribution(items: list[dict]) -> list[dict]:
+    """Enrich only the bounded visible page; preserve historical audit fields."""
+    enriched = []
+    for item in items:
+        kind, _ = geo_access.classify_ip(item.get("source_ip"))
+        result = geo_access.lookup(item.get("source_ip")) if kind == "public" else geo_access.GeoLookup(status=kind)
+        enriched.append({**item, "current_country": result.country,
+                         "geo_lookup_status": result.status, "geo_db_epoch": result.epoch})
+    return enriched
 
 
 def _window(from_ts: object, to_ts: object) -> tuple[int, int]:
@@ -112,7 +123,7 @@ async def admin_access_summary(
     )
     return JSONResponse(
         {
-            "items": page["items"],
+            "items": await asyncio.to_thread(_current_attribution, page["items"]),
             "page": {"has_more": page["has_more"], "offset": page["offset"], "limit": limit},
             "window": {"from_ts": start, "to_ts": end},
             "stats": counts,

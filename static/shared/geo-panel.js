@@ -23,12 +23,20 @@
     dbStats: document.getElementById('geo-db-stats'),
     mode: document.getElementById('geo-mode'),
     countries: document.getElementById('geo-countries'),
+    preset: document.getElementById('geo-country-preset'),
+    interval: document.getElementById('geo-interval'),
+    scheduleForm: document.getElementById('geo-schedule-form'),
+    scheduleSave: document.getElementById('geo-schedule-save'),
+    scheduleStatus: document.getElementById('geo-schedule-status'),
+    verificationState: document.getElementById('geo-verification-state'),
+    verificationTime: document.getElementById('geo-verification-time'),
     unknown: document.getElementById('geo-unknown'),
     cidrs: document.getElementById('geo-cidrs'),
     simIp: document.getElementById('geo-sim-ip'),
     simRun: document.getElementById('geo-sim-run'),
     simResult: document.getElementById('geo-sim-result'),
     check: document.getElementById('geo-check'),
+    checkHint: document.getElementById('geo-check-hint'),
     refresh: document.getElementById('geo-refresh'),
     save: document.getElementById('geo-save'),
     selfWarning: document.getElementById('geo-self-warning'),
@@ -84,6 +92,7 @@
   }
 
   var updateErrors = {
+    interval_invalid: '更新周期必须为 1–168 小时的整数。',
     database_missing: '尚未下载地区库。', database_expired: '地区库已过期，请检查自动更新。',
     database_unreadable: '无法读取地区库，请检查文件和权限。', database_invalid: '下载的地区库校验失败，旧库未替换。',
     dependency_missing: '缺少地区库读取组件，请更新完整镜像。',
@@ -108,6 +117,20 @@
   }
   function render() {
     var status = state.status || {};
+    if (!state.intervalDirty && els.interval) els.interval.value = status.intervalHours || 12;
+    var verificationLabels = {
+      unconfigured: '未配置下载凭据', unverified: '凭据已配置 · 待验证',
+      verified: '下载权限已验证', rejected: '凭据被拒绝 · 请检查或更换 Key',
+      unavailable: '暂时无法验证 · 请检查网络后重试'
+    };
+    if (els.verificationState) els.verificationState.textContent = status.credentialsError ? errorText(status.credentialsError)
+      : verificationLabels[status.credentialVerification] || verificationLabels.unverified;
+    if (els.verificationState) els.verificationState.parentElement.setAttribute('data-tone',
+      status.credentialsError || status.credentialVerification === 'rejected' ? 'error'
+        : status.credentialVerification === 'verified' ? 'ok'
+          : status.credentialVerification === 'unconfigured' ? '' : 'warn');
+    if (els.verificationTime) els.verificationTime.textContent = '最近检查：' + fmtTime(status.credentialCheckedTs)
+      + ' · 最近验证通过：' + fmtTime(status.credentialVerifiedTs);
     var managed = status.credentialsManaged === true;
     [els.account, els.key, els.credentialSave].forEach(function (node) { if (node) node.disabled = managed || state.credentialBusy || status.running; });
     if (els.credentialClear) els.credentialClear.disabled = !status.credentialsSaved || state.credentialBusy || status.running;
@@ -119,17 +142,20 @@
       if (status.forcedOff) pieces.push('已被环境变量强制关闭');
       if (!status.databaseAvailable) pieces.push('无地区库');
       els.summary.textContent = pieces.join(' · ');
+      els.summary.setAttribute('data-tone', status.forcedOff ? 'warn' : status.mode === 'enforce'
+        ? (status.databaseAvailable ? 'ok' : 'error') : status.mode === 'observe' ? 'warn' : '');
     }
     if (!state.formDirty) {
       if (els.mode) els.mode.value = status.mode || 'off';
       if (els.countries) els.countries.value = (status.allowedCountries || []).join(',');
+      syncPreset();
       if (els.unknown) els.unknown.value = status.unknownAction || 'deny';
       if (els.cidrs) els.cidrs.value = (status.allowCidrs || []).join(',');
     }
 
     if (els.dbStats) {
       var items = [
-        ['地区库', status.databaseAvailable ? '可用' : '不可用'],
+        ['地区库', status.databaseAvailable ? '可用' : '不可用', status.databaseAvailable ? 'ok' : (status.mode === 'enforce' ? 'error' : 'warn')],
         ['库版本', status.databaseEpoch ? fmtTime(status.databaseEpoch) : '—'],
         ['库大小', fmtBytes(status.databaseSizeBytes)],
         ['上次成功', fmtTime(status.lastSuccessTs)],
@@ -138,15 +164,26 @@
         ['下次自动检查', fmtTime(status.nextDueTs)]
       ];
       els.dbStats.innerHTML = items.map(function (pair) {
-        return '<li class="vis-stat"><b>' + escapeText(pair[1]) + '</b><span>' + escapeText(pair[0]) + '</span></li>';
+        return '<li class="vis-stat" data-tone="' + (pair[2] || '') + '"><b>' + escapeText(pair[1]) + '</b><span>' + escapeText(pair[0]) + '</span></li>';
       }).join('');
     }
 
     if (els.check) {
-      els.check.disabled = status.running || !status.licenseKeyPresent || !status.accountIdPresent || !status.canUpdateNow;
-      els.check.title = status.licenseKeyPresent
-        ? (status.canUpdateNow ? '' : ('暂时不能下载：' + errorText(status.blockedReason || '')))
-        : '未配置 License Key，自动更新已停用';
+      els.check.disabled = state.credentialBusy || status.running || !status.licenseKeyPresent || !status.accountIdPresent || !status.canUpdateNow;
+      var checkHint = state.credentialBusy ? '保存中…' : status.running ? '地区库更新任务运行中…'
+        : !status.accountIdPresent ? errorText('account_id_missing')
+        : !status.licenseKeyPresent ? errorText('license_key_missing')
+        : !status.canUpdateNow ? errorText(status.blockedReason || '')
+        : '凭据已配置，可点击「立即检查更新」验证下载权限。';
+      els.check.title = checkHint;
+      if (!status.running && status.jobState === 'completed') checkHint = '地区库已更新';
+      else if (!status.running && status.jobState === 'unchanged') checkHint = '地区库已是最新版本';
+      else if (!status.running && status.lastError) checkHint = errorText(status.lastError);
+      if (els.checkHint) {
+        els.checkHint.textContent = checkHint;
+        els.checkHint.setAttribute('data-tone', status.running ? 'warn' : status.lastError ? 'error'
+          : status.jobState === 'completed' || status.jobState === 'unchanged' ? 'ok' : '');
+      }
     }
     if (els.save) els.save.disabled = false;
 
@@ -168,7 +205,11 @@
     if (status.removedOldDatabases) {
       notes.push('已清理过期地区库 ' + num(status.removedOldDatabases) + ' 个（保留期 ' + num(status.oldDatabaseMaxAgeDays) + ' 天）。');
     }
-    if (els.databaseNote) els.databaseNote.textContent = notes.join(' ');
+    if (els.databaseNote) {
+      els.databaseNote.textContent = notes.join(' ');
+      els.databaseNote.setAttribute('data-tone', status.lastError || (status.databaseError && status.mode === 'enforce') ? 'error'
+        : status.databaseError || status.enabled === false || status.forcedOff ? 'warn' : '');
+    }
     if (els.policyNotice) {
       var unavailable = !status.databaseAvailable;
       els.policyNotice.hidden = !unavailable && !status.forcedOff;
@@ -184,10 +225,15 @@
   function load() {
     if (!api()) return;
     var seq = (state.seq += 1);
-    api().configured('geo.status', { force: true })
+    return api().configured('geo.status', { force: true })
       .then(function (status) {
         if (seq !== state.seq) return;
         state.status = status;
+        var databaseSignature = status.databaseAvailable + ':' + status.databaseEpoch + ':' + status.lastSuccessTs;
+        if (state.databaseSignature && state.databaseSignature !== databaseSignature) {
+          window.dispatchEvent(new CustomEvent('scrcpygate:geo-updated'));
+        }
+        state.databaseSignature = databaseSignature;
         state.loaded = true;
         render();
         if (jobPoll) window.clearTimeout(jobPoll);
@@ -280,24 +326,59 @@
   function checkNow() {
     if (!api()) return;
     if (els.check) els.check.disabled = true;
+    if (els.checkHint) els.checkHint.textContent = '正在检查并下载地区库…';
     setStatus('正在检查并下载地区库…', '');
     api().configured('geo.check', { method: 'POST', body: {} })
       .then(function (result) {
         setStatus('地区库更新任务已提交', '');
-        load();
+        return load();
       })
       .catch(function (error) {
         var message = requestError(error);
         setStatus('更新失败：' + message, 'error');
-        load();
-      })
-      .then(function () { load(); });
+        if (els.checkHint) els.checkHint.textContent = message;
+        return load();
+      });
+  }
+
+  function credentialFieldError(field, message) {
+    var translated = window.ScrcpyGateI18n ? window.ScrcpyGateI18n.t(message) : message;
+    field.setCustomValidity(translated);
+    field.setAttribute('aria-invalid', 'true');
+    els.credentialStatus.textContent = translated;
+    els.credentialStatus.setAttribute('data-tone', 'error');
+    field.reportValidity();
+    return false;
+  }
+
+  function validateCredentials() {
+    // Normalize before constraint validation, including when submitting with Enter.
+    // Avoid maxlength truncation of pasted credentials; reject overlong values intact.
+    [els.account, els.key].forEach(function (field) {
+      field.value = field.value.trim();
+      field.setCustomValidity('');
+      field.removeAttribute('aria-invalid');
+    });
+    var status = state.status || {};
+    if (!els.account.value && !status.accountIdPresent) {
+      return credentialFieldError(els.account, '请先配置 Account ID。');
+    }
+    if (els.account.value && !/^[0-9]{1,20}$/.test(els.account.value)) {
+      return credentialFieldError(els.account, 'Account ID 必须为数字（最多 20 位）。');
+    }
+    if (!els.key.value && !status.licenseKeyPresent) {
+      return credentialFieldError(els.key, '请先配置 License Key。');
+    }
+    if (els.key.value && !/^[A-Za-z0-9_-]{1,256}$/.test(els.key.value)) {
+      return credentialFieldError(els.key, '请填写有效的 License Key（最多 256 个字符）。');
+    }
+    return els.credentialForm.reportValidity();
   }
 
   async function configureCredentials(clear) {
     if (!api() || state.credentialBusy) return;
     if (clear && !await window.ScrcpyGateSecurity.confirm({ title: '清除下载凭据', message: '清除后台保存的 Account ID 和 Key？', detail: '地区库与地域策略保留。环境变量中的凭据不受影响。', accept: '清除凭据' })) return;
-    if (!clear && !els.credentialForm.reportValidity()) return;
+    if (!clear && !validateCredentials()) return;
     var body = clear ? {} : { account_id: els.account.value.trim(), license_key: els.key.value.trim() };
     state.credentialBusy = true;
     render();
@@ -308,7 +389,7 @@
       els.key.value = '';
       els.credentialStatus.textContent = clear ? '已清除后台保存的凭据。' : '凭据已保存，可点击「立即检查更新」验证下载权限。';
       els.credentialStatus.setAttribute('data-tone', 'ok');
-      load();
+      await load();
     } catch (error) {
       els.key.value = '';
       els.credentialStatus.textContent = requestError(error);
@@ -317,10 +398,57 @@
   }
   if (els.credentialForm) els.credentialForm.addEventListener('submit', function (event) { event.preventDefault(); configureCredentials(false); });
   if (els.credentialClear) els.credentialClear.addEventListener('click', function () { configureCredentials(true); });
+  [els.account, els.key].forEach(function (field) {
+    if (field) field.addEventListener('input', function () {
+      field.setCustomValidity('');
+      field.removeAttribute('aria-invalid');
+      els.credentialStatus.textContent = '';
+      els.credentialStatus.removeAttribute('data-tone');
+    });
+  });
   window.addEventListener('pagehide', function () { if (els.key) els.key.value = ''; });
 
+  function syncPreset() {
+    if (!els.preset || !els.countries) return;
+    var codes = els.countries.value.toUpperCase().split(/[,，]/).map(function (s) { return s.trim(); }).filter(Boolean).sort().join(',');
+    els.preset.value = 'custom';
+    Array.prototype.forEach.call(els.preset.options, function (option) {
+      if (option.value !== 'custom' && option.value.split(',').sort().join(',') === codes) els.preset.value = option.value;
+    });
+  }
+  function policyChanged() {
+    state.formDirty = true;
+    if (els.confirm) els.confirm.checked = false;
+    if (els.confirmWrap) els.confirmWrap.hidden = true;
+    setWarning('');
+    if (els.simResult) els.simResult.textContent = '';
+  }
+  if (els.preset) els.preset.addEventListener('change', function () {
+    if (els.preset.value !== 'custom') els.countries.value = els.preset.value;
+    policyChanged();
+    els.countries.focus();
+  });
+  if (els.countries) els.countries.addEventListener('input', syncPreset);
+  if (els.interval) els.interval.addEventListener('input', function () { state.intervalDirty = true; els.scheduleStatus.textContent = ''; });
+  if (els.scheduleForm) els.scheduleForm.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    if (!api() || !els.scheduleForm.reportValidity() || els.scheduleSave.disabled) return;
+    els.scheduleSave.disabled = true;
+    els.scheduleStatus.textContent = '保存中…';
+    try {
+      await api().configured('geo.schedule.save', { method: 'PUT', body: { interval_hours: Number(els.interval.value) } });
+      state.intervalDirty = false;
+      els.scheduleStatus.textContent = '更新周期已保存，无需重启。';
+      els.scheduleStatus.setAttribute('data-tone', 'ok');
+      await load();
+    } catch (error) {
+      els.scheduleStatus.textContent = requestError(error);
+      els.scheduleStatus.setAttribute('data-tone', 'error');
+    } finally { els.scheduleSave.disabled = false; }
+  });
+
   [els.mode, els.countries, els.unknown, els.cidrs].forEach(function (el) {
-    if (el) el.addEventListener('input', function () { state.formDirty = true; });
+    if (el) el.addEventListener('input', policyChanged);
   });
   if (els.save) els.save.addEventListener('click', save);
   if (els.simRun) els.simRun.addEventListener('click', simulate);

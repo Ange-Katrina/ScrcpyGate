@@ -364,6 +364,10 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 
 环境变量 `GEO_ACCOUNT_ID` 或 `GEO_LICENSE_KEY` 任一非空时，整个环境凭据对优先，因此两项均须配置，不会与后台值混用；后台不能覆盖环境凭据。`GEO_UPDATE_ENABLED=false` 时，即使保存凭据也不会下载，适用于外部管理的只读地区库。
 
+后台显示凭据配置状态、最近检查和最近验证通过的时间。MaxMind 下载认证没有网页登录会话，不提供可查询的账户/Key 到期日；网络故障不会显示为凭据失效，轮换凭据后需重新验证。参见 [MaxMind 更新文档](https://dev.maxmind.com/geoip/updating-databases/) 与 [License Key 文档](https://support.maxmind.com/knowledge-base/articles/using-maxmind-license-keys)。
+
+可在后台保存 1–168 小时的自动检查周期（推荐 12），优先于 `GEO_UPDATE_INTERVAL_HOURS` 默认值，持久化并立即重新调度，无需重启；禁用自动更新的环境开关仍然有效。国家/地区预设仅填入代码，保存地域设置后才生效。访问记录列表按当前地区库查询归属；国家筛选、历史明细和导出仍按记录时的值，内网地址不定位。
+
 默认每 12 小时附加随机延迟检查一次，通过官方 HTTPS 下载并限制重定向目标。检查共用 10 分钟冷却和每日 30 次尝试上限（UTC 日期，失败计入）。远端版本未变时不重复下载，下载或校验失败保留最后可用库。构建超过 30 天的地区库被本项目新鲜度策略视为不可用；强制执行模式下会拒绝访问，启用前请确认更新可用。
 
 建议先「只观察」并预演当前来源。使用 WAF/CDN 时正确配置可信代理网段，不要无条件信任转发头。VPN、代理和移动网络可能影响定位准确性，地域限制不能替代认证与 IP 封禁。误锁恢复：`./deploy.sh --geo-off`，或配置 `GEO_ENFORCE_DISABLED=true` 并重启。

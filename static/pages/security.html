@@ -351,6 +351,7 @@
     <p class="sec-table-hint">
      按来源 IP 汇总。选择明细查看请求，或直接管理封禁。
     </p>
+    <p class="sec-hint">归属按当前地区库查询；国家筛选、明细与导出保留访问当时的记录。内网地址无法定位国家。</p>
     <div aria-label="访问记录表格" class="vis-table-wrap sec-scroll-table" role="region" tabindex="0">
      <table class="vis-table">
       <caption class="sr-only">
@@ -653,7 +654,14 @@
       </span>
      </div>
      <div class="guard-field geo-wide">
+      <select id="geo-country-preset" aria-label="国家或地区预设">
+       <option value="custom">自定义国家/地区</option>
+       <option value="CN">中国大陆（CN）</option>
+       <option value="CN,HK,MO,TW">中国大陆、香港、澳门、台湾</option>
+       <option value="CN,HK,MO,TW,JP,KR,SG">中国及日本、韩国、新加坡</option>
+      </select>
       <input aria-label="允许的国家或地区代码" id="geo-countries" placeholder="CN" type="text"/>
+      <small>预设仅填入代码，点击「保存地域设置」后生效。</small>
      </div>
     </div>
     <div class="guard-row" data-field="geo_unknown">
@@ -741,32 +749,41 @@
       </i>
      </summary>
      <p class="sec-hint" id="geo-database-note"></p>
-     <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off">
+     <div class="geo-verification" role="status" aria-live="polite">
+      <b id="geo-verification-state">正在读取凭据状态…</b>
+      <p class="sec-hint" id="geo-verification-time"></p>
+      <p class="sec-hint">使用 Account ID 和 License Key 验证下载权限，无网页登录会话，也无法查询账户或 Key 的到期日。状态仅代表最近一次检查结果。</p>
+     </div>
+     <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off" novalidate>
       <p class="sec-hint">配置 MaxMind 下载凭据，不需要提供账户登录密码。留空保留已保存的值；更换 Account ID 时须同时填写新 Key。</p>
       <div class="geo-credentials-fields">
-       <label class="vis-filter"><span>Account ID</span><input id="geo-account-id" name="account_id" type="text" inputmode="numeric" pattern="[0-9]{1,20}" maxlength="20" placeholder="MaxMind Account ID" autocomplete="off"/></label>
-       <label class="vis-filter"><span>License Key</span><input id="geo-license-key" name="license_key" type="password" maxlength="256" placeholder="填写新 Key；留空保留" autocomplete="new-password" spellcheck="false"/></label>
+       <label class="vis-filter"><span>Account ID</span><input id="geo-account-id" name="account_id" type="text" inputmode="numeric" pattern="[0-9]{1,20}" placeholder="MaxMind Account ID" autocomplete="off" spellcheck="false" aria-describedby="geo-account-hint geo-credentials-status"/><small id="geo-account-hint">填写账户数字编号，不是邮箱或用户名；粘贴时会去除首尾空白。</small></label>
+       <label class="vis-filter"><span>License Key</span><input id="geo-license-key" name="license_key" type="password" placeholder="填写新 Key；留空保留" autocomplete="new-password" spellcheck="false" aria-describedby="geo-key-hint geo-credentials-status"/><small id="geo-key-hint">使用同一账户生成的完整 Key，不是登录密码或仅显示的前四位。</small></label>
       </div>
       <p class="sec-hint" id="geo-credentials-source"></p>
       <div class="sec-inline-actions">
        <button class="guard-btn primary" id="geo-credentials-save" type="submit">保存下载凭据</button>
+       <button class="guard-btn ghost" id="geo-check" type="button" disabled aria-describedby="geo-check-hint">立即检查更新</button>
        <button class="guard-btn ghost" id="geo-credentials-clear" type="button" disabled>清除已保存凭据</button>
-       <a href="https://www.maxmind.com/en/accounts/current/license-key" target="_blank" rel="noopener noreferrer">获取 License Key</a>
+       <a class="guard-btn ghost" href="https://www.maxmind.com/en/accounts/current/license-key" target="_blank" rel="noopener noreferrer">获取 License Key<span aria-hidden="true">↗</span></a>
       </div>
       <p class="guard-status" id="geo-credentials-status" role="status" aria-live="polite"></p>
+      <p class="sec-hint" id="geo-check-hint" role="status" aria-live="polite"></p>
+      <p class="sec-hint">首次配置请填写两项。保存只验证格式；点击「立即检查更新」后，将通过 MaxMind 官方下载端点验证权限并更新地区库。</p>
      </form>
+     <form id="geo-schedule-form" class="geo-schedule-form">
+      <label class="vis-filter" for="geo-interval"><span>自动检查间隔（小时）</span><input id="geo-interval" type="number" min="1" max="168" step="1" required aria-describedby="geo-schedule-hint"/></label>
+      <button type="submit" class="guard-btn ghost" id="geo-schedule-save">保存更新周期</button>
+      <p class="guard-status" id="geo-schedule-status" role="status" aria-live="polite"></p>
+     </form>
+     <p class="sec-hint" id="geo-schedule-hint">可设为 1–168 小时，推荐 12 小时。后台设置优先于环境变量默认值，保存后立即重新安排检查；会附加随机延迟以错开下载高峰。</p>
      <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats">
      </ul>
-     <div class="sec-inline-actions">
-      <button class="guard-preset" id="geo-check" type="button">
-       立即检查更新
-      </button>
-     </div>
      <p class="sec-hint">
-      保存凭据后，默认每 12 小时自动检查（附加随机延迟）；也可立即检查。手动检查至少间隔 10 分钟，每日最多尝试 30 次。地区库不可用时，强制执行会拒绝访问。
+      手动检查至少间隔 10 分钟，每日最多尝试 30 次。地区库不可用时，强制执行会拒绝访问。
      </p>
      <p class="sec-hint">IP 地域是估算结果，代理、VPN 和移动网络可能造成偏差。建议先使用「只观察」并预演当前来源，再启用强制执行。</p>
-     <p class="sec-hint"><a href="https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases" target="_blank" rel="noopener noreferrer">MaxMind 更新文档</a> · 凭据保存在私有数据卷，保留数据重装会保留配置；清除凭据不会删除现有地区库或取消地域策略。</p>
+     <p class="sec-hint"><a href="https://dev.maxmind.com/geoip/updating-databases/" target="_blank" rel="noopener noreferrer">MaxMind 更新文档</a> · 凭据保存在私有数据卷，保留数据重装会保留配置；清除凭据不会删除现有地区库或取消地域策略。</p>
      <p class="sec-hint">
       本产品使用 GeoLite2 数据，来源：
       <a href="https://www.maxmind.com" rel="noopener noreferrer" target="_blank">

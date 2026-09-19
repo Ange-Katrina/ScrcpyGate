@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import base64
 import shutil
 from urllib.parse import urlparse
@@ -66,6 +67,7 @@ DOWNLOAD_TIMEOUT_SECONDS = 120.0
 # 应用采用构建后 30 天的保守有效期；这不是 MaxMind EULA 的原文期限定义。
 OLD_DATABASE_MAX_AGE_DAYS = 30
 STATE_SETTING = "_geo_update_state"
+INTERVAL_SETTING = "_geo_update_interval_hours"
 _USER_AGENT = "ScrcpyGate-GeoUpdater/1.0"
 _MANAGED_NAME_RE = re.compile(r"^GeoLite2-Country.*\.mmdb$", re.IGNORECASE)
 _MEMBER_RE = re.compile(r"(?:^|/)GeoLite2-Country\.mmdb$", re.IGNORECASE)
@@ -79,6 +81,8 @@ _update_lock = threading.Lock()
 _job_thread = None
 _task: "threading.Thread | None" = None
 _stop_event = threading.Event()
+_wake_event = threading.Event()
+_next_check_ts = 0.0
 
 
 class GeoUpdateError(RuntimeError):
@@ -116,7 +120,47 @@ def download_base() -> str:
 
 def interval_seconds() -> float:
     hours = security.env_int("GEO_UPDATE_INTERVAL_HOURS", int(DEFAULT_INTERVAL_HOURS), int(MIN_INTERVAL_HOURS), int(MAX_INTERVAL_HOURS))
+    saved = storage.get_setting(INTERVAL_SETTING, "")
+    if str(saved).isdigit() and MIN_INTERVAL_HOURS <= int(saved) <= MAX_INTERVAL_HOURS:
+        hours = int(saved)
     return float(hours) * 3600.0
+
+
+def configure_schedule(hours: object) -> dict:
+    """An explicit admin setting overrides the environment's initial default."""
+    global _next_check_ts
+    if type(hours) is not int or not MIN_INTERVAL_HOURS <= hours <= MAX_INTERVAL_HOURS:
+        raise GeoUpdateError("interval_invalid")
+    try:
+        storage.set_settings({INTERVAL_SETTING: str(hours)})
+    except Exception:
+        raise GeoUpdateError("state_persist_failed") from None
+    _next_check_ts = 0.0
+    _wake_event.set()
+    start()
+    return {"interval_hours": hours}
+
+
+def _credential_fingerprint() -> str:
+    try:
+        account, key = geo_credentials.resolve()
+    except geo_credentials.CredentialError:
+        return ""
+    if not account or not key:
+        return ""
+    return hashlib.sha256((account + "\0" + key).encode()).hexdigest()
+
+
+def _verification_status(state: dict, credentials: dict) -> dict:
+    fingerprint = _credential_fingerprint()
+    matches = bool(fingerprint and fingerprint == state.get("credential_fingerprint"))
+    configured = credentials["account_id_present"] and credentials["license_key_present"]
+    return {
+        "credential_verification": (state.get("credential_verification", "unverified") if matches
+                                    else "unverified" if configured else "unconfigured"),
+        "credential_checked_ts": int(state.get("credential_checked_ts") or 0) if matches else 0,
+        "credential_verified_ts": int(state.get("credential_verified_ts") or 0) if matches else 0,
+    }
 
 
 def jitter_seconds() -> float:
@@ -377,12 +421,19 @@ def _audit_result(actor: str, outcome: str, reason: str) -> None:
 
 def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
     temp_path = backup_temp = None
+    head_verified = False
+    fingerprint = _credential_fingerprint()
+    if fingerprint != state.get("credential_fingerprint"):
+        state.update(credential_verified_ts=0, credential_verification="unverified")
+    state.update(credential_fingerprint=fingerprint, credential_checked_ts=int(moment))
     deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
     try:
         directory = _state_path()
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{EDITION}.mmdb"
         _, version = _fetch(_download_url(), method="HEAD", deadline=deadline)
+        head_verified = True
+        state.update(credential_verification="verified", credential_verified_ts=int(moment))
         reader, _, error = geo_access._ensure_reader()
         if version and version == state.get("remote_version") and reader is not None and not error:
             state.update(job_state="unchanged", last_success_ts=int(moment), last_error="")
@@ -431,6 +482,10 @@ def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
         return status(now=moment)
     except Exception as exc:
         code = exc.code if isinstance(exc, GeoUpdateError) else "update_io_failed"
+        if code == "license_rejected":
+            state["credential_verification"] = "rejected"
+        elif not head_verified:
+            state["credential_verification"] = "unavailable"
         state.update(last_error=code, last_error_ts=int(moment), job_state="failed")
         _save_state(state)
         _audit_result(actor, "failure", code)
@@ -452,6 +507,7 @@ def update_now(*, trigger: str = "manual", actor: str = "", now: float | None = 
         _perform_update(_reserve(trigger, moment), moment=moment, actor=actor)
     finally:
         _update_lock.release()
+        _wake_event.set()
     return status(now=moment)
 
 
@@ -469,6 +525,7 @@ def enqueue_update(*, trigger: str = "manual", actor: str = "") -> dict:
                 log.warning("GEO_UPDATE_FAILED code=%s", exc.code)
             finally:
                 _update_lock.release()
+                _wake_event.set()
         _job_thread = threading.Thread(target=run, name="geo-update-job", daemon=True)
         _job_thread.start()
     except Exception:
@@ -494,15 +551,17 @@ def status(*, now: float | None = None) -> dict:
     base = geo_access.status()
     allowed, reason = can_update_now(now=moment)
     last_success = float(state.get("last_success_ts") or 0)
+    credentials = geo_credentials.status()
     next_due = 0.0
-    if last_success:
-        next_due = last_success + interval_seconds()
+    if enabled() and credentials["account_id_present"] and credentials["license_key_present"]:
+        next_due = _next_check_ts or (last_success + interval_seconds() if last_success else 0)
     return {
         "enabled": enabled(),
         "running": _update_lock.locked(),
         "job_state": "running" if _update_lock.locked() else ("interrupted" if state.get("job_state") == "running" else state.get("job_state", "idle")),
         "attempts_today": int(state.get("attempts") or 0) if state.get("day") == _today(moment) else 0,
-        **geo_credentials.status(),
+        **credentials,
+        **_verification_status(state, credentials),
         "download_base": download_base(),
         "edition": EDITION,
         "interval_hours": round(interval_seconds() / 3600.0, 2),
@@ -538,15 +597,23 @@ def configure_credentials(account: object = "", key: object = "", *, clear: bool
     if not _update_lock.acquire(blocking=False):
         raise GeoUpdateError("update_in_progress")
     try:
+        old_fingerprint = _credential_fingerprint()
         if clear:
             geo_credentials.clear()
         else:
             geo_credentials.save(account, key)
+        if old_fingerprint != _credential_fingerprint():
+            state = _load_state()
+            for field in ("credential_fingerprint", "credential_verification", "credential_checked_ts", "credential_verified_ts"):
+                state.pop(field, None)
+            state.update(last_error="", last_error_ts=0, job_state="idle")
+            _save_state(state)
     except geo_credentials.CredentialError as exc:
         raise GeoUpdateError(str(exc)) from None
     finally:
         _update_lock.release()
     start()
+    _wake_event.set()
     return geo_credentials.status()
 
 
@@ -586,14 +653,22 @@ def maybe_update_once(*, now: float | None = None) -> dict | None:
 
 
 def _loop() -> None:  # pragma: no cover - 线程体，靠集成验收覆盖
+    global _next_check_ts
     while not _stop_event.is_set():
-        delay = next_delay_seconds()
-        if _stop_event.wait(delay):
-            return
         try:
+            delay = next_delay_seconds()
+            _next_check_ts = time.time() + delay
+            if _wake_event.wait(delay):
+                _wake_event.clear()
+                continue
+            if _stop_event.is_set():
+                break
             maybe_update_once()
         except Exception:
-            log.exception("GEO_UPDATE_LOOP_ERROR")
+            log.warning("GEO_UPDATE_LOOP_ERROR")
+            _wake_event.wait(60)
+            _wake_event.clear()
+    _next_check_ts = 0.0
 
 
 def start() -> bool:
@@ -615,6 +690,7 @@ def stop() -> None:
     global _task
     with _lock:
         _stop_event.set()
+        _wake_event.set()
         task = _task
         _task = None
     if task is not None and task.is_alive():

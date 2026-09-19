@@ -223,7 +223,9 @@
       var ip = String(item.source_ip || '');
       return '<tr class="vis-ip-row" data-ip="' + escapeText(ip) + '">'
         + '<td class="vis-ip">' + escapeText(ip) + '</td>'
-        + '<td>' + escapeText(item.country || '—') + '</td>'
+        + '<td>' + escapeText(item.current_country || (item.geo_lookup_status === 'private' ? '内网地址'
+          : item.geo_lookup_status === 'unavailable' ? '地区库不可用'
+            : item.geo_lookup_status ? '无法定位' : item.country || '—')) + '</td>'
         + '<td>' + num(item.requests).toLocaleString() + '</td>'
         + '<td' + (num(item.errors_4xx) ? ' class="vis-bad"' : '') + '>' + num(item.errors_4xx).toLocaleString() + '</td>'
         + '<td' + (num(item.errors_5xx) ? ' class="vis-bad"' : '') + '>' + num(item.errors_5xx).toLocaleString() + '</td>'
@@ -564,6 +566,7 @@
       loadSummary(true);
     }
   });
+  window.addEventListener('scrcpygate:geo-updated', function () { loadSummary(true); });
   loadSummary(true);
   loadStatus();
   if (els.rows) els.rows.addEventListener('click', function (event) {

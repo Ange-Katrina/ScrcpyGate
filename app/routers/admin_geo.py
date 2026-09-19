@@ -100,6 +100,21 @@ async def admin_geo_credentials_clear(request: Request):
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+@router.put("/api/admin/geo/schedule")
+async def admin_geo_schedule(request: Request):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    body = await parse_body(request)
+    if not isinstance(body, dict) or set(body) != {"interval_hours"}:
+        raise HTTPException(status_code=400, detail="Invalid schedule fields")
+    try:
+        result = await asyncio.to_thread(geo_updater.configure_schedule, body["interval_hours"])
+    except geo_updater.GeoUpdateError as exc:
+        raise _update_error_response(exc) from None
+    audit_request(request, admin, "geo_schedule_update", target_type="geo_database", metadata=result)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/api/admin/geo/check")
 async def admin_geo_check(request: Request):
     """立即检查并更新库（服务端限频；失败返回稳定错误码）。"""
