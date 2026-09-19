@@ -286,14 +286,11 @@ async def _video_receiver(
     session_check,
     state: _VideoStreamState,
 ) -> None:
+    # Incoming messages must not extend the authorization recheck deadline.
+    next_check = time.monotonic() + VIDEO_PERMISSION_RECHECK_SECONDS
     try:
         while True:
-            try:
-                text = await asyncio.wait_for(
-                    websocket.receive_text(),
-                    timeout=VIDEO_PERMISSION_RECHECK_SECONDS,
-                )
-            except asyncio.TimeoutError:
+            if time.monotonic() >= next_check:
                 if not await _run_session_check(session_check):
                     state.end_reason = "session_revoked"
                     log.info(
@@ -302,7 +299,10 @@ async def _video_receiver(
                         client.id,
                         username,
                     )
-                    await websocket.close(code=4403, reason="session revoked")
+                    await asyncio.wait_for(
+                        websocket.close(code=4403, reason="session revoked"),
+                        timeout=VIDEO_SEND_TIMEOUT_SECONDS,
+                    )
                     return
                 allowed = await asyncio.to_thread(storage.user_can, username, device_id, "view")
                 if not allowed:
@@ -313,8 +313,18 @@ async def _video_receiver(
                         client.id,
                         username,
                     )
-                    await websocket.close(code=4403, reason="permission revoked")
+                    await asyncio.wait_for(
+                        websocket.close(code=4403, reason="permission revoked"),
+                        timeout=VIDEO_SEND_TIMEOUT_SECONDS,
+                    )
                     return
+                next_check = time.monotonic() + VIDEO_PERMISSION_RECHECK_SECONDS
+            try:
+                text = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=max(0.001, next_check - time.monotonic()),
+                )
+            except asyncio.TimeoutError:
                 continue
             try:
                 msg = json.loads(text)
@@ -377,7 +387,11 @@ async def video_socket(
             return
         query_params = getattr(websocket, "query_params", {})
         reservation_token = str(query_params.get("viewer_token") or "").strip()
-        client = ClientSession(str(uuid.uuid4()), user["username"], websocket)
+        browser_id = str(query_params.get("browser_id") or "").strip()[:64]
+        grid_view = str(query_params.get("view") or "").strip().lower() == "grid"
+        client = ClientSession(
+            str(uuid.uuid4()), user["username"], websocket, browser_id=browser_id, grid_view=grid_view
+        )
         if not session.attach_client(client, reservation_token):
             await websocket.close(code=4403 if reservation_token else 1013)
             return
@@ -409,6 +423,12 @@ async def video_socket(
     try:
         public_id = exposed_device_id or device_id
         await websocket.send_json(_video_hello_payload(session, client, public_id))
+        # 多端投屏记录：晚一步接入的观看端在这里补一条邀请，发起端重连后在这里拿回主导权
+        # （前端把「本机会话 id + 角色」存在 localStorage，重连时作为 claim 带上来）。
+        try:
+            record_registry.attach_client(device_id, client.id, username)
+        except Exception:  # noqa: BLE001 - 记录协同失败不能影响观看
+            log.exception("MIRROR_RECORD_ATTACH_FAILED device=%s client=%s", device_id, client.id)
         sender_task = asyncio.ensure_future(_video_sender(websocket, client, device_id, user, stream_state))
         receiver_task = asyncio.ensure_future(
             _video_receiver(websocket, client, session, device_id, username, session_check, stream_state)

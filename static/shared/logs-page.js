@@ -720,6 +720,7 @@
     else if (k === 'result') { state.result = 'all'; $('logs-result').value = 'all'; }
     else if (k === 'actor') { state.actor = 'all'; $('logs-actor').value = 'all'; }
     else if (k === 'target') { state.target = ''; $('logs-target').value = ''; }
+    syncExtraFilterCounts();
     loadActive({ show:false }).catch(function () {});
   }
   function clearAllFilters() {
@@ -738,7 +739,19 @@
     state.actor = 'all'; $('logs-actor').value = 'all';
     state.target = ''; $('logs-target').value = '';
     toggleCustomRange(); toggleAuditRange();
+    syncExtraFilterCounts();
     loadActive({ show:false }).catch(function () {});
+  }
+
+  function syncExtraFilterCounts() {
+    document.querySelectorAll('.filter-disclosure').forEach(function (details) {
+      var count = Array.from(details.querySelectorAll('select, input')).filter(function (field) {
+        return field.value && field.value !== 'all';
+      }).length;
+      var badge = details.querySelector('.filter-active-count');
+      badge.textContent = count ? '(' + count + ')' : '';
+      badge.hidden = !count;
+    });
   }
 
   function updateRefreshUI() {
@@ -922,6 +935,13 @@
   $('integrity-modal-mask').addEventListener('click', function (e) { if (e.target === this) this.classList.remove('open'); });
   $('logs-empty-clear').addEventListener('click', clearAllFilters);
   $('audit-empty-clear').addEventListener('click', clearAllFilters);
+  document.querySelectorAll('[data-clear-log-filters]').forEach(function (button) {
+    button.addEventListener('click', clearAllFilters);
+  });
+  document.querySelectorAll('.filter-extra').forEach(function (filters) {
+    filters.addEventListener('input', syncExtraFilterCounts);
+    filters.addEventListener('change', syncExtraFilterCounts);
+  });
 
   document.addEventListener('click', function (e) {
     var viewBtn = e.target.closest ? e.target.closest('.logs-table .row-btn.view') : null;
@@ -954,6 +974,63 @@
     }
   });
 
+  /* ---------- 日志保存时长（审计日志 + 运行日志轮转段；固定档位，0 = 不清理） ---------- */
+  var LOG_RETENTION_OPTIONS = [0, 1, 3, 7, 15, 30];
+  var logRetention = { logRetentionDays: 30 };
+
+  function logRetentionDaysOf(payload) {
+    var settings = (payload && payload.settings) || payload || {};
+    var days = Number(settings.logRetentionDays);
+    if (LOG_RETENTION_OPTIONS.indexOf(days) >= 0) return days;
+    // 存量值不在档位内（更早的任意天数）：按「不超过它的最大档位」显示，和后台维护逻辑一致。
+    if (!isFinite(days) || days <= 0) return 0;
+    var allowed = LOG_RETENTION_OPTIONS.filter(function (option) { return option > 0 && option <= days; });
+    return allowed.length ? allowed[allowed.length - 1] : LOG_RETENTION_OPTIONS[LOG_RETENTION_OPTIONS.length - 1];
+  }
+  function renderLogRetention() {
+    var input = $('log-retention-days');
+    if (input) input.value = String(logRetention.logRetentionDays);
+    var state = $('log-retention-state');
+    if (state) {
+      state.textContent = logRetention.logRetentionDays > 0
+        ? tr('保留最近') + ' ' + logRetention.logRetentionDays + ' ' + tr('天')
+        : tr('不清理');
+    }
+  }
+  function loadLogRetention() {
+    if (!isConfigured('logs.retention')) return Promise.resolve();
+    return window.ScrcpyGateApi.configured('logs.retention', { method: 'GET' }).then(function (payload) {
+      logRetention.logRetentionDays = logRetentionDaysOf(payload);
+      renderLogRetention();
+    }).catch(function () {});
+  }
+  function saveLogRetention() {
+    var input = $('log-retention-days');
+    var days = input ? Number(input.value) : NaN;
+    if (LOG_RETENTION_OPTIONS.indexOf(days) < 0) {
+      showToast('日志保存时长只能是：不清理 / 1 / 3 / 7 / 15 / 30 天', 'error');
+      return;
+    }
+    var btn = $('log-retention-save');
+    if (btn) btn.disabled = true;
+    window.ScrcpyGateApi.configured('logs.retention.update', {
+      method: 'PUT',
+      body: { logRetentionDays: days }
+    }).then(function (payload) {
+      logRetention.logRetentionDays = logRetentionDaysOf(payload);
+      renderLogRetention();
+      showToast('日志保存时长已保存', 'success');
+    }).catch(function (error) {
+      showToast(apiError(error), 'error');
+    }).finally(function () {
+      if (btn) btn.disabled = false;
+    });
+  }
+  (function wireLogRetention() {
+    var btn = $('log-retention-save');
+    if (btn) btn.addEventListener('click', saveLogRetention);
+  })();
+
   bindFilters();
   state.autoOn = $('auto-switch').checked;
   syncViewSeg();
@@ -970,4 +1047,5 @@
     });
   }
   loadAudits({ show:false }).catch(function () {});
+  loadLogRetention();
 })();

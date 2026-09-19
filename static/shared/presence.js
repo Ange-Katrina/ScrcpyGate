@@ -42,6 +42,11 @@
 
   function scheduleReconnect() {
     if (stopped || reconnectTimer) return;
+    if (retryIndex >= RECONNECT_DELAYS.length) {
+      stopped = true;
+      if (global.ScrcpyGateAccess) global.ScrcpyGateAccess.notify({});
+      return;
+    }
     var delay = RECONNECT_DELAYS[Math.min(retryIndex, RECONNECT_DELAYS.length - 1)];
     retryIndex += 1;
     reconnectTimer = global.setTimeout(function () {
@@ -65,7 +70,14 @@
       retryIndex = 0;
       schedulePing();
     };
-    next.onmessage = function () {};
+    next.onmessage = function (event) {
+      if (socket !== next) return;
+      var message;
+      try { message = JSON.parse(event.data); } catch (error) { return; }
+      if (message && message.type === 'control_lock') {
+        global.document.dispatchEvent(new CustomEvent('scrcpygate:control-lock-changed', { detail: message }));
+      }
+    };
     next.onerror = function () {
       if (socket !== next) return;
       try { next.close(); } catch (error) {}
@@ -77,9 +89,15 @@
       var code = Number(event && event.code);
       if (code === 4401 || code === 4403) {
         stopped = true;
+        if (global.ScrcpyGateAccess) global.ScrcpyGateAccess.check();
         return;
       }
-      scheduleReconnect();
+      if (global.ScrcpyGateAccess) {
+        global.ScrcpyGateAccess.check().then(function (result) {
+          if (result.blocked) { stopped = true; return; }
+          scheduleReconnect();
+        });
+      } else scheduleReconnect();
     };
   }
 

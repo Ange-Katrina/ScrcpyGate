@@ -77,7 +77,7 @@ async def alas_gateway_exchange(request: Request):
 
 @router.get("/api/alas/status")
 async def api_alas_status(request: Request):
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     requested = str(request.query_params.get("config") or "").strip()
     device_id = await asyncio.to_thread(alas_device_for_user, user, request.query_params.get("device_id"))
     binding = await asyncio.to_thread(
@@ -118,7 +118,7 @@ async def api_alas_status(request: Request):
 
 @router.get("/api/alas/configs")
 async def api_alas_configs(request: Request):
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     device_id = await asyncio.to_thread(alas_device_for_user, user, request.query_params.get("device_id"))
     configs = await asyncio.to_thread(public_user_alas_bindings, user, device_id)
     if user.get("role") == "admin" and device_id is not None and not configs:
@@ -146,7 +146,7 @@ async def api_alas_configs(request: Request):
 @router.post("/api/alas/toggle")
 async def api_alas_toggle(request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     payload = await parse_body(request)
     requested = str(payload.get("config_name") or payload.get("config") or "").strip()
     action = str(payload.get("action") or "toggle").strip().lower()
@@ -198,7 +198,7 @@ async def api_alas_toggle(request: Request):
 @router.get("/api/alas/exit-guard")
 async def api_alas_exit_guard(request: Request):
     """Per-user 「退出浏览器后自动检测」 switch for the workbench ALAS menu."""
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     preference = await asyncio.to_thread(storage.get_user_alas_preference, user["username"])
     return {
         "ok": True,
@@ -210,7 +210,7 @@ async def api_alas_exit_guard(request: Request):
 @router.put("/api/alas/exit-guard")
 async def api_save_alas_exit_guard(request: Request):
     security.verify_csrf(request)
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     payload = await parse_body(request)
     raw = payload.get("enabled")
     if isinstance(raw, bool):

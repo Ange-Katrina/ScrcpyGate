@@ -11,7 +11,7 @@ import hmac
 import ipaddress
 import uuid
 
-from .logging_config import sanitize_log_text, sanitize_log_value
+from .logging_config import prune_rotated_log_files, sanitize_log_text, sanitize_log_value
 from .alas_secrets import (
     AlasTokenError,
     TOKEN_KEY_ENV,
@@ -19,12 +19,17 @@ from .alas_secrets import (
     decrypt_token,
     encrypt_token,
     is_encrypted_token,
+    key_diagnostics,
     key_is_configured,
     key_is_valid,
+    token_summary,
 )
 from . import (
+    access_log,
+    storage_access,
     storage_alas,
     storage_audit,
+    storage_bans,
     storage_core,
     storage_notifications,
     storage_schema,
@@ -80,6 +85,7 @@ ACCOUNT_EXPIRING_WINDOW_DAYS_MAX = 365
 MAX_ACCOUNT_EXPIRES_AT = 253402300799  # 9999-12-31T23:59:59Z
 EXPIRATION_UNSET = object()
 ENABLED_UNSET = object()
+ALAS_VISIBLE_UNSET = object()
 ALAS_DEVICE_UNCHANGED = object()
 SESSION_IDLE_SECONDS = 12 * 60 * 60
 SESSION_ABSOLUTE_SECONDS = 7 * 24 * 60 * 60
@@ -104,7 +110,7 @@ AUDIT_SCHEMA_VERSION = 2
 # :func:`init_db` and into the machine-readable contract in
 # ``tests/fixtures/phase7_storage_schema_manifest.json``.  Bump it whenever the
 # storage schema changes so operators can tell which generation a database is.
-SCHEMA_GENERATION = 2
+SCHEMA_GENERATION = 3
 AUDIT_MAX_ROWS = _bounded_env_int("AUDIT_MAX_ROWS", 100000, 1000, 5000000)
 # Retention for the durable alert projection.  Only alerts that are already
 # handled or hidden are pruned — the visible unhandled ones are the operator's
@@ -112,6 +118,21 @@ AUDIT_MAX_ROWS = _bounded_env_int("AUDIT_MAX_ROWS", 100000, 1000, 5000000)
 AUDIT_ALERT_MAX_ROWS = _bounded_env_int("AUDIT_ALERT_MAX_ROWS", 20000, 100, 5000000)
 # Viewer watch history retention in days (0 = keep forever).
 VIEWER_WATCH_RETENTION_DAYS = _bounded_env_int("VIEWER_WATCH_RETENTION_DAYS", 180, 0, 3650)
+# 「日志保存时长」由管理员在后台设置：固定档位（0 = 不清理，永久保留）。
+# 档位而不是任意天数，是为了让「保存多久」在界面上是明确、可预期的一组选择。
+LOG_RETENTION_DAY_OPTIONS = (0, 1, 3, 7, 15, 30)
+LOG_RETENTION_DEFAULT_DAYS = 30
+LOG_RETENTION_STATE_SETTING = "_log_retention_last_run_day"
+# 访问记录（VIS）：保留档位与上限来自 app.access_log，避免两处各写一套。
+ACCESS_RETENTION_DAY_OPTIONS = access_log.RETENTION_DAY_OPTIONS
+ACCESS_RETENTION_DEFAULT_DAYS = access_log.DEFAULT_RETENTION_DAYS
+ACCESS_MAX_DETAIL_ROWS = access_log.MAX_DETAIL_ROWS
+ACCESS_RETENTION_STATE_SETTING = "_access_retention_last_run_day"
+ACCESS_DROPPED_TOTAL_SETTING = "_access_log_dropped_total"
+ACCESS_LAST_DROP_TS_SETTING = "_access_log_last_drop_ts"
+# IP 封禁（BAN）：自定义时长上限 365 天，事件保留期与审计日志同量级。
+BAN_MAX_SECONDS = storage_bans.MAX_BAN_SECONDS
+BAN_EVENT_RETENTION_DAYS = storage_bans.DEFAULT_BAN_EVENT_RETENTION_DAYS
 AUDIT_PRUNE_BATCH = 1000
 AUDIT_OUTCOMES = {"success", "failure", "denied", "error", "unknown"}
 AUDIT_SEVERITIES = {"debug", "info", "warning", "error", "critical"}
@@ -175,6 +196,20 @@ DEFAULT_SETTINGS = {
     "ui_theme_mode": "system",
     "expiry_reminder_days": "3",
     "stop_alas_on_expiry": "false",
+    # 日志保存时长（天，0 = 永久保留）：同时约束审计日志行与运行日志的轮转段。
+    # 运行日志仍保留按体积轮转（LOG_MAX_BYTES / LOG_BACKUP_COUNT）作为上限。
+    "log_retention_days": "30",
+    # 访问记录（VIS）：默认开启；明细保留 7 天（0 = 不按时间清理，仍受行数上限约束）。
+    "access_log_enabled": "true",
+    "access_retention_days": "7",
+    # 地域限制（GEO）：默认关闭；国家清单默认 CN（HK/MO/TW 是彼此独立的值）。
+    "geo_mode": "off",
+    "geo_allowed_countries": "CN",
+    "geo_unknown_action": "deny",
+    "geo_allow_cidrs": "",
+    # 采样丢弃的累计计数（写入失败也要能被管理员看到「记录不完整」）。
+    "_access_log_dropped_total": "0",
+    "_access_log_last_drop_ts": "0",
 }
 
 # The legacy ``data/.env`` file is an import source, not a second settings
@@ -182,6 +217,7 @@ DEFAULT_SETTINGS = {
 # restart cannot overwrite settings changed through the current UI or restore
 # a token that an administrator deliberately cleared.
 LEGACY_ENV_MIGRATED_SETTING = "_legacy_env_migrated_v1"
+LEGACY_ALAS_TOKEN_PENDING_SETTING = "_legacy_alas_token_pending_v1"
 LEGACY_ALAS_TOKEN_KEY = "ALAS_GYRE_TOKEN"
 
 VIDEO_QUALITY_MIGRATION_VERSION = "3"
@@ -607,6 +643,8 @@ def _init_db_locked() -> bool:
         _migrate_audit_log(conn)
         storage_schema.ensure_compatibility_schema(conn, logger=AUDIT_LOGGER)
         for key, value in DEFAULT_SETTINGS.items():
+            if key.startswith("geo_"):
+                continue  # Absence means env/default; explicit UI settings remain authoritative.
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value))
         _migrate_video_defaults(conn)
         # 一次性：把历史上明文存储的会话换成哈希存储形态（见 session_token_hash）。
@@ -722,11 +760,40 @@ def _clear_legacy_alas_token() -> bool:
     return True
 
 
-def migrate_alas_token_storage() -> None:
-    """Migrate legacy ALAS tokens at the controlled database-init boundary."""
+def migrate_alas_token_storage() -> dict[str, object]:
+    """Migrate legacy ALAS tokens at the controlled database-init boundary.
+
+    Credential failures do not abort startup: an unreadable credential must not take the
+    whole service down (that also blocks ``reset-admin``, so an operator could
+    not even get in to fix it).  The stored value is left untouched and a loud,
+    actionable warning is logged instead; the ALAS runtime paths already report
+    a token they cannot decrypt, so the UI stays truthful while the admin either
+    restores the matching key or clears the token. Database failures still
+    propagate so that an unavailable database cannot be reported as healthy.
+    """
     with db_connect() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
         raw = str(row["value"] or "") if row else ""
+        pending = conn.execute(
+            "SELECT value FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,)
+        ).fetchone()
+        if not raw and pending and pending["value"] == "true":
+            # Other legacy settings/permissions stay migrated. Retry only the
+            # credential whose encryption failed, without replaying grants.
+            try:
+                if storage_core.LEGACY_ENV_FILE.is_symlink():
+                    raise OSError("legacy file must not be a symlink")
+                legacy = storage_core.parse_env_file(storage_core.LEGACY_ENV_FILE)
+                token = str(legacy.get(LEGACY_ALAS_TOKEN_KEY, "") or "")
+                if not token:
+                    return {"ok": False, "action": "legacy_token_pending"}
+                raw = encrypt_token(token)
+            except (OSError, AlasTokenError):
+                AUDIT_LOGGER.warning("ALAS_TOKEN_LEGACY_PENDING restore a valid key and retry migration")
+                return {"ok": False, "action": "legacy_token_pending"}
+            conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (raw,))
+            conn.execute("DELETE FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+            conn.commit()
         if not raw:
             marker = conn.execute(
                 "SELECT value FROM settings WHERE key=?",
@@ -737,37 +804,108 @@ def migrate_alas_token_storage() -> None:
                 # administrator cleared the DB value.  Remove that stale
                 # credential without importing it again.
                 conn.commit()
-                _clear_legacy_alas_token()
-            return
+                _clear_legacy_alas_token_safely()
+            return {"ok": True, "action": "empty"}
         if is_encrypted_token(raw):
             try:
                 _token, source = decrypt_token(raw, allow_legacy=True)
             except AlasTokenError as exc:
-                # An unreadable ciphertext must stop startup even when ALAS
-                # is currently disabled; otherwise the process could continue
-                # with an unrecoverable credential and a misleading status.
-                raise RuntimeError("ALAS token encryption key cannot decrypt the configured token") from exc
-            if source != "ALAS_TOKEN_ENCRYPTION_KEY":
+                # 保留原文：换回正确密钥后仍能解密。这里只降级并说清"该怎么修"。
+                AUDIT_LOGGER.warning(
+                    "ALAS_TOKEN_UNDECRYPTABLE error=%s token=%s key=%s hint=%s",
+                    exc,
+                    json.dumps(token_summary(raw), sort_keys=True),
+                    json.dumps(key_diagnostics(), sort_keys=True),
+                    "restore the matching key (ALAS_TOKEN_ENCRYPTION_KEY / "
+                    "ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS / data/.alas-token-encryption-key, "
+                    "e.g. from a deployment backup) and restart, or clear the token with "
+                    "`python -m app.cli clear-alas-token` and re-enter it in the ALAS settings",
+                )
+                return {"ok": False, "action": "undecryptable", "error": str(exc)}
+            if source != TOKEN_KEY_ENV:
                 try:
                     encrypted = encrypt_token(_token)
                 except AlasTokenError as exc:
-                    raise RuntimeError("current ALAS token encryption key is required for rotation") from exc
+                    AUDIT_LOGGER.warning(
+                        "ALAS_TOKEN_ROTATION_SKIPPED error=%s key=%s hint=%s",
+                        exc,
+                        json.dumps(key_diagnostics(), sort_keys=True),
+                        "set ALAS_TOKEN_ENCRYPTION_KEY to rotate the token; it stays readable "
+                        "through ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS in the meantime",
+                    )
+                    return {"ok": False, "action": "rotation_skipped", "error": str(exc)}
                 conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (encrypted,))
                 conn.commit()
-            _clear_legacy_alas_token()
-            return
+            _clear_legacy_alas_token_safely()
+            return {"ok": True, "action": "encrypted", "source": source}
         if not key_is_configured():
-            # A disabled ALAS integration can still leave a legacy plaintext
-            # credential on disk.  Refuse to continue until it is encrypted;
-            # otherwise a later restart or backup could expose the secret.
-            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token")
+            # 明文凭据留在库里确实是安全问题，但把服务整体打挂并不能解决它：
+            # 明确告警 + 让管理员进来设置密钥或清空该值。
+            AUDIT_LOGGER.warning(
+                "ALAS_TOKEN_PLAINTEXT_WITHOUT_KEY token=%s key=%s hint=%s",
+                json.dumps(token_summary(raw), sort_keys=True),
+                json.dumps(key_diagnostics(), sort_keys=True),
+                "set ALAS_TOKEN_ENCRYPTION_KEY (or run `python -m app.cli generate-alas-key`) "
+                "and restart to encrypt it, or clear it with `python -m app.cli clear-alas-token`",
+            )
+            return {"ok": False, "action": "plaintext_without_key"}
         try:
             encrypted = encrypt_token(raw)
         except AlasTokenError as exc:
-            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token") from exc
+            AUDIT_LOGGER.warning(
+                "ALAS_TOKEN_ENCRYPT_FAILED error=%s key=%s",
+                exc,
+                json.dumps(key_diagnostics(), sort_keys=True),
+            )
+            return {"ok": False, "action": "encrypt_failed", "error": str(exc)}
         conn.execute("UPDATE settings SET value=? WHERE key='alas_token'", (encrypted,))
         conn.commit()
-    _clear_legacy_alas_token()
+    _clear_legacy_alas_token_safely()
+    return {"ok": True, "action": "encrypted", "source": "migrated"}
+
+
+def _clear_legacy_alas_token_safely() -> bool:
+    """Best-effort legacy-token cleanup: never let it stop startup.
+
+    The legacy env file is an old-deployment artifact.  If it cannot be read or
+    rewritten (symlink, permissions, read-only mount) the DB migration itself
+    has already succeeded, so log loudly and keep booting — the operator still
+    has to remove that plaintext credential by hand.
+    """
+    try:
+        return bool(_clear_legacy_alas_token())
+    except RuntimeError as exc:
+        AUDIT_LOGGER.warning(
+            "ALAS_TOKEN_LEGACY_FILE_KEPT error=%s hint=%s",
+            exc,
+            "remove the ALAS_GYRE_TOKEN assignment from the legacy env file by hand",
+        )
+        return False
+
+
+def clear_alas_token() -> dict[str, object]:
+    """Clear the stored ALAS token (recovery path when its encryption key is lost).
+
+    Returns a redacted summary so the CLI can report what happened without ever
+    printing the credential.
+    """
+    with db_connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
+        previous = str(row["value"] or "") if row else ""
+        conn.execute("UPDATE settings SET value='' WHERE key='alas_token'")
+        conn.execute("DELETE FROM settings WHERE key=?", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ENV_MIGRATED_SETTING,))
+        conn.commit()
+    legacy_removed = _clear_legacy_alas_token_safely()
+    summary = {
+        "ok": True,
+        "action": "cleared",
+        "cleared": bool(previous),
+        "previous": token_summary(previous),
+        "legacy_file_removed": legacy_removed,
+    }
+    AUDIT_LOGGER.warning("ALAS_TOKEN_CLEARED cleared=%s legacy_removed=%s", bool(previous), legacy_removed)
+    return summary
 
 
 def get_alas_token_migration_status() -> dict[str, object]:
@@ -1347,18 +1485,33 @@ def migrate_legacy_data() -> bool:
                     if not current_token or not str(current_token["value"] or "").strip():
                         legacy_token = str(env.get("ALAS_GYRE_TOKEN") or "")
                         if legacy_token and not key_is_configured():
-                            raise RuntimeError("ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token")
-                        if legacy_token:
-                            try:
-                                legacy_token = encrypt_token(legacy_token)
-                            except AlasTokenError as exc:
-                                raise RuntimeError(
-                                    "ALAS_TOKEN_ENCRYPTION_KEY is required to migrate the ALAS token"
-                                ) from exc
-                        conn.execute(
-                            "INSERT OR REPLACE INTO settings(key,value) VALUES('alas_token',?)",
-                            (legacy_token,),
-                        )
+                            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+                            # 旧 .env 里的明文 token + 没有密钥：跳过导入并告警，不要让
+                            # 整个服务（以及 reset-admin）起不来。
+                            AUDIT_LOGGER.warning(
+                                "ALAS_TOKEN_LEGACY_ENV_SKIPPED key=%s hint=%s",
+                                json.dumps(key_diagnostics(), sort_keys=True),
+                                "set ALAS_TOKEN_ENCRYPTION_KEY (or run `python -m app.cli "
+                                "generate-alas-key`) and restart to import ALAS_GYRE_TOKEN, then "
+                                "remove it from the legacy env file",
+                            )
+                        else:
+                            if legacy_token:
+                                try:
+                                    legacy_token = encrypt_token(legacy_token)
+                                except AlasTokenError as exc:
+                                    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_ALAS_TOKEN_PENDING_SETTING,))
+                                    AUDIT_LOGGER.warning(
+                                        "ALAS_TOKEN_LEGACY_ENV_SKIPPED error=%s key=%s",
+                                        exc,
+                                        json.dumps(key_diagnostics(), sort_keys=True),
+                                    )
+                                    legacy_token = ""
+                            if legacy_token:
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO settings(key,value) VALUES('alas_token',?)",
+                                    (legacy_token,),
+                                )
                 conn.execute(
                     "INSERT OR REPLACE INTO settings(key,value) VALUES(?, 'true')",
                     (LEGACY_ENV_MIGRATED_SETTING,),
@@ -1500,6 +1653,284 @@ def prune_viewer_watch_history(now_ms: int | None = None) -> int:
     return removed
 
 
+def prune_audit_log_by_age(days: int, now: float | None = None) -> int:
+    """Trim audit rows older than the retention window without breaking the chain.
+
+    审计哈希链要求「删前缀 + 前移锚点」，所以这里沿用 :func:`_prune_audit_prefix`
+    的记账方式（锚点、event_count、pruned_count、告警投影链接），只是把「按行数超限」
+    换成「按天超龄」。``days <= 0`` 表示永久保留。
+    """
+    days = max(0, int(days))
+    if days <= 0:
+        return 0
+    cutoff = int(now if now is not None else time.time()) - days * 86400
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        state = conn.execute("SELECT * FROM audit_integrity_state WHERE singleton=1").fetchone()
+        if state is None:
+            conn.commit()
+            return 0
+        # Wall-clock corrections can put a newer event before an older one.
+        # Only remove a contiguous expired prefix, never a retained event.
+        boundary = conn.execute(
+            """SELECT id, event_hash FROM audit_log
+               WHERE ts < ? AND id < COALESCE(
+                   (SELECT MIN(id) FROM audit_log WHERE ts >= ?),
+                   (SELECT COALESCE(MAX(id), 0) + 1 FROM audit_log)
+               ) ORDER BY id DESC LIMIT 1""",
+            (cutoff, cutoff),
+        ).fetchone()
+        if boundary is None:
+            conn.commit()
+            return 0
+        cutoff_id = int(boundary["id"])
+        prune_count = int(
+            conn.execute("SELECT COUNT(*) FROM audit_log WHERE id <= ?", (cutoff_id,)).fetchone()[0]
+        )
+        if prune_count <= 0:
+            conn.commit()
+            return 0
+        # 与按行数裁剪同样的自检：记账行数与实际行数不一致时宁可不裁剪。
+        actual_count = int(conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0])
+        current_count = max(0, int(state["event_count"] or 0))
+        if actual_count != current_count:
+            conn.commit()
+            AUDIT_LOGGER.critical(
+                "AUDIT_AGE_RETENTION_SKIPPED state_count=%s row_count=%s",
+                current_count,
+                actual_count,
+                extra={"event_name": "audit.retention_skipped"},
+            )
+            return 0
+        conn.execute("DELETE FROM audit_log WHERE id <= ?", (cutoff_id,))
+        conn.execute(
+            "UPDATE audit_alerts SET log_url='' WHERE audit_id <= ? AND log_url <> ''",
+            (cutoff_id,),
+        )
+        _prune_audit_alerts(conn)
+        conn.execute(
+            """
+            UPDATE audit_integrity_state
+            SET anchor_event_id=?, anchor_event_hash=?,
+                event_count=event_count-?, pruned_count=pruned_count+?, updated_at=?
+            WHERE singleton=1
+            """,
+            (
+                cutoff_id,
+                str(boundary["event_hash"] or ""),
+                prune_count,
+                prune_count,
+                now_ts(),
+            ),
+        )
+        conn.commit()
+    AUDIT_LOGGER.info(
+        "AUDIT_AGE_RETENTION_PRUNED count=%s days=%s",
+        prune_count,
+        days,
+        extra={
+            "event_name": "audit.age_retention_pruned",
+            "event_fields": {"pruned_count": prune_count, "retention_days": days},
+        },
+    )
+    return prune_count
+
+
+def normalize_log_retention_days(value: object) -> int:
+    """把任意存量/输入值收敛到允许的档位。
+
+    合法档位直接返回；非数字退回默认档位；其余按「不超过它的最大档位」收敛
+    （2 → 1、45 → 30、负数 → 0），这样老库里留下的任意天数不会让维护逻辑拿到
+    一个界面无法表达的值。
+    """
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return LOG_RETENTION_DEFAULT_DAYS
+    if days in LOG_RETENTION_DAY_OPTIONS:
+        return days
+    if days <= 0:
+        return 0
+    allowed = [option for option in LOG_RETENTION_DAY_OPTIONS if 0 < option <= days]
+    return max(allowed) if allowed else LOG_RETENTION_DAY_OPTIONS[-1]
+
+
+def log_retention_days() -> int:
+    """Current 「日志保存时长」in days (0 = 不清理 / keep forever)."""
+    return normalize_log_retention_days(get_setting("log_retention_days", LOG_RETENTION_DEFAULT_DAYS))
+
+
+def run_log_retention(now: float | None = None, *, force: bool = False) -> dict:
+    """按「日志保存时长」清理审计日志与运行日志轮转段（每天最多一次）。
+
+    维护循环每 10 秒调用一次 :func:`run_storage_maintenance`，所以这里用持久化的
+    「上次执行日期」做闸门：既不会每次维护都全表扫描，也不会因重启反复裁剪。
+    """
+    days = log_retention_days()
+    if days <= 0:
+        return {"log_retention": "disabled", "audit_rows": 0, "log_files": 0}
+    current = time.localtime(now if now is not None else time.time())
+    today = time.strftime("%Y-%m-%d", current)
+    if not force and str(get_setting(LOG_RETENTION_STATE_SETTING, "") or "") == today:
+        return {"log_retention": "skipped", "audit_rows": 0, "log_files": 0}
+    audit_rows = prune_audit_log_by_age(days, now)
+    log_files = prune_rotated_log_files(days, now)
+    set_setting(LOG_RETENTION_STATE_SETTING, today)
+    if log_files:
+        AUDIT_LOGGER.info(
+            "RUNTIME_LOG_RETENTION_PRUNED files=%s days=%s",
+            log_files,
+            days,
+            extra={
+                "event_name": "runtime_log.retention_pruned",
+                "event_fields": {"removed_files": log_files, "retention_days": days},
+            },
+        )
+    return {"log_retention": "pruned", "audit_rows": audit_rows, "log_files": log_files, "days": days}
+
+
+def normalize_access_retention_days(value: object) -> int:
+    """把存量/输入值收敛到允许的保留档位（与日志保留同一套「就近」规则）。"""
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return ACCESS_RETENTION_DEFAULT_DAYS
+    if days in ACCESS_RETENTION_DAY_OPTIONS:
+        return days
+    if days <= 0:
+        return 0
+    allowed = [option for option in ACCESS_RETENTION_DAY_OPTIONS if 0 < option <= days]
+    return max(allowed) if allowed else ACCESS_RETENTION_DAY_OPTIONS[-1]
+
+
+def access_retention_days() -> int:
+    """当前访问明细保留天数（0 = 不按时间清理，仅受行数上限约束）。"""
+    return normalize_access_retention_days(get_setting("access_retention_days", ACCESS_RETENTION_DEFAULT_DAYS))
+
+
+def access_log_enabled() -> bool:
+    return str(get_setting("access_log_enabled", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def access_drop_state() -> dict:
+    """累计丢弃数与最近丢弃时间（演示「记录不完整」状态，不冒充总数）。"""
+    try:
+        total = int(str(get_setting(ACCESS_DROPPED_TOTAL_SETTING, "0") or "0"))
+    except (TypeError, ValueError):
+        total = 0
+    try:
+        last_ts = int(str(get_setting(ACCESS_LAST_DROP_TS_SETTING, "0") or "0"))
+    except (TypeError, ValueError):
+        last_ts = 0
+    return {"dropped_total": max(0, total), "last_drop_ts": max(0, last_ts), "sampled": total > 0}
+
+
+def record_access_batch(records: list, dropped: int = 0, dropped_ts: int = 0) -> int:
+    """写入一批访问明细（+ 汇总 upsert）；由单写线程调用。"""
+    return storage_access.record_access_batch(
+        records, connect=db_connect, dropped=dropped, dropped_ts=dropped_ts, max_rows=ACCESS_MAX_DETAIL_ROWS
+    )
+
+
+def query_access_records(**kwargs) -> dict:
+    return storage_access.query_access_records(connect=db_connect, **kwargs)
+
+
+def query_access_ip_summaries(**kwargs) -> dict:
+    return storage_access.query_access_ip_summaries(connect=db_connect, **kwargs)
+
+
+def access_status_counts(**kwargs) -> dict:
+    return storage_access.access_status_counts(connect=db_connect, **kwargs)
+
+
+def access_scan_hints(**kwargs) -> dict:
+    return storage_access.access_scan_hints(connect=db_connect, **kwargs)
+
+
+def prune_access_records(days: int, now: float | None = None) -> dict:
+    return storage_access.prune_access_records(
+        connect=db_connect, days=days, now=now, max_rows=ACCESS_MAX_DETAIL_ROWS
+    )
+
+
+# ---------------------------------------------------------------- IP 封禁（BAN）
+
+def get_ban(ip: str) -> dict | None:
+    return storage_bans.get_ban(connect=db_connect, ip=ip)
+
+
+def get_active_ban(ip: str, now: int | None = None) -> dict | None:
+    return storage_bans.get_active_ban(connect=db_connect, ip=ip, now=now)
+
+
+def active_bans(now: int | None = None, limit: int | None = None) -> list:
+    return storage_bans.active_bans(connect=db_connect, now=now, limit=limit)
+
+
+def list_bans(**kwargs) -> dict:
+    return storage_bans.list_bans(connect=db_connect, **kwargs)
+
+
+def upsert_ban(**kwargs) -> dict:
+    return storage_bans.upsert_ban(connect=db_connect, **kwargs)
+
+
+def revoke_ban(**kwargs) -> dict | None:
+    return storage_bans.revoke_ban(connect=db_connect, **kwargs)
+
+
+def record_ban_event(**kwargs) -> int:
+    return storage_bans.record_ban_event(connect=db_connect, **kwargs)
+
+
+def expire_bans(now: int | None = None, batch: int = storage_bans.PRUNE_BATCH) -> int:
+    return storage_bans.expire_bans(connect=db_connect, now=now, batch=batch)
+
+
+def list_ban_events(**kwargs) -> dict:
+    return storage_bans.list_ban_events(connect=db_connect, **kwargs)
+
+
+def ban_counters(now: int | None = None) -> dict:
+    return storage_bans.ban_counters(connect=db_connect, now=now)
+
+
+def prune_ban_history(retention_days: int | None = None, now: int | None = None) -> int:
+    days = BAN_EVENT_RETENTION_DAYS if retention_days is None else int(retention_days)
+    return storage_bans.prune_ban_history(connect=db_connect, retention_days=days, now=now)
+
+
+def run_access_retention(now: float | None = None, *, force: bool = False) -> dict:
+    """按「访问记录保留天数」清理明细与汇总（每天最多一次，分批有界）。"""
+    days = access_retention_days()
+    current = time.localtime(now if now is not None else time.time())
+    today = time.strftime("%Y-%m-%d", current)
+    if not force and str(get_setting(ACCESS_RETENTION_STATE_SETTING, "") or "") == today:
+        removed = prune_access_records(0, now)
+        return {"access_retention": "capacity_checked", **removed}
+    removed = prune_access_records(days, now)
+    if not removed.get("pending_age"):
+        set_setting(ACCESS_RETENTION_STATE_SETTING, today)
+    total_removed = int(removed.get("records_removed_by_age") or 0) + int(removed.get("records_removed_by_cap") or 0)
+    if total_removed or removed.get("summary_rows_removed"):
+        AUDIT_LOGGER.info(
+            "ACCESS_RETENTION_PRUNED records=%s summary=%s days=%s",
+            total_removed,
+            removed.get("summary_rows_removed"),
+            days,
+            extra={
+                "event_name": "access.retention_pruned",
+                "event_fields": {
+                    "removed_records": total_removed,
+                    "removed_summary_rows": int(removed.get("summary_rows_removed") or 0),
+                    "retention_days": days,
+                },
+            },
+        )
+    return {"access_retention": "pruned" if total_removed else "clean", "records_removed": total_removed, **removed}
+
+
 def run_storage_maintenance() -> dict:
     """Periodic retention sweep (startup + the account monitor loop).
 
@@ -1510,6 +1941,8 @@ def run_storage_maintenance() -> dict:
         "sessions": prune_expired_sessions(),
         "watch_sessions": prune_viewer_watch_history(),
     }
+    result.update(run_log_retention())
+    result.update(run_access_retention())
     return result
 
 
@@ -1837,6 +2270,47 @@ def prune_login_challenges(now: float) -> int:
         return max(0, cursor.rowcount)
 
 
+def create_pow_challenge(challenge_id: str, provider: str, fingerprint: str,
+                         expires: float, ip: str, username: str) -> bool:
+    """Bound persistent state globally and per source, including used proofs.
+
+    BEGIN IMMEDIATE prevents concurrent issuance from overshooting either cap.
+    Expired entries are pruned via an index; live replay state is never evicted.
+    """
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM login_pow_challenges WHERE expires<=?", (time.time(),))
+        total = conn.execute("SELECT COUNT(*) FROM login_pow_challenges").fetchone()[0]
+        source = conn.execute("SELECT COUNT(*) FROM login_pow_challenges WHERE ip=?", (ip,)).fetchone()[0]
+        if total >= 10_000 or source >= 64:
+            conn.commit()
+            return False
+        conn.execute(
+            "INSERT INTO login_pow_challenges(challenge_id,provider,fingerprint,expires,ip,username) VALUES(?,?,?,?,?,?)",
+            (challenge_id, provider, fingerprint, expires, ip, username),
+        )
+        conn.commit()
+        return True
+
+
+def get_pow_challenge(challenge_id: str) -> dict | None:
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM login_pow_challenges WHERE challenge_id=?", (challenge_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def consume_pow_challenge(challenge_id: str, fingerprint: str, ip: str, username: str) -> bool:
+    """Consume only a verified, unexpired proof; concurrent replay wins once."""
+    with db_connect() as conn:
+        cursor = conn.execute(
+            "UPDATE login_pow_challenges SET used=1 WHERE challenge_id=? AND fingerprint=? "
+            "AND ip=? AND username=? AND used=0 AND expires>?",
+            (challenge_id, fingerprint, ip, username, time.time()),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+
 def save_login_guard_state(
     failures: dict[str, list[tuple[str, float]]],
     locked_until: dict[str, float],
@@ -1975,6 +2449,8 @@ def get_settings(keys: list[str] | None = None) -> dict:
         else:
             rows = conn.execute("SELECT key,value FROM settings").fetchall()
     data = dict(DEFAULT_SETTINGS)
+    for key in ("geo_mode", "geo_allowed_countries", "geo_unknown_action", "geo_allow_cidrs"):
+        data[key] = os.environ.get(key.upper(), DEFAULT_SETTINGS[key])
     data.update({row["key"]: row["value"] for row in rows})
     return data
 
@@ -2033,6 +2509,13 @@ UI_SETTING_KEYS = (
     "ui_theme_mode",
     "expiry_reminder_days",
     "stop_alas_on_expiry",
+    "log_retention_days",
+    "access_log_enabled",
+    "access_retention_days",
+    "geo_mode",
+    "geo_allowed_countries",
+    "geo_unknown_action",
+    "geo_allow_cidrs",
 )
 
 
@@ -2045,12 +2528,22 @@ def _int_setting(settings: dict, key: str, default: int) -> int:
 
 def get_ui_settings() -> dict[str, object]:
     settings = get_settings(list(UI_SETTING_KEYS))
+    for key in ("geo_mode", "geo_allowed_countries", "geo_unknown_action", "geo_allow_cidrs"):
+        if key not in settings:
+            settings[key] = os.environ.get(key.upper(), DEFAULT_SETTINGS[key])
     return {
         "ui_system_name": str(settings.get("ui_system_name") or "ScrcpyGate").strip() or "ScrcpyGate",
         "ui_language": str(settings.get("ui_language") or "").strip(),
         "ui_theme_mode": str(settings.get("ui_theme_mode") or "system").strip() or "system",
         "expiry_reminder_days": _int_setting(settings, "expiry_reminder_days", 3),
         "stop_alas_on_expiry": str(settings.get("stop_alas_on_expiry") or "false").lower() in ("1", "true", "yes", "on"),
+        "log_retention_days": normalize_log_retention_days(settings.get("log_retention_days")),
+        "access_log_enabled": str(settings.get("access_log_enabled") or "true").lower() in ("1", "true", "yes", "on"),
+        "access_retention_days": normalize_access_retention_days(settings.get("access_retention_days")),
+        "geo_mode": str(settings.get("geo_mode") or DEFAULT_SETTINGS["geo_mode"]).strip().lower(),
+        "geo_allowed_countries": str(settings.get("geo_allowed_countries") or DEFAULT_SETTINGS["geo_allowed_countries"]).strip().upper(),
+        "geo_unknown_action": str(settings.get("geo_unknown_action") or DEFAULT_SETTINGS["geo_unknown_action"]).strip().lower(),
+        "geo_allow_cidrs": str(settings.get("geo_allow_cidrs") or "").strip(),
     }
 
 
@@ -2061,7 +2554,11 @@ def save_ui_settings(updates: dict[str, object]) -> None:
             raise ValueError("invalid ui setting: " + str(key))
         if key in ("ui_system_name", "ui_language", "ui_theme_mode"):
             values[key] = str(value or "").strip()
-        elif key == "stop_alas_on_expiry":
+        elif key in ("geo_mode", "geo_unknown_action", "geo_allowed_countries", "geo_allow_cidrs"):
+            # GEO 的档位与清单按文本存储；取值合法性由调用方（admin_settings）校验，
+            # 这里只做长度防御，避免超长设置把 DB 撑大。
+            values[key] = str(value or "").strip()[:2000]
+        elif key in ("stop_alas_on_expiry", "access_log_enabled"):
             if isinstance(value, str):
                 parsed = value.strip().lower() in ("1", "true", "yes", "on")
             else:
@@ -2156,7 +2653,8 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
         users = [
             dict(row)
             for row in conn.execute(
-                "SELECT username,role,created_at,must_change_password,expires_at,enabled,last_login_at,last_login_ip FROM users ORDER BY username"
+                "SELECT username,role,created_at,must_change_password,expires_at,enabled,alas_visible,"
+                "last_login_at,last_login_ip FROM users ORDER BY username"
             )
         ]
         current = now_ts()
@@ -2166,6 +2664,7 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
         watch_page_size, _watch_page_offset = _bounded_watch_page(watch_history_limit, 0)
         for user in users:
             user["enabled"] = bool(user.get("enabled", 1))
+            user["alas_visible"] = bool(user.get("alas_visible", 1))
             user["video_mode"] = "normal"
             user.update(storage_users.user_expiration_payload(user, now=current, expiring_window_seconds=expiring_window))
             if include_watch_data:
@@ -2269,6 +2768,7 @@ def upsert_user(
     expires_at=EXPIRATION_UNSET,
     must_change_password: bool | None = None,
     enabled=ENABLED_UNSET,
+    alas_visible=ALAS_VISIBLE_UNSET,
 ) -> None:
     _ = video_mode  # 兼容旧调用；统一画质不再按用户保存模式。
     username = (username or "").strip()
@@ -2291,7 +2791,7 @@ def upsert_user(
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         current = conn.execute(
-            "SELECT username,role,expires_at,must_change_password,enabled FROM users WHERE username=?", (username,)
+            "SELECT username,role,expires_at,must_change_password,enabled,alas_visible FROM users WHERE username=?", (username,)
         ).fetchone()
         final_must_change_password = (
             bool(current["must_change_password"])
@@ -2312,6 +2812,14 @@ def upsert_user(
             if enabled is ENABLED_UNSET
             else bool(enabled)
         )
+        # 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
+        normalized_alas_visible = (
+            bool(current["alas_visible"])
+            if alas_visible is ALAS_VISIBLE_UNSET and current
+            else True
+            if alas_visible is ALAS_VISIBLE_UNSET
+            else bool(alas_visible)
+        )
         if current:
             if current and current["role"] == "admin" and role != "admin" and admin_count(conn) <= 1:
                 raise ValueError("last_admin_required")
@@ -2321,14 +2829,30 @@ def upsert_user(
             if password:
                 conn.execute(
                     "UPDATE users SET password_hash=?, role=?, video_mode='normal', expires_at=?, "
-                    "must_change_password=?, enabled=? WHERE username=?",
-                    (hash_password(password), role, normalized_expires_at, int(final_must_change_password), int(normalized_enabled), username),
+                    "must_change_password=?, enabled=?, alas_visible=? WHERE username=?",
+                    (
+                        hash_password(password),
+                        role,
+                        normalized_expires_at,
+                        int(final_must_change_password),
+                        int(normalized_enabled),
+                        int(normalized_alas_visible),
+                        username,
+                    ),
                 )
                 conn.execute("DELETE FROM sessions WHERE username=?", (username,))
             else:
                 conn.execute(
-                    "UPDATE users SET role=?, video_mode='normal', expires_at=?, must_change_password=?, enabled=? WHERE username=?",
-                    (role, normalized_expires_at, int(final_must_change_password), int(normalized_enabled), username),
+                    "UPDATE users SET role=?, video_mode='normal', expires_at=?, must_change_password=?, enabled=?, "
+                    "alas_visible=? WHERE username=?",
+                    (
+                        role,
+                        normalized_expires_at,
+                        int(final_must_change_password),
+                        int(normalized_enabled),
+                        int(normalized_alas_visible),
+                        username,
+                    ),
                 )
             if was_expired or will_be_expired or not normalized_enabled:
                 _revoke_user_access(conn, username)
@@ -2346,7 +2870,8 @@ def upsert_user(
             if role == "admin" and normalized_expires_at is None and not normalized_enabled and available_permanent_admin_count(conn) < 1:
                 raise ValueError("last_permanent_admin_required")
             conn.execute(
-                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible) "
+                "VALUES(?,?,?,?,?,?,?,?)",
                 (
                     username,
                     hash_password(password),
@@ -2355,13 +2880,19 @@ def upsert_user(
                     int(final_must_change_password),
                     normalized_expires_at,
                     int(normalized_enabled),
+                    int(normalized_alas_visible),
                 ),
             )
         conn.commit()
 
 
 def revoke_expired_access(now: int | None = None) -> set[str]:
-    """Revoke durable access for every expired account without deleting users."""
+    """回收**停用**账户的会话，并返回所有不可用账户（含仅到期）供上层收尾。
+
+    到期不等于封号：账户保留登录态与全部授权（续期后原样恢复），投屏与 ALAS 由
+    功能闸门按 ``user_is_active`` 拒绝。返回值仍包含到期账户，调用方据此停止其
+    ALAS 配置、断开其长连接并记账；只有 ``enabled=0`` 才会删会话。
+    """
     current = now_ts() if now is None else int(now)
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -2372,11 +2903,7 @@ def revoke_expired_access(now: int | None = None) -> set[str]:
                 (current,),
             ).fetchall()
         }
-        conn.execute(
-            "DELETE FROM sessions WHERE username IN "
-            "(SELECT username FROM users WHERE enabled=0 OR (expires_at IS NOT NULL AND expires_at<=?))",
-            (current,),
-        )
+        conn.execute("DELETE FROM sessions WHERE username IN (SELECT username FROM users WHERE enabled=0)")
         conn.execute(
             "DELETE FROM control_locks WHERE username IN "
             "(SELECT username FROM users WHERE enabled=0 OR (expires_at IS NOT NULL AND expires_at<=?))",
@@ -3190,13 +3717,14 @@ def create_session(
     *,
     client_ip: str | None = None,
     user_agent: str | None = None,
+    device_id: str | None = None,
 ) -> dict:
     """Create a session with a bounded idle lifetime and a fixed absolute cap.
 
-    ``client_ip`` / ``user_agent`` are recorded for the session list only; they are
-    truncated so a hostile header cannot bloat the row.  When ``MAX_SESSIONS_PER_USER``
-    is set, the oldest sessions beyond the cap are dropped in the same transaction
-    (login-time only, no per-request cost).
+    ``client_ip`` / ``user_agent`` / ``device_id`` are recorded for the session list only;
+    they are truncated so a hostile header cannot bloat the row.  When
+    ``MAX_SESSIONS_PER_USER`` is set, the oldest sessions beyond the cap are dropped in
+    the same transaction (login-time only, no per-request cost).
     """
     try:
         requested_idle_seconds = int(ttl_seconds)
@@ -3211,16 +3739,17 @@ def create_session(
     expires_at = min(idle_expires_at, absolute_expires_at)
     recorded_ip = str(client_ip or "").strip()[:SESSION_CLIENT_IP_MAX_LENGTH] or None
     recorded_agent = str(user_agent or "").strip()[:SESSION_USER_AGENT_MAX_LENGTH] or None
+    recorded_device = str(device_id or "").strip()[:64] or None
     with db_connect() as conn:
         cursor = conn.execute(
             """
             INSERT INTO sessions(
                 sid,username,csrf_token,created_at,expires_at,idle_expires_at,absolute_expires_at,
-                last_seen_at,client_ip,user_agent
+                last_seen_at,client_ip,user_agent,device_id
             )
-            SELECT ?,?,?,?,?,?,?,?,?,?
+            SELECT ?,?,?,?,?,?,?,?,?,?,?
             FROM users
-            WHERE username=? AND enabled=1 AND (expires_at IS NULL OR expires_at>?)
+            WHERE username=? AND enabled=1
             """,
             (
                 session_token_hash(sid),
@@ -3233,12 +3762,13 @@ def create_session(
                 ts,
                 recorded_ip,
                 recorded_agent,
+                recorded_device,
                 username,
-                ts,
             ),
         )
         if cursor.rowcount != 1:
             conn.rollback()
+            # 只有「账号不存在」或管理员显式停用会走到这里；到期账户允许登录。
             raise ValueError("account_expired_or_missing")
         if MAX_SESSIONS_PER_USER:
             # 用 rowid 而不是 sid 作为次序兜底：同一秒内登录的多个会话 created_at 相同，
@@ -3281,7 +3811,7 @@ def list_login_sessions(username: str | None = None, current_sid: str | None = N
         rows = conn.execute(
             f"""
             SELECT s.sid, s.username, s.created_at, s.last_seen_at, s.expires_at,
-                   s.idle_expires_at, s.absolute_expires_at, s.client_ip, s.user_agent,
+                   s.idle_expires_at, s.absolute_expires_at, s.client_ip, s.user_agent, s.device_id,
                    u.role AS account_role, u.enabled AS account_enabled
             FROM sessions s
             LEFT JOIN users u ON u.username=s.username
@@ -3304,6 +3834,8 @@ def list_login_sessions(username: str | None = None, current_sid: str | None = N
             "absolute_expires_at": int(row["absolute_expires_at"] or 0),
             "client_ip": str(row["client_ip"] or ""),
             "user_agent": str(row["user_agent"] or ""),
+            # 浏览器侧稳定设备标识：安全页据此把同一台设备的多条会话归并成一行。
+            "device_id": str(row["device_id"] or ""),
             "current": bool(current_hash) and str(row["sid"]) == current_hash,
         }
         for row in rows
@@ -3361,9 +3893,10 @@ def get_session(sid: str | None) -> dict | None:
             conn.commit()
             return None
         account_missing = row["account_username"] is None
-        account_expired = row["account_expires_at"] is not None and int(row["account_expires_at"]) <= current
         account_disabled = "account_enabled" in row.keys() and not bool(row["account_enabled"])
-        if account_missing or account_expired or account_disabled:
+        # 到期不再使会话失效：账户保持登录态（能看到期提示、等待续期），投屏与 ALAS
+        # 由各自的 user_is_active 闸门拒绝。只有停用/被删才回收会话。
+        if account_missing or account_disabled:
             _revoke_user_access(conn, row["username"])
             conn.commit()
             return None
@@ -3436,10 +3969,10 @@ def renew_session(sid: str | None) -> dict | None:
         absolute_expires_at = int(row["absolute_expires_at"] or row["created_at"] + SESSION_ABSOLUTE_SECONDS)
         effective_expires_at = min(int(row["expires_at"]), idle_expires_at, absolute_expires_at)
         account_missing = row["account_username"] is None
-        account_expired = row["account_expires_at"] is not None and int(row["account_expires_at"]) <= current
         account_disabled = "account_enabled" in row.keys() and not bool(row["account_enabled"])
-        if effective_expires_at <= current or account_missing or account_expired or account_disabled:
-            if account_missing or account_expired or account_disabled:
+        # 与 get_session 同一套语义：到期账户的会话继续续期（不封号），停用/被删则回收。
+        if effective_expires_at <= current or account_missing or account_disabled:
+            if account_missing or account_disabled:
                 _revoke_user_access(conn, row["username"])
             conn.execute("DELETE FROM sessions WHERE sid=?", (sid_hash,))
             conn.commit()
@@ -3494,7 +4027,9 @@ def authenticate(username: str, password: str) -> dict | None:
         return None
     if not verify_password(password, user["password_hash"]):
         return None
-    if not user_is_active(user):
+    # 到期账户仍可登录（付费服务可能续期/接入付款），投屏与 ALAS 由各自闸门拦截；
+    # 只有管理员显式停用才不允许登录。
+    if not user_login_allowed(user):
         return None
     if password_hash_needs_upgrade(user["password_hash"]):
         with db_connect() as conn:
@@ -3753,6 +4288,15 @@ def normalize_expires_at(value) -> int | None:
 def user_is_active(user, now: int | None = None) -> bool:
     current = now_ts() if now is None else int(now)
     return storage_users.user_is_active(user, now=current)
+
+
+def user_login_allowed(user) -> bool:
+    """到期不封号：只有管理员显式「停用」才拒绝登录。
+
+    投屏/ALAS 的闸门仍然只看 :func:`user_is_active`，所以到期账户能登录、
+    能看自己的页面和到期提示，但用不了投屏（含仅观看）和 ALAS。
+    """
+    return storage_users.user_login_allowed(user)
 
 
 def account_expiring_window_seconds(conn: sqlite3.Connection | None = None) -> int:

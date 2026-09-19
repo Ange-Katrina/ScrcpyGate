@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-users">
           <div class="page-heading">
             <h1>用户与权限</h1>
             <p>用户、角色、设备与 ALAS 权限管理</p>
@@ -100,35 +100,13 @@
               </div>
             </section>
 
-            <section class="panel account-policy" id="account-policy-panel" aria-labelledby="account-policy-title">
-              <div class="panel-header">
-                <h2 class="panel-title" id="account-policy-title">账户到期策略<span class="panel-subtitle">即将到期的判定与到期后的自动处理</span></h2>
-                <span class="page-info" id="account-policy-state">读取中…</span>
-              </div>
-              <div class="account-policy-grid">
-                <div class="policy-field">
-                  <label class="field-label" for="account-policy-reminder">到期提醒提前天数</label>
-                  <input class="field-input" id="account-policy-reminder" type="number" min="0" max="90" step="1" inputmode="numeric" aria-describedby="account-policy-reminder-hint">
-                  <span class="policy-hint" id="account-policy-reminder-hint">列表与仪表盘在这段时间内标记为「即将到期」，0 表示不提前提醒。</span>
-                </div>
-                <div class="policy-field">
-                  <label class="policy-switch-row" for="account-policy-stop">
-                    <input type="checkbox" id="account-policy-stop">
-                    <span class="policy-switch-label">账户到期后自动停止其 ALAS 配置</span>
-                  </label>
-                  <span class="policy-hint">开启后：账户到期（会话与控制锁被回收）时，其仍能运行的 ALAS 配置会被自动停止。</span>
-                </div>
-                <div class="policy-actions">
-                  <button class="btn-primary" type="button" id="account-policy-save"><i data-lucide="save"></i><span>保存策略</span></button>
-                </div>
-              </div>
-            </section>
+
 
             <section class="panel" id="users" aria-labelledby="users-title">
               <div class="panel-header">
                 <h2 class="panel-title" id="users-title">用户列表<span class="panel-subtitle" id="users-subtitle">等待数据</span></h2>
               </div>
-              <div class="user-table-wrap">
+              <div class="user-table-wrap" data-scroll-table tabindex="0" role="region" aria-label="用户列表，可横向滚动">
                 <table class="user-table">
                   <thead>
                     <tr><th style="width:15%">用户</th><th style="width:8%">角色</th><th style="width:9%">账户状态</th><th style="width:13%">到期时间 / 剩余</th><th style="width:9%">设备权限</th><th style="width:9%">ALAS 配置</th><th style="width:13%">观看时长 / 最近</th><th style="width:11%">上次登录</th><th style="width:8%">登录 IP</th><th style="width:20%;text-align:right">操作</th></tr>
@@ -147,6 +125,30 @@
                 <div class="pager" id="users-pager" role="navigation" aria-label="分页"></div>
               </div>
             </section>
+
+            <details class="admin-disclosure panel account-policy" id="account-policy-panel" aria-labelledby="account-policy-title">
+              <summary class="panel-header">
+                <h2 class="panel-title" id="account-policy-title">账户到期策略<span class="panel-subtitle">即将到期的判定与到期后的自动处理</span></h2>
+                <span class="page-info" id="account-policy-state">读取中…</span>
+              </summary>
+              <div class="account-policy-grid">
+                <div class="policy-field">
+                  <label class="field-label" for="account-policy-reminder">到期提醒提前天数</label>
+                  <input class="field-input" id="account-policy-reminder" type="number" min="0" max="90" step="1" inputmode="numeric" aria-describedby="account-policy-reminder-hint">
+                  <span class="policy-hint" id="account-policy-reminder-hint">列表与仪表盘在这段时间内标记为「即将到期」，0 表示不提前提醒。</span>
+                </div>
+                <div class="policy-field">
+                  <label class="policy-switch-row" for="account-policy-stop">
+                    <input type="checkbox" id="account-policy-stop">
+                    <span class="policy-switch-label">账户到期后自动停止其 ALAS 配置</span>
+                  </label>
+                  <span class="policy-hint">开启后：账户到期（会话与控制锁被回收）时，其仍能运行的 ALAS 配置会被自动停止。</span>
+                </div>
+                <div class="policy-actions">
+                  <button class="btn-primary" type="button" id="account-policy-save"><i data-lucide="save"></i><span>保存策略</span></button>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -154,7 +156,7 @@
   </main>
 
   <!-- ===== 新增用户弹窗 ===== -->
-  <div class="modal-mask" id="modal-add-user" role="dialog" aria-modal="true" aria-labelledby="add-title">
+  <div class="modal-mask" id="modal-add-user" role="dialog" aria-modal="true" aria-labelledby="add-title" aria-hidden="true" inert>
     <div class="modal-card modal-card-wide">
       <div class="modal-head"><h3 class="modal-title" id="add-title">新增用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <form class="modal-body" id="add-form" novalidate>
@@ -184,6 +186,7 @@
           <div class="field-error" id="er-add-expiry"></div>
         </div>
         <label class="field-check"><input type="checkbox" id="add-force">强制下次登录修改密码</label>
+        <label class="permission-switch account-state-switch"><span>显示 ALAS</span><input type="checkbox" id="add-alas-visible" checked><span class="permission-track"></span><strong id="add-alas-visible-label">显示</strong></label>
         <section class="add-permissions" aria-labelledby="add-permissions-title">
           <div class="add-permissions-head">
             <div><h4 id="add-permissions-title">初始权限</h4><p>可以留空，创建后仍可在权限管理中补充。</p></div>
@@ -201,7 +204,7 @@
                 <label class="field" for="add-alas-config"><span class="field-label">Runtime 配置</span><select class="field-select" id="add-alas-config"><option value="">不关联</option></select></label>
                 <label class="field" for="add-alas-device"><span class="field-label">关联设备</span><select class="field-select" id="add-alas-device" disabled><option value="">先选择可观看设备</option></select></label>
               </div>
-              <p class="add-alas-hint">关联后默认允许运行与编辑；ALAS 必须绑定到该用户可观看的设备。</p>
+              <p class="add-alas-hint">选设备会自动带出与之匹配的 Runtime 配置，选配置会自动带出设备（只在第一次选择时自动匹配，之后两边可以各自改）；关联后默认给「允许运行 + 允许编辑」，选中的设备会同时获得观看权限。</p>
               <div class="field-error add-permission-error" id="er-add-permissions"></div>
             </details>
           </div>
@@ -215,7 +218,7 @@
   </div>
 
   <!-- ===== 编辑用户弹窗 ===== -->
-  <div class="modal-mask" id="modal-edit-user" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+  <div class="modal-mask" id="modal-edit-user" role="dialog" aria-modal="true" aria-labelledby="edit-title" aria-hidden="true" inert>
     <div class="modal-card">
       <div class="modal-head"><h3 class="modal-title" id="edit-title">编辑用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <form class="modal-body" id="edit-form" novalidate>
@@ -237,6 +240,16 @@
           <div class="field-error" id="er-edit-expiry"></div>
         </div>
         <label class="permission-switch account-state-switch"><span>账户状态</span><input type="checkbox" id="edit-enabled"><span class="permission-track"></span><strong id="edit-enabled-label">已启用</strong></label>
+        <label class="permission-switch account-state-switch"><span>显示 ALAS</span><input type="checkbox" id="edit-alas-visible"><span class="permission-track"></span><strong id="edit-alas-visible-label">显示</strong></label>
+        <details class="add-alas-details" id="edit-alas-details">
+          <summary><span><i data-lucide="bot"></i>ALAS 关联</span><small id="edit-alas-summary">未关联</small><i data-lucide="chevron-down"></i></summary>
+          <div class="add-alas-fields">
+            <label class="field" for="edit-alas-config"><span class="field-label">Runtime 配置</span><select class="field-select" id="edit-alas-config"><option value="">不关联</option></select></label>
+            <label class="field" for="edit-alas-device"><span class="field-label">关联设备</span><select class="field-select" id="edit-alas-device" disabled><option value="">选择设备</option></select></label>
+          </div>
+          <p class="add-alas-hint" id="edit-alas-hint">选设备会自动带出与之匹配的配置，选配置会自动带出设备（只在第一次选择时自动匹配，之后两边可以各自改）；保存后该配置给「允许运行 + 允许编辑」。留空不会解除已有绑定，如需解绑请到 ALAS 管理里移除。</p>
+          <div class="field-error add-permission-error" id="er-edit-permissions"></div>
+        </details>
       </form>
       <div class="modal-foot">
         <button class="btn-ghost" type="button" data-close>取消</button>
@@ -246,7 +259,7 @@
   </div>
 
   <!-- ===== 删除用户确认弹窗 ===== -->
-  <div class="modal-mask" id="modal-delete-user" role="dialog" aria-modal="true" aria-labelledby="del-title">
+  <div class="modal-mask" id="modal-delete-user" role="dialog" aria-modal="true" aria-labelledby="del-title" aria-hidden="true" inert>
     <div class="modal-card">
       <div class="modal-head"><h3 class="modal-title" id="del-title">删除用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body">
@@ -261,7 +274,7 @@
   </div>
 
   <!-- ===== 重置密码弹窗 ===== -->
-  <div class="modal-mask" id="modal-reset-password" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+  <div class="modal-mask" id="modal-reset-password" role="dialog" aria-modal="true" aria-labelledby="reset-title" aria-hidden="true" inert>
     <div class="modal-card">
       <div class="modal-head"><h3 class="modal-title" id="reset-title">重置密码</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <form class="modal-body" id="reset-form" novalidate>
@@ -280,7 +293,7 @@
   </div>
 
   <!-- ===== 设备选择弹窗（添加设备权限） ===== -->
-  <div class="modal-mask" id="modal-device-picker" role="dialog" aria-modal="true" aria-labelledby="picker-dev-title">
+  <div class="modal-mask" id="modal-device-picker" role="dialog" aria-modal="true" aria-labelledby="picker-dev-title" aria-hidden="true" inert>
     <div class="modal-card">
       <div class="modal-head"><h3 class="modal-title" id="picker-dev-title">添加设备权限</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body">
@@ -294,7 +307,7 @@
   </div>
 
   <!-- ===== ALAS 配置选择弹窗（添加配置权限） ===== -->
-  <div class="modal-mask" id="modal-config-picker" role="dialog" aria-modal="true" aria-labelledby="picker-cfg-title">
+  <div class="modal-mask" id="modal-config-picker" role="dialog" aria-modal="true" aria-labelledby="picker-cfg-title" aria-hidden="true" inert>
     <div class="modal-card">
       <div class="modal-head"><h3 class="modal-title" id="picker-cfg-title">添加 ALAS 配置权限</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body">
@@ -309,7 +322,7 @@
 
   <!-- ===== 权限管理抽屉 ===== -->
   <div class="drawer-mask" id="drawer-mask"></div>
-  <div class="perm-drawer" id="perm-drawer" role="dialog" aria-modal="true" aria-labelledby="perm-drawer-title">
+  <div class="perm-drawer" id="perm-drawer" role="dialog" aria-modal="true" aria-labelledby="perm-drawer-title" aria-hidden="true" inert>
     <div class="drawer-head">
       <h3 class="drawer-title" id="perm-drawer-title">权限管理</h3>
       <button class="modal-close" type="button" id="perm-close" aria-label="关闭"><i data-lucide="x"></i></button>

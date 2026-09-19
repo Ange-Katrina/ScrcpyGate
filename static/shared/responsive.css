@@ -66,6 +66,57 @@
   /* ===== 触控滚动优化 ===== */
   .alas-status-strip, .alas-list, .sessions-wrap, .table-wrap,
   .user-table-wrap, .admin-rail, .device-list { -webkit-overflow-scrolling: touch; }
+
+  /* ===== 触控目标：Apple Copy / Pinguo 规范 44×44pt（390×844 参考框） =====
+     页面 CSS 大多是 24–40px 的桌面尺寸，且用单类选择器声明 min-height，
+     在层叠顺序上晚于本文件；这里作为移动端触控兜底层统一放大，
+     因此需要 !important 才能覆盖。桌面端不受影响。 */
+  button,
+  .btn, .row-btn, .menu-item, .side-item, .device-entry, .device-filter-btn,
+  .dev-access-tab, .dev-btn-sm, .btn-ghost, .guard-preset, .page-btn, .tl-btn,
+  .view-switch-btn, .vp-tab, .vp-seg button, .mg-refresh, .mg-menu-trigger,
+  .collapse-btn, .device-refresh, .cb-btn, .ap-btn, .control-takeover-btn,
+  .control-takeover-close, .notify-mark, .alas-float-icon, .tl-float-stop,
+  .drawer-close, .tool-btn, .tl-close, .vp-close, .ap-close, .up-close, .perm-close,
+  select, textarea,
+  input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px !important;
+  }
+
+  /* 图标按钮：宽度同样补到 44px */
+  .view-switch-btn, .device-refresh, .alas-float-icon, .control-takeover-close,
+  .drawer-close, .tool-btn, .tl-close, .vp-close, .ap-close, .up-close, .perm-close,
+  #perm-close, .mg-menu-trigger, .tl-float-stop, .cb-btn, .page-btn, #pwd-toggle,
+  #adminSidebarToggle, #adminThemeToggle, #mobile-menu-btn, #themeToggle,
+  #notify-btn, #account-menu .menu-trigger, #users-pager .page-btn {
+    min-width: 44px !important;
+  }
+
+  /* 复选框/单选框/下拉的真实命中区在其外层 label 上 */
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  label:has(> select),
+  label:has(> input:not([type="checkbox"]):not([type="radio"])) {
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
+
+  /* 固定高度的输入外壳随之放开，避免放大后溢出容器 */
+  .search-box, .device-search, .tl-search, .up-field, .vp-field,
+  .field, .form-field, .input-wrap, .table-toolbar .search-box {
+    height: auto !important;
+    min-height: 44px !important;
+  }
+
+  /* 面包屑与内联文字链接：补足命中区，避免贴边误触 */
+  .breadcrumb a,
+  #tl-sub > a,
+  .topnav-link {
+    display: inline-flex !important;
+    align-items: center !important;
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
 }
 
 @media (max-width: 480px) {

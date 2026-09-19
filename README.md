@@ -126,8 +126,8 @@ One command, and it does the whole first install in order:
 
 1. creates `.env` from `.env.example` (or drives an interactive wizard with `--configure`),
 2. validates the configuration, then checks for port and container conflicts,
-3. creates the data directory and generates the ALAS token encryption key,
-4. builds the image,
+3. creates the data directory,
+4. builds the image, then reuses the ALAS token encryption key or provisions one for new data,
 5. fixes the data-directory ownership for the container user (`uid 100` / `gid 101`),
 6. creates the admin account and prints its password,
 7. starts the stack and waits for the `/healthz` gate.
@@ -139,6 +139,35 @@ overwritten.
 Running `./deploy.sh` with no arguments opens an interactive menu with the same operations —
 install/update, start/stop/restart, status, logs, configuration, admin reset, backups, ALAS token
 status and migration, environment checks and uninstall.
+
+For a reinstall that keeps accounts and settings, run `./deploy.sh --uninstall` and then
+`./deploy.sh --install`. Ordinary uninstall always keeps `.env`, the local image, the database,
+and its ALAS key together. Menu option 13 offers **Keep data** (the default) or **Full cleanup**.
+Existing passwords are retained when keeping data;
+use `./deploy.sh --reset-admin` if the original password was not saved.
+
+Use `./deploy.sh --uninstall --purge` only to remove the local data and start fresh. If cleanup
+fails, `.env` is retained so the same command can be retried. Data outside the project directory
+is never deleted automatically; its configuration is retained and cleanup reports incomplete.
+Backups are retained. Keep the database and its matching key together when moving a deployment.
+Interactive full cleanup requires typing the complete data path before anything is removed;
+an empty answer cancels, and `--yes` does not skip this confirmation. Noninteractive
+`--uninstall --purge` is an explicit destructive command and runs without a prompt.
+If an older uninstall already removed the container and `.env`, full cleanup can still remove
+the default `./data` containing a `webscrcpy.db` with a SQLite header. Unrecognized directories
+and symlinks are retained; restore the original `.env` and verify its data path before retrying.
+Recognized legacy cleanup saves a minimal `.env` with the data path before deletion, so an
+interrupted purge remains retryable even if the database was already removed.
+Full cleanup removes accounts, ALAS credentials and persisted ADB authorization; reinstall
+requires fresh setup. If only the ALAS key is missing, prefer the token-only reset below.
+An old database with an encrypted ALAS token and a missing key blocks automatic key generation: restore the
+matching key first. Interactive installation offers to clear only the ALAS token and continue with
+a new key; the default answer is No. Accounts and device settings are retained. Noninteractive
+installation never accepts this reset automatically, including with `--yes`.
+If that key cannot be recovered, you can also explicitly run `./deploy.sh --clear-alas-token`,
+then reinstall and enter a new ALAS token. This clears only the stored ALAS credential, not accounts.
+An invalid existing key file must be repaired separately; reinstall never replaces it silently.
+Do not use `--skip-build` when installing source fixes.
 
 ### Docker: Compose
 
@@ -164,6 +193,14 @@ Two things the installer did for you and Compose will not: the data-directory ow
 the admin account. If you skip the password, the app generates one and writes it to
 `./data/initial_admin_password.txt` (mode `0600`, removed again on the next start) instead of
 leaving you locked out — see [Advanced and recovery](#advanced-and-recovery).
+
+The container entrypoint provisions an ALAS key for new or unencrypted data. It preserves
+existing keys and refuses to replace a missing key when the database contains encrypted tokens.
+Restore the matching key in that case; the core application can start with an ALAS warning.
+`SCRCPYGATE_ADMIN_PASSWORD_FILE=false` in `.env` disables the first-run password file.
+
+Container-managed ADB now stores its identity in `data/.android`. Before replacing an older
+container that stored it under `/tmp`, follow the [ADB migration steps](docs/deployment/docker-run.md#5-lifecycle-and-upgrades).
 
 ### Special: host network and USB
 
@@ -204,6 +241,10 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 CI/CD publishes verified amd64 and arm64 images to GHCR; servers are deployed
 manually. See [CI/CD and manual deployment](docs/deployment/ci-cd.md) for
 release tags, package permissions, image attestations, and deployment commands.
+
+The product version is defined in [`VERSION`](VERSION). See the
+[versioning guide](docs/contributing/versioning.md) for release numbering,
+development builds, and version display.
 
 Health endpoint `GET /healthz`; logs are JSON on stdout (`LOG_FORMAT=json`) with optional file
 logging in the data directory.
@@ -324,7 +365,7 @@ itself never does).
 
 - Host/Origin allow-lists, optional proxy trust with explicit CIDRs, CSRF tokens on mutations,
   `SameSite`/secure session cookies, and no API docs in production by default.
-- Login guard: failure counting, lockout windows, and a slider + proof-of-work captcha after
+- Login guard: failure counting, lockout windows, and a click-to-verify, built-in proof-of-work check after
   repeated failures.
 - Device access is granted per user; watching and controlling are separate permissions, and
   control is an explicit lease that can be released or taken over (with an audit trail).
@@ -341,6 +382,26 @@ itself never does).
   `MAX_SESSIONS_PER_USER` caps concurrent sessions per account by dropping the oldest at login.
 - The container runs as a non-root user; the sample compose files drop all capabilities and
   enable `no-new-privileges`.
+
+Login verification uses ScrcpyGate's own SHA-256 PoW by default: click the verification button, wait for the spinner, then sign in after the checkmark appears. Four small bounded puzzles reduce wait-time variance. Signed challenges expire and can be used only once for the bound account/source. PoW raises automation cost; it is not proof of human identity or a replacement for rate limiting, TLS, or a WAF.
+
+HTTPS (or localhost for testing) is required for WebCrypto. The default build bundles no ALTCHA/Cap code and makes no CAPTCHA service requests. `LOGIN_POW_PROVIDER=builtin` selects the default. Other providers require a separately installed, trusted adapter package exporting the `scrcpygate.pow` entry point (API v1), a dedicated static directory with `client.js`, and `issue`/`verify` methods; simply installing an upstream library is insufficient. Docker users install the adapter in a derived image. Select its entry-point name and restart; missing/invalid adapters stop startup rather than bypassing verification. Provider changes require fresh challenges; deployments with multiple workers/replicas remain unsupported by the process-local login limits.
+
+### Security controls in the admin console
+
+- **Access records:** open request details in place, or select **Ban** to choose a duration and reason in a dialog. Rescheduling preserves the existing reason. Bans disconnect existing connections; banning your own source also removes your access. Recover on the server with `./deploy.sh --unban <ip>`.
+- **Login protection:** customize initial PoW difficulty, escalation, ceiling, challenge lifetime, issuance interval, and failure thresholds. The light/balanced/stronger PoW presets change difficulty only. Each additional bit approximately doubles expected work. Benchmark locally and test on a phone before raising the ceiling; the built-in solver has a 30-second compute deadline. Save to apply to newly issued challenges.
+- **Regional restrictions → Database and automatic updates:** enter a MaxMind **Account ID and License Key**, not your MaxMind password. Blank fields keep saved values; changing the Account ID requires a new Key. Save, then check for updates to verify download access. Saving alone does not validate the credentials with MaxMind or enable enforcement.
+
+Saved MaxMind credentials live in `data/.geo-credentials.json` (or the configured data directory), as a private configuration file, **not encrypted**. Linux permissions are `0600`; Windows operators must restrict the data directory ACL. The API never returns the Key, and credentials are excluded from Git, Docker build inputs, and SQLite/settings exports. `deploy.sh` includes the file in private data backups; protect those backups as secrets. Keeping data on reinstall preserves the configuration; purging data removes it. Removing saved credentials leaves the existing country database and region policy intact.
+
+`GEO_ACCOUNT_ID` or `GEO_LICENSE_KEY` in the environment takes precedence for the **entire pair**, so both must be configured; environment and saved values are never mixed. Backend edits cannot override environment credentials. `GEO_UPDATE_ENABLED=false` disables downloads even if credentials are saved; use this with an externally managed, read-only database.
+
+The built-in updater checks every 12 hours by default, with jitter, using official HTTPS downloads and bounded redirects. Checks share a ten-minute cooldown and a local limit of 30 attempts per UTC day, including failures. Unchanged remote versions avoid a full download; invalid downloads keep the last usable database. A database older than 30 days is considered unavailable by this application's freshness policy. In enforce mode an unavailable database denies access, so configure and test updates before enabling enforcement.
+
+Start with **Observe**, preview your source, and configure trusted proxy CIDRs correctly if using a WAF or CDN. Never trust arbitrary forwarded headers. IP geolocation can be inaccurate for VPNs, proxies, and mobile networks; it supplements authentication and IP bans. Recovery: `./deploy.sh --geo-off`, or set `GEO_ENFORCE_DISABLED=true` and restart.
+
+MaxMind documentation: [generate a license key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [database downloads and update schedule](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases). GeoLite Country currently updates on Tuesdays and Fridays; checking more often does not imply a new database each time.
 
 ---
 

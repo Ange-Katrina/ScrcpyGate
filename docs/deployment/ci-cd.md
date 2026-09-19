@@ -85,16 +85,74 @@ to distinguish authorization errors from other registry or network failures.
 
 ## Publish a release
 
-After merging the desired source to `main`, create and push a version tag:
+Set the root `VERSION` file to the intended version (for example `1.0.0`) in
+the release PR. After merging the verified source to `main`, create and push
+the matching version tag. CI rejects tags that disagree with `VERSION`:
 
 ```sh
 git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
-Use `v1.0.0-rc.1` for a prerelease. In **Actions > Builds**, wait for all three
+For a prerelease, set `VERSION` to `1.0.0-rc.1` and use tag `v1.0.0-rc.1`.
+See [Versioning](../contributing/versioning.md) for bump rules and development
+image identifiers. In **Actions > Builds**, wait for all three
 stages to succeed, then copy the `ghcr.io/<owner>/scrcpygate@sha256:...`
 reference from the summary.
+
+The tag build publishes a Docker image; it does not create a GitHub Release.
+Prepare the Release as a draft using the existing tag, the
+[release template](../../.github/RELEASE_TEMPLATE.md), and GitHub's **Generate
+release notes**. The [writing guide](../contributing/pull-requests-and-releases.md#release-notes)
+explains the categories and how to add highlights, upgrade instructions and
+the verified image digest above the full PR list. Review the draft before
+publishing; mark release candidates as prereleases.
+
+## Update an existing bridge deployment
+
+The administrator dashboard checks GHCR tags and confirms the selected manifest
+before offering a host command. Current images and local builds read their
+baked `VERSION`; older images may still report an unversioned marker. Check
+the displayed image reference as well as the product version.
+
+From the existing deployment directory, run:
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.io/ange-katrina/scrcpygate:edge
+```
+
+Use a verified version or digest for a stable deployment. Without `--image`, the
+script uses `SCRCPYGATE_UPDATE_IMAGE`, then `latest`; `latest` exists only after a
+stable release. Repeated updates pull floating tags and compare actual image IDs.
+This command requires a running service owned by that directory and Docker Compose
+plugin. Host-network installations must follow their separate manual procedure.
+
+For an interactive update, run `./deploy.sh --menu` and choose **Update to a
+published image**. The menu queries the public GHCR registry and lists existing
+`latest` (stable), `edge` (development), and the ten highest stable version tags.
+Choose a number, review the full image reference, and confirm to start the update.
+Discovery uses host Python 3 and requires no GitHub login. If discovery fails,
+the configured default and manual tag/digest entry remain available. A custom
+`SCRCPYGATE_UPDATE_IMAGE` is preserved as the default; discovery lists only the
+official ScrcpyGate package. Tag discovery does not replace the subsequent image
+pull and health checks. Canceling the selector makes no deployment changes.
+
+The script preserves the actual old image under a local rollback tag, pulls before
+changing configuration, and creates an online SQLite snapshot with its matching
+ALAS key. A protected `.env` copy stays beside the data archive. If an online
+snapshot cannot be obtained, the update stops. `--skip-update-backup` skips the
+data snapshot but retains the configuration backup and rollback image.
+
+Startup uses the downloaded image without rebuilding or pulling again. On failure,
+the script attempts to restore the previous configuration and pinned image and
+checks its identity and health. Exit code 2 means image rollback passed; 3 means
+recovery needs attention. Database migrations are **not** automatically reversed:
+an incompatible migration requires restoring the matching data backup manually.
+
+The Logs page now defaults to 30 days of age-based retention. Existing row-count
+and file-rotation limits still apply. Choose **Do not clean up** to disable only
+age-based deletion; export any audit history needed before upgrading. Audit cleanup
+preserves the chain anchor and only removes a continuous expired prefix.
 
 ## Deploy manually
 

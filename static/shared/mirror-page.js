@@ -108,11 +108,15 @@ document.addEventListener('DOMContentLoaded',function(){
       // 这样切换设备或打开画质面板时都能保留实时读数。
       var qualityMetaBase='—';
       var measuredMbps=0;
+      // 实测码率只在「投屏中」展示：投屏期间**始终**保留这一格（低到 0.0 也不隐藏），
+      // 停止投屏才收起。以前 measuredMbps<=0 就把整格去掉，结果读数在低位时
+      // 一会出现一会消失，状态条宽度跟着跳。
+      var rateShown=false;
       function renderQualityMeta(){
         var el=document.getElementById('mirror-quality-meta');
         if(!el) return;
         var hasBase=!!qualityMetaBase&&qualityMetaBase!=='—';
-        if(!(measuredMbps>0&&hasBase)){ el.textContent=qualityMetaBase; el.removeAttribute('title'); return; }
+        if(!(rateShown&&hasBase)){ el.textContent=qualityMetaBase; el.removeAttribute('title'); return; }
         // 配置码率/实测码率:实测值单独着色;移动端省略单位,避免状态栏尾部被挤出可视区。
         var compact=window.matchMedia&&window.matchMedia('(max-width:767px)').matches;
         el.textContent=qualityMetaBase+'/';
@@ -121,6 +125,19 @@ document.addEventListener('DOMContentLoaded',function(){
         rate.className='pill-rate';
         rate.textContent=measuredMbps.toFixed(1)+(compact?'':' Mbps');
         el.appendChild(rate);
+      }
+      /* 实测帧率：紧挨分辨率显示（用户要求「分辨率旁边增加帧数」）。
+         投屏中始终占位（0 也显示），停止后收起；明显掉帧时变色。 */
+      var measuredFps=0;
+      var fpsShown=false;
+      function renderQualityFps(){
+        var el=document.getElementById('mirror-fps');
+        if(!el) return;
+        if(!fpsShown){ el.hidden=true; el.textContent='—'; el.classList.remove('is-low'); return; }
+        el.hidden=false;
+        el.textContent=Math.round(Number(measuredFps)||0)+' fps';
+        el.title=tr('实测帧率（客户端每秒收到的帧数）');
+        el.classList.toggle('is-low',Number(measuredFps)>0&&Number(measuredFps)<20);
       }
       function closeMoreMenu(restoreFocus){
         var pop=document.getElementById('cb-pop');
@@ -134,6 +151,7 @@ document.addEventListener('DOMContentLoaded',function(){
           else if(focusInside && document.activeElement && typeof document.activeElement.blur==='function') document.activeElement.blur();
         }
         moreMenuReturnFocus=null;
+        if(wasOpen) scheduleDockDensity();
       }
       function closeFixedPops(except){
         var morePop=document.getElementById('cb-pop');
@@ -157,6 +175,9 @@ document.addEventListener('DOMContentLoaded',function(){
       var menuItems=sidebar.querySelectorAll('.menu-item');
       menuItems.forEach(function(item){
         if(item.id==='acct-item'||item.id==='visual-item'||item.id==='alas-item') return;
+        // 「投屏记录」的高亮不跟点击走：它必须反映「现在是否真的在记录」，
+        // 否则打开过一次就永远蓝着（用户反馈）。点击只负责打开面板。
+        if(item.id==='record-item') return;
         item.addEventListener('click',function(event){
           var isExternal=item.getAttribute('href')!=='#';
           if(!isExternal) event.preventDefault();
@@ -204,6 +225,8 @@ document.addEventListener('DOMContentLoaded',function(){
       var acquireBtn=document.getElementById('cb-acquire');
       var keyboardBtn=document.getElementById('cb-keyboard');
       var fullscreenBtn=document.getElementById('cb-fullscreen');
+      var rotateBtn=document.getElementById('cb-rotate');
+      var rotateState=document.getElementById('cb-rotate-state');
       var popShot=document.getElementById('cb-pop-shot');
       var popKeyboard=document.getElementById('cb-pop-keyboard');
       var popAutoControl=document.getElementById('cb-pop-auto-control');
@@ -225,7 +248,10 @@ document.addEventListener('DOMContentLoaded',function(){
       var moreActionBusy=false;
       var keyboardOn=false;
       var dockHidden=false;
+      var windowDockHidden=false;
       var controlState='unknown';
+      // 控制权持有者（用户名）：状态栏「控制权」胶囊显示「我 / 某人 / 空闲」。
+      var controlOwner='';
       var watchState='idle';
       var remaining=0;
       var cdTimer=null;
@@ -317,17 +343,22 @@ document.addEventListener('DOMContentLoaded',function(){
       /* 服务端快照里的 control_lock 只有用户名，没有 client_id：
          「持有者是我」并不等于「这条连接持有」——同一账号在别的标签页/浏览器里的锁也会显示成我。
          所以只有在本地控制通道确实持有（controlOwnership）时才认 'self'；
-         同账号但非本连接按 'free' 处理，让按钮显示「获取控制」并能真正拿到（见 v2-adapter 的
-         「同账号陈旧锁先释放再重试」）。 */
+         同账号的另一端也按 'other' 处理，接管前同样需要确认。 */
       function selfHoldsControl(){
         return !!(window.ScrcpyGateV2&&window.ScrcpyGateV2.state&&window.ScrcpyGateV2.state.controlOwnership===true);
       }
       function snapshotControlState(owner){
         if(selfHoldsControl()) return 'self';
-        var username=currentMirrorUsername();
         var name=owner?String(owner):'';
         if(!name) return 'free';
-        return username&&name===username?'free':'other';
+        return 'other';
+      }
+      /* 控制权的持有者用户名（状态栏要显示「谁在控制」）。 */
+      function noteControlOwner(owner){
+        var name=owner?String(owner):'';
+        if(name) controlOwner=name;
+        else if(controlState!=='other') controlOwner='';
+        return controlOwner;
       }
       function deviceControlState(d){
         return snapshotControlState(d&&d.controller?String(d.controller):'');
@@ -358,7 +389,9 @@ document.addEventListener('DOMContentLoaded',function(){
           slotCount:GRID_SLOT_COUNT,
           onOpenDevice:function(deviceId,options){ openDeviceFromGrid(deviceId,options); },
           onAddDevice:function(){ addAdbDevice(); },
-          onNotice:function(message){ showToast(message); }
+          onNotice:function(message){ showToast(message); },
+          // 卡片实际宽度变化时刷新缩放标签。
+          onTileWidth:function(){ refreshGridZoomLabel(); }
         });
         gridView.mount(host,{
           startAll:document.getElementById('mg-start-all'),
@@ -407,8 +440,32 @@ document.addEventListener('DOMContentLoaded',function(){
         if(window.lucide) lucide.createIcons();
         return stopped;
       }
+      /* 深链：/mirror?device=<public id>（管理后台设备列表「打开」用的入口）。
+         参数只消费一次并立刻从地址栏清掉，避免刷新/后退重复应用或重复起流；
+         它优先于「上次视图」——否则管理员上次用过宫格就会被恢复成宫格（NAV 明确要求不进宫格）。 */
+      function readRequestedDeviceRef(){
+        try{
+          var ref=new URLSearchParams(window.location.search).get('device');
+          return ref?String(ref).trim():'';
+        }catch(error){
+          return '';
+        }
+      }
+      function clearRequestedDeviceRef(){
+        try{
+          if(window.history&&window.history.replaceState){
+            window.history.replaceState(null,'',window.location.pathname);
+          }
+        }catch(error){}
+      }
+      var requestedDeviceRef=readRequestedDeviceRef();
+      var deviceDeepLink=!!requestedDeviceRef;
       function restoreViewMode(){
         // 刷新后保持管理员上次选择的视图（localStorage，按浏览器保存）。
+        if(deviceDeepLink){
+          if(viewMode==='grid') setViewMode('single');
+          return;
+        }
         if(savedViewMode()!=='grid') return;
         if(!mirrorIsAdmin()) return;
         setViewMode('grid');
@@ -507,9 +564,12 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!api||!api.isConfigured||!api.isConfigured('alas.configs')) return;
         api.configured('alas.configs',{ query:{ device_id:device.id } }).then(function(payload){
           if(seq!==alasPillSeq) return;
-          // 管理员没有绑定时后端会回退到 Runtime 配置目录（admin_fallback），
-          // 那不是绑定，按需求「未绑定不显示」要过滤掉。
-          var configs=((payload&&payload.configs)||[]).filter(function(c){ return !c||c.admin_fallback!==true; });
+          var raw=((payload&&payload.configs)||[]);
+          // 管理员没有单独绑定该设备时，后端会回退到 Runtime 配置目录并标 admin_fallback
+          // （只有管理员会拿到这种条目）。同一份数据在下面「ALAS 面板」里本来就直接取用，
+          // 顶部状态条以前把它过滤掉了，于是「面板能看、状态条不见」。
+          // 现在管理员与面板一致地使用回退配置；普通用户仍然只有真正绑定才显示。
+          var configs=raw.filter(function(c){ return !c||c.admin_fallback!==true||mirrorIsAdmin(); });
           if(!configs.length) return;
           var defaultName=String(payload&&payload.default_config||'');
           var chosen=null;
@@ -520,6 +580,11 @@ document.addEventListener('DOMContentLoaded',function(){
           alasPillConfig=configName;
           alasPillState='loading';
           renderAlasPill(configName,'loading');
+          // 回退配置不是绑定：状态条上标明来源，避免误以为这台设备已绑定 ALAS。
+          if(chosen.admin_fallback===true){
+            var pillBlock=document.getElementById('mirror-alas-status-block');
+            if(pillBlock) pillBlock.title='ALAS · '+configName+'（运行时默认配置，未单独绑定该设备）';
+          }
           if(!api.isConfigured('alas.status')) return;
           return api.configured('alas.status',{ query:{ config:configName, device_id:device.id } }).then(function(statusPayload){
             if(seq!==alasPillSeq) return;
@@ -547,6 +612,7 @@ document.addEventListener('DOMContentLoaded',function(){
         options=options||{};
         var previousId=selectedDevice&&selectedDevice.id;
         var sameDevice=previousId!=null&&String(previousId)===String(id);
+        if(!sameDevice) clearControlNotice();
         var preserveSession=options.preserveSession!==false&&sameDevice&&!!currentSession&&
           (watchState==='connecting'||watchState==='playing'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming');
         selectedDevice=deviceById(id); renderDeviceList();
@@ -580,12 +646,29 @@ document.addEventListener('DOMContentLoaded',function(){
           deviceRenderSignature=nextSignature;
           if(deviceListStale && !options.silent) showToast('设备列表可能已过期,将在下一次刷新时重试');
           if(deviceItems.length){
-            var nextId=deviceById(previousId) ? previousId : deviceItems[0].id;
+            /* 深链目标优先；解析不到（已删除/无权限/标识过期）时给出可理解提示并回落到默认设备。 */
+            var requestedId=requestedDeviceRef && deviceById(requestedDeviceRef) ? requestedDeviceRef : '';
+            if(requestedDeviceRef && !requestedId){
+              showToast('未找到该设备，可能已被删除或你没有访问权限');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
+            var nextId=requestedId ? requestedId : (deviceById(previousId) ? previousId : deviceItems[0].id);
             if(shouldRender) selectDevice(nextId);
             else selectedDevice=deviceById(nextId);
+            if(requestedId){
+              if(viewMode==='grid') setViewMode('single');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
           }else{
             selectedDevice=null;
             if(shouldRender) renderDeviceList();
+            if(requestedDeviceRef){
+              showToast('未找到该设备，可能已被删除或你没有访问权限');
+              requestedDeviceRef='';
+              clearRequestedDeviceRef();
+            }
           }
           // 列表签名未变化时 selectDevice/renderDeviceList 不会执行，这里补一次视图同步。
           syncViewSwitch();
@@ -619,10 +702,13 @@ document.addEventListener('DOMContentLoaded',function(){
         var m=Math.floor(s/60), ss=s%60;
         return (m<10?'0':'')+m+':'+(ss<10?'0':'')+ss;
       }
+      /* 投屏进行中（含连接/等关键帧）：旋转按钮的可用条件，也是「画框」在拿到真实
+         尺寸前是否已经进入投屏布局的判断依据（避免开始投屏时才从 16:9 大框缩回画面大小）。 */
+      var LIVE_WATCH_STATES=['connecting','waiting','websocket','hello','keyframe','resuming','playing'];
+      function streamLive(){ return LIVE_WATCH_STATES.indexOf(watchState)>=0; }
       function renderControl(){
         var watching=watchState==='playing';
-        var pending=watchState==='connecting'||watchState==='waiting'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming';
-        var self=controlState==='self';
+        var pending=watchState==='connecting'||watchState==='waiting'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming';        var self=controlState==='self';
         var menuAllowed=mirrorControlTools ? mirrorControlTools.canUseMenu() : (watching&&!controlBusy&&!navBusy&&!moreActionBusy);        var controlMenuAllowed=mirrorControlTools ? mirrorControlTools.canUseControlMenu() : (menuAllowed&&self);
         // 方向状态对外可见（CSS/测试/排障都读它）：画面方向完全自动，这里只报当前角度。
         if(app) app.setAttribute('data-view-rotation',String(displayRotation()));
@@ -648,7 +734,7 @@ document.addEventListener('DOMContentLoaded',function(){
           keyboardBtn.classList.toggle('held',keyboardOn);
           keyboardBtn.title=keyboardOn?'关闭键盘':'开启键盘输入';
           keyboardBtn.setAttribute('aria-label',keyboardOn?'关闭键盘':'开启键盘输入');
-          keyboardBtn.setAttribute('aria-pressed',String(keyboardOn));
+          setDockTogglePressed(keyboardBtn,keyboardOn);
           keyboardBtn.setAttribute('aria-busy',moreActionBusy?'true':'false');
           keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+keyboardLabel+'</span>';
         }
@@ -659,21 +745,29 @@ document.addEventListener('DOMContentLoaded',function(){
         moreBtn.setAttribute('aria-busy',moreActionBusy?'true':'false');
         // 全屏是纯显示层操作，不依赖投屏会话，始终可用。
         if(fullscreenBtn) fullscreenBtn.disabled=false;
+        // 旋转也是纯显示层操作（不需要控制权），但要有画面可转：投屏中/连接中可用。
+        if(rotateBtn){
+          rotateBtn.disabled=!streamLive();
+          rotateBtn.title=streamLive()?'顺时针旋转 90°':'开始投屏后可用';
+          rotateBtn.setAttribute('aria-label',rotateBtn.title);
+        }
+        if(rotateState) rotateState.textContent=viewRotationDegrees()+'°';
         if(popShot) popShot.disabled=!menuAllowed;
         // 「全屏后默认获取控制」是本浏览器偏好，只要有菜单权限就能改。
         if(popAutoControl) popAutoControl.disabled=!menuAllowed;
         if(popKeyboard) popKeyboard.disabled=!controlMenuAllowed || moreActionBusy;
-        var ctext=self?'我 · 控制中':(controlState==='other'?'其他用户占用中':(controlState==='free'?'空闲':'未加载'));
-        // 控制权胶囊已移除(底部「获取控制」按钮与占用 chip 已表达同一状态),保留写入以便旧结构复用。
+        var ctext=self?'我 · 控制中':(controlState==='other'?(controlOwner?(controlOwner+' 控制中'):'其他用户占用中'):(controlState==='free'?'空闲（可获取）':'未加载'));
+        // 控制权胶囊（用户要求恢复，老项目里就有）：必须显示**谁**在控制，
+        // 只写"其他用户占用中"没法判断是不是自己被别的端顶掉了。
         if(ctrlState){
           ctrlState.className='ctrl-state '+(self?'self':(controlState==='other'?'other':'free'));
-          ctrlState.innerHTML='<i data-lucide="'+(self?'shield-check':(controlState==='other'?'lock':'shield'))+'"></i>'+ctext;
+          ctrlState.innerHTML='<i data-lucide="'+(self?'shield-check':(controlState==='other'?'lock':'shield'))+'"></i>'+escHtml(ctext);
         }
         if(window.lucide) lucide.createIcons();
-        // 按钮文案/可见性变了，控制栏宽度也会变：重新判定是否需要收文字/换行。
+        // 按钮文案/可见性改变后，重新分配单排工具栏和更多菜单。
         syncDockDensity();
         // 全屏里「获取控制」可能就藏在收起的把手后面，把手要跟着状态点亮。
-        if(fullscreenActive) updateFullscreenDockToggle();
+        updateFullscreenDockToggle();
       }
       function stopCountdown(){
         clearInterval(cdTimer);
@@ -709,8 +803,14 @@ document.addEventListener('DOMContentLoaded',function(){
           cdBanner.classList.add('show');
           return;
         }
+        if(remaining<=0){
+          // 没有「离开自动停止」警告、也没有会话时限倒计时：直接收起横幅。
+          // 这里以前只改文案不收起，于是切回页面（适配层取消警告）后横幅还挂着，
+          // 用户以为必须点「延长 10 分钟」才能继续看。
+          cdBanner.classList.remove('show');
+          return;
+        }
         if(remaining>300){ cdBanner.classList.remove('show'); return; }
-        if(remaining<=0){ cdBannerText.textContent='观看时长已用完，正在结束…'; return; }
         cdBannerText.textContent=remaining>60?('将在 '+Math.ceil(remaining/60)+' 分钟后停止观看'):('将在 '+remaining+' 秒后停止观看');
         cdBanner.classList.add('show');
       }
@@ -724,6 +824,8 @@ document.addEventListener('DOMContentLoaded',function(){
         setWatchState('expired');
       }
       function setWatchState(s){
+        // 原始层：状态切换逐次留痕（「到底是哪一步卡住」靠它对齐）。
+        if(watchState!==s) rawState('watch_state',{from:String(watchState||''),to:String(s||'')});
         watchState=s;
         if(s!=='playing' && viewerStopWarning){
           viewerStopWarning=false;
@@ -733,6 +835,18 @@ document.addEventListener('DOMContentLoaded',function(){
         overlays.forEach(function(o){ o.classList.toggle('show',o.getAttribute('data-cstate')===overlayState); });
         var watching=s==='playing';
         videoSurface.classList.toggle('show',watching);
+        // 实测码率：投屏中（含连接/重连）一直占着这一格，停止投屏才收起并清零。
+        var live=LIVE_WATCH_STATES.indexOf(s)>=0;
+        if(!live) clearControlNotice();
+        if(live!==rateShown){
+          rateShown=live;
+          if(!live){ measuredMbps=0; measuredFps=0; }
+          renderQualityMeta();
+        }
+        if(live!==fpsShown){
+          fpsShown=live;
+          renderQualityFps();
+        }
         if(watching){
           startCountdown();
         }else{
@@ -742,20 +856,34 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function startWatchFlow(){
         if(!selectedDevice) { showToast('请先选择设备'); return; }
-        // 新会话从正向开始，随后由自动摆正按设备方向调整。
+        // 新会话从正向开始，随后由自动摆正按设备方向调整（手动旋转基准一并解冻）。
         videoBox.classList.remove('rotated','rotated-180');
+        manualRotationOffset=0;
+        manualBaseRotation=null;
         if(window.ScrcpyGateV2&&typeof window.ScrcpyGateV2.setVideoRotation==='function') window.ScrcpyGateV2.setVideoRotation(0);
         if(displayController) displayController.setRotation(0);
+        // 先进入「连接中」再算布局：这样画框会按投屏布局（含 16:9 兜底）一次到位，
+        // 而不是先撑成整宽的 16:9 大框、等第一帧到了再缩回画面大小。
+        setWatchState('connecting');
         syncVideoOrientation();
         var requestGeneration=++watchRequestGeneration;
         var requestDeviceId=selectedDevice.id;
-        setWatchState('connecting');
         window.ScrcpyGateApi.configured('sessions.create',{method:'POST',body:{deviceId:requestDeviceId}}).then(function(payload){
           if(requestGeneration!==watchRequestGeneration || !selectedDevice || String(selectedDevice.id)!==String(requestDeviceId)){
             return window.ScrcpyGateApi.configured('sessions.stop',{params:{deviceId:requestDeviceId},method:'POST'}).catch(function(){});
           }
           currentSession=payload && (payload.session || payload.data || payload);
-          if(currentSession&&currentSession.controller){ controlState=String(currentSession.controller); }
+          // controller 是「持有者用户名 / self / other / free」的混合口径：这里统一走
+          // snapshotControlState + 持有者名，别把用户名直接塞进 controlState（否则
+          // 状态栏会显示成用户名、按钮判定也会错）。
+          if(currentSession&&currentSession.controller){
+            var ctrlRef=String(currentSession.controller);
+            if(ctrlRef==='self'){ controlState='self'; controlOwner=currentMirrorUsername()||'我'; }
+            else if(ctrlRef==='other'){ controlState='other'; }
+            else if(ctrlRef==='free'){ controlState='free'; controlOwner=''; }
+            else { noteControlOwner(ctrlRef); controlState=snapshotControlState(ctrlRef); }
+            renderControl();
+          }
           if(currentSession && currentSession.remainingSeconds) { remaining=currentSession.remainingSeconds; startCountdown(); }
         }).catch(function(error){ if(requestGeneration===watchRequestGeneration){ setWatchState('fail'); showToast(apiErrorText(error)); } });
       }
@@ -822,10 +950,10 @@ document.addEventListener('DOMContentLoaded',function(){
         });
       }
       /* 宫格画面缩放：滑块按百分比调格子宽度（100% = 300px），列数仍由宽度自适应。
-         范围 25%–150%（默认 80%）：再大单格子会顶满视口高度，再小就看不清缩略图。 */
+         范围 40%–150%（默认 80%）：最小 120px，保留两个完整的触控按钮。 */
       var GRID_ZOOM_KEY='scrcpygate-grid-zoom';
       var GRID_ZOOM_BASE=300;
-      var GRID_ZOOM_MIN=25;
+      var GRID_ZOOM_MIN=40;
       var GRID_ZOOM_MAX=150;
       var GRID_ZOOM_STEP=5;
       var GRID_ZOOM_DEFAULT=80;
@@ -855,8 +983,24 @@ document.addEventListener('DOMContentLoaded',function(){
         if(host) host.style.setProperty('--mg-tile-min',gridZoomPx(value)+'px');
         if(gridView) gridView.syncTileWidths();
         if(gridZoomRange&&Number(gridZoomRange.value)!==value) gridZoomRange.value=String(value);
-        if(gridZoomValue) gridZoomValue.textContent=value+'%';
+        refreshGridZoomLabel();
         return value;
+      }
+      // 卡片仅在超过容器宽度时受限；较高的卡片通过宫格滚动查看。
+      function refreshGridZoomLabel(){
+        if(!gridZoomValue) return;
+        var value=clampGridZoom(gridZoomRange?gridZoomRange.value:savedGridZoom());
+        var info=gridView&&typeof gridView.tileWidth==='function'?gridView.tileWidth():null;
+        var requested=gridZoomPx(value);
+        var effective=info&&info.effective?Number(info.effective):requested;
+        gridZoomValue.textContent=Math.abs(effective-requested)>1
+          ?(value+'%'+tr('（实际 {0}px）').replace('{0}',effective))
+          :(value+'%');
+        if(gridZoomValue.title!==undefined){
+          gridZoomValue.title=tr(effective<requested-1
+            ?'当前卡片宽 {0}px（受可用宽度限制，滑块请求 {1}px）'
+            :'当前卡片宽 {0}px').replace('{0}',effective).replace('{1}',requested);
+        }
       }
       if(gridZoomRange){
         gridZoomRange.addEventListener('input',function(){ applyGridZoom(gridZoomRange.value); });
@@ -1044,7 +1188,14 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('scrcpygate:videorate',function(event){
         var detail=event&&event.detail||{};
         measuredMbps=Math.max(0,Number(detail.mbps)||0);
+        if(!rateShown&&streamLive()){ rateShown=true; }
         renderQualityMeta();
+      });
+      document.addEventListener('scrcpygate:videofps',function(event){
+        var detail=event&&event.detail||{};
+        measuredFps=Math.max(0,Number(detail.fps)||0);
+        if(!fpsShown&&streamLive()){ fpsShown=true; }
+        renderQualityFps();
       });
       document.addEventListener('scrcpygate:viewer-stop-warning',function(){
         viewerStopWarning=true;
@@ -1053,6 +1204,8 @@ document.addEventListener('DOMContentLoaded',function(){
         cdBanner.classList.add('show');
       });
       document.addEventListener('scrcpygate:viewer-stop-cancelled',function(){
+        // 切回页面（可见 + 获得焦点）后适配层会取消「离开超时自动停止」并清零计时，
+        // 这里同步收起横幅、恢复标题 —— 不需要用户再点任何按钮。
         viewerStopWarning=false;
         document.title=baseDocumentTitle;
         updateBanner();
@@ -1066,6 +1219,10 @@ document.addEventListener('DOMContentLoaded',function(){
         controlState='free';
         if(fullscreenActive) exitFullscreen();
         setWatchState(detail.reason==='auth_invalid'?'fail':'idle');
+      });
+      document.addEventListener('scrcpygate:account-expired',function(){
+        // 到期账户仍处于登录态（可以浏览与续期），这里只说清投屏已停用。
+        showToast(tr('账户已到期：投屏与 ALAS 已停用，请联系管理员续期'));
       });
       document.addEventListener('scrcpygate:auth-invalid',function(){
         viewerStopWarning=false;
@@ -1086,8 +1243,11 @@ document.addEventListener('DOMContentLoaded',function(){
         // 服务端快照是权威：快照里没有 lock（或 lock 是别人）就不能继续显示「我有控制权」。
         // 旧代码在「没有 lock」时保留 self，导致画面重连后按钮显示有控制权但指令全被丢弃。
         if(lock&&lock.username){
+          noteControlOwner(lock.username);
           controlState=snapshotControlState(lock.username);
+          rawState('control_lock',{owner:String(lock.username),acquired_at:lock.acquired_at||null,state:controlState});
         }else if(watchState==='playing'){
+          controlOwner='';
           controlState='free';
         }
         renderControl();
@@ -1098,6 +1258,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(fullscreenActive) exitFullscreen();
         currentSession=null;
         controlState='free';
+        controlOwner='';
         setWatchState('idle');
         document.getElementById('mirror-viewers').textContent='0';
       });
@@ -1109,10 +1270,31 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('scrcpygate:controlstate',function(event){
         var active=!!(event&&event.detail&&event.detail.active);
         var owner=event&&event.detail&&event.detail.owner?String(event.detail.owner):'';
-        if(active) controlState='self';
-        else if(controlState==='self') controlState=(owner&&owner!==currentMirrorUsername())?'other':'free';
+        if(active){ controlState='self'; controlOwner=currentMirrorUsername()||'我'; clearControlNotice(); }
+        else if(controlState==='self') controlState=owner?'other':'free';
+        if(owner) noteControlOwner(owner);
+        else if(controlState==='free') controlOwner='';
+        rawState('control_state',{active:active,owner:owner,state:controlState});
         renderControl();
       });
+      function clearControlNotice(){
+        var notice=document.getElementById('control-loss-notice');
+        if(notice) notice.hidden=true;
+      }
+      document.addEventListener('scrcpygate:control-lost',function(event){
+        var detail=event.detail||{};
+        if(!selectedDevice||String(detail.deviceId)!==String(selectedDevice.id)||!streamLive()) return;
+        var message=detail.owner===currentMirrorUsername()
+          ?tr('控制权已被此账号的另一端接管，当前仍可观看。')
+          :tr('控制权已被 {0} 接管，当前仍可观看。').replace('{0}',detail.owner||tr('其他用户'));
+        var notice=document.getElementById('control-loss-notice');
+        notice.hidden=false;
+        document.getElementById('control-loss-text').textContent=message;
+        setFullscreenDockHidden(false);
+      });
+      document.getElementById('control-loss-dismiss').addEventListener('click',clearControlNotice);
+      document.addEventListener('scrcpygate:viewer-stopped',clearControlNotice);
+      document.addEventListener('scrcpygate:session-stopped',clearControlNotice);
       document.getElementById('expired-renew').addEventListener('click',function(){
         configuredCall(['account.renewal.request','users.renewal.request'],{method:'POST',body:{deviceId:selectedDevice && selectedDevice.id,sessionId:currentSession && currentSession.id}}).then(function(){ showToast('续期申请已提交'); }).catch(function(error){ showToast(apiErrorText(error)); });
       });
@@ -1248,7 +1430,7 @@ document.addEventListener('DOMContentLoaded',function(){
         keyboardOn=active;
         if(keyboardBtn){
           keyboardBtn.classList.toggle('held',active);
-          keyboardBtn.setAttribute('aria-pressed',String(active));
+          setDockTogglePressed(keyboardBtn,active);
           keyboardBtn.setAttribute('aria-label',active?'关闭键盘':'开启键盘输入');
           keyboardBtn.title=active?'关闭键盘':'开启键盘输入';
           keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+(active?'关闭键盘':'键盘')+'</span>';
@@ -1380,8 +1562,12 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         var size=fullscreenSourceSize(detail);
         if(!(size.width>0&&size.height>0)){
-          clearAdaptiveVideoFrame();
-          return;
+          // 还没拿到真实尺寸：投屏中（刚点开始/重连）用 16:9 兜底先按投屏布局落位，
+          // 否则会退回 CSS 的整宽 16:9 大框，等第一帧到了再缩回去 —— 用户看到的就是
+          // 「开始投屏的一瞬间边框变得很大再缩回画面大小」。
+          if(mirrorPanel.classList.contains('video-frame-adaptive')) return; // 已有画框：保持不动
+          if(!streamLive()){ clearAdaptiveVideoFrame(); return; }
+          size={width:16,height:9};
         }
         var v2=window.ScrcpyGateV2;
         var rotated=viewRotationTransposed();
@@ -1411,10 +1597,14 @@ document.addEventListener('DOMContentLoaded',function(){
         mirrorPanel.style.flex='0 0 auto';
         refreshVideoLayout();
       }
-      /* ---------- 方向：完全自动（跟随设备 + 按可用空间摆正） ----------
-         手动旋转（自动 / ↺ / ↻ 三个按钮）在 ISSUE-152/154/155 做过，用户实测「不好用、
-         太挤太乱」，ISSUE-156 按要求整套撤掉：画面方向只由「设备真实方向 + 当前可用空间」
-         决定。角度仍走 display-control.js 的纯状态层（0/90 两档自动摆正）。 */
+      /* ---------- 方向：自动摆正 + 手动顺时针叠加 ----------
+         画面方向由「设备真实方向 + 当前可用空间」自动决定（display-control.js 的纯状态层，
+         0/90 两档）；「旋转」按钮在此基础上叠加一个 0/90/180/270 的偏移，每点一次 +90°，
+         点满四次 offset 归零、回到自动角度 —— 既满足「每次点击顺时针转 90°」，又不会
+         让用户转进一个回不去的角度。偏移只作用于当前会话，重新开始投屏时清零。 */
+      var manualRotationOffset=0;
+      // 手动旋转期间的「自动基准」（冻结值）；null = 未冻结，按当前可用空间算。
+      var manualBaseRotation=null;
       var lastDeviceLandscape=null;
       function displaySnapshot(){
         return displayController?displayController.snapshot():null;
@@ -1449,6 +1639,35 @@ document.addEventListener('DOMContentLoaded',function(){
           window.ScrcpyGateV2.setVideoRotation(normalized);
         }
       }
+      /* ---------- 全屏方向锁：目标方向按「最终显示方向」算 ----------
+         设备横屏 → 锁横屏；但用户在竖屏手机上手动把画面转成竖的（横屏源被转置）之后，
+         再锁横屏就等于把「竖着的画面」塞进横屏，画面只能缩成中间一条窄带 ——
+         这正是用户反馈的「旋转后边框很大画面很小」。所以目标方向必须跟着**当前显示的
+         画面方向**走：显示是竖的就锁竖屏，显示是横的就锁横屏。 */
+      function fullscreenOrientationFor(deviceLandscape){
+        var displayedLandscape=viewRotationTransposed()?!deviceLandscape:deviceLandscape;
+        return displayedLandscape?'landscape':'portrait';
+      }
+      function lockFullscreenOrientation(orientation){
+        if(!fullscreenActive) return;
+        var screenOrientation=window.screen&&window.screen.orientation;
+        if(!screenOrientation||typeof screenOrientation.lock!=='function') return;
+        if(fullscreenOrientationTarget===orientation) return;
+        fullscreenOrientationTarget=orientation;
+        try{
+          var lockResult=screenOrientation.lock(orientation);
+          if(lockResult&&typeof lockResult.catch==='function'){
+            lockResult.catch(function(){ fullscreenOrientationTarget=''; });
+          }
+        }catch(e){ fullscreenOrientationTarget=''; }
+      }
+      /* 手动旋转之后立刻按新方向重新申请一次（手机上就是让屏幕跟着转，画面才能铺满）。 */
+      function applyFullscreenOrientationLock(){
+        if(!fullscreenActive) return;
+        var size=fullscreenSourceSize(lastVideoSizeDetail);
+        if(!(size.width>0&&size.height>0)) return;
+        lockFullscreenOrientation(fullscreenOrientationFor(size.width>=size.height));
+      }
       /* ---------- 跟随设备：画面方向跟着设备本身走 ----------
          默认不转：设备竖屏就竖着显示（宽屏窗口里也不再为了「面积更大」把竖屏画面掰横，
          ISSUE-157：那会让工作台默认画面看起来是横向的）。
@@ -1474,12 +1693,45 @@ document.addEventListener('DOMContentLoaded',function(){
         //    ISSUE-159 的用户反馈：全屏后横屏设备画面变小）。
         return displayController.resolveAuto();
       }
-      /* 按当前源尺寸 + 可用空间自动摆正；返回本次是否改变了方向。 */
+      /* 按当前源尺寸 + 可用空间自动摆正，再叠加手动偏移；返回本次是否改变了方向。
+         手动旋转期间自动基准会被**冻结**：否则全屏里旋转会让屏幕跟着转，屏幕一转可用空间
+         就变了，自动摆正又算出另一个基准，画面会被「自动 + 偏移」连转两次（用户看到的
+         是「转一下画面反而又转回去/缩成一条」）。冻结后：偏移 0→90→180→270→0 就是四次
+         顺时针回原位，屏幕也跟着转回原方向。会话重新开始时解冻（见 reset 处）。 */
+      function autoRotationWithOffset(){
+        if(manualBaseRotation===null){
+          var base=autoFitRotationDegrees();
+          if(base===null) return null;
+          if(!manualRotationOffset) return base;
+          manualBaseRotation=base;
+        }
+        if(manualBaseRotation===null) return null;
+        return ((manualBaseRotation+manualRotationOffset)%360+360)%360;
+      }
       function applyAutoFitRotation(){
-        var desired=autoFitRotationDegrees();
+        var desired=autoRotationWithOffset();
         if(desired===null||desired===viewRotationDegrees()) return false;
         setViewRotation(desired);
         return true;
+      }
+      /* 顺时针 90°：偏移 +90 后重新按「自动角度 + 偏移」落位。 */
+      function rotateViewClockwise(){
+        manualRotationOffset=(manualRotationOffset+90)%360;
+        var desired=autoRotationWithOffset();
+        if(desired===null){
+          // 还没有源尺寸（未投屏/刚连接）：纯顺时针转，等尺寸到位后由自动摆正接管。
+          desired=((viewRotationDegrees()+90)%360+360)%360;
+          if(displayController) displayController.setRotation(desired);
+          manualRotationOffset=0;
+        }
+        setViewRotation(desired);
+        applyAdaptiveVideoFrame(lastVideoSizeDetail);
+        // 全屏里旋转会改变「最终显示方向」：立刻按新方向重新申请屏幕方向锁，
+        // 让手机跟着转（否则竖着的画面被留在横屏里，只能缩成中间一条）。
+        applyFullscreenOrientationLock();
+        syncVideoOrientation(lastVideoSizeDetail);
+        showToast('画面已顺时针旋转 90°（当前 '+viewRotationDegrees()+'°）');
+        renderControl();
       }
       /**
        * 设备自己转了方向（横竖互换）= 重新按新方向自动摆正（不一定是正向）。
@@ -1489,6 +1741,9 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function syncVideoOrientation(detail){
         if(!app) return;
+        // 不带尺寸的调用（进/出全屏、窗口缩放）也要能用上一次的真实画面尺寸：
+        // 否则刚进全屏时还没有新的一帧，方向锁这一段会被跳过（手机上就不会自动横过来）。
+        if(!(detail&&Number(detail.width)>0&&Number(detail.height)>0)) detail=lastVideoSizeDetail;
         var size=fullscreenSourceSize(detail);
         // 只在事件真的带来尺寸时记住：resize/orientationchange 触发的空调用
         // 不会冲掉上一次的真实画面尺寸。
@@ -1514,23 +1769,13 @@ document.addEventListener('DOMContentLoaded',function(){
         applyAdaptiveVideoFrame(lastVideoSizeDetail);
         // 屏幕方向锁按「画面内容方向」算，不按摆正后的视图算：横屏设备在竖屏手机上
         // 宁可让手机真的横过来（画面自然铺满），也不能算成 portrait 把手机锁在竖屏 ——
-        // 那正是「手机端全屏下没有自动横向」（用户反馈）。
-        var orientation=deviceLandscape?'landscape':'portrait';
+        // 那正是「手机端全屏下没有自动横向」（用户反馈）。手动旋转叠加后，画面显示方向
+        // 可能已经反过来，此时目标方向也跟着反过来（否则旋转后画面缩成窄条）。
+        var orientation=fullscreenOrientationFor(deviceLandscape);
         app.setAttribute('data-video-orientation',orientation);
         // 画面尺寸/方向变了，顶部留白也跟着变 —— 让位位移要重算。
         syncFullscreenDockLift();
-        // 全屏（原生或纯 CSS 全屏）都尝试锁定屏幕方向；桌面浏览器不支持时静默失败。
-        if(!fullscreenActive) return;
-        var screenOrientation=window.screen&&window.screen.orientation;
-        if(!screenOrientation||typeof screenOrientation.lock!=='function') return;
-        if(fullscreenOrientationTarget===orientation) return;
-        fullscreenOrientationTarget=orientation;
-        try{
-          var lockResult=screenOrientation.lock(orientation);
-          if(lockResult&&typeof lockResult.catch==='function'){
-            lockResult.catch(function(){ fullscreenOrientationTarget=''; });
-          }
-        }catch(e){ fullscreenOrientationTarget=''; }
+        lockFullscreenOrientation(orientation);
       }
       /* ---------- 自适应画框：跟随窗口尺寸重算 ----------
          自适应画框是按「当时可用空间」算出的像素尺寸。窗口从小变大（小窗口起流后
@@ -1577,7 +1822,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!fullscreenBtn) return;
         var label=fullscreenActive?'退出全屏':'全屏显示';
         var state=fullscreenActive?'全屏':'窗口';
-        fullscreenBtn.setAttribute('aria-pressed',String(fullscreenActive));
+        setDockTogglePressed(fullscreenBtn,fullscreenActive);
         fullscreenBtn.setAttribute('aria-label',label);
         fullscreenBtn.title=label;
         fullscreenBtn.classList.toggle('held',fullscreenActive);
@@ -1645,17 +1890,17 @@ document.addEventListener('DOMContentLoaded',function(){
         fullscreenOrientationTarget='';
         if(!next){
           fullscreenOrientationTarget='';
-          dockHidden=false;
+          dockHidden=windowDockHidden;
         }
         // 全屏是沉浸式播放：控制栏默认收进边缘，只留一条细把手，点一下才展开
         // （需要手动点「获取控制」的情况由 autoAcquireControlOnFullscreen 兜底摊开）。
-        if(next&&!wasActive) dockHidden=true;
+        if(next&&!wasActive){ windowDockHidden=dockHidden; dockHidden=true; }
         app.classList.toggle('is-fullscreen',next);
-        app.classList.toggle('dock-menu-collapsed',next&&dockHidden);
+        app.classList.toggle('dock-menu-collapsed',dockHidden);
         app.setAttribute('data-fullscreen',String(next));
-        if(ctrlDock) ctrlDock.classList.toggle('dock-hidden',next&&dockHidden);
+        if(ctrlDock){ ctrlDock.classList.toggle('dock-hidden',dockHidden); ctrlDock.inert=dockHidden; }
         placeMoreMenuForFullscreen(next);
-        // 全屏里控制栏只留图标（见 CSS），宽度变了要重新判定是否需要换行 —— 放在切换
+        // 全屏里控制栏只留图标（见 CSS），宽度变了要重新分配更多菜单 —— 放在切换
         // is-fullscreen 之后，密度判定读到的才是切换后的真实宽度。
         syncDockDensity();
         // 全屏留白就是纯黑（#000）：不拉伸、不裁切，也不加任何背景层。
@@ -1683,7 +1928,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
       function updateFullscreenDockToggle(){
         if(!fullscreenDockToggle) return;
-        var visible=fullscreenActive;
+        var visible=viewMode!=='grid';
         fullscreenDockToggle.setAttribute('aria-hidden',String(!visible));
         fullscreenDockToggle.tabIndex=visible?0:-1;
         fullscreenDockToggle.setAttribute('aria-expanded',String(!dockHidden));
@@ -1692,11 +1937,16 @@ document.addEventListener('DOMContentLoaded',function(){
         // 可读名称与提示走 aria-label / title，状态用 .is-attention 点亮。
         var label=attention?'展开控制栏并获取控制':'展开控制栏';
         if(!dockHidden) label='收起控制栏';
-        var hint=label+'（拖动可沿屏幕左右侧移动，双击或按 0 回到右侧中间）';
-        fullscreenDockToggle.setAttribute('aria-label',hint);
-        fullscreenDockToggle.title=hint;
+        var hint=fullscreenActive?label+'（拖动可沿屏幕左右侧移动，双击或按 0 回到右侧中间）':label;
+        fullscreenDockToggle.setAttribute('aria-label',tr(hint));
+        fullscreenDockToggle.title=tr(hint);
         fullscreenDockToggle.classList.toggle('is-attention',attention);
-        if(fullscreenDockToggle.firstChild) fullscreenDockToggle.textContent='';
+        var toggleIcon=fullscreenActive?'':(dockHidden?'chevron-up':'chevron-down');
+        if(fullscreenDockToggle.dataset.icon!==toggleIcon){
+          fullscreenDockToggle.dataset.icon=toggleIcon;
+          fullscreenDockToggle.innerHTML=toggleIcon?'<i data-lucide="'+toggleIcon+'" aria-hidden="true"></i>':'';
+          if(window.lucide) lucide.createIcons();
+        }
       }
 
       var DOCK_AUTO_HIDE_MS=4000;
@@ -1797,13 +2047,18 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('wheel',noteDockActivity,{capture:true,passive:true});
 
       function setFullscreenDockHidden(hidden){
-        if(!fullscreenActive) return;
+        if(hidden){
+          closeMoreMenu(false);
+          if(ctrlDock&&ctrlDock.contains(document.activeElement)&&fullscreenDockToggle) fullscreenDockToggle.focus({preventScroll:true});
+        }
         if(mirrorControlTools) mirrorControlTools.setDockHidden(!!hidden); else dockHidden=!!hidden;
-        if(ctrlDock) ctrlDock.classList.toggle('dock-hidden',dockHidden);
+        if(!fullscreenActive) windowDockHidden=dockHidden;
+        if(ctrlDock){ ctrlDock.classList.toggle('dock-hidden',dockHidden); ctrlDock.inert=dockHidden; }
         app.classList.toggle('dock-menu-collapsed',dockHidden);
-        if(dockHidden) closeMoreMenu(true);
         updateFullscreenDockToggle();
         applyDockAnchor();
+        scheduleDockDensity();
+        scheduleAdaptiveFrameRefresh();
         // 展开/收起会改变「画面该不该让位」，等布局稳定后再算位移（见下面的让位逻辑）。
         scheduleFullscreenDockLift();
         // 展开后空闲一段时间自动收回边缘；收起时不再计时。
@@ -1880,21 +2135,54 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       document.addEventListener('fullscreenchange',scheduleFullscreenDockLift);
 
-      /* ---------- 控制栏密度：先收文字，再换行，绝不让按钮被裁掉 ----------
-         窄屏上控制栏原来是「固定一条 + 横向滚动」，于是最左边/最右边的按钮会被裁一半，
-         而且「获取控制」拿到焦点时浏览器会把容器滚过去，把最左边的「开始投屏」推出可视区。
-         这里按实际宽度分两档降级：① 隐藏文字标签、按钮变方形（图标 + aria-label）；
-         ② 仍然放不下才换行。宽度够时保持原来的「图标 + 文字」胶囊样式。 */
+      /* 单排工具栏：先收文字，仍放不下时将次要操作移入「更多」。 */
       function dockOverflow(){
         if(!ctrlDock) return 0;
         return Math.max(0,(Number(ctrlDock.scrollWidth)||0)-(Number(ctrlDock.clientWidth)||0));
       }
+      function setDockTogglePressed(button,pressed){
+        button.setAttribute(button.getAttribute('role')==='menuitemcheckbox'?'aria-checked':'aria-pressed',String(pressed));
+      }
       function syncDockDensity(){
-        if(!ctrlDock) return;
-        ctrlDock.classList.remove('dock-compact','dock-wrap');
+        if(!ctrlDock||dockHidden||!ctrlDock.offsetWidth||(cbPop&&cbPop.classList.contains('open'))) return;
+        restoreDockOverflow();
+        ctrlDock.classList.remove('dock-compact');
         if(dockOverflow()<=0) return;
         ctrlDock.classList.add('dock-compact');
-        if(dockOverflow()>0) ctrlDock.classList.add('dock-wrap');
+        // Keep one row with full touch targets. Move the actual buttons so
+        // handlers, permission flags and changing labels stay in sync.
+        var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-tasks','cb-back','cb-home','cb-fullscreen','cb-watch','cb-acquire'];
+        Array.prototype.forEach.call(ctrlDock.querySelectorAll(':scope > button'),function(el){
+          if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
+        });
+        candidates.some(function(id){
+          if(dockOverflow()<=0) return true;
+          var el=document.getElementById(id);
+          if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return false;
+          var anchor=document.createComment('dock action');
+          el.before(anchor);
+          var toggle=el.hasAttribute('aria-pressed');
+          dockOverflowItems.push({element:el,anchor:anchor,role:el.getAttribute('role'),toggle:toggle});
+          el.setAttribute('role',toggle?'menuitemcheckbox':'menuitem');
+          if(toggle){ el.setAttribute('aria-checked',el.getAttribute('aria-pressed')); el.removeAttribute('aria-pressed'); }
+          cbPop.appendChild(el);
+          var moreWrap=document.getElementById('cb-more');
+          if(dockOverflowItems.length===1) dockMoreWasOff=moreWrap.hasAttribute('data-feature-off');
+          moreWrap.removeAttribute('data-feature-off');
+          moreBtn.disabled=false;
+          return false;
+        });
+      }
+      var dockOverflowItems=[];
+      var dockMoreWasOff=false;
+      function restoreDockOverflow(){
+        if(dockOverflowItems&&dockOverflowItems.length&&dockMoreWasOff) document.getElementById('cb-more').setAttribute('data-feature-off','');
+        (dockOverflowItems||[]).forEach(function(item){
+          item.anchor.replaceWith(item.element);
+          if(item.role) item.element.setAttribute('role',item.role); else item.element.removeAttribute('role');
+          if(item.toggle){ item.element.setAttribute('aria-pressed',item.element.getAttribute('aria-checked')); item.element.removeAttribute('aria-checked'); }
+        });
+        dockOverflowItems=[];
       }
       var dockDensityRaf=0;
       function scheduleDockDensity(){
@@ -2205,7 +2493,7 @@ document.addEventListener('DOMContentLoaded',function(){
       window.addEventListener('resize',function(){ syncVideoOrientation(); applyDockAnchor(); });
 
       function moreMenuItems(){
-        return Array.prototype.slice.call(cbPop ? cbPop.querySelectorAll('[role^="menuitem"]') : []).filter(function(item){ return !item.disabled; });
+        return Array.prototype.slice.call(cbPop ? cbPop.querySelectorAll('[role^="menuitem"]') : []).filter(function(item){ return !item.disabled&&item.getBoundingClientRect().width>0; });
       }
       function openMoreMenu(){
         if(!cbPop || moreBtn.disabled) return;
@@ -2260,8 +2548,12 @@ document.addEventListener('DOMContentLoaded',function(){
         moreActionBusy=false;
         renderControl();
       });
-      if(fullscreenDockToggle) fullscreenDockToggle.addEventListener('click',function(event){
-        // 刚拖过 / 双击复位：都不要当成「展开-收起」。
+      // 旋转：每次点击在自动摆正的基础上顺时针 +90°（点满四次回到自动角度）。
+      if(rotateBtn) rotateBtn.addEventListener('click',function(){
+        if(rotateBtn.disabled) return;
+        rotateViewClockwise();
+      });
+      if(fullscreenDockToggle) fullscreenDockToggle.addEventListener('click',function(event){        // 刚拖过 / 双击复位：都不要当成「展开-收起」。
         if(Date.now()-dockDragEndedAt<250) return;
         if(event&&event.detail>1) return;
         setFullscreenDockHidden(!dockHidden);
@@ -2858,14 +3150,15 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       /* ---------- 投屏管理：按角色下发的工作台功能开关 + 底部菜单编排 ---------- */
       // 只控制显示与可用性；权限判定仍在服务端。缺省（未下发/未知）一律启用。
-      // 状态条按**功能块**各一个开关（设备连接 / 观看端 / 剩余时长 / ALAS / 画质）。
+      // 状态条按**功能块**各一个开关（设备连接 / 观看端 / 控制权 / ALAS / 画质）。
+      // 「剩余时长」按用户要求下线：改由「控制权」块显示谁在控制。
       var WORKBENCH_FEATURE_TARGETS={
         status:['status-pill'],
         status_device:['mirror-device-name','mirror-device-dot','mirror-device-status'],
         status_viewers:['mirror-viewers-label','mirror-viewers-block'],
-        status_countdown:['cd-label','cd-time'],
+        status_control:['mirror-control-label','ctrl-state'],
         status_alas:['mirror-alas-label','mirror-alas-dot','mirror-alas-status'],
-        status_quality:['mirror-quality-label','mirror-quality-name','mirror-quality-meta'],
+        status_quality:['mirror-quality-label','mirror-quality-name','mirror-fps','mirror-quality-meta'],
         notifications:['notify-btn','notify-pop']
       };
       // 画面上的「开始观看」不属于控制栏，仍随 watch 开关一起隐藏。
@@ -2875,9 +3168,9 @@ document.addEventListener('DOMContentLoaded',function(){
       var STATUS_PILL_GROUPS=[
         ['pill-device',['mirror-device-label','mirror-device-name','mirror-device-dot','mirror-device-status']],
         ['pill-viewers',['mirror-viewers-label','mirror-viewers-block']],
-        ['cd-block',['cd-label','cd-time']],
+        ['pill-control',['mirror-control-label','ctrl-state']],
         ['mirror-alas-status-block',['mirror-alas-label','mirror-alas-dot','mirror-alas-status']],
-        ['pill-quality',['mirror-quality-label','mirror-quality-name','mirror-quality-meta']]
+        ['pill-quality',['mirror-quality-label','mirror-quality-name','mirror-fps','mirror-quality-meta']]
       ];
       var workbenchFeatures={};
       function workbenchFeatureEnabled(id){ return workbenchFeatures[id]!==false; }
@@ -2980,8 +3273,9 @@ document.addEventListener('DOMContentLoaded',function(){
         var parts=[];
         Object.keys(data||{}).forEach(function(key){
           var value=data[key];
-          if(value===undefined||value===null||value==='') return;
-          parts.push(key+'='+String(value));
+          if(value===undefined||value===null) return;
+          // 空串也照原样显示：记录是排查用的，宁可多一行也不要漏掉字段。
+          parts.push(key+'='+(value&&typeof value==='object'?JSON.stringify(value):String(value)));
         });
         return parts.join('  ');
       }
@@ -3002,23 +3296,84 @@ document.addEventListener('DOMContentLoaded',function(){
           parts.push('<span class="tl-stat'+(heavy?' warn':'')+'">'+tlKindLabel(kind)+' <b>'+kinds[kind]+'</b></span>');
         });
         tlStats.innerHTML=parts.join('');
+        tlRenderFloat();
+      }
+      /* 记录中悬浮窗：条数 / 警告 / 错误 / 参与端，点一下回面板。 */
+      function tlRenderFloat(){
+        renderRecordItemState();
+        var box=document.getElementById('tl-float');
+        if(!box) return;
+        if(!recordInProgress()&&!localRecord.active){ box.hidden=true; return; }
+        box.hidden=false;
+        var active=recordInProgress();
+        box.classList.toggle('is-stopped',!active);
+        var api=timelineApi();
+        var stats=(api&&typeof api.stats==='function')?api.stats():{total:0,warn:0,error:0};
+        var state=recordState();
+        var session=recordSession();
+        var title=document.getElementById('tl-float-title');
+        if(title){
+          if(session&&recordIsInitiator()) title.textContent=session.stopped?'多端记录已停止':'多端记录中 · 主端';
+          else if(session) title.textContent=session.stopped?'多端记录已停止':'多端记录中 · 参与端';
+          else title.textContent=active?'本端记录中':'记录已停止';
+        }
+        var meta=document.getElementById('tl-float-meta');
+        if(meta){
+          var bits=[Number(stats.total||0)+' 条'];
+          if(stats.warn) bits.push(Number(stats.warn)+' 警告');
+          // 错误数一直显示（0 错误也要看得见），否则「记录中到底有没有出错」没有依据。
+          bits.push(Number(stats.error||0)+' 错误');
+          if(session){
+            var participants=session.participants||[];
+            var accepted=participants.filter(function(item){
+              return item.state==='accepted'||item.state==='uploaded';
+            }).length;
+            bits.push('参与 '+accepted+'/'+participants.length);
+            var bundles=(state&&state.bundles)||[];
+            if(bundles.length) bits.push('已收到 '+bundles.length+' 份');
+          }
+          meta.textContent=bits.join(' · ');
+        }
+        var stopBtn=document.getElementById('tl-float-stop');
+        if(stopBtn){
+          var stoppable=localRecord.active||!!(session&&!session.stopped&&recordIsInitiator());
+          stopBtn.hidden=!stoppable;
+        }
       }
       function tlRow(entry){
         var row=document.createElement('li');
         row.className='tl-row'+(entry.level==='info'?'':' '+entry.level);
+        // 悬停看完整原始记录（含未渲染的键、序号、级别）：排查时不会因为界面裁剪漏信息。
+        try{ row.title=JSON.stringify(entry); }catch(e){}
         var time=document.createElement('span');
         time.className='tl-time';
         var date=new Date(entry.t);
         time.textContent=('0'+date.getHours()).slice(-2)+':'+('0'+date.getMinutes()).slice(-2)+':'+('0'+date.getSeconds()).slice(-2);
+        // 序号也显示出来：跳号/丢帧要靠它对齐服务端日志。
+        if(entry.seq!=null){
+          var seq=document.createElement('span');
+          seq.className='tl-seq';
+          seq.textContent='#'+entry.seq;
+          time.appendChild(document.createTextNode(' '));
+          time.appendChild(seq);
+        }
         var body=document.createElement('span');
         body.className='tl-body';
         var main=document.createElement('span');
         main.className='tl-main';
         var kind=document.createElement('span');
         kind.className='tl-kind';
-        kind.textContent=tlKindLabel(entry.kind);
+        // 原始 kind 也留着（中文标签只作可读性补充）：未收录的事件类型照样看得出来。
+        kind.textContent=tlKindLabel(entry.kind)+(entry.kind&&tlKindLabel(entry.kind)!==entry.kind?' / '+entry.kind:'');
         main.appendChild(kind);
         main.appendChild(document.createTextNode(entry.text||''));
+        if(entry.level&&entry.level!=='info'){
+          var lvl=document.createElement('span');
+          lvl.className='tl-level tl-level-'+entry.level;
+          lvl.textContent=entry.level;
+          main.appendChild(document.createTextNode(' '));
+          main.appendChild(lvl);
+        }
         body.appendChild(main);
         var metaText=tlDataText(entry.data);
         if(metaText){
@@ -3069,6 +3424,444 @@ document.addEventListener('DOMContentLoaded',function(){
       function recordApi(){
         return (window.ScrcpyGateV2&&window.ScrcpyGateV2.mirrorRecord)||null;
       }
+      /* ---------- 原始数据层（面板「原始数据」块） ----------
+         只渲染适配器已经采集到的原始项；采集开关关闭时适配器完全不占内存。 */
+      var tlRawList=document.getElementById('tl-raw-list');
+      var tlRawStats=document.getElementById('tl-raw-stats');
+      var tlRawToggle=document.getElementById('tl-raw-toggle');
+      var tlRawUnsubscribe=null;
+      var TL_RAW_DOM_LIMIT=300;
+      function rawApi(){
+        return (window.ScrcpyGateV2&&window.ScrcpyGateV2.videoRecordRaw)||null;
+      }
+      function tlRawPayloadText(payload){
+        if(payload===null||payload===undefined) return '';
+        if(typeof payload==='string') return payload;
+        try{ return JSON.stringify(payload); }catch(e){ return String(payload); }
+      }
+      function tlRawRow(entry){
+        var row=document.createElement('li');
+        row.className='tl-raw-row';
+        var time=document.createElement('span');
+        time.className='tl-time';
+        var date=new Date(entry.t);
+        time.textContent=('0'+date.getHours()).slice(-2)+':'+('0'+date.getMinutes()).slice(-2)+':'+('0'+date.getSeconds()).slice(-2)+'.'
+          +('00'+date.getMilliseconds()).slice(-3);
+        var chip=document.createElement('span');
+        chip.className='tl-raw-ch '+String(entry.channel||'');
+        chip.textContent=String(entry.channel||'')+(entry.kind?'/'+entry.kind:'');
+        var body=document.createElement('span');
+        body.className='tl-raw-body';
+        // 原文照抄（不翻译、不裁剪），排查时以它为准。
+        body.textContent=tlRawPayloadText(entry.payload);
+        row.appendChild(time);
+        row.appendChild(chip);
+        row.appendChild(body);
+        return row;
+      }
+      function tlRenderRawStats(){
+        if(!tlRawStats) return;
+        var api=rawApi();
+        if(!api||typeof api.stats!=='function'){ tlRawStats.textContent='—'; return; }
+        var stats=api.stats()||{};
+        var parts=[Number(stats.total||0)+' 条'];
+        if(stats.bytes) parts.push(Math.round(Number(stats.bytes)/1024)+' KB');
+        if(stats.dropped) parts.push('已丢弃 '+stats.dropped);
+        tlRawStats.textContent=parts.join(' · ')+((api.isEnabled&&api.isEnabled()===false)?'（采集已关闭）':'');
+      }
+      function tlRenderRaw(){
+        if(!tlRawList) return;
+        var api=rawApi();
+        var entries=(api&&typeof api.entries==='function')?api.entries():[];
+        tlRawList.innerHTML='';
+        if(!entries.length){
+          var empty=document.createElement('li');
+          empty.className='tl-empty';
+          empty.textContent='还没有原始数据。开始投屏后这里会逐条显示控制面 JSON 原文、发出的控制消息、Raw v2 包头、接口调用、状态切换与环境快照。';
+          tlRawList.appendChild(empty);
+          tlRenderRawStats();
+          return;
+        }
+        var tail=entries.slice(Math.max(0,entries.length-TL_RAW_DOM_LIMIT));
+        tail.forEach(function(entry){ tlRawList.appendChild(tlRawRow(entry)); });
+        tlRawList.scrollTop=tlRawList.scrollHeight;
+        tlRenderRawStats();
+      }
+      function tlAppendRaw(entry){
+        if(!tlRawList||!entry) return;
+        if(tlRawList.firstElementChild&&tlRawList.firstElementChild.className==='tl-empty') tlRawList.innerHTML='';
+        tlRawList.appendChild(tlRawRow(entry));
+        while(tlRawList.childElementCount>TL_RAW_DOM_LIMIT) tlRawList.removeChild(tlRawList.firstElementChild);
+        tlRawList.scrollTop=tlRawList.scrollHeight;
+        tlRenderRawStats();
+      }
+      function tlSubscribeRaw(){
+        var api=rawApi();
+        if(!api||typeof api.subscribe!=='function'||tlRawUnsubscribe) return;
+        tlRawUnsubscribe=api.subscribe(function(entry){ tlAppendRaw(entry); });
+      }
+      function tlUnsubscribeRaw(){
+        if(typeof tlRawUnsubscribe==='function'){ tlRawUnsubscribe(); tlRawUnsubscribe=null; }
+      }
+      function tlRawEnabledPref(){
+        try{ return window.localStorage.getItem('scrcpygate-record-raw')!=='0'; }catch(e){ return true; }
+      }
+      function tlApplyRawEnabled(enabled){
+        var api=rawApi();
+        if(api&&typeof api.setEnabled==='function') api.setEnabled(!!enabled);
+        try{ window.localStorage.setItem('scrcpygate-record-raw',enabled?'1':'0'); }catch(e){}
+        if(tlRawToggle) tlRawToggle.checked=!!enabled;
+        tlRenderRawStats();
+      }
+      // 页面侧状态也进原始层（watchState / 控制权 / 显示层操作 / 离开超时决策）。
+      function rawState(kind,payload){
+        var api=rawApi();
+        if(api&&typeof api.push==='function') api.push('state',kind,payload||null);
+      }
+      function rawEnvironment(extra){
+        var api=rawApi();
+        if(api&&typeof api.environment==='function') api.environment(extra||null);
+      }
+
+      /* ---------- 旧记录（记录结束自动归档） ----------
+         用户要求：记录一结束就把这次记录收进「旧记录」卡片，同时自动清空实时缓冲，
+         下一次记录从干净状态开始。卡片放在面板「仅本端记录」下方：左侧信息
+         （名称/记录时间/设备/时长/条数），右下角复制、导出、查看、删除。
+         归档存 localStorage（关掉页面也还在），有单条原始数据预算与总容量上限，超了
+         丢最旧的；原始数据被裁剪时会写进卡片信息里，不假装完整。 */
+      var TL_ARCHIVE_KEY='scrcpygate-record-archive';
+      var TL_ARCHIVE_MAX=8;
+      var TL_ARCHIVE_RAW_BUDGET=512*1024;
+      var TL_ARCHIVE_TOTAL_BUDGET=3.5*1024*1024;
+      var tlArchive=[];
+      var tlArchiveViewId='';
+      var tlArchiveViewMode='events';
+      var recordStartedAt=0;
+      function tlArchiveBytes(value){ try{ return JSON.stringify(value).length; }catch(e){ return 0; } }
+      function tlTimeText(ms){
+        var date=new Date(Number(ms)||Date.now());
+        return ('0'+date.getHours()).slice(-2)+':'+('0'+date.getMinutes()).slice(-2)+':'+('0'+date.getSeconds()).slice(-2);
+      }
+      function tlArchiveLoad(){
+        try{
+          var raw=window.localStorage.getItem(TL_ARCHIVE_KEY);
+          var list=raw?JSON.parse(raw):[];
+          return Array.isArray(list)?list:[];
+        }catch(e){ return []; }
+      }
+      function tlArchivePersist(){
+        // 配额超了就丢最旧的再存；再失败就只保留最近一条（不能让归档把记录功能搞挂）。
+        var attempt=0;
+        while(attempt<2){
+          try{ window.localStorage.setItem(TL_ARCHIVE_KEY,JSON.stringify(tlArchive)); return true; }
+          catch(e){
+            attempt+=1;
+            if(!tlArchive.length) return false;
+            tlArchive.pop();
+          }
+        }
+        return false;
+      }
+      function tlArchiveTrim(){
+        while(tlArchive.length>TL_ARCHIVE_MAX) tlArchive.pop();
+        while(tlArchive.length>1&&tlArchiveBytes(tlArchive)>TL_ARCHIVE_TOTAL_BUDGET) tlArchive.pop();
+      }
+      function tlArchiveStamp(date){
+        var d=date||new Date();
+        function p(n){ return (n<10?'0':'')+n; }
+        return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+      }
+      function tlArchiveModeLabel(mode){
+        if(mode==='multi') return '多端 · 主端';
+        if(mode==='participant') return '多端 · 副端';
+        return '单端';
+      }
+      function tlArchiveModeClass(mode){ return mode==='local'?'local':'multi'; }
+      function tlArchiveDurationText(ms){
+        var total=Math.max(0,Math.round(Number(ms)/1000));
+        var minutes=Math.floor(total/60);
+        var seconds=total%60;
+        return minutes?minutes+'分'+seconds+'秒':seconds+'秒';
+      }
+      /* 把当前实时缓冲归档。mode: local / multi / participant。没有内容就不归档。 */
+      function tlArchiveCurrent(mode,reason){
+        var api=timelineApi();
+        var rawApiRef=rawApi();
+        var payload=(api&&typeof api.json==='function')?api.json():null;
+        if(!payload) return null;
+        var entries=payload.entries||[];
+        var rawEntries=(payload.raw&&payload.raw.entries)||[];
+        if(!entries.length&&!rawEntries.length) return null;
+        // 原始数据按预算保留最新的（旧记录要长期留在浏览器里）。
+        var keptRaw=[]; var used=0;
+        for(var i=rawEntries.length-1;i>=0;i--){
+          var size=tlArchiveBytes(rawEntries[i]);
+          if(used+size>TL_ARCHIVE_RAW_BUDGET) break;
+          used+=size;
+          keptRaw.unshift(rawEntries[i]);
+        }
+        var rawTrimmed=rawEntries.length-keptRaw.length;
+        payload.raw=Object.assign({},payload.raw||{},{entries:keptRaw,stats:Object.assign({},(payload.raw&&payload.raw.stats)||{},{total:keptRaw.length,stored:keptRaw.length,trimmed:rawTrimmed})});
+        var ended=Date.now();
+        var started=recordStartedAt||Number(payload.stats&&payload.stats.since)||ended;
+        var duration=Number(payload.stats&&payload.stats.duration_ms)||(ended-started);
+        var deviceName=(selectedDevice&&selectedDevice.name)||String(payload.device_id||'')||'未知设备';
+        var name=tlArchiveModeLabel(mode)+' · '+deviceName+' · '+tlArchiveStamp(new Date(ended));
+        var item={
+          id:'rec-'+ended+'-'+Math.random().toString(16).slice(2,6),
+          name:name,
+          mode:String(mode||'local'),
+          reason:String(reason||'stopped'),
+          device:deviceName,
+          device_id:String(payload.device_id||''),
+          started_at:started,
+          ended_at:ended,
+          duration_ms:duration,
+          raw_trimmed:rawTrimmed,
+          payload:payload
+        };
+        tlArchive.unshift(item);
+        tlArchiveTrim();
+        var stored=tlArchivePersist();
+        tlArchiveRender();
+        showToast('已归档旧记录：'+name+(stored?'':'（浏览器存储已满，已丢弃最旧的）'));
+        return item;
+      }
+      /* 记录结束：先归档，再清空实时缓冲（这就是「自动清理旧记录」）。 */
+      function tlArchiveAndClearLive(mode,reason){
+        var item=tlArchiveCurrent(mode,reason);
+        var api=timelineApi();
+        if(api&&typeof api.clear==='function') api.clear();
+        var rawApiRef=rawApi();
+        if(rawApiRef&&typeof rawApiRef.clear==='function') rawApiRef.clear();
+        tlRenderAll();
+        tlRenderRaw();
+        recordStartedAt=0;
+        return item;
+      }
+      function tlArchiveMetaText(item){
+        return '记录时间 '+tlArchiveStamp(new Date(Number(item.ended_at)||Date.now()))
+          +' · 设备 '+String(item.device||item.device_id||'未知设备')
+          +' · 时长 '+tlArchiveDurationText(item.duration_ms);
+      }
+      function tlArchiveStatsText(item){
+        var stats=(item.payload&&item.payload.stats)||{};
+        var rawStats=(item.payload&&item.payload.raw&&item.payload.raw.stats)||{};
+        var bits=[Number(stats.total||0)+' 条事件'];
+        if(stats.warn) bits.push(Number(stats.warn)+' 警告');
+        if(stats.error) bits.push(Number(stats.error)+' 错误');
+        bits.push('原始 '+Number(rawStats.total||0)+' 条');
+        if(Number(item.raw_trimmed||rawStats.trimmed||0)>0) bits.push('原始已裁剪 '+Number(item.raw_trimmed||rawStats.trimmed));
+        if(item.payload&&item.payload.browser_id) bits.push('设备标识 '+String(item.payload.browser_id).slice(0,10));
+        return bits.join(' · ');
+      }
+      /* 渲染一组旧记录卡片。面板「旧记录」与「记录方式」弹窗里的「历史记录」共用，
+         卡片结构完全一致（左侧信息 + 右下四个操作）。 */
+      function tlArchiveRenderInto(list){
+        if(!list) return;
+        list.innerHTML='';
+        if(!tlArchive.length){
+          var empty=document.createElement('li');
+          empty.className='tl-archive-empty';
+          empty.textContent='还没有旧记录。结束一次记录后，它会自动出现在这里。';
+          list.appendChild(empty);
+          return;
+        }
+        tlArchive.forEach(function(item){
+          var li=document.createElement('li');
+          li.className='tl-arch-card';
+          li.setAttribute('data-arch-id',item.id);
+          var info=document.createElement('div');
+          info.className='tl-arch-info';
+          var name=document.createElement('b');
+          name.className='tl-arch-name';
+          name.textContent=String(item.name||'未命名记录');
+          var meta=document.createElement('span');
+          meta.className='tl-arch-meta';
+          var chip=document.createElement('span');
+          chip.className='tl-arch-chip '+tlArchiveModeClass(item.mode);
+          chip.textContent=tlArchiveModeLabel(item.mode);
+          meta.appendChild(chip);
+          meta.appendChild(document.createTextNode(tlArchiveMetaText(item)));
+          var stats=document.createElement('span');
+          stats.className='tl-arch-stats';
+          stats.textContent=tlArchiveStatsText(item);
+          info.appendChild(name);
+          info.appendChild(meta);
+          info.appendChild(stats);
+          var actions=document.createElement('div');
+          actions.className='tl-arch-actions';
+          [['copy','复制'],['export','导出'],['view','查看'],['delete','删除']].forEach(function(pair){
+            var btn=document.createElement('button');
+            btn.type='button';
+            btn.className='tl-arch-btn'+(pair[0]==='delete'?' danger':'');
+            btn.setAttribute('data-arch-act',pair[0]);
+            btn.textContent=pair[1];
+            actions.appendChild(btn);
+          });
+          li.appendChild(info);
+          li.appendChild(actions);
+          list.appendChild(li);
+        });
+      }
+      function tlArchiveRender(){
+        var count=document.getElementById('tl-archive-count');
+        var clearBtn=document.getElementById('tl-archive-clear');
+        if(count) count.textContent=tlArchive.length+' 条';
+        if(clearBtn) clearBtn.hidden=!tlArchive.length;
+        var dialogCount=document.getElementById('tl-mode-history-count');
+        if(dialogCount) dialogCount.textContent=tlArchive.length+' 条';
+        // 两处列表（面板 + 记录方式弹窗的历史记录）保持同步。
+        tlArchiveRenderInto(document.getElementById('tl-archive-list'));
+        tlArchiveRenderInto(document.getElementById('tl-mode-history-list'));
+      }
+      /* 两处列表共用的点击处理（复制/导出/查看/删除）。 */
+      function tlArchiveHandleClick(event){
+        var btn=event.target&&event.target.closest?event.target.closest('[data-arch-act]'):null;
+        if(!btn) return;
+        var card=btn.closest('[data-arch-id]');
+        var id=card?card.getAttribute('data-arch-id'):'';
+        var act=btn.getAttribute('data-arch-act');
+        if(!id) return;
+        if(act==='copy') tlArchiveCopyItem(id);
+        else if(act==='export') tlArchiveExportItem(id);
+        else if(act==='view') tlArchiveOpen(id);
+        else if(act==='delete') tlArchiveDeleteItem(id);
+      }
+      function tlArchiveFind(id){
+        var target=String(id||'');
+        for(var i=0;i<tlArchive.length;i++){ if(tlArchive[i].id===target) return tlArchive[i]; }
+        return null;
+      }
+      function tlArchiveText(item){
+        var p=(item&&item.payload)||{};
+        var lines=[];
+        lines.push('ScrcpyGate 投屏记录（旧记录）');
+        lines.push('名称: '+String(item.name||''));
+        lines.push('方式: '+tlArchiveModeLabel(item.mode)+'  设备: '+String(p.device_id||'')+'  通道: '+String(p.transport||''));
+        lines.push('时间: '+tlArchiveStamp(new Date(Number(item.ended_at)||Date.now()))+'  时长: '+tlArchiveDurationText(item.duration_ms));
+        var stats=p.stats||{};
+        lines.push('事件: '+Number(stats.total||0)+'  警告: '+Number(stats.warn||0)+'  错误: '+Number(stats.error||0));
+        lines.push('');
+        lines.push('===== 事件 =====');
+        (p.entries||[]).forEach(function(entry){
+          var data=tlDataText(entry.data);
+          lines.push(tlTimeText(entry.t)+' ['+(entry.level||'info')+'/'+(entry.kind||'event')+'] '+String(entry.text||'')+(data?'  '+data:''));
+        });
+        var rawEntries=(p.raw&&p.raw.entries)||[];
+        if(rawEntries.length){
+          lines.push('');
+          lines.push('===== 原始数据（'+rawEntries.length+' 条） =====');
+          rawEntries.forEach(function(entry){
+            lines.push(tlTimeText(entry.t)+' ['+entry.channel+'/'+entry.kind+'] '+tlRawPayloadText(entry.payload));
+          });
+        }
+        return lines.join('\n');
+      }
+      /* ---------- 旧记录查看器（只读；事件 / 原始数据两个页签） ---------- */
+      var tlArchiveDialog=document.getElementById('tl-archive-dialog');
+      var tlArchiveBackdrop=document.getElementById('tl-archive-backdrop');
+      var tlArchiveViewList=document.getElementById('tl-archive-view-list');
+      function tlArchiveOpen(id){
+        var item=tlArchiveFind(id);
+        if(!item||!tlArchiveDialog) return;
+        tlArchiveViewId=item.id;
+        tlArchiveViewMode='events';
+        var title=document.getElementById('tl-archive-title');
+        if(title) title.textContent=String(item.name||'旧记录');
+        var meta=document.getElementById('tl-archive-meta');
+        if(meta) meta.textContent=tlArchiveMetaText(item)+' · '+tlArchiveStatsText(item);
+        tlArchiveRenderView();
+        tlArchiveSyncTabs();
+        dialogOpen(tlArchiveDialog,tlArchiveBackdrop);
+      }
+      function tlArchiveClose(){ dialogClose(tlArchiveDialog,tlArchiveBackdrop); }
+      function tlArchiveSyncTabs(){
+        var events=document.getElementById('tl-archive-view-events');
+        var raw=document.getElementById('tl-archive-view-raw');
+        if(events){ events.classList.toggle('active',tlArchiveViewMode==='events'); events.setAttribute('aria-pressed',String(tlArchiveViewMode==='events')); }
+        if(raw){ raw.classList.toggle('active',tlArchiveViewMode==='raw'); raw.setAttribute('aria-pressed',String(tlArchiveViewMode==='raw')); }
+      }
+      function tlArchiveRenderView(){
+        if(!tlArchiveViewList) return;
+        var item=tlArchiveFind(tlArchiveViewId);
+        tlArchiveViewList.innerHTML='';
+        if(!item) return;
+        var p=item.payload||{};
+        if(tlArchiveViewMode==='raw'){
+          var rawEntries=(p.raw&&p.raw.entries)||[];
+          if(!rawEntries.length){
+            tlArchiveViewList.innerHTML='<li class="tl-empty">这条旧记录没有原始数据（可能记录时关掉了采集，或已按预算裁剪）。</li>';
+            return;
+          }
+          rawEntries.forEach(function(entry){ tlArchiveViewList.appendChild(tlRawRow(entry)); });
+          return;
+        }
+        var entries=p.entries||[];
+        if(!entries.length){
+          tlArchiveViewList.innerHTML='<li class="tl-empty">这条旧记录没有事件。</li>';
+          return;
+        }
+        entries.forEach(function(entry){ tlArchiveViewList.appendChild(tlRow(entry)); });
+      }
+      function tlArchiveCopyItem(id){
+        var item=tlArchiveFind(id);
+        if(!item) return;
+        tlCopyText(tlArchiveText(item),'已复制旧记录：'+String(item.name||''));
+      }
+      function tlArchiveExportItem(id){
+        var item=tlArchiveFind(id);
+        if(!item) return;
+        try{
+          var blob=new Blob([JSON.stringify(item.payload,null,2)],{type:'application/json'});
+          var url=URL.createObjectURL(blob);
+          var link=document.createElement('a');
+          var stamp=new Date(Number(item.ended_at)||Date.now()).toISOString().replace(/[:.]/g,'-');
+          link.href=url;
+          link.download='scrcpygate-mirror-record-'+String(item.device_id||'device')+'-'+stamp+'.json';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.setTimeout(function(){ URL.revokeObjectURL(url); },4000);
+          showToast('已导出旧记录 JSON');
+        }catch(err){
+          showToast('导出失败：'+((err&&err.message)||'未知错误'));
+        }
+      }
+      function tlArchiveDeleteItem(id){
+        var item=tlArchiveFind(id);
+        if(!item) return;
+        if(!window.confirm('删除这条旧记录？删除后无法恢复。')) return;
+        tlArchive=tlArchive.filter(function(entry){ return entry.id!==item.id; });
+        tlArchivePersist();
+        tlArchiveRender();
+        if(tlArchiveViewId===item.id) tlArchiveClose();
+        showToast('已删除旧记录：'+String(item.name||''));
+      }
+      /* 通用复制（旧记录卡片与查看器共用）。 */
+      function tlCopyText(text,doneMessage){
+        var value=String(text==null?'':text);
+        var done=function(){ showToast(doneMessage||'已复制'); };
+        var fallback=function(){
+          try{
+            var area=document.createElement('textarea');
+            area.value=value;
+            area.setAttribute('readonly','');
+            area.style.position='fixed';
+            area.style.left='-9999px';
+            document.body.appendChild(area);
+            area.select();
+            var ok=document.execCommand&&document.execCommand('copy');
+            document.body.removeChild(area);
+            if(ok) done(); else showToast('复制失败，请改用「导出」');
+          }catch(err){ showToast('复制失败，请改用「导出」'); }
+        };
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(value).then(done).catch(fallback);
+        }else{
+          fallback();
+        }
+      }
       function recordState(){
         var api=recordApi();
         return api&&typeof api.state==='function'?api.state():null;
@@ -3078,6 +3871,93 @@ document.addEventListener('DOMContentLoaded',function(){
         var s=recordState();
         return !!(s&&(s.armed||s.invite));
       }
+      /* ---------- 记录会话的三种形态 ----------
+         local  ：仅本端记录（纯前端的会话边界，不经服务端）；
+         multi  ：多端记录，本端是**主端**（发起，能停止、能汇总）；
+         participant：多端记录，本端是**副端**（被邀请参与，只能退出、不能停止）。 */
+      var recordMode=null;                 // null | 'local' | 'multi'
+      var localRecord={active:false,startedAt:0};
+      // 宫格观看端：记录通知来自宫格自己的 WebSocket，适配器状态里没有会话／没有
+      // is_initiator，这里留一份只读影子，让面板与悬浮窗在宫格模式下也能显示「参与中」。
+      var gridRecord={session:null,clientId:''};
+      function recordSession(){ var s=recordState(); return (s&&s.session)||gridRecord.session; }
+      function recordIsInitiator(){ var s=recordState(); return !!(s&&s.is_initiator); }
+      function recordIsParticipant(){
+        var s=recordState();
+        if(s&&s.session&&!s.is_initiator) return true;
+        return !!(gridRecord.session&&!gridRecord.session.stopped);
+      }
+      function recordMyClientId(){
+        var s=recordState();
+        return String((s&&s.client_id)||gridRecord.clientId||'');
+      }
+      function recordInviteClientId(){
+        var s=recordState();
+        return String((s&&s.invite_client_id)||(s&&s.client_id)||gridRecord.clientId||'');
+      }
+      function recordInProgress(){
+        if(localRecord.active) return true;
+        if(recordParticipantActive()) return true;
+        if(gridRecord.session&&!gridRecord.session.stopped) return true;
+        var session=recordSession();
+        return !!(session&&!session.stopped);
+      }
+      // 已经选过记录方式（哪怕会话已停止）时，再点「投屏记录」应当直接回到面板，
+      // 而不是又弹一次「选择记录方式」。
+      // 注意：**记录已经结束**（停止/上传完）之后要重新问一次记录方式 —— 用户反馈
+      // 「结束后关闭窗口再点还是上一次的模式」。
+      function recordModeChosen(){ return recordInProgress(); }
+      /* 侧栏「投屏记录」高亮 + 红点：只反映「现在是否真的在记录」，
+         与面板有没有打开无关（用户反馈：打开过就一直蓝着）。 */
+      function renderRecordItemState(){
+        var item=document.getElementById('record-item');
+        if(!item) return;
+        var active=recordInProgress();
+        item.classList.toggle('active',active);
+        if(active) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
+        var dot=document.getElementById('record-dot');
+        if(dot) dot.hidden=!active;
+        var hint=document.getElementById('record-item-hint');
+        if(hint){
+          var s=recordState();
+          var session=recordSession();
+          var text='实时事件时间线';
+          if(localRecord.active&&!session) text='本端记录中';
+          else if(session) text=session.stopped?'记录已停止':'记录中（'+(session.participants||[]).length+' 个参与端）';
+          hint.textContent=text;
+        }
+      }
+      function startLocalRecord(){
+        if(!localRecord.active){
+          localRecord.active=true;
+          localRecord.startedAt=Date.now();
+          recordStartedAt=localRecord.startedAt;
+          var api=timelineApi();
+          // 纯前端的会话边界，直接在时间线上留一条，便于事后对照。
+          if(api&&typeof api.push==='function'){
+            api.push('record_start','info','开始仅本端投屏记录',{scope:'local'});
+          }
+          // 原始层：环境快照 + 会话边界（单端记录不经服务端，这两条就是它的「会话头」）。
+          rawEnvironment({record_mode:'local'});
+          rawState('record_start',{mode:'local'});
+        }
+        recordMode='local';
+        tlRenderSession();
+        tlRenderFloat();
+      }
+      function stopLocalRecord(){
+        if(!localRecord.active) return;
+        localRecord.active=false;
+        var api=timelineApi();
+        if(api&&typeof api.push==='function'){
+          api.push('record_stop','info','停止仅本端投屏记录',{scope:'local'});
+        }
+        rawState('record_stop',{mode:'local',duration_ms:Date.now()-(localRecord.startedAt||Date.now())});
+        // 结束即归档：这次记录进「旧记录」卡片，实时缓冲清空（自动清理）。
+        tlArchiveAndClearLive('local','stopped');
+        tlRenderSession();
+        tlRenderFloat();
+      }
       function tlOpen(){
         if(!mirrorIsAdmin()&&!recordParticipantActive()) return;
         if(!tlPanel) return;
@@ -3085,7 +3965,9 @@ document.addEventListener('DOMContentLoaded',function(){
         apClose();
         upClose();
         tlRenderAll();
-        tlRenderMulti();
+        tlRenderSession();
+        tlRenderRaw();
+        tlSubscribeRaw();
         tlPanel.classList.add('open');
         tlBackdrop.classList.add('open');
         tlPanel.setAttribute('aria-hidden','false');
@@ -3101,6 +3983,7 @@ document.addEventListener('DOMContentLoaded',function(){
       function tlClose(){
         if(!tlPanel) return;
         if(typeof tlUnsubscribe==='function'){ tlUnsubscribe(); tlUnsubscribe=null; }
+        tlUnsubscribeRaw();
         tlPanel.classList.remove('open');
         tlBackdrop.classList.remove('open');
         releasePanelFocus(tlPanel);
@@ -3111,8 +3994,14 @@ document.addEventListener('DOMContentLoaded',function(){
       function tlCopy(){
         var api=timelineApi();
         if(!api){ showToast('记录不可用'); return; }
-        var text=api.text();
-        var done=function(){ showToast('已复制 '+api.stats().total+' 条记录'); };
+        // 原始数据接在派生事件后面（同一份文本里都给到，排查不用来回切）。
+        var raw="";
+        var rawApiRef=rawApi();
+        if(rawApiRef&&typeof rawApiRef.text==='function'&&(!rawApiRef.isEnabled||rawApiRef.isEnabled())){
+          try{ raw='\n\n'+rawApiRef.text(); }catch(e){ raw=''; }
+        }
+        var text=api.text()+raw;
+        var done=function(){ showToast('已复制 '+api.stats().total+' 条记录'+((raw?' + 原始数据':''))); };
         var fallback=function(){
           try{
             var area=document.createElement('textarea');
@@ -3177,6 +4066,8 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function openRecordModeDialog(){
         if(!mirrorIsAdmin()) return;
+        // 打开时刷新历史记录（和面板里的旧记录同一份数据）。
+        tlArchiveRender();
         dialogOpen(tlModeDialog,tlModeBackdrop);
         var first=document.getElementById('tl-mode-local');
         if(first) first.focus();
@@ -3184,6 +4075,7 @@ document.addEventListener('DOMContentLoaded',function(){
       function closeRecordModeDialog(){ dialogClose(tlModeDialog,tlModeBackdrop); }
       function showRecordInvite(invite){
         if(!invite) return;
+        lastInviteDetail=invite;
         var text=document.getElementById('tl-invite-text');
         if(text){
           text.textContent='管理员 '+String(invite.initiator||'')+' 发起了对这台设备的多端投屏记录。参与后本浏览器会记录画面管道事件，'
@@ -3194,47 +4086,116 @@ document.addEventListener('DOMContentLoaded',function(){
         if(accept) accept.focus();
       }
       function closeRecordInvite(){ dialogClose(tlInviteDialog,tlInviteBackdrop); }
+      // 最近一次邀请的内容：宫格观看端的邀请不经过适配器状态，响应时要用它兜底。
+      var lastInviteDetail=null;
       function answerRecordInvite(accept){
         var api=recordApi();
-        var invite=recordState()&&recordState().invite;
+        var stateInvite=recordState()&&recordState().invite;
+        var invite=stateInvite||lastInviteDetail;
         var sessionId=(invite&&invite.session)||'';
+        // 宫格视图里一页可能有多个观看端，必须按「收到邀请的那个 client_id」响应。
+        var inviteClientId=String((invite&&invite.client_id)||'');
         closeRecordInvite();
         if(!api||typeof api.respond!=='function'||!sessionId) return;
-        api.respond(sessionId,accept).then(function(){
+        api.respond(sessionId,accept,inviteClientId).then(function(){
           showToast(accept?'已参与记录，管理员停止后会收到你这份记录':'已拒绝参与记录');
-          tlRenderMulti();
+          if(accept) recordMode='multi';
+          tlRenderSession();
+          tlRenderFloat();
         }).catch(function(error){
           showToast('响应失败：'+apiErrorText(error));
         });
       }
-      function tlRenderMulti(){
+      function tlRenderSession(){
         var box=document.getElementById('tl-multi');
         if(!box) return;
         var state=recordState();
-        var session=state&&state.session;
-        var mine=mirrorIsAdmin();
-        if(!session||(!mine&&!recordParticipantActive())){
+        var session=recordSession();
+        var mine=recordIsInitiator();
+        var participant=recordIsParticipant();
+        var localOnly=!!localRecord.active&&!session;
+        // 停止之后仍然保留这条会话框（显示「已停止」+ 记录方式入口），
+        // 否则关掉面板就再也找不到「重新选择记录方式」了。
+        if(!session&&!localOnly&&recordMode===null){
           box.hidden=true;
+          tlRenderFloat();
           return;
         }
         box.hidden=false;
         var title=document.getElementById('tl-multi-title');
-        if(title) title.textContent=mine?'多端记录 · 由我发起':'多端记录 · 参与中（管理员 '+String(session.initiator||'')+' 发起）';
+        if(title) title.textContent=session
+          ? (mine?'多端记录 · 由我发起':'多端记录 · 参与中')
+          : '仅本端记录';
+        // 单端 / 多端徽标：面板里一眼看出这次记录是哪一种（用户反馈两者看不出区别）。
+        var chip=document.getElementById('tl-mode-chip');
+        if(chip){
+          var chipText='未选择';
+          var chipClass='is-none';
+          if(session&&mine){ chipText='多端 · 主端'; chipClass='is-multi'; }
+          else if(session&&participant){ chipText='多端 · 副端'; chipClass='is-multi'; }
+          else if(session){ chipText='多端'; chipClass='is-multi'; }
+          else if(localRecord.active){ chipText='单端记录中'; chipClass='is-local'; }
+          else if(localRecord.startedAt){ chipText='单端（已停止）'; chipClass='is-local'; }
+          chip.textContent=chipText;
+          chip.className='tl-mode-chip '+chipClass;
+        }
+        // 主端 / 副端说明：副端明确不能停止，避免同账号的另一台设备（手机端）误停。
+        var roleEl=document.getElementById('tl-multi-role');
+        if(roleEl){
+          if(session&&mine){
+            roleEl.textContent='你是这次记录的主端：可以停止记录，各参与端的记录会自动汇总到这里。';
+          }else if(session){
+            roleEl.textContent='你是副端（管理员 '+String(session.initiator||'')+' 发起）：本端只负责记录并上传自己的画面管道事件，'
+              +'停止由主端操作；你随时可以退出参与。';
+          }else{
+            roleEl.textContent='仅记录本浏览器，不经服务端；记录一直保存在本机内存里，可随时停止并导出。';
+          }
+          roleEl.hidden=false;
+        }
         var stateEl=document.getElementById('tl-multi-state');
-        var participants=session.participants||[];
+        var participants=(session&&session.participants)||[];
         var bundles=(state&&state.bundles)||[];
         var uploaded=participants.filter(function(item){return item.uploaded;}).length;
         if(stateEl){
-          stateEl.textContent=(session.stopped?'已停止':'进行中')
-            +' · 参与 '+participants.filter(function(item){return item.state==='accepted'||item.state==='uploaded';}).length+'/'+participants.length
-            +' · 已收到 '+uploaded+' 份';
+          var api=timelineApi();
+          var stats=(api&&typeof api.stats==='function')?api.stats():{total:0,error:0};
+          var line=(session?(session.stopped?'已停止':'进行中'):(localRecord.active?'进行中':'已停止'))
+            +' · '+Number(stats.total||0)+' 条'
+            +' · '+Number(stats.error||0)+' 错误';
+          if(session){
+            line+=' · 参与 '+participants.filter(function(item){return item.state==='accepted'||item.state==='uploaded';}).length
+              +'/'+participants.length
+              +' · 已收到 '+uploaded+' 份';
+          }
+          stateEl.textContent=line;
         }
         var stopBtn=document.getElementById('tl-stop');
-        if(stopBtn) stopBtn.disabled=!mine||!!session.stopped;
+        if(stopBtn){
+          var canStop=session?(!session.stopped&&mine):localRecord.active;
+          stopBtn.disabled=!canStop;
+          stopBtn.hidden=!canStop&&(!session||!mine);
+          var stopLabel=stopBtn.querySelector('span');
+          if(!stopLabel){
+            // 文案节点在 HTML 里是纯文本，补一个 span 便于单独更新。
+            stopBtn.textContent='';
+            stopLabel=document.createElement('span');
+            stopBtn.appendChild(stopLabel);
+          }
+          stopLabel.textContent=session?'停止记录并汇总':'停止本端记录';
+        }
+        var leaveBtn=document.getElementById('tl-leave');
+        if(leaveBtn) leaveBtn.hidden=!(session&&participant&&!session.stopped);
+        var restartBtn=document.getElementById('tl-restart');
+        if(restartBtn) restartBtn.hidden=!(mirrorIsAdmin()&&!session);
         var list=document.getElementById('tl-participants');
         if(list){
           tlClearList(list);
-          if(!participants.length){
+          if(!session){
+            var localHint=document.createElement('li');
+            localHint.className='tl-participant empty';
+            localHint.textContent='仅本端记录：不邀请其它观看端，也不会上传。';
+            list.appendChild(localHint);
+          }else if(!participants.length){
             var emptyPart=document.createElement('li');
             emptyPart.className='tl-participant empty';
             emptyPart.textContent='当前没有其他观看端，只有本端记录。';
@@ -3242,14 +4203,16 @@ document.addEventListener('DOMContentLoaded',function(){
           }
           participants.forEach(function(item){
             var li=document.createElement('li');
-            li.className='tl-participant '+String(item.state||'');
+            li.className='tl-participant '+String(item.state||'')+(item.away?' away':'');
             var who=document.createElement('b');
             who.textContent=String(item.username||'?');
             var badge=document.createElement('span');
             badge.className='tl-participant-state';
-            badge.textContent=RECORD_STATE_LABEL[item.state]||String(item.state||'');
+            badge.textContent=(RECORD_STATE_LABEL[item.state]||String(item.state||''))+(item.away?' · 暂离':'');
             var meta=document.createElement('small');
-            meta.textContent=String(item.client_id||'').slice(0,8);
+            // 显示稳定的浏览器设备标识（同一台设备进出记录不变），连接级 id 只作兜底。
+            var stable=String(item.browser_id||'');
+            meta.textContent=stable?stable.slice(0,10):String(item.client_id||'').slice(0,8);
             li.appendChild(who);
             li.appendChild(badge);
             li.appendChild(meta);
@@ -3275,18 +4238,50 @@ document.addEventListener('DOMContentLoaded',function(){
             bundlesEl.appendChild(hint);
           }
         }
+        tlRenderFloat();
       }
       function tlStopRecord(){
+        // 仅本端记录：纯前端会话，停止即结束本端记录。
+        if(localRecord.active&&!recordSession()){
+          stopLocalRecord();
+          showToast('已停止本端记录，时间线仍保留在本机，可继续复制/导出');
+          return;
+        }
         var api=recordApi();
         if(!api||typeof api.stop!=='function') return;
+        // 副端不允许停止：服务端也会拒（record_not_initiator），这里先挡住并解释清楚。
+        if(!recordIsInitiator()){
+          showToast('这次记录由管理员 '+String((recordSession()||{}).initiator||'')+' 发起，副端不能停止；如需退出请点「退出参与」','error');
+          tlRenderSession();
+          return;
+        }
         var btn=document.getElementById('tl-stop');
         if(btn) btn.disabled=true;
         api.stop().then(function(){
           showToast('已停止记录，正在等各参与端上传');
-          tlRenderMulti();
+          tlRenderSession();
+          tlRenderFloat();
+          // 发起端**不会**收到 record_stopped 通知（服务端只通知参与端），所以这里自己收尾：
+          // 归档成旧记录并清空实时缓冲（用户要求「结束记录后自动清理旧记录」）。
+          tlArchiveAndClearLive('multi','stopped');
+          tlRenderSession();
+          tlRenderFloat();
         }).catch(function(error){
           showToast('停止失败：'+apiErrorText(error));
-          tlRenderMulti();
+          tlRenderSession();
+        });
+      }
+      // 副端退出参与：置为 declined 并通知主端；本端记录随之停止（不再上传）。
+      function tlLeaveRecord(){
+        var api=recordApi();
+        var session=recordSession();
+        if(!api||typeof api.respond!=='function'||!session) return;
+        api.respond(session.session,false,recordInviteClientId()).then(function(){
+          showToast('已退出这次多端记录');
+          tlRenderSession();
+          tlRenderFloat();
+        }).catch(function(error){
+          showToast('退出失败：'+apiErrorText(error));
         });
       }
       function tlBundleCopy(){
@@ -3336,8 +4331,9 @@ document.addEventListener('DOMContentLoaded',function(){
         var trigger=document.getElementById('record-item');
         if(trigger) trigger.addEventListener('click',function(e){
           e.preventDefault();
-          // 管理员先选记录方式；参与中/被邀请的普通用户直接看自己那份记录。
-          if(mirrorIsAdmin()&&!recordParticipantActive()) openRecordModeDialog();
+          // 管理员先选记录方式；已经选过（或正在记录、或正在参与）时直接回到面板，
+          // 而不是每次都重新弹「选择记录方式」。参与中的普通用户直接看自己那份记录。
+          if(mirrorIsAdmin()&&!recordParticipantActive()&&!recordModeChosen()) openRecordModeDialog();
           else tlOpen();
         });
         var closeBtn=document.getElementById('tl-close');
@@ -3359,19 +4355,23 @@ document.addEventListener('DOMContentLoaded',function(){
         var localBtn=document.getElementById('tl-mode-local');
         if(localBtn) localBtn.addEventListener('click',function(){
           closeRecordModeDialog();
+          startLocalRecord();
           tlOpen();
-          showToast('仅记录本端；需要多端协同时再点一次「投屏记录」');
+          showToast('仅记录本端；需要多端协同时可在面板里重新选择记录方式');
         });
         var multiBtn=document.getElementById('tl-mode-multi');
         if(multiBtn) multiBtn.addEventListener('click',function(){
           var api=recordApi();
           closeRecordModeDialog();
+          recordMode='multi';
           if(!api||typeof api.start!=='function'){ tlOpen(); return; }
           api.start().then(function(session){
             tlOpen();
+            recordStartedAt=Date.now();
             var invited=session&&session.participants?session.participants.length:0;
             showToast(invited?('已邀请 '+invited+' 个观看端参与记录'):'当前没有其他观看端，仅记录本端');
-            tlRenderMulti();
+            tlRenderSession();
+            tlRenderFloat();
           }).catch(function(error){
             tlOpen();
             showToast('发起多端记录失败：'+apiErrorText(error));
@@ -3380,6 +4380,23 @@ document.addEventListener('DOMContentLoaded',function(){
         var modeCancel=document.getElementById('tl-mode-cancel');
         if(modeCancel) modeCancel.addEventListener('click',closeRecordModeDialog);
         if(tlModeBackdrop) tlModeBackdrop.addEventListener('click',closeRecordModeDialog);
+        // 面板里的「重新选择记录方式」：只在本端记录（或没有会话）时出现。
+        var restartBtn=document.getElementById('tl-restart');
+        if(restartBtn) restartBtn.addEventListener('click',function(){
+          stopLocalRecord();
+          recordMode=null;
+          tlRenderSession();
+          tlRenderFloat();
+          openRecordModeDialog();
+        });
+        // 副端退出参与
+        var leaveBtn=document.getElementById('tl-leave');
+        if(leaveBtn) leaveBtn.addEventListener('click',tlLeaveRecord);
+        // 悬浮窗：点主体回面板，点停止直接停。
+        var floatMain=document.getElementById('tl-float-main');
+        if(floatMain) floatMain.addEventListener('click',function(){ tlOpen(); });
+        var floatStop=document.getElementById('tl-float-stop');
+        if(floatStop) floatStop.addEventListener('click',tlStopRecord);
         // 参与邀请
         var acceptBtn=document.getElementById('tl-invite-accept');
         if(acceptBtn) acceptBtn.addEventListener('click',function(){ answerRecordInvite(true); });
@@ -3391,6 +4408,46 @@ document.addEventListener('DOMContentLoaded',function(){
         if(bundleCopyBtn) bundleCopyBtn.addEventListener('click',tlBundleCopy);
         var bundleExportBtn=document.getElementById('tl-bundle-export');
         if(bundleExportBtn) bundleExportBtn.addEventListener('click',tlBundleExport);
+        // 原始数据层：采集开关（本浏览器偏好）+ 清空。
+        if(tlRawToggle) tlRawToggle.addEventListener('change',function(){ tlApplyRawEnabled(this.checked); });
+        var rawClearBtn=document.getElementById('tl-raw-clear');
+        if(rawClearBtn) rawClearBtn.addEventListener('click',function(){
+          var api=rawApi();
+          if(!api||typeof api.clear!=='function') return;
+          api.clear();
+          tlRenderRaw();
+          showToast('原始数据已清空');
+        });
+        tlApplyRawEnabled(tlRawEnabledPref());
+        // 旧记录：卡片操作（复制/导出/查看/删除）、全部删除、查看器。
+        // 面板「旧记录」与「记录方式」弹窗的「历史记录」是同一套卡片，共用同一处理。
+        var archiveList=document.getElementById('tl-archive-list');
+        if(archiveList) archiveList.addEventListener('click',tlArchiveHandleClick);
+        var historyList=document.getElementById('tl-mode-history-list');
+        if(historyList) historyList.addEventListener('click',tlArchiveHandleClick);
+        var archiveClearBtn=document.getElementById('tl-archive-clear');
+        if(archiveClearBtn) archiveClearBtn.addEventListener('click',function(){
+          if(!tlArchive.length) return;
+          if(!window.confirm('删除全部 '+tlArchive.length+' 条旧记录？删除后无法恢复。')) return;
+          tlArchive=[];
+          tlArchivePersist();
+          tlArchiveRender();
+          showToast('旧记录已全部删除');
+        });
+        var archiveCloseBtn=document.getElementById('tl-archive-close');
+        if(archiveCloseBtn) archiveCloseBtn.addEventListener('click',tlArchiveClose);
+        if(tlArchiveBackdrop) tlArchiveBackdrop.addEventListener('click',tlArchiveClose);
+        var archiveCopyBtn=document.getElementById('tl-archive-copy');
+        if(archiveCopyBtn) archiveCopyBtn.addEventListener('click',function(){ tlArchiveCopyItem(tlArchiveViewId); });
+        var archiveExportBtn=document.getElementById('tl-archive-export');
+        if(archiveExportBtn) archiveExportBtn.addEventListener('click',function(){ tlArchiveExportItem(tlArchiveViewId); });
+        var archiveEventsBtn=document.getElementById('tl-archive-view-events');
+        if(archiveEventsBtn) archiveEventsBtn.addEventListener('click',function(){ tlArchiveViewMode='events'; tlArchiveSyncTabs(); tlArchiveRenderView(); });
+        var archiveRawBtn=document.getElementById('tl-archive-view-raw');
+        if(archiveRawBtn) archiveRawBtn.addEventListener('click',function(){ tlArchiveViewMode='raw'; tlArchiveSyncTabs(); tlArchiveRenderView(); });
+        tlArchive=tlArchiveLoad();
+        tlArchiveTrim();
+        tlArchiveRender();
         // 适配器派发的多端记录事件
         document.addEventListener('scrcpygate:record-invite',function(e){ showRecordInvite(e.detail); });
         document.addEventListener('scrcpygate:record-responded',function(e){
@@ -3400,27 +4457,86 @@ document.addEventListener('DOMContentLoaded',function(){
             var item=document.getElementById('record-item');
             if(item) item.style.display='';
           }
-          tlRenderMulti();
+          tlRenderSession();
         });
         document.addEventListener('scrcpygate:record-started',function(){
           var item=document.getElementById('record-item');
           if(item) item.style.display='';
-          tlRenderMulti();
+          tlRenderSession();
         });
-        document.addEventListener('scrcpygate:record-participants',function(){ tlRenderMulti(); });
-        document.addEventListener('scrcpygate:record-bundle',function(){ tlRenderMulti(); });
-        document.addEventListener('scrcpygate:record-stopped',function(){
+        document.addEventListener('scrcpygate:record-participants',function(){ tlRenderSession(); });
+        document.addEventListener('scrcpygate:record-bundle',function(){ tlRenderSession(); });
+        // 服务端在握手后对齐会话（晚到者补邀请、发起端刷新页面后拿回主导权）。
+        document.addEventListener('scrcpygate:record-session',function(e){
+          var detail=e&&e.detail||{};
+          var role=String(detail.role||'');
+          var item=document.getElementById('record-item');
+          if(item) item.style.display='';
+          if(detail.grid&&detail.session){
+            // 宫格观看端：适配器没有这条会话，记进影子状态供面板/悬浮窗显示。
+            gridRecord.session=detail.session;
+            gridRecord.clientId=String(detail.client_id||'');
+          }
+          if(role==='initiator'||role==='participant'){
+            // 本端已经在这条会话里：关掉可能刚弹出的邀请，直接进入记录视图。
+            closeRecordInvite();
+            recordMode='multi';
+          }
+          tlRenderSession();
+          tlRenderFloat();
+        });
+        // 宫格观看端的上传请求：适配器的单画面通道会自己上传，这里只处理宫格转发的。
+        document.addEventListener('scrcpygate:record-upload-request',function(e){
+          var detail=e&&e.detail||{};
+          var api=recordApi();
+          if(!detail.grid||!api||typeof api.upload!=='function') return;
+          var clientId=String(detail.client_id||'');
+          if(!clientId) return;
+          api.upload(detail.session,clientId).then(function(){
+            if(gridRecord.session&&gridRecord.session.session===detail.session){
+              gridRecord.session.stopped=true;
+            }
+            tlRenderSession();
+            tlRenderFloat();
+          }).catch(function(error){
+            showToast('本端记录上传失败：'+apiErrorText(error));
+          });
+        });
+        document.addEventListener('scrcpygate:record-stopped',function(e){
+          var detail=e&&e.detail||{};
+          if(detail.grid&&gridRecord.session) gridRecord.session.stopped=true;
           closeRecordInvite();
-          tlRenderMulti();
+          // 记录结束：自动归档成旧记录卡片，并清空实时缓冲（用户要求）。
+          tlArchiveAndClearLive(recordIsInitiator()?'multi':'participant','stopped');
+          tlRenderSession();
+          tlRenderFloat();
+          // 记录已经结束：下次点「投屏记录」要重新问记录方式（用户反馈：结束后
+          // 再点还是上一次的模式）。
+          recordMode=null;
+          renderRecordItemState();
+        });
+        // 画面停了但记录还在（服务端不再因为停流终止记录）：提示一次，
+        // 免得用户以为记录跟着投屏一起没了。
+        document.addEventListener('scrcpygate:record-stream-stopped',function(){
+          if(!recordIsInitiator()&&!recordIsParticipant()) return;
+          showToast('投屏已停止，但这次投屏记录仍在进行；重新开始投屏后会自动继续');
+          tlRenderSession();
+          tlRenderFloat();
         });
         document.addEventListener('scrcpygate:record-uploaded',function(e){
           var detail=e&&e.detail||{};
           showToast(detail.delivered===false?'记录未能送达发起端，本端仍保留':'已把本端记录上传给发起端');
-          tlRenderMulti();
+          // 参与端上传完成 = 这次参与结束：同样归档并清空实时缓冲。
+          if(!recordIsInitiator()){
+            tlArchiveAndClearLive('participant','uploaded');
+          }
+          tlRenderSession();
+          tlRenderFloat();
         });
-        document.addEventListener('scrcpygate:record-upload-failed',function(){ tlRenderMulti(); });
+        document.addEventListener('scrcpygate:record-upload-failed',function(){ tlRenderSession(); });
         document.addEventListener('keydown',function(e){
           if(e.key!=='Escape') return;
+          if(tlArchiveDialog&&tlArchiveDialog.classList.contains('open')){ e.preventDefault(); tlArchiveClose(); return; }
           if(tlInviteDialog&&tlInviteDialog.classList.contains('open')){ e.preventDefault(); answerRecordInvite(false); return; }
           if(tlModeDialog&&tlModeDialog.classList.contains('open')){ e.preventDefault(); closeRecordModeDialog(); return; }
           if(!tlPanel||!tlPanel.classList.contains('open')) return;
@@ -3439,6 +4555,7 @@ document.addEventListener('DOMContentLoaded',function(){
         keyboard:['cb-keyboard'],
         nav:['cb-back','cb-home','cb-tasks'],
         fullscreen:['cb-fullscreen'],
+        rotate:['cb-rotate'],
         shot:['cb-pop-shot'],
         alt_keyboard:['cb-pop-keyboard'],
         more:['cb-more'],
@@ -3450,15 +4567,17 @@ document.addEventListener('DOMContentLoaded',function(){
         keyboard:'control',
         nav:'nav',
         fullscreen:'view',
+        rotate:'view',
         shot:'more',
         alt_keyboard:'more',
         more:'more',
         '@alas':'alas'
       };
       // 与后端 workbench_features.default_layout() 保持一致：默认排布 = 现有工作台。
-      // 画面方向已经完全自动（ISSUE-156 撤掉了手动旋转按钮），控制栏不再有方向按钮。
+      // 画面方向默认自动摆正（跟随设备 + 可用空间），「旋转」按钮在其基础上按 90° 叠加，
+      // 点满四次回到自动角度（offset 归零）。
       var DOCK_MENU_DEFAULT={
-        level1:['watch','acquire','keyboard','@alas','nav','fullscreen','more'],
+        level1:['watch','acquire','keyboard','@alas','nav','fullscreen','rotate','more'],
         level2:['shot','alt_keyboard']
       };
       var dockLayout=null;
@@ -3469,12 +4588,14 @@ document.addEventListener('DOMContentLoaded',function(){
         return {level1:level1,level2:level2};
       }
       function dockFeatureEnabled(id){
-        return id==='@alas'?true:workbenchFeatureEnabled(id);
+        // 锚点没有开关：@alas 的显隐由「工作台显示」控制，rotate 始终显示（只可调顺序）。
+        return (id==='@alas'||id==='rotate')?true:workbenchFeatureEnabled(id);
       }
       function dockMenuRender(){
         var dock=document.getElementById('ctrl-dock');
         var pop=document.getElementById('cb-pop');
         if(!dock||!pop) return;
+        restoreDockOverflow();
         var layout=dockMenuLayout();
         var level1=dockLayout?layout.level1.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level1.slice();
         var level2=dockLayout?layout.level2.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level2.slice();
@@ -3618,7 +4739,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var failed=alasStateIsFault(state);
         var available=!!cfg && apDevice() && cfg.can_run!==false && !blocked;
         apBottomToggle.disabled=!available || apBusy;
-        apBottomToggle.setAttribute('aria-pressed',state==='running'?'true':'false');
+        setDockTogglePressed(apBottomToggle,state==='running');
         apBottomToggle.classList.toggle('is-active',state==='running');
         // 异常状态用红色标出来：以前这里只有「运行中」有颜色，error/unreachable 落到默认灰。
         apBottomToggle.classList.toggle('is-error',failed);
@@ -4173,14 +5294,19 @@ document.addEventListener('DOMContentLoaded',function(){
           var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||null;
           var devices=d&&(d.devices||d.items||d.list)||(Array.isArray(d)?d:null)||[];
           var items=devices.filter(function(device){
-            return device && device.enabled !== false && device.can_view !== false;
+            return device && device.enabled !== false && device.can_view !== false && device.noPermission !== true;
           }).map(function(device){
+            // 页面里的设备对象由适配层规范化过：控制权限是驼峰 canControl，蛇形
+            // can_control 只存在于裸接口响应里。此前只看 can_control，导致每一行都
+            // 落回「观看」（连管理员也一样）。只认显式 true —— 字段缺失时按仅观看
+            // 显示，不虚报控制权。
+            var canControl=device.canControl===true||device.can_control===true;
             return {
               device:device.name||device.display_name||device.displayName||device.id||device.device_id||'—',
               deviceId:device.id||device.device_id||'',
-              permission:device.can_control===true?'control':'watch',
-              canView:device.can_view!==false,
-              canControl:device.can_control===true
+              permission:canControl?'control':'watch',
+              canView:device.can_view!==false&&device.noPermission!==true,
+              canControl:canControl
             };
           });
           upRenderPerms(items);

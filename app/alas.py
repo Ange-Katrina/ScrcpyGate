@@ -431,7 +431,7 @@ def save_settings(payload: dict) -> None:
             visible = str(visible_value).strip().lower() in ("1", "true", "yes", "on")
         storage.set_setting("workbench_alas_visible", "true" if visible else "false")
     if "clear_token" in payload and parse_bool_strict(payload.get("clear_token")):
-        storage.set_setting("alas_token", "")
+        storage.clear_alas_token()
     elif str(payload.get("api_token") or "").strip():
         token = str(payload.get("api_token") or "").strip()
         if len(token) > 512 or any(ch in token for ch in "\r\n\t "):
@@ -451,6 +451,70 @@ def sanitize_config_name(value: object) -> str:
     if not name or name in (".", "..") or any(ch in invalid for ch in name) or "/" in name or "\\" in name or name.startswith("template") or len(name) > 120:
         raise ValueError("invalid config name")
     return name
+
+
+# ALAS 的模拟器 ADB 地址（配置文件里的 `Serial`）在不同方案下位置不同：
+# 经典方案 `Alas.Emulator.Serial`、Fpy 方案 `Fpy.FpyEmulator.Serial`、
+# Maa 方案 `Maa.MaaEmulator.Serial`。三个都认，另外兜底扫任意 `*Emulator` 映射。
+EMULATOR_SERIAL_PATHS: tuple[tuple[str, str], ...] = (
+    ("Alas", "Emulator"),
+    ("Fpy", "FpyEmulator"),
+    ("Maa", "MaaEmulator"),
+)
+# 回环/通配地址不能用来对设备：同机上多台（adb connect 转发）会全部撞到同一个地址。
+LOOPBACK_ADB_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+
+
+def emulator_serial(payload: object) -> str:
+    """从 ALAS 配置内容（`get_config()` 的返回或裸配置对象）里取模拟器 Serial。
+
+    取不到、或值为 `auto`（ALAS 表示自动探测）时返回空串；这里不做网络地址校验。
+    """
+    data = payload
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]
+    if not isinstance(data, dict):
+        return ""
+    for section, emulator in EMULATOR_SERIAL_PATHS:
+        node = data.get(section)
+        if not isinstance(node, dict):
+            continue
+        target = node.get(emulator)
+        if isinstance(target, dict):
+            serial = str(target.get("Serial") or "").strip()
+            if serial:
+                return serial
+    # 兜底：ALAS 换方案名时不至于失效。
+    for node in data.values():
+        if not isinstance(node, dict):
+            continue
+        for key, target in node.items():
+            if str(key).lower().endswith("emulator") and isinstance(target, dict):
+                serial = str(target.get("Serial") or "").strip()
+                if serial:
+                    return serial
+    return ""
+
+
+def adb_endpoint_parts(value: object) -> tuple[str, str]:
+    """把 `host:port` 拆成（小写主机, 端口）；不是网络 ADB 地址时返回空字符串对。
+
+    USB 序列号（`emulator-5554`）、`auto`、只写 IP 不带端口的一律按「不是网络地址」处理 ——
+    自动绑定只认完全一致的 `host:port`。
+    """
+    text = str(value or "").strip()
+    if not text or text.lower() == "auto":
+        return "", ""
+    host, separator, port = text.rpartition(":")
+    if not separator or not port.isdigit():
+        return "", ""
+    host = host.strip().strip("[]").lower()
+    return (host, port) if host else ("", "")
+
+
+def is_loopback_endpoint(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    return normalized in LOOPBACK_ADB_HOSTS or normalized.startswith("127.")
 
 
 def request_api(path: str, method: str = "GET", params: dict | None = None, body: object | None = None, timeout: float = 3.0):

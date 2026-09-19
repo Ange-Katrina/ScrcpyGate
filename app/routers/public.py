@@ -59,6 +59,13 @@ from ..video_options import (
 log = logging.getLogger("webscrcpy.main")
 router = APIRouter()
 
+
+@router.get("/api/access-status")
+@router.get("/alas/access-status")
+async def access_status(request: Request):
+    """Diagnostic for failed WS handshakes; HTTP middleware enforces BAN/GEO."""
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
 @router.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -91,10 +98,18 @@ async def api_auth_challenge(request: Request):
             content={"challenge": None, "captcha_required": False},
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
+    if request.query_params.get("status") == "1":
+        return JSONResponse(
+            content={"challenge": None, "captcha_required": status["captcha_required"]},
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
     username = (request.query_params.get("user") or "").strip()[:64]
     issued = await asyncio.to_thread(
         login_guard.issue_challenge, security.client_ip(request), username, status["failures"]
     )
+    if issued.get("error") == "provider_unavailable":
+        return JSONResponse(status_code=503, content={"code": "CAPTCHA_UNAVAILABLE", "message": "Verification unavailable"},
+                            headers={"Retry-After": "5", "Cache-Control": "no-store"})
     if issued.get("error") == "challenge_rate_limited":
         return JSONResponse(
             status_code=429,
@@ -139,7 +154,7 @@ async def api_auth_login(request: Request):
     # 失败 1 次起要求验证码：先校验签名挑战与 PoW，再做密码校验。
     if security.login_captcha_enabled() and status["captcha_required"]:
         proof = data.get("proof")
-        if not isinstance(proof, dict):
+        if not isinstance(proof, str) or not proof:
             audit_request(
                 request,
                 username or "anonymous",
@@ -243,6 +258,9 @@ async def api_auth_login(request: Request):
             user["username"],
             client_ip=security.client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            # 浏览器侧稳定设备标识（前端 api.js 统一带上）：安全页据此把同一台设备的
+            # 多条会话归并成一行。
+            device_id=request.headers.get("x-device-id"),
         )
     except ValueError:
         audit_request(
@@ -457,10 +475,13 @@ async def workbench_snapshot(request: Request):
         "alas": alas_result,
         # Non-sensitive presentation preference.  It does not enable/disable
         # ALAS or alter the user's binding; it only controls workbench chrome.
+        # 两个来源取交集：后台的全局开关（ALAS 管理 → 工作台显示）与用户列表里
+        # 该账号自己的「显示 ALAS」。
         "workbench_alas_visible": bool(
             str(await asyncio.to_thread(storage.get_setting, "workbench_alas_visible", "true")).strip().lower()
             in ("1", "true", "yes", "on")
-        ),
+        )
+        and bool(user.get("alas_visible", 1)),
         # 投屏管理：按当前用户角色下发的工作台功能开关与底部菜单编排（缺省 = 默认）。
         # 只影响前端可见性，不参与任何权限判定。
         "workbench_features": workbench_features.switches_for_role(

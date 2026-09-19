@@ -1,6 +1,9 @@
 ARG PYTHON_IMAGE=python:3.12-alpine
 FROM ${PYTHON_IMAGE}
 
+# Local builds use VERSION; CI supplies a validated release/development version.
+ARG SCRCPYGATE_VERSION
+
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     WEB_SCRCPY_DATA_DIR=/app/data \
     PATH="/app/venv/bin:$PATH" \
-    HOME=/tmp
+    HOME=/app/data
 
 RUN apk add --no-cache android-tools libstdc++ libffi curl && \
     addgroup -S app && \
@@ -27,9 +30,11 @@ RUN python -m venv /app/venv && \
 
 COPY app/ app/
 COPY static/ static/
-COPY LICENSE THIRD_PARTY.md ./
+COPY LICENSE THIRD_PARTY.md VERSION ./
 COPY adb_manager.py scrcpy.py scrcpy-server docker-entrypoint.sh ./
 COPY adb/linux/ adb/linux/
+
+RUN python -c 'import os; from pathlib import Path; from app.version import validate_version; p = Path("/app/VERSION"); value = os.environ.get("SCRCPYGATE_VERSION") or p.read_text().strip(); p.write_text(validate_version(value) + "\n", encoding="utf-8")'
 
 RUN mkdir -p /app/data /tmp && \
     chmod +x /app/adb/linux/adb || true && \
@@ -40,6 +45,6 @@ USER app
 EXPOSE 5000
 # 端口跟随 WEB_SCRCPY_PORT（宿主网络模式下容器直接绑宿主端口，默认 5000 不变）。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${WEB_SCRCPY_PORT:-5000}/healthz" || exit 1
+  CMD python -m app.container_health || exit 1
 
 CMD ["/app/docker-entrypoint.sh"]

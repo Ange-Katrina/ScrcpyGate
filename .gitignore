@@ -61,3 +61,7 @@ log/
 
 .run-data/
 /.ui-adapter-test-data/
+
+# Private GeoIP updater configuration (also excluded outside the default data directory).
+**/.geo-credentials.json
+**/.geo-credentials-*.tmp

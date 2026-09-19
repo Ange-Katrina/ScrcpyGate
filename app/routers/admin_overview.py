@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 
@@ -340,6 +341,13 @@ def _attention_days(remaining_seconds: object, expires_at: object) -> int | None
         except (TypeError, ValueError):
             remaining = 0
         if remaining > 0:
+            # 与用户列表/编辑弹窗同一套日历日口径：到期时间按本地 23:59:59 存，
+            # 用时长向上取整会把 30 天读成 31 天。
+            if expires_at:
+                try:
+                    return max(0, (datetime.fromtimestamp(int(expires_at)).date() - datetime.now().date()).days)
+                except (TypeError, ValueError, OSError, OverflowError):
+                    pass
             return max(1, (remaining + 86399) // 86400)
     if expires_at:
         try:

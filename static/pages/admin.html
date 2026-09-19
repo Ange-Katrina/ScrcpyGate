@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-admin">
           <div class="page-heading">
             <div class="page-heading-copy">
               <h1>管理后台</h1>
@@ -120,6 +120,26 @@
             </a>
           </section>
 
+          <details class="admin-disclosure panel" id="update-panel" aria-labelledby="update-title">
+            <summary class="panel-header">
+              <h2 class="panel-title" id="update-title">系统更新<span class="panel-subtitle" id="update-subtitle">检查是否有已发布的新版本</span></h2>
+              <div class="update-tools">
+                <span class="update-state" id="update-state" role="status" aria-live="polite">等待检查</span>
+
+              </div>
+            </summary>
+            <div class="update-body">
+              <div class="update-check-row"><button class="tool-btn" id="update-check-btn" type="button" title="重新检查更新"><i data-lucide="refresh-cw"></i><span>检查更新</span></button></div>
+              <div class="update-row"><span class="update-k">当前版本</span><span class="update-v" id="update-current">—</span></div>
+              <div class="update-row"><span class="update-k">最新版本</span><span class="update-v" id="update-latest">—</span></div>
+              <p class="update-hint" id="update-hint">这里只显示是否有更新。应用更新在服务器上执行下面的命令（会先备份数据与 .env，只换镜像，失败自动回滚）。</p>
+              <div class="update-cmd">
+                <code id="update-command">—</code>
+                <button class="update-copy" id="update-copy" type="button" title="复制更新命令" disabled><i data-lucide="copy"></i><span>复制</span></button>
+              </div>
+            </div>
+          </details>
+
           <div class="workspace-grid">
             <div class="main-col">
             <section class="panel" id="devices" aria-labelledby="devices-title">
@@ -140,7 +160,7 @@
                   <button class="filter-tab" type="button" data-filter="alas-err" role="tab">ALAS 异常<span class="count" data-count-filter="alas-err">—</span></button>
                 </div>
               </div>
-              <div class="device-table-wrap" tabindex="0" role="region" aria-label="设备列表">
+              <div class="device-table-wrap" data-scroll-table tabindex="0" role="region" aria-label="设备列表，可横向滚动">
                 <table class="device-table">
                   <caption class="sr-only">设备状态列表</caption>
                   <thead>
@@ -158,7 +178,7 @@
                   <h2 class="panel-title" id="sessions-title">活跃投屏<span class="panel-subtitle" id="dash-sessions-count">等待数据</span></h2>
                 <a class="text-link" href="/mirror">查看全部 →</a>
               </div>
-              <div class="sessions-wrap" tabindex="0" role="region" aria-label="会话列表">
+              <div class="sessions-wrap" data-scroll-table tabindex="0" role="region" aria-label="投屏会话，可横向滚动">
                 <table class="sessions-table">
                   <caption class="sr-only">活跃投屏会话列表</caption>
                   <thead>

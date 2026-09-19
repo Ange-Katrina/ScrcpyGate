@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-logs">
           <div class="page-heading">
             <h1>日志审计</h1>
             <p>运行日志与安全审计事件记录</p>
@@ -112,6 +112,28 @@
             </div>
           </section>
 
+          <details class="admin-disclosure panel" id="log-retention-panel" aria-labelledby="log-retention-title">
+            <summary class="panel-header">
+              <h2 class="panel-title" id="log-retention-title">日志保存时长<span class="panel-subtitle">审计日志与运行日志的保留天数</span></h2>
+              <span class="refresh-meta" id="log-retention-state">读取中…</span>
+            </summary>
+            <div class="log-retention-grid">
+              <label class="log-retention-field" for="log-retention-days">
+                <span class="log-retention-label">保存时长</span>
+                <select class="field-input" id="log-retention-days" aria-describedby="log-retention-hint">
+                  <option value="0">不清理</option>
+                  <option value="1">1 天</option>
+                  <option value="3">3 天</option>
+                  <option value="7">7 天</option>
+                  <option value="15">15 天</option>
+                  <option value="30">30 天</option>
+                </select>
+              </label>
+              <span class="log-retention-hint" id="log-retention-hint">「不清理」仅关闭按天清理，行数与文件轮转上限仍生效。审计日志清理连续过期记录并保留校验链；运行日志只清理超期轮转段。</span>
+              <button class="btn-primary" type="button" id="log-retention-save"><i data-lucide="save"></i><span>保存</span></button>
+            </div>
+          </details>
+
           <section class="panel" id="logs-panel" aria-labelledby="logs-panel-title">
             <div class="panel-header">
               <h2 class="panel-title" id="logs-panel-title">运行日志与安全审计<span class="panel-subtitle">实时记录 · 按需刷新</span></h2>
@@ -139,10 +161,12 @@
                 <span>至</span>
                 <input class="field-input" type="datetime-local" id="logs-date-to" aria-label="自定义结束时间">
               </span>
-              <span class="filter-field" id="f-severity"><span class="f-label">严重级别</span><span class="select-wrap"><select id="logs-severity" aria-label="严重级别"><option value="all">全部</option><option value="debug">调试</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select><i data-lucide="chevron-down"></i></span></span>
+              <details class="admin-disclosure filter-disclosure" id="logs-more-filters"><summary><span>更多筛选</span><span class="filter-active-count" hidden></span></summary><div class="filter-extra"><span class="filter-field" id="f-severity"><span class="f-label">严重级别</span><span class="select-wrap"><select id="logs-severity" aria-label="严重级别"><option value="all">全部</option><option value="debug">调试</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-source"><span class="f-label">来源模块</span><span class="select-wrap"><select id="logs-source" aria-label="来源模块"><option value="all">全部</option><option value="auth">认证</option><option value="account">账户</option><option value="device">设备</option><option value="quality">画质传输</option><option value="alas">ALAS</option><option value="system">系统</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-device"><span class="f-label">设备</span><span class="select-wrap"><select id="logs-device" aria-label="设备"><option value="all">全部设备</option><option value="none">无设备</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-user"><span class="f-label">用户</span><span class="select-wrap"><select id="logs-user" aria-label="用户"><option value="all">全部用户</option><option value="none">无用户</option></select><i data-lucide="chevron-down"></i></span></span>
+            </div></details>
+              <button class="tool-btn filter-reset" type="button" data-clear-log-filters><i data-lucide="filter-x"></i><span>清除筛选</span></button>
             </div>
 
             <div class="logs-filter-bar" id="audit-filter-bar">
@@ -153,10 +177,12 @@
                 <span>至</span>
                 <input class="field-input" type="datetime-local" id="audit-date-to" aria-label="自定义结束时间">
               </span>
-              <span class="filter-field" id="f-event-type"><span class="f-label">事件类型</span><span class="select-wrap"><select id="logs-event-type" aria-label="事件类型"><option value="all">全部事件类型</option><option value="login">登录与退出审计</option><option value="authfail">认证失败</option><option value="acct">账户状态变更</option><option value="perm">用户权限调整</option><option value="dev">设备操作</option><option value="quality">画质与传输配置修改</option><option value="alas">ALAS 配置与运行操作</option><option value="admin">管理员操作</option></select><i data-lucide="chevron-down"></i></span></span>
+              <details class="admin-disclosure filter-disclosure" id="audit-more-filters"><summary><span>更多筛选</span><span class="filter-active-count" hidden></span></summary><div class="filter-extra"><span class="filter-field" id="f-event-type"><span class="f-label">事件类型</span><span class="select-wrap"><select id="logs-event-type" aria-label="事件类型"><option value="all">全部事件类型</option><option value="login">登录与退出审计</option><option value="authfail">认证失败</option><option value="acct">账户状态变更</option><option value="perm">用户权限调整</option><option value="dev">设备操作</option><option value="quality">画质与传输配置修改</option><option value="alas">ALAS 配置与运行操作</option><option value="admin">管理员操作</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-result"><span class="f-label">执行结果</span><span class="select-wrap"><select id="logs-result" aria-label="执行结果"><option value="all">全部</option><option value="success">成功</option><option value="fail">失败</option><option value="denied">拒绝</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-actor"><span class="f-label">操作者</span><span class="select-wrap"><select id="logs-actor" aria-label="操作者"><option value="all">全部操作者</option><option value="none">未认证用户</option></select><i data-lucide="chevron-down"></i></span></span>
               <label class="search-box" id="f-target"><i data-lucide="crosshair"></i><input type="search" id="logs-target" placeholder="筛选操作对象" aria-label="筛选操作对象"></label>
+            </div></details>
+              <button class="tool-btn filter-reset" type="button" data-clear-log-filters><i data-lucide="filter-x"></i><span>清除筛选</span></button>
             </div>
 
             <div class="logs-banner banner-error is-hidden" id="logs-fail-banner" role="alert"><i data-lucide="alert-circle"></i><span class="banner-msg">刷新失败 · 无法获取最新日志，请重试</span><button class="banner-close" id="logs-fail-retry" type="button"><i data-lucide="rotate-cw"></i>重试</button></div>
@@ -166,7 +192,7 @@
 
             <div id="logs-run-view" class="is-hidden">
               <div id="logs-structured">
-                <div class="logs-table-wrap">
+                <div class="logs-table-wrap" data-scroll-table tabindex="0" role="region" aria-label="日志列表，可横向滚动">
                   <table class="logs-table">
                     <thead>
                       <tr><th style="width:12%">时间</th><th style="width:7%">级别</th><th style="width:12%">来源</th><th style="width:11%">设备</th><th style="width:9%">用户</th><th style="width:39%">内容摘要</th><th style="width:10%;text-align:right">操作</th></tr>
@@ -197,7 +223,7 @@
               </div>
               <div class="logs-banner banner-audit" id="logs-audit-banner"><i data-lucide="alert-triangle"></i><span class="banner-msg" id="logs-audit-banner-text">正在加载审计风险统计</span></div>
               <div id="audit-structured">
-                <div class="logs-table-wrap">
+                <div class="logs-table-wrap" data-scroll-table tabindex="0" role="region" aria-label="日志列表，可横向滚动">
                   <table class="logs-table audit-table">
                     <thead>
                       <tr><th style="width:14%">时间</th><th style="width:22%">事件</th><th style="width:24%">操作者 / 对象</th><th style="width:10%">结果</th><th style="width:10%">严重度</th><th style="width:15%">请求 ID</th><th style="width:5%;text-align:right">详情</th></tr>

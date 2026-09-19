@@ -197,8 +197,21 @@
     });
   }
 
-  function request(path, options) {
-    options = options || {};
+  /* 浏览器稳定设备标识：由适配器生成（localStorage 里存一份随机 id），
+     适配器还没加载时退回直接读 localStorage；都没有就不带这个头。 */
+  var DEVICE_ID_KEY = 'scrcpygate-device-id';
+  function deviceIdHeader() {
+    try {
+      if (window.ScrcpyGateV2 && typeof window.ScrcpyGateV2.browserDeviceId === 'function') {
+        return String(window.ScrcpyGateV2.browserDeviceId() || '');
+      }
+      return String(window.localStorage.getItem(DEVICE_ID_KEY) || '');
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function request(path, options) {    options = options || {};
     var method = String(options.method || 'GET').toUpperCase();
     var headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
@@ -207,6 +220,9 @@
     }
     var token = csrfToken();
     if (token) headers.set('X-CSRF-Token', token);
+    // 浏览器稳定设备标识：登录会话列表据此把同一台设备的多条会话归并成一行。
+    var deviceId = deviceIdHeader();
+    if (deviceId) headers.set('X-Device-Id', deviceId);
     var body = options.body;
     if (body !== undefined && body !== null && headers.get('Content-Type') === 'application/json' && typeof body !== 'string') {
       body = JSON.stringify(body);

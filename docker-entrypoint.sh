@@ -51,8 +51,20 @@ if [ -z "${ADB_PATH:-}" ]; then
   unset ADB_PATH
 fi
 
+# Provision only for fresh/unencrypted data. Existing ciphertext without its
+# matching key is preserved; core service recovery remains available.
+if ! python -m app.cli generate-alas-key; then
+  echo "[WARN] ALAS key provisioning failed; restore the matching key or explicitly clear the token. Existing credentials were preserved." >&2
+fi
+
+# --no-proxy-headers 是**必须**的：应用自己实现「从右向左跳过可信代理」的 X-Forwarded-For
+# 解析（app/security.py::client_ip + TRUST_PROXY/TRUSTED_PROXY_IPS）。若让 uvicorn 处理
+# 转发头（默认开启），它会先把 request.client.host 改写成 XFF 里的客户端地址——于是应用看到
+# 的「直连对端」变成了客户端而不是代理，TRUSTED_PROXY_IPS 判定必然失败，经环回代理进来的
+# 每个请求都会以 403（untrusted_proxy_headers）被拒。关掉它，转发头只有应用一份判定逻辑。
 exec "$uvicorn_bin" app.main:app \
   --host "$bind" \
   --port "$port" \
   --workers 1 \
+  --no-proxy-headers \
   --ws-max-size "$max_size"

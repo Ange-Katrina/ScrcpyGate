@@ -15,8 +15,10 @@ from ..runtime import runtime_for
 from ..services.alas_service import (
     admin_alas_payload,
     admin_alas_permissions_payload,
+    auto_bind_admin_configs,
     bound_alas_config_names,
     clear_alas_status_cache,
+    public_config_matches,
     runtime_catalog,
 )
 from ..services.audit_service import audit_request
@@ -150,6 +152,50 @@ async def admin_alas_config(request: Request):
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.invalid_alas_config_name")) from exc
     result = await asyncio.to_thread(alas.get_config, config_name)
     return _public_alas_result(result)
+
+
+@router.post("/api/admin/alas/auto-bind")
+async def admin_alas_auto_bind(request: Request):
+    """按 ALAS 配置里的模拟器 ADB 地址，补齐全缺失的管理员配置关联。
+
+    打开 ALAS 管理页时调用一次：只认完全一致的 `host:port`，回环地址跳过，
+    只补当前管理员缺失的绑定（手工绑定优先，绝不覆盖），普通用户的数据不动。
+    """
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    username = str(admin.get("username") or "")
+    result = await asyncio.to_thread(auto_bind_admin_configs, username, runtime_for(request))
+    created = list(result.get("created") or [])
+    skipped = list(result.get("skipped") or [])
+    audit_request(
+        request,
+        admin,
+        "alas_auto_bind",
+        outcome="success" if result.get("ok") else "failure",
+        reason="" if result.get("ok") else str(result.get("error") or "auto_bind_failed"),
+        severity="info" if result.get("ok") else "warning",
+        target_type="alas_config",
+        target_id=username,
+        # 只记条数与配置名，不记设备地址（日志里的地址另有 <adb-endpoint> 脱敏）。
+        metadata={
+            "configs": int(result.get("configs") or 0),
+            "devices": int(result.get("devices") or 0),
+            "created": [str(item.get("config_name") or "") for item in created],
+            "skipped": len(skipped),
+        },
+    )
+    return result
+
+
+@router.get("/api/admin/alas/config-matches")
+async def admin_alas_config_matches(request: Request):
+    """只读：Runtime 配置里的模拟器 ADB 地址 ↔ 本机设备的配对结果。
+
+    用户与权限页用它做「选设备自动带出配置 / 选配置自动带出设备」。与自动绑定共用
+    同一份判定代码（`match_runtime_configs_to_devices`），且只返回公开设备 id。
+    """
+    security.require_admin(request)
+    return await asyncio.to_thread(public_config_matches, runtime_for(request))
 
 
 @router.get("/api/admin/alas/configs")

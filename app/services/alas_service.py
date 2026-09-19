@@ -135,13 +135,16 @@ __all__ = [
     "admin_runtime_alas_config_names",
     "alas_binding_for_user",
     "alas_device_for_user",
+    "auto_bind_admin_configs",
     "bound_alas_config_names",
     "cached_public_alas_status",
     "clear_alas_status_cache",
     "log_alas_embed_denied",
     "log_alas_websocket_close",
+    "match_runtime_configs_to_devices",
     "public_admin_alas_bindings",
     "public_alas_status",
+    "public_config_matches",
     "public_user_alas_bindings",
     "require_alas_binding",
 ]
@@ -184,6 +187,14 @@ def log_alas_websocket_close(
     )
 
 
+def _alas_binding_accessible(user: dict, binding: dict) -> bool:
+    """Authorize the stored device even when the caller omits its selector."""
+    if user.get("role") == "admin":
+        return True
+    device_id = str(binding.get("device_id") or "").strip()
+    return bool(device_id and storage.user_can(user["username"], device_id, "view"))
+
+
 def alas_binding_for_user(
     user: dict,
     allow_admin_global: bool = False,
@@ -207,6 +218,8 @@ def alas_binding_for_user(
         else:
             binding = storage.get_user_alas_config(user["username"], device_id)
     if binding and binding.get("config_name"):
+        if not _alas_binding_accessible(user, binding):
+            return None
         if user.get("role") == "admin":
             binding = {**binding, "can_run": True, "can_edit": True}
         return binding
@@ -292,7 +305,7 @@ def public_user_alas_bindings(user: dict, device_id: str | None = None) -> list[
             "is_default": bool(binding.get("is_default")),
         }
         for binding in bindings
-        if binding and binding.get("config_name")
+        if binding and binding.get("config_name") and _alas_binding_accessible(user, binding)
     ]
 
 
@@ -306,6 +319,226 @@ def public_admin_alas_bindings(bindings: list[dict]) -> list[dict]:
         item["device_name"] = str(item.get("device_name") or "")
         result.append(item)
     return result
+
+
+def _runtime_config_names(catalog: dict) -> list[str]:
+    names: list[str] = []
+    for raw in catalog.get("configs") or []:
+        try:
+            name = alas.sanitize_config_name(raw)
+        except ValueError:
+            continue
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _device_endpoint_index() -> dict[str, list[dict]]:
+    """`host:port` → 设备列表（跳过回环地址）。"""
+    index: dict[str, list[dict]] = {}
+    for device in storage.list_all_devices():
+        host, port = alas.adb_endpoint_parts(device.get("address") or device.get("id") or "")
+        if not host or alas.is_loopback_endpoint(host):
+            continue
+        index.setdefault(f"{host}:{port}", []).append(device)
+    return index
+
+
+def match_runtime_configs_to_devices(runtime: RuntimeState | None = None) -> dict:
+    """只读：Runtime 配置里的模拟器 ADB 地址 ↔ 本机设备的配对结果。
+
+    与 `auto_bind_admin_configs` **共用同一份判定代码**，所以管理页里「选设备自动带出
+    配置 / 选配置自动带出设备」给出的配对，和自动绑定真正落库的配对不会出现分歧。
+    每条一个 state：`matched` / `no_address` / `not_network_address` / `loopback` /
+    `no_device` / `ambiguous` / `runtime_error`。
+
+    每条 match 里的 `internal_id` 只给本模块内部（自动绑定）用，对外接口必须剥掉。
+    """
+    settings = alas.public_settings()
+    if not settings.get("enabled") or not settings.get("token_set"):
+        return {"ok": False, "error": "ALAS_RUNTIME_NOT_CONFIGURED", "matches": []}
+    catalog = runtime_catalog(runtime)
+    names = _runtime_config_names(catalog)
+    if not names:
+        return {
+            "ok": False,
+            "error": public_error_detail(catalog.get("error")) or "ALAS_RUNTIME_CATALOG_EMPTY",
+            "matches": [],
+        }
+    endpoints = _device_endpoint_index()
+    matches: list[dict] = []
+    truncated = False
+    for name in names:
+        result = alas.get_config(name)
+        if not result.get("ok"):
+            matches.append(
+                {
+                    "config_name": name,
+                    "state": "runtime_error",
+                    "detail": public_error_detail(result.get("error")),
+                }
+            )
+            # 一个配置读不到通常说明 Runtime 不可达，后面的也会逐个超时：直接收尾，
+            # 免得管理页为了一个下拉框等上几十秒。
+            truncated = True
+            break
+        serial = alas.emulator_serial(result)
+        if not serial or serial.strip().lower() == "auto":
+            # `auto` 是 ALAS 的「自动探测」，等于没有显式地址。
+            matches.append({"config_name": name, "state": "no_address", "address": ""})
+            continue
+        host, port = alas.adb_endpoint_parts(serial)
+        if not host:
+            matches.append({"config_name": name, "state": "not_network_address", "address": str(serial)})
+            continue
+        endpoint = f"{host}:{port}"
+        if alas.is_loopback_endpoint(host):
+            matches.append({"config_name": name, "state": "loopback", "address": endpoint})
+            continue
+        found = endpoints.get(endpoint) or []
+        if not found:
+            matches.append({"config_name": name, "state": "no_device", "address": endpoint})
+            continue
+        if len(found) > 1:
+            matches.append(
+                {"config_name": name, "state": "ambiguous", "address": endpoint, "devices": len(found)}
+            )
+            continue
+        device = found[0]
+        internal_id = str(device.get("id") or "")
+        matches.append(
+            {
+                "config_name": name,
+                "state": "matched",
+                "address": endpoint,
+                "internal_id": internal_id,
+                "device_id": storage.public_device_id(internal_id) if internal_id else "",
+                "device_name": str(device.get("name") or ""),
+            }
+        )
+    return {
+        "ok": True,
+        "configs": len(names),
+        "devices": sum(len(items) for items in endpoints.values()),
+        "matches": matches,
+        "truncated": truncated,
+    }
+
+
+def public_config_matches(runtime: RuntimeState | None = None) -> dict:
+    """管理页只读接口用的副本：剥掉内部设备 id。"""
+    report = match_runtime_configs_to_devices(runtime)
+    matches = []
+    for item in report.get("matches") or []:
+        matches.append({key: value for key, value in item.items() if key != "internal_id"})
+    cleaned = {key: value for key, value in report.items() if key != "matches"}
+    cleaned["matches"] = matches
+    return cleaned
+
+
+def auto_bind_admin_configs(username: str, runtime: RuntimeState | None = None) -> dict:
+    """按 ALAS 配置里的模拟器 ADB 地址，给该管理员补齐缺失的配置关联。
+
+    规则（用户确认过的口径）：
+      * 只认**完全一致**的 `host:port`（`app.alas.adb_endpoint_parts` 解析）；
+      * 回环地址（`127.0.0.1` / `localhost` / `::1` / `0.0.0.0`）一律跳过 ——
+        同机多台转发设备会撞到同一个地址，宁可留给管理员手工绑定；
+      * **只补缺失项**：该管理员已有该配置的绑定行时原样保留（手工绑定优先），
+        指向别的设备也不改；
+      * 不碰其它用户的数据（普通用户的 ALAS 权限仍需管理员显式授权）。
+
+    返回逐条报告：`created` 为新建的绑定，`skipped` 带原因（`no_address` /
+    `not_network_address` / `loopback` / `no_device` / `ambiguous` / `already_bound` /
+    `owned_by_other` / `runtime_error`）。
+    """
+    target = str(username or "").strip()
+    account = storage.get_user(target) if target else None
+    if not account or str(account["role"]) != "admin":
+        return {"ok": False, "error": "admin_required", "created": [], "skipped": []}
+
+    report = match_runtime_configs_to_devices(runtime)
+    if not report.get("ok"):
+        return {
+            "ok": False,
+            "error": str(report.get("error") or "ALAS_RUNTIME_NOT_CONFIGURED"),
+            "created": [],
+            "skipped": [],
+        }
+
+    bound = {
+        str(row.get("config_name") or ""): row
+        for row in storage.list_user_alas_bindings(username=target)
+    }
+    created: list[dict] = []
+    skipped: list[dict] = []
+    for item in report.get("matches") or []:
+        name = str(item.get("config_name") or "")
+        if not name:
+            continue
+        existing = bound.get(name)
+        if existing is not None:
+            existing_device = str(existing.get("device_id") or "").strip()
+            skipped.append(
+                {
+                    "config_name": name,
+                    "reason": "already_bound",
+                    "device_id": storage.public_device_id(existing_device) if existing_device else "",
+                }
+            )
+            continue
+        state = str(item.get("state") or "")
+        if state != "matched":
+            entry: dict = {"config_name": name, "reason": state}
+            if item.get("address"):
+                entry["address"] = item["address"]
+            if item.get("detail"):
+                entry["detail"] = item["detail"]
+            if item.get("devices"):
+                entry["devices"] = item["devices"]
+            skipped.append(entry)
+            continue
+        device_id = str(item.get("internal_id") or "")
+        endpoint = str(item.get("address") or "")
+        try:
+            storage.upsert_user_alas_binding_with_view(
+                target, name, True, True, device_id=device_id, grant_view=False
+            )
+        except storage.AlasConfigOwnershipError as exc:
+            skipped.append(
+                {
+                    "config_name": name,
+                    "reason": "owned_by_other",
+                    "owner": str(getattr(exc, "owner", "") or ""),
+                    "address": endpoint,
+                }
+            )
+        except ValueError as exc:
+            skipped.append({"config_name": name, "reason": str(exc) or "bind_rejected", "address": endpoint})
+        else:
+            created.append(
+                {
+                    "config_name": name,
+                    "address": endpoint,
+                    "device_id": str(item.get("device_id") or ""),
+                    "device_name": str(item.get("device_name") or ""),
+                }
+            )
+    log.info(
+        "ALAS_AUTO_BIND admin=%s configs=%s devices=%s created=%s skipped=%s",
+        target,
+        int(report.get("configs") or 0),
+        int(report.get("devices") or 0),
+        len(created),
+        len(skipped),
+    )
+    return {
+        "ok": True,
+        "admin": target,
+        "configs": int(report.get("configs") or 0),
+        "devices": int(report.get("devices") or 0),
+        "created": created,
+        "skipped": skipped,
+    }
 
 
 def public_alas_status(result: dict, binding: dict) -> dict:

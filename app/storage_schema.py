@@ -195,7 +195,8 @@ USERS_COLUMNS = """
             expires_at INTEGER NULL,
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
             last_login_at INTEGER NULL,
-            last_login_ip TEXT NULL
+            last_login_ip TEXT NULL,
+            alas_visible INTEGER NOT NULL DEFAULT 1 CHECK(alas_visible IN (0, 1))
 """
 
 
@@ -374,6 +375,17 @@ def create_base_schema(conn: sqlite3.Connection) -> None:
             locked_until_json TEXT NOT NULL,
             updated_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS login_pow_challenges (
+            challenge_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            expires REAL NOT NULL,
+            ip TEXT NOT NULL,
+            username TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0, 1))
+        );
+        CREATE INDEX IF NOT EXISTS idx_login_pow_expires ON login_pow_challenges(expires);
+        CREATE INDEX IF NOT EXISTS idx_login_pow_ip ON login_pow_challenges(ip);
         CREATE TABLE IF NOT EXISTS user_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
@@ -385,6 +397,59 @@ def create_base_schema(conn: sqlite3.Connection) -> None:
             created_at INTEGER NOT NULL,
             read_at INTEGER NULL,
             FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS access_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            source_ip TEXT NOT NULL DEFAULT '',
+            ip_version INTEGER NOT NULL DEFAULT 4,
+            country TEXT NOT NULL DEFAULT '',
+            geo_db_epoch INTEGER,
+            identity TEXT NOT NULL DEFAULT 'anonymous',
+            account TEXT NOT NULL DEFAULT '',
+            method TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT 'page',
+            route_template TEXT NOT NULL DEFAULT '',
+            path_sample TEXT NOT NULL DEFAULT '',
+            status INTEGER NOT NULL DEFAULT 0,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            decision TEXT NOT NULL DEFAULT 'allow',
+            request_id TEXT NOT NULL DEFAULT '',
+            user_agent TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS access_ip_summary (
+            bucket_ts INTEGER NOT NULL,
+            source_ip TEXT NOT NULL,
+            country TEXT NOT NULL DEFAULT '',
+            first_seen_ts INTEGER NOT NULL,
+            last_seen_ts INTEGER NOT NULL,
+            requests INTEGER NOT NULL DEFAULT 0,
+            errors_4xx INTEGER NOT NULL DEFAULT 0,
+            errors_5xx INTEGER NOT NULL DEFAULT 0,
+            denied_ban INTEGER NOT NULL DEFAULT 0,
+            denied_geo INTEGER NOT NULL DEFAULT 0,
+            observe_geo INTEGER NOT NULL DEFAULT 0,
+            dropped INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (bucket_ts, source_ip)
+        );
+        CREATE TABLE IF NOT EXISTS ip_bans (
+            ip TEXT PRIMARY KEY,
+            created_ts INTEGER NOT NULL,
+            updated_ts INTEGER NOT NULL,
+            expires_ts INTEGER,
+            permanent INTEGER NOT NULL DEFAULT 0 CHECK(permanent IN (0, 1)),
+            reason TEXT NOT NULL DEFAULT '',
+            actor TEXT NOT NULL DEFAULT '',
+            revoked_ts INTEGER,
+            revoked_by TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS ip_ban_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            ip TEXT NOT NULL,
+            action TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            detail_json TEXT NOT NULL DEFAULT '{}'
         );
         """
     )
@@ -434,6 +499,19 @@ def ensure_base_indexes(conn: sqlite3.Connection) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_notifications_dedupe "
         "ON user_notifications(username, dedupe_key) WHERE dedupe_key != ''"
     )
+    # 访问记录：keyset 分页 (id)、按时间的保留清理 (ts)、以及暴露出去的过滤器各一条。
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_records_ts_id ON access_records(ts DESC, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_records_ip_ts ON access_records(source_ip, ts DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_records_status ON access_records(status, ts DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_records_country ON access_records(country, ts DESC)")
+    # 汇总表按 IP 看时间线；保留清理按 bucket 删除。
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_access_summary_ip ON access_ip_summary(source_ip, bucket_ts DESC)"
+    )
+    # 到期封禁的统计与清理；永久封禁 expires_ts 为 NULL，因此用部分索引。
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_bans_expires ON ip_bans(expires_ts) WHERE expires_ts IS NOT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_ban_events_ip ON ip_ban_events(ip, ts DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_ban_events_ts ON ip_ban_events(ts DESC)")
 
 
 SESSIONS_COLUMNS = """
@@ -446,7 +524,8 @@ SESSIONS_COLUMNS = """
             absolute_expires_at INTEGER NOT NULL,
             last_seen_at INTEGER,
             client_ip TEXT,
-            user_agent TEXT
+            user_agent TEXT,
+            device_id TEXT
 """
 
 
@@ -499,10 +578,15 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
         conn.execute("ALTER TABLE users ADD COLUMN last_login_ip TEXT NULL")
     if "enabled" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    # 每个用户的 ALAS 可见性（有些账号用不上 ALAS）：只影响界面显隐，不参与权限判定。
+    if "alas_visible" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN alas_visible INTEGER NOT NULL DEFAULT 1")
     conn.execute("UPDATE users SET enabled=1 WHERE enabled IS NULL")
+    conn.execute("UPDATE users SET alas_visible=1 WHERE alas_visible IS NULL")
 
     # 登录会话列表需要展示「最近活动 / 来源 IP / 客户端」，老库补齐这三列（可空，无默认值，
-    # 因此 ALTER 不会重写既有行，成本可忽略）。
+    # 因此 ALTER 不会重写既有行，成本可忽略）。device_id 是浏览器侧的稳定设备标识，
+    # 用来把「同一台设备的多条会话」在安全页里归并成一行。
     session_columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if session_columns:
         if "last_seen_at" not in session_columns:
@@ -511,6 +595,8 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
             conn.execute("ALTER TABLE sessions ADD COLUMN client_ip TEXT")
         if "user_agent" not in session_columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN user_agent TEXT")
+        if "device_id" not in session_columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN device_id TEXT")
 
     # 设备权限的来源：'manual'（管理员显式授予）或 'alas'（ALAS 绑定顺带授予）。
     # 历史库里的行无法追溯来源，一律按 'manual' 处理（保守：不会误删既有授权）。

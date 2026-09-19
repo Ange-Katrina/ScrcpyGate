@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-devices">
 
           <div class="page-heading dev-head">
             <div>
@@ -91,7 +91,7 @@
               <p>投屏设备、连接状态与观看会话管理</p>
             </div>
             <div class="dev-head-actions">
-              <button class="btn-ghost icon-only" id="devRefreshAllBtn" type="button" title="刷新全部设备" aria-label="刷新全部设备"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-ghost" id="devRefreshAllBtn" type="button" title="刷新全部设备" aria-label="刷新全部设备"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
               <button class="btn-primary" id="devAddBtn" type="button"><i data-lucide="plus"></i><span>新增设备</span></button>
             </div>
           </div>
@@ -185,15 +185,15 @@
                 </article>
               </div>
 
-              <article class="dev-card" style="margin-top:16px;">
-                <div class="dev-card-head"><div><h3>维护操作</h3><span>对选中设备执行低频操作</span></div></div>
+              <details class="admin-disclosure dev-card" style="margin-top:16px;">
+                <summary class="dev-card-head"><div><h3>维护操作</h3><span>对选中设备执行低频操作</span></div></summary>
                 <div class="dev-maintenance">
                   <button class="btn-ghost dev-btn-sm" id="devRefreshOneBtn" type="button"><i data-lucide="rotate-cw"></i><span>重新读取设备信息</span></button>
                   <button class="btn-ghost dev-btn-sm" id="devReleaseCtrlBtn" type="button"><i data-lucide="hand"></i><span>释放当前控制权</span></button>
                   <button class="btn-ghost dev-btn-sm dev-danger" id="devStopStreamBtn" type="button"><i data-lucide="square"></i><span>停止当前投屏会话</span></button>
                   <button class="btn-ghost dev-btn-sm dev-danger" id="devDeleteBtn" type="button"><i data-lucide="trash-2"></i><span>删除设备</span></button>
                 </div>
-              </article>
+              </details>
             </section>
           </section>
 

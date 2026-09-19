@@ -171,16 +171,25 @@
           modal.setAttribute('aria-hidden', 'true');
         }, 190);
       }
+      var drawerOpeners = {};
       function openDrawer(id) {
         var maskId = id === 'alasConnDrawer' ? 'alasConnMask' : 'alasLinkMask';
+        if (!$(id).classList.contains('open')) drawerOpeners[id] = document.activeElement;
         $(id).classList.add('open');
         $(maskId).classList.add('open');
         $(id).setAttribute('aria-hidden', 'false');
         $(id).removeAttribute('inert');
         $(maskId).hidden = false;
+        var first = $(id).querySelector('button');
+        if (first) first.focus({ preventScroll: true });
       }
       function closeDrawer(id) {
         var maskId = id === 'alasConnDrawer' ? 'alasConnMask' : 'alasLinkMask';
+        if ($(id).contains(document.activeElement)) {
+          var opener = drawerOpeners[id];
+          if (opener && opener.isConnected && !opener.disabled && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
+          if ($(id).contains(document.activeElement)) document.activeElement.blur();
+        }
         $(id).classList.remove('open');
         $(maskId).classList.remove('open');
         $(id).setAttribute('aria-hidden', 'true');
@@ -262,6 +271,34 @@
        }
        var overviewRequest = null;
        var alasLastRefreshAt = 0;
+       /* 打开 ALAS 管理页时扫一次：把 ALAS 配置里模拟器 ADB 地址对应的设备补成缺失的管理员关联。
+          只跑一次（幂等），Runtime 不可用或没配 Token 时静默跳过；有新建或需要人工确认才提示。 */
+       var autoBindState = 'idle';
+       function maybeAutoBind() {
+         if (autoBindState !== 'idle') { return; }
+         if (!window.ScrcpyGateApi.isConfigured('alas.autoBind')) { return; }
+         if (!serviceEnabled || !tokenConfigured) { return; }
+         autoBindState = 'running';
+         window.ScrcpyGateApi.configured('alas.autoBind', { method: 'POST', body: {} }).then(function (payload) {
+           var d = unwrapData(payload) || {};
+           autoBindState = 'done';
+           if (!d.ok) { return; }
+           var created = d.created || [];
+           var skipped = d.skipped || [];
+           if (created.length) {
+             toast('已按 ALAS 配置里的 ADB 地址自动绑定 ' + created.length + ' 个配置', 'success');
+             // 等本轮 overview 请求收尾（overviewRequest 在 finally 里才清空）再重新拉，否则会被去重。
+             window.setTimeout(function () { loadOverview(false).catch(function () {}); }, 0);
+             return;
+           }
+           var conflicts = skipped.filter(function (item) {
+             return item && (item.reason === 'owned_by_other' || item.reason === 'ambiguous');
+           });
+           if (conflicts.length) {
+             toast('有 ' + conflicts.length + ' 个配置需要人工确认（已被其它用户占用或匹配不唯一）', 'info');
+           }
+         }).catch(function () { autoBindState = 'done'; });
+       }
        function loadOverview(showMessage, autoRefresh) {
          var background = dataState === 'ready' && (USERS.length || DEVICES.length || CONFIGS.length || RELS.length);
          if (overviewRequest) return overviewRequest;
@@ -271,6 +308,7 @@
          alasLastRefreshAt = Date.now();
          overviewRequest = window.ScrcpyGateApi.configured('alas.overview', { query: { include: 'users,devices,configs,relations' }, background: !!(autoRefresh && background) }).then(function (payload) {
            applyOverview(payload);
+           maybeAutoBind();
            if (showMessage) { toast('ALAS 数据已刷新', 'success'); }
            return payload;
          }).catch(function (error) {
@@ -414,7 +452,7 @@
           var sel = selectedUserId === u.id ? ' active' : '';
           var roleTxt = u.role === 'admin' ? '管理员' : '普通用户';
            var expiryTxt = u.role === 'admin' ? '长期有效' : (u.expiry ? (st.text === '正常' || st.text === '已停用' ? '到期 ' + u.expiry : st.text + ' ' + u.expiry) : st.text);
-          out += '<button class="alas-list-button' + sel + '" type="button" role="option" aria-selected="' + (selectedUserId === u.id) + '" data-uid="' + esc(u.id) + '">'
+          out += '<button class="alas-list-button' + sel + '" type="button" aria-pressed="' + (selectedUserId === u.id) + '" aria-controls="alasUserDetail" data-uid="' + esc(u.id) + '">'
             + '<span class="alas-list-avatar">' + userInit(u) + '</span>'
             + '<span class="alas-list-main"><strong data-i18n-skip>' + esc(u.name) + '</strong><span>' + esc(roleTxt + ' · ' + expiryTxt) + '</span></span>'
             + '<span class="alas-list-meta">' + (rels.length ? rels.length + ' 个配置' : '未关联') + '</span>'
@@ -425,6 +463,15 @@
         }
         list.innerHTML = out;
         refreshIcons();
+      }
+      function restoreListFocus(listId, attribute, value) {
+        var buttons = $(listId).querySelectorAll('.alas-list-button');
+        for (var i = 0; i < buttons.length; i++) {
+          if (buttons[i].getAttribute(attribute) === value) {
+            buttons[i].focus({ preventScroll: true });
+            return;
+          }
+        }
       }
       function runtimeText(value) {
         var state = String(value || '').toLowerCase();
@@ -441,21 +488,24 @@
         var list = $('alasRelList');
         var u = userById(selectedUserId);
         var rels = userRels(selectedUserId);
-        // 管理员自动获得全部 Runtime 配置权限:展示自动授权清单,而非"暂无关联"。
+        // 管理员自动获得全部 Runtime 配置权限。自动绑定（按 ALAS 配置里的 ADB 地址）落下的
+        // 关联是真实绑定行：先列出它们（可编辑/可解除），剩下的 Runtime 配置仍按「自动授权」展示。
         if (u && u.role === 'admin') {
           var autoCfg = CONFIGS.filter(function (c) { return c.inRuntime; });
-          $('alasRelCount').textContent = autoCfg.length + ' 个配置（自动授权）';
-          if (!autoCfg.length) {
-            list.innerHTML = '<div class="alas-rel-empty">Runtime 配置目录为空</div>';
-            return;
-          }
-          list.innerHTML = autoCfg.map(function (c) {
+          var boundIds = {};
+          rels.forEach(function (r) { boundIds[r.cfgId] = true; });
+          var remaining = autoCfg.filter(function (c) { return !boundIds[c.id]; });
+          $('alasRelCount').textContent = rels.length + ' 个已绑定 · ' + remaining.length + ' 个自动授权';
+          var out = '';
+          for (var i = 0; i < rels.length; i++) { out += relRowHtml(rels[i]); }
+          out += remaining.map(function (c) {
             return '<div class="alas-assignment-row">'
-              + '<div class="alas-assignment-main"><strong>' + esc(c.name) + '</strong><span>自动授权 · 无需关联</span></div>'
+              + '<div class="alas-assignment-main"><strong data-i18n-skip>' + esc(c.name) + '</strong><span>自动授权 · 无需关联</span></div>'
               + '<div class="alas-assignment-main"><strong>' + runtimeText(c.runtime) + '</strong><span>Runtime 状态</span></div>'
               + '<div class="alas-permissions"><span class="chip info">管理员权限</span></div>'
               + '</div>';
           }).join('');
+          list.innerHTML = out || '<div class="alas-rel-empty">Runtime 配置目录为空</div>';
           refreshIcons();
           return;
         }
@@ -464,31 +514,34 @@
           list.innerHTML = '<div class="alas-rel-empty">该用户暂无关联的 ALAS 配置</div>';
           return;
         }
-        var out = '', i;
-        var conflictIds = computeStats().conflictsList.map(function (c) { return c.id; });
-        for (i = 0; i < rels.length; i++) {
-          var r = rels[i], cfg = cfgById(r.cfgId);
-          if (!cfg) { continue; }
-          var dev = devById(r.device);
-          var isConflict = conflictIds.indexOf(r.cfgId) >= 0;
-          var subTxt = (r.def ? '默认配置' : '普通配置') + (isConflict ? ' · 归属冲突' : '');
-          out += '<div class="alas-assignment-row" data-rid="' + esc(r.id) + '">'
-            + '<div class="alas-assignment-main"><strong data-i18n-skip>' + esc(cfg.name) + '</strong><span>' + esc(subTxt) + '</span></div>'
-            + '<div class="alas-assignment-main"><strong data-i18n-skip>' + esc(dev ? dev.name : '设备未绑定') + '</strong><span>绑定设备</span></div>'
-            + '<div class="alas-assignment-main"><strong>' + runtimeText(cfg.runtime) + '</strong><span>Runtime 状态</span></div>'
-            + '<div class="alas-permissions">'
-            + '<span class="chip ' + (r.run ? 'ok' : '') + '">' + (r.run ? '允许运行' : '仅查看') + '</span>'
-            + '<span class="chip ' + (r.edit ? 'info' : '') + '">' + (r.edit ? '允许编辑' : '不可编辑') + '</span>'
-            + '</div>'
-            + '<div class="alas-row-actions">'
-            + '<button class="alas-row-action" type="button" data-rel-edit-btn="' + esc(r.id) + '" title="编辑关联" aria-label="编辑关联">' + icon('pencil') + '</button>'
-            + '<button class="alas-row-action danger" type="button" data-rel-del-btn="' + esc(r.id) + '" title="解除关联" aria-label="解除关联">' + icon('trash-2') + '</button>'
-            + '</div></div>';
-        }
-        list.innerHTML = out;
+        var html = '';
+        for (var j = 0; j < rels.length; j++) { html += relRowHtml(rels[j]); }
+        list.innerHTML = html;
         refreshIcons();
       }
+      /* 单条关联行：管理员与普通用户共用（管理员行因此也能编辑/解除）。 */
+      function relRowHtml(r) {
+        var cfg = cfgById(r.cfgId);
+        if (!cfg) { return ''; }
+        var dev = devById(r.device);
+        var conflictIds = computeStats().conflictsList.map(function (c) { return c.id; });
+        var isConflict = conflictIds.indexOf(r.cfgId) >= 0;
+        var subTxt = (r.def ? '默认配置' : '普通配置') + (isConflict ? ' · 归属冲突' : '');
+        return '<div class="alas-assignment-row" data-rid="' + esc(r.id) + '">'
+          + '<div class="alas-assignment-main"><strong data-i18n-skip>' + esc(cfg.name) + '</strong><span>' + esc(subTxt) + '</span></div>'
+          + '<div class="alas-assignment-main"><strong data-i18n-skip>' + esc(dev ? dev.name : '设备未绑定') + '</strong><span>绑定设备</span></div>'
+          + '<div class="alas-assignment-main"><strong>' + runtimeText(cfg.runtime) + '</strong><span>Runtime 状态</span></div>'
+          + '<div class="alas-permissions">'
+          + '<span class="chip ' + (r.run ? 'ok' : '') + '">' + (r.run ? '允许运行' : '仅查看') + '</span>'
+          + '<span class="chip ' + (r.edit ? 'info' : '') + '">' + (r.edit ? '允许编辑' : '不可编辑') + '</span>'
+          + '</div>'
+          + '<div class="alas-row-actions">'
+          + '<button class="alas-row-action" type="button" data-rel-edit-btn="' + esc(r.id) + '" title="编辑关联" aria-label="编辑关联">' + icon('pencil') + '</button>'
+          + '<button class="alas-row-action danger" type="button" data-rel-del-btn="' + esc(r.id) + '" title="解除关联" aria-label="解除关联">' + icon('trash-2') + '</button>'
+          + '</div></div>';
+      }
        function renderUserDetail() {
+         $('alasExpiredNote').hidden = true;
          if (!selectedUserId || !userById(selectedUserId)) {
            $('alasUserDetailAvatar').textContent = '—'; $('alasUserDetailName').textContent = tr('请选择用户'); $('alasUserDetailMeta').textContent = dataState === 'error' ? tr('数据服务不可用') : tr('暂无可显示的用户'); $('alasRelList').innerHTML = '<div class="alas-rel-empty">' + esc(tr('暂无配置关联')) + '</div>'; $('alasRelCount').textContent = '0 ' + tr('个配置'); $('alasAddRelBtn').disabled = true; return;
          }
@@ -502,9 +555,9 @@
         $('alasUserDetailMeta').textContent = roleTxt + ' · ' + expiryTxt + ' · ' + rels.length + ' 个配置';
         $('alasAdminNote').hidden = u.role !== 'admin';
         $('alasAddRelBtn').hidden = u.role === 'admin';
-        var blocked = u.status !== 'active';
-        $('alasExpiredNote').hidden = !blocked;
-        $('alasExpiredNoteText').textContent = tr(u.status === 'expired' ? '账户已到期，其 ALAS 配置已自动停止运行' : '账户已停用，其 ALAS 配置已自动停止运行');
+        var showExpiryNotice = u.role !== 'admin' && u.status === 'expired' && rels.length > 0;
+        $('alasExpiredNote').hidden = !showExpiryNotice;
+        $('alasExpiredNoteText').textContent = showExpiryNotice ? tr('账户已到期，请检查已关联的 ALAS 配置运行状态') : '';
         var conflictIds = computeStats().conflictsList.map(function (c) { return c.id; });
         var hasConflict = false, conflictCfgName = '';
         for (var i = 0; i < rels.length; i++) {
@@ -563,7 +616,7 @@
           var runCls = cfg.runtime === 'running' ? 'ok' : (cfg.runtime === 'error' || cfg.runtime === 'unreachable' ? 'warn' : (cfg.runtime === 'unknown' ? 'unknown' : ''));
           var runTxt = runtimeText(cfg.runtime);
           var linkedOnly = !cfg.inRuntime && rels.length > 0;
-          out += '<button class="alas-list-button' + sel + '" type="button" role="option" aria-selected="' + (selectedCfgId === cfg.id) + '" data-cid="' + esc(cfg.id) + '">'
+          out += '<button class="alas-list-button' + sel + '" type="button" aria-pressed="' + (selectedCfgId === cfg.id) + '" aria-controls="alasCfgDetail" data-cid="' + esc(cfg.id) + '">'
             + '<span class="alas-list-main"><strong><span data-i18n-skip>' + esc(cfg.name) + '</span>' + (linkedOnly ? ' <small style="color:var(--admin-faint);font-weight:400">· 仅关联记录</small>' : '') + '</strong>'
             + '<span>' + esc(ownerTxt + ' · ' + devTxt) + '</span></span>'
             + '<span class="chip ' + runCls + '">' + runTxt + '</span>'
@@ -629,7 +682,7 @@
       function renderAll() {
         renderStats();
         renderUsers();
-        if (selectedUserId) { renderUserDetail(); }
+        renderUserDetail();
         renderConfigs();
         if (selectedCfgId) { renderCfgDetail(); }
       }
@@ -646,7 +699,7 @@
         $('alasViewConfigs').hidden = v !== 'configs';
         var featuresView = $('alasViewFeatures');
         if (featuresView) { featuresView.hidden = v !== 'features'; }
-        if (v === 'users') { renderUsers(); if (selectedUserId) { renderUserDetail(); } }
+        if (v === 'users') { renderUsers(); renderUserDetail(); }
         if (v === 'configs') { renderConfigs(); if (selectedCfgId) { renderCfgDetail(); } }
         if (v === 'features') { loadFeatures(); renderFeatures(); loadVisibility(); }
       }
@@ -896,9 +949,6 @@
         $('alasLinkTitle').textContent = mode === 'edit' ? '编辑关联' : '新增关联';
         $('alasLinkSubtitle').textContent = mode === 'edit' ? '调整设备和访问权限' : '为用户连接设备与 ALAS 配置';
         $('alasLinkSaveBtn').querySelector('span').textContent = mode === 'edit' ? '保存更改' : '创建关联';
-        var userOpts = [{ value: '', label: '选择用户' }].concat(USERS.filter(function (item) { return item.role !== 'admin'; }).map(function (item) { return { value: item.id, label: item.name }; }));
-        var devOpts = [{ value: '', label: '选择设备' }].concat(DEVICES.map(function (item) { return { value: item.id, label: item.name + (item.online === true ? '' : (item.online === false ? '（离线）' : '（未检查）')) }; }));
-        var cfgOpts = [{ value: '', label: '选择 Runtime 配置' }].concat(CONFIGS.filter(function (item) { return item.inRuntime; }).map(function (item) { return { value: item.id, label: item.name + (item.task && item.task !== '—' ? ' · ' + item.task : '') }; }));
         var rel = null, u = null, cfg = null;
         if (mode === 'edit' && relId) { rel = RELS.filter(function (r) { return r.id === relId; })[0] || null; }
         if (rel) {
@@ -909,6 +959,13 @@
         } else if (presetCfg) {
           cfg = cfgById(presetCfg);
         }
+        // 新建只允许普通用户；编辑时把该关联自己的用户也放进来 —— 自动绑定给管理员落下的
+        // 关联行同样要能改设备（否则下拉框里没有管理员，保存会报「请选择关联用户」）。
+        var userOpts = [{ value: '', label: '选择用户' }].concat(USERS.filter(function (item) {
+          return item.role !== 'admin' || (mode === 'edit' && rel && item.id === rel.userId);
+        }).map(function (item) { return { value: item.id, label: item.name }; }));
+        var devOpts = [{ value: '', label: '选择设备' }].concat(DEVICES.map(function (item) { return { value: item.id, label: item.name + (item.online === true ? '' : (item.online === false ? '（离线）' : '（未检查）')) }; }));
+        var cfgOpts = [{ value: '', label: '选择 Runtime 配置' }].concat(CONFIGS.filter(function (item) { return item.inRuntime; }).map(function (item) { return { value: item.id, label: item.name + (item.task && item.task !== '—' ? ' · ' + item.task : '') }; }));
         fillSelect($('alasLinkUser'), userOpts, u ? u.id : '');
         fillSelect($('alasLinkDevice'), devOpts, (rel && rel.device) || (cfg && cfg.device) || '');
         var cfgVal = '';
@@ -1119,6 +1176,7 @@
         selectedUserId = uid;
         renderUsers();
         renderUserDetail();
+        restoreListFocus('alasUserList', 'data-uid', uid);
       });
       $('alasRelList').addEventListener('click', function (e) {
         var btn = e.target.closest('[data-rel-edit-btn]');
@@ -1184,6 +1242,7 @@
         selectedCfgId = cid;
         renderConfigs();
         renderCfgDetail();
+        restoreListFocus('alasCfgList', 'data-cid', cid);
       });
       $('alasCfgPrimaryBtn').addEventListener('click', runPrimaryCfg);
       $('alasCfgAssignBtn').addEventListener('click', function () {

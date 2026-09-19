@@ -140,8 +140,11 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
     def __init__(self, host, port=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *, resolved_ip=None, **kwargs):
         self._resolved_ip = resolved_ip
         super().__init__(host, port, timeout, source_address)
+        # HTTPConnection installs an instance attribute with this name. Set
+        # our factory after initialization so DNS cannot change the target.
+        self._create_connection = self._create_pinned_connection
 
-    def _create_connection(self, address, timeout, source_address=None):
+    def _create_pinned_connection(self, address, timeout, source_address=None):
         return socket.create_connection(
             (self._resolved_ip or address[0], address[1]),
             timeout,
@@ -150,21 +153,21 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
-    def __init__(self, host, port=None, key_file=None, cert_file=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *, context=None, check_hostname=None, blocksize=8192, resolved_ip=None, **kwargs):
+    def __init__(self, host, port=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *, context=None, blocksize=8192, resolved_ip=None, **kwargs):
         self._resolved_ip = resolved_ip
         super().__init__(
             host,
             port,
-            key_file=key_file,
-            cert_file=cert_file,
             timeout=timeout,
             source_address=source_address,
             context=context,
-            check_hostname=check_hostname,
             blocksize=blocksize,
         )
+        # Keep the hostname for TLS SNI/certificate verification; only the
+        # TCP destination uses the address validated by the outbound policy.
+        self._create_connection = self._create_pinned_connection
 
-    def _create_connection(self, address, timeout, source_address=None):
+    def _create_pinned_connection(self, address, timeout, source_address=None):
         return socket.create_connection(
             (self._resolved_ip or address[0], address[1]),
             timeout,
@@ -193,6 +196,7 @@ class _PinnedHTTPSHandler(HTTPSHandler):
         return self.do_open(
             lambda host, **kwargs: _PinnedHTTPSConnection(host, resolved_ip=self.resolved_ip, **kwargs),
             req,
+            context=self._context,
         )
 
 

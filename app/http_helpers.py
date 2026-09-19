@@ -194,6 +194,9 @@ def user_payload(user: dict) -> dict:
         "last_login_at": user.get("last_login_at"),
         "last_login_ip": user.get("last_login_ip") or "",
         "enabled": bool(user.get("enabled", 1)),
+        # 每个账号各自的 ALAS 可见性（有些账号用不上 ALAS，由管理员在用户列表里设置）。
+        # 只影响界面显隐，不参与任何权限判定。
+        "alas_visible": bool(user.get("alas_visible", 1)),
     }
     payload.update(storage.user_expiration_payload(user))
     return payload
@@ -270,21 +273,10 @@ async def register_current_user_websocket(
 
     username = str(user.get("username") or "").strip()
     normalized_device_id = str(device_id or "").strip() or None
-    if session_id is None:
-        if normalized_device_id is None:
-            await account_connections.register(username, websocket)
-        else:
-            await account_connections.register(username, websocket, device_id=normalized_device_id)
-    else:
-        if normalized_device_id is None:
-            await account_connections.register(username, websocket, session_id)
-        else:
-            await account_connections.register(
-                username,
-                websocket,
-                session_id,
-                device_id=normalized_device_id,
-            )
+    await account_connections.register(
+        username, websocket, session_id,
+        device_id=normalized_device_id, source_ip=security.client_ip(websocket),
+    )
     try:
         if verifier is not None:
             verified = verifier()
@@ -301,6 +293,14 @@ async def register_current_user_websocket(
             verified = security.get_current_user(websocket)
     except Exception:
         verified = False
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await account_connections.unregister(username, websocket, session_id)
+        from starlette.websockets import WebSocketState
+
+        if websocket.application_state is not WebSocketState.DISCONNECTED:
+            await websocket.close(code=4403, reason=handshake.reason or "access denied")
+        return False
     if verified:
         return True
     if session_id is None:

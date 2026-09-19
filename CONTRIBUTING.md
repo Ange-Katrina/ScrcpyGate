@@ -79,6 +79,11 @@ performed and any gaps; do not attach sensitive logs as evidence.
 
 ## Review and publication
 
+Use the [PR and release writing guide](docs/contributing/pull-requests-and-releases.md)
+for English titles, concise before/after descriptions, validation results,
+upgrade notes and release category labels. New PRs use the repository template;
+GitHub's generated release notes group merged PRs by label.
+
 Changes to `main` go through pull requests. Required checks are
 `Source and workflow checks`, `Verify image (amd64)`, and `Verify image (arm64)`.
 Keep the branch current with `main` and resolve review conversations before

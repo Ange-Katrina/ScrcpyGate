@@ -302,15 +302,37 @@ ScrcpyGate 引导式安装与管理脚本
   ./deploy.sh --pull         更新基础镜像后安装或更新
   ./deploy.sh --skip-build   复用已有 scrcpygate:local 镜像
 
+更新到已发布的镜像:
+  ./deploy.sh --update [--image <引用>] [--skip-update-backup]
+      从 GHCR 拉取已发布镜像并原地更新（**不重新构建源码**）：
+      先备份数据目录与 .env，写入 SCRCPYGATE_IMAGE/SCRCPYGATE_VERSION，
+      再 docker compose up -d --no-build 并过健康检查；
+      拉取失败或健康检查不通过时保留配置与数据，自动回滚到更新前的镜像，
+      不会退回源码构建。--image 支持 tag（ghcr.io/owner/scrcpygate:v1.2.3）
+      或 digest（ghcr.io/owner/scrcpygate@sha256:...）；默认取 .env 的
+      SCRCPYGATE_UPDATE_IMAGE，未设置时用 ghcr.io/ange-katrina/scrcpygate:latest。
+      管理菜单可自动查询 GHCR 版本并按编号选择，也可手动输入；确认后才更新。
+      更新前备份默认开启，--skip-update-backup 可跳过。
+
 服务管理:
   ./deploy.sh --start | --stop | --restart
   ./deploy.sh --status | --logs [行数] | --reset-admin
   ./deploy.sh --uninstall [--purge]   卸载服务；默认保留数据和配置
   ./deploy.sh --uninstall --purge      卸载服务并删除镜像、数据和配置（不可恢复）
 
+服务器侧安全恢复（管理员把自己封了、或后台进不去时用）:
+  ./deploy.sh --ban-list           列出 IP 封禁（含已过期/已解除）
+  ./deploy.sh --unban <ip>         解除某个来源 IP 的封禁
+  ./deploy.sh --ban <ip> [--preset 15m|1h|24h|7d|permanent] [--seconds N] [--reason 文本]
+      直接改数据库；运行中的进程按内存快照判定，跨进程改动最多 5 秒后生效。
+      环回/本机/可信代理地址会被拒绝（避免把健康探针或反向代理一起封掉）。
+  ./deploy.sh --geo-status        输出现行地域策略与库状态（不含 License Key）
+  ./deploy.sh --geo-off           强制把地域策略改回关闭（误锁时唯一的自救出口）
+
 凭据与候选制品:
   ./deploy.sh --token-status       输出脱敏的 ALAS Token 迁移状态
   ./deploy.sh --migrate-alas-token 执行迁移/轮换并输出脱敏状态
+  ./deploy.sh --clear-alas-token   清空换不回密钥的 ALAS Token（之后在 ALAS 设置里重新填写）
   ./deploy.sh --candidate-manifest [文件] 生成清洁 checkout 的文件哈希与镜像 digest
 
 备份与恢复:
@@ -345,7 +367,9 @@ SCRCPYGATE_AUTO_INSTALL_DEPS=true 时安装系统软件。
   SCRCPYGATE_REGISTRY_CONNECT_TIMEOUT_SECONDS=8
   SCRCPYGATE_IMAGE_PULL_TIMEOUT_SECONDS=120
 
-Existing .env files, databases, users, and passwords are never overwritten.
+Install preserves existing accounts and passwords. Normal uninstall keeps data,
+its ALAS key, .env and the local image; --purge explicitly removes local data.
+Missing keys for encrypted data must be recovered before automatic provisioning.
 EOF
 }
 
@@ -354,7 +378,14 @@ skip_build=false
 pull_images=false
 auto_install_deps=${SCRCPYGATE_AUTO_INSTALL_DEPS:-false}
 LOG_LINES=""
+UNBAN_IP=""
+BAN_IP=""
+BAN_PRESET=""
+BAN_SECONDS=""
+BAN_REASON=""
 CANDIDATE_MANIFEST=""
+UPDATE_IMAGE=""
+UPDATE_SKIP_BACKUP=false
 PURGE=false
 PORT_OCCUPANCY_STATUS=unknown
 PORT_OCCUPANCY_TOOL=""
@@ -369,6 +400,24 @@ while [ "$#" -gt 0 ]; do
     --install-deps) ACTION=install; auto_install_deps=true ;;
     --pull) ACTION=install; pull_images=true ;;
     --skip-build) ACTION=install; skip_build=true ;;
+    --update) ACTION=update ;;
+    --image)
+      ACTION=update
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) die "--image 需要镜像引用 / --image requires an image reference" ;;
+          *) UPDATE_IMAGE=$2; shift ;;
+        esac
+      else
+        die "--image 需要镜像引用 / --image requires an image reference"
+      fi
+      ;;
+    --image=*)
+      ACTION=update
+      UPDATE_IMAGE=${1#--image=}
+      [ -n "$UPDATE_IMAGE" ] || die "--image 需要镜像引用 / --image requires an image reference"
+      ;;
+    --skip-update-backup) UPDATE_SKIP_BACKUP=true ;;
     --start) ACTION=start ;;
     --stop) ACTION=stop ;;
     --restart) ACTION=restart ;;
@@ -393,6 +442,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --token-status) ACTION=token_status ;;
     --migrate-alas-token) ACTION=migrate_alas_token ;;
+    --clear-alas-token) ACTION=clear_alas_token ;;
     --candidate-manifest)
       ACTION=candidate_manifest
       if [ "$#" -gt 1 ]; then
@@ -400,6 +450,51 @@ while [ "$#" -gt 0 ]; do
       fi
       ;;
     --reset-admin) ACTION=reset_admin ;;
+    --ban-list) ACTION=ban_list ;;
+    --geo-status) ACTION=geo_status ;;
+    --geo-off) ACTION=geo_off ;;
+    --unban)
+      ACTION=unban
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) UNBAN_IP=$2; shift ;;
+        esac
+      fi
+      ;;
+    --ban)
+      ACTION=ban
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_IP=$2; shift ;;
+        esac
+      fi
+      ;;
+    --preset)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_PRESET=$2; shift ;;
+        esac
+      fi
+      ;;
+    --seconds)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_SECONDS=$2; shift ;;
+        esac
+      fi
+      ;;
+    --reason)
+      if [ "$#" -gt 1 ]; then
+        case "$2" in
+          -*) ;;
+          *) BAN_REASON=$2; shift ;;
+        esac
+      fi
+      ;;
     --backup)
       ACTION=backup
       if [ "$#" -gt 1 ]; then
@@ -1616,7 +1711,9 @@ existing_instance_can_be_managed() {
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_SERVICE" != scrcpygate ]; then ownership_error="Compose 服务不匹配"; fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_WORKING_DIR" != "$SCRIPT_DIR" ]; then ownership_error="Compose 工作目录不匹配"; fi
   if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_CONFIG_FILES" != "$expected_config" ]; then ownership_error="Compose 配置文件不匹配"; fi
-  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != scrcpygate:local ]; then ownership_error="容器镜像不匹配"; fi
+  managed_image=$(dotenv_value SCRCPYGATE_IMAGE)
+  managed_image=${managed_image:-scrcpygate:local}
+  if [ -z "${ownership_error:-}" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" != "$managed_image" ]; then ownership_error="容器镜像不匹配"; fi
   if [ -z "${ownership_error:-}" ]; then
     if expected_data=$(configured_data_dir_from_disk); then
       if actual_data=$(existing_container_data_dir); then
@@ -1659,7 +1756,10 @@ scrcpygate_container_identity_is_safe() {
   esac
   case "${EXISTING_SCRCPYGATE_IMAGE:-}" in
     scrcpygate:*) ;;
-    *) return 1 ;;
+    *)
+      identity_image=$(dotenv_value SCRCPYGATE_IMAGE)
+      [ -n "$identity_image" ] && [ "$EXISTING_SCRCPYGATE_IMAGE" = "$identity_image" ] || return 1
+      ;;
   esac
   case "${EXISTING_SCRCPYGATE_SERVICE:-}" in
     ""|scrcpygate) ;;
@@ -1673,7 +1773,8 @@ scrcpygate_container_matches_current_project() {
   [ "${EXISTING_SCRCPYGATE_PROJECT:-}" = scrcpygate ] || return 1
   [ "${EXISTING_SCRCPYGATE_SERVICE:-}" = scrcpygate ] || return 1
   [ "${EXISTING_SCRCPYGATE_WORKING_DIR:-}" = "$SCRIPT_DIR" ] || return 1
-  [ "${EXISTING_SCRCPYGATE_IMAGE:-}" = scrcpygate:local ] || return 1
+  current_project_image=$(dotenv_value SCRCPYGATE_IMAGE)
+  [ "${EXISTING_SCRCPYGATE_IMAGE:-}" = "${current_project_image:-scrcpygate:local}" ] || return 1
   return 0
 }
 
@@ -2042,9 +2143,15 @@ prepare_data_directory() {
     mkdir -p "$WEB_SCRCPY_DATA_HOST" || die "无法创建数据目录: $WEB_SCRCPY_DATA_HOST"
   fi
   DATA_DIR=$(CDPATH= cd -- "$WEB_SCRCPY_DATA_HOST" && pwd -P)
-  case "$DATA_DIR" in '/'|"$SCRIPT_DIR") die "拒绝使用不安全的数据目录: $DATA_DIR" ;; esac
+  case "$DATA_DIR" in '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝使用不安全的数据目录: $DATA_DIR" ;; esac
+  case "$SCRIPT_DIR/" in "$DATA_DIR/"*) die "拒绝使用项目父目录作为数据目录" ;; esac
   # 幂等收紧：数据目录含数据库（会话/令牌/审计），无论是否新建都不应组/其他可读。
   chmod 700 "$DATA_DIR" 2>/dev/null || warn_msg "无法限制数据目录权限"
+  # 地域库目录：容器内的自动更新要在这里做原子替换，因此必须可写（默认 700，随数据目录一起收紧）。
+  # 若操作员改用外部只读挂载，这一步不影响（目录已存在时不会被动过）。
+  if [ ! -d "$DATA_DIR/geoip" ]; then
+    mkdir -p "$DATA_DIR/geoip" 2>/dev/null || warn_msg "无法创建地域库目录（GEO 自动更新将不可用）"
+  fi
 }
 
 generate_persisted_alas_token_key() {
@@ -2067,6 +2174,57 @@ generate_persisted_alas_token_key() {
   printf '%s\n' "$generated_key"
 }
 
+existing_database_needs_alas_key() {
+  # Inspect only the stored format, without bootstrapping or exposing a token.
+  # SQLite mode=ro keeps the database read-only, but WAL readers may need to
+  # create sidecars. Run as the app user on the writable data mount, not root.
+  # Docker failures must never be confused with an empty credential.
+  key_probe_result=$(docker run --rm --network none --read-only \
+    -v "$DATA_DIR:/app/data" --entrypoint python scrcpygate:local -c '
+import sqlite3, sys
+try:
+    conn = sqlite3.connect("file:/app/data/webscrcpy.db?mode=ro", uri=True)
+    row = conn.execute("SELECT value FROM settings WHERE key=?", ("alas_token",)).fetchone()
+    needs_key = bool(row and str(row[0] or "").startswith("v1:"))
+    conn.close()
+except Exception:
+    sys.exit(2)
+print("encrypted" if needs_key else "clear")
+' 2>/dev/null) || return 2
+  case "$key_probe_result" in
+    encrypted) return 0 ;;
+    clear) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+confirm_reset_alas_token_without_key() {
+  if ! is_interactive; then
+    die "旧数据库含加密 ALAS Token，但密钥文件缺失。请恢复配套密钥或注入原密钥；确认无法找回时，可执行 --clear-alas-token 后重装并重新填写 Token。非交互安装不会自动重置"
+  fi
+  warn_msg "旧数据库含加密 ALAS Token，但密钥文件缺失；优先恢复原密钥可以保留现有 Token"
+  warn_msg "强行重置只清空保存的 ALAS Token（含旧配置中的 Token），并生成新密钥；账号、密码、设备和其他配置保留。安装后需重新填写 ALAS Token"
+  if ! prompt_confirm_no "是否强行重置 ALAS Token 并继续安装？"; then
+    die "已取消重置，原 Token 保留；请恢复配套密钥后重新安装"
+  fi
+  if [ -e "$DATA_DIR/.alas-token-encryption-key" ] || [ -L "$DATA_DIR/.alas-token-encryption-key" ]; then
+    die "密钥文件状态已变化，未清空 Token；请重新安装以检查当前密钥"
+  fi
+  # Target the data directory just inspected, not a possibly stale running
+  # container. Do not initialize the database or replay startup side effects.
+  if ! docker run --rm --network none --read-only \
+    -v "$DATA_DIR:/app/data" --entrypoint python scrcpygate:local -c '
+from app import storage, storage_core
+with storage_core.StartupLock():
+    storage.clear_alas_token()
+    if storage.get_setting("alas_token") or storage._legacy_env_has_alas_token():
+        raise SystemExit(1)
+' >/dev/null 2>&1; then
+    die "ALAS Token 重置失败，未生成新密钥；请检查数据目录后重试"
+  fi
+  success_msg "已重置 ALAS Token，正在生成新密钥；安装后请在 ALAS 设置中重新填写 Token"
+}
+
 ensure_alas_token_key() {
   # Explicit Secret Manager injection remains the strongest source and is
   # never copied to disk by this script.
@@ -2077,17 +2235,28 @@ ensure_alas_token_key() {
 
   key_file="$DATA_DIR/.alas-token-encryption-key"
   if [ -L "$key_file" ]; then
-    die "ALAS Token 密钥文件不能是符号链接；请移除后重新安装"
+    die "ALAS Token 密钥文件不能是符号链接；请恢复与数据库配套的普通密钥文件"
   fi
   if [ -e "$key_file" ]; then
     [ -f "$key_file" ] || die "ALAS Token 密钥路径不是普通文件"
     key_file_value=$(cat "$key_file" 2>/dev/null) || die "无法读取 ALAS Token 密钥文件"
     valid_token_encryption_key_value "$key_file_value" \
-      || die "ALAS Token 密钥文件无效；请移除该文件后重新生成"
+      || die "ALAS Token 密钥文件无效；请恢复匹配的密钥备份，不要删除后重新生成"
     chmod 600 "$key_file" 2>/dev/null \
       || die "无法限制 ALAS Token 密钥文件权限（需要仅文件所有者可读）"
     success_msg "已复用服务器侧 ALAS Token 加密密钥"
     return 0
+  fi
+
+  if [ -e "$DATA_DIR/webscrcpy.db" ]; then
+    ensure_data_permissions
+    key_probe_status=0
+    existing_database_needs_alas_key || key_probe_status=$?
+    case "$key_probe_status" in
+      0) confirm_reset_alas_token_without_key ;;
+      1) ;;
+      *) die "无法只读检查旧数据库，未生成新密钥；请检查数据库和本地镜像后重试" ;;
+    esac
   fi
 
   TOKEN_KEY_TMP_FILE=$(mktemp "$DATA_DIR/.alas-token-encryption-key.XXXXXX") \
@@ -2378,6 +2547,18 @@ ensure_data_permissions() {
   if ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -w /app/data' >/dev/null 2>&1; then
     data_permissions_need_fix=true
   fi
+  # 地域库目录单独检查：容器内的自动更新要在这里做原子替换，父目录可写不代表它可写
+  # （常见于先建了 data 再手工建 geoip 的场景）。发现不可写时走同一套递归 chown 修复。
+  if [ -d "$DATA_DIR/geoip" ] && ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -w /app/data/geoip' >/dev/null 2>&1; then
+    data_permissions_need_fix=true
+  fi
+  if [ -f "$DATA_DIR/.geo-credentials.json" ]; then
+    [ ! -L "$DATA_DIR/.geo-credentials.json" ] || die "地域下载凭据不能是符号链接"
+    chmod 600 "$DATA_DIR/.geo-credentials.json" || die "无法限制地域下载凭据权限"
+    if ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -r /app/data/.geo-credentials.json' >/dev/null 2>&1; then
+      data_permissions_need_fix=true
+    fi
+  fi
   key_file="$DATA_DIR/.alas-token-encryption-key"
   key_permissions_need_fix=false
   if [ -f "$key_file" ] && ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -r /app/data/.alas-token-encryption-key' >/dev/null 2>&1; then
@@ -2420,7 +2601,7 @@ initialize_admin() {
     panel_top "检测到现有管理员账号"
     panel_line "用户名" "admin"
     panel_line "密码" "保持原密码（安全原因不会重复显示）"
-    panel_line "后续重置" "管理菜单 10，或 ./deploy.sh --reset-admin"
+    panel_line "后续重置" "“配置与账号 → 重置管理员密码”，或 ./deploy.sh --reset-admin"
     print_rule
     if is_interactive && prompt_confirm_no "是否立即生成并显示新的 admin 密码？"; then
       reset_output=$(compose run --rm --no-deps -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.cli reset-admin) \
@@ -2579,7 +2760,7 @@ configure_and_install_flow() {
     panel_line "将执行" "构建 scrcpygate:local 镜像 → 初始化 admin → 启动容器并等待健康检查"
     print_rule
     if ! prompt_confirm_no "开始安装？"; then
-      warn_msg "配置已保存，已取消安装；稍后可用菜单 2 或 ./deploy.sh --install 继续"
+      warn_msg "配置已保存，已取消安装；稍后可用“使用当前配置安装/更新”或 ./deploy.sh --install 继续"
       return 0
     fi
     INSTALL_INSTANCE_CHECKED=true
@@ -2600,11 +2781,15 @@ install_service() {
   prepare_deployment
   ensure_startup_conflicts
   prepare_data_directory
-  ensure_alas_token_key
   show_install_summary
   build_image
+  ensure_alas_token_key
   ensure_data_permissions
-  initialize_admin
+  detect_scrcpygate_instance
+  case "${EXISTING_SCRCPYGATE_STATE:-}" in
+    running|restarting|paused) ;;
+    *) initialize_admin ;;
+  esac
   log "正在启动 ScrcpyGate..."
   compose_up_checked -d
   wait_for_health
@@ -2625,12 +2810,253 @@ install_with_pull_service() {
   install_service
 }
 
+default_update_image() {
+  default_image=$(dotenv_value SCRCPYGATE_UPDATE_IMAGE)
+  printf '%s\n' "${default_image:-ghcr.io/ange-katrina/scrcpygate:latest}"
+}
+
+# Discover public image tags, not Git tags: a source tag may not have a
+# successfully published image. Never load Docker credentials for discovery.
+published_update_images() {
+  image_python=$(python_command 2>/dev/null) || return 1
+  "$image_python" - <<'PY'
+import json
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+opener = urllib.request.build_opener(NoRedirect)
+deadline = time.monotonic() + 20
+repository = "ange-katrina/scrcpygate"
+
+
+def read_json(url, token=None):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("discovery deadline")
+    headers = {"User-Agent": "ScrcpyGate-deploy", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    with opener.open(urllib.request.Request(url, headers=headers), timeout=min(5, remaining)) as response:
+        data = response.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024 or time.monotonic() > deadline:
+        raise ValueError("discovery limit")
+    return json.loads(data)
+
+
+try:
+    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
+    token = read_json("https://ghcr.io/token?" + query)["token"]
+    if not isinstance(token, str) or not token or len(token) > 16384:
+        raise ValueError("invalid registry token")
+    tags = set()
+    last = ""
+    for _ in range(5):
+        query = urllib.parse.urlencode({"n": 1000, "last": last})
+        page = read_json(f"https://ghcr.io/v2/{repository}/tags/list?{query}", token)
+        batch = page.get("tags") or []
+        if not isinstance(batch, list) or len(batch) > 1000:
+            raise ValueError("invalid tag page")
+        if any(not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag) for tag in batch):
+            raise ValueError("invalid tag")
+        tags.update(batch)
+        if len(batch) < 1000:
+            break
+        if batch[-1] == last:
+            raise ValueError("repeated page")
+        last = batch[-1]
+    else:
+        raise ValueError("too many tag pages")
+    versions = sorted(
+        (tag for tag in tags if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag)),
+        key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
+        reverse=True,
+    )
+    choices = [tag for tag in ("latest", "edge") if tag in tags] + versions[:10]
+    for tag in choices:
+        print(f"ghcr.io/{repository}:{tag}")
+except Exception:
+    # Do not echo network exceptions, proxy URLs, or registry bearer tokens.
+    sys.exit(1)
+PY
+}
+
+select_update_image() {
+  UPDATE_IMAGE=""
+  menu_default_image=$(default_update_image)
+  panel_top "选择更新镜像"
+  panel_line "默认目标" "$menu_default_image"
+  log "正在查询 GHCR 已发布版本…"
+  if menu_published_images=$(published_update_images); then
+    [ -n "$menu_published_images" ] || warn_msg "暂无可列出的稳定版或开发版镜像"
+  else
+    menu_published_images=""
+    warn_msg "无法获取版本列表（网络、仓库权限或 Python 不可用）；可使用配置或手动输入"
+  fi
+  while :; do
+    menu_group "更新目标"
+    menu_item 1 "使用默认目标（配置优先，未设置则 latest；可用性以拉取结果为准）" "$C_CYAN"
+    menu_image_index=2
+    while IFS= read -r menu_image_ref; do
+      [ -n "$menu_image_ref" ] || continue
+      menu_image_tag=${menu_image_ref##*:}
+      case "$menu_image_tag" in
+        latest) menu_image_label="latest — 稳定版（最近完成发布）" ;;
+        edge) menu_image_label="edge — 开发版（main 分支，非稳定版）" ;;
+        *) menu_image_label="$menu_image_tag — 固定版本" ;;
+      esac
+      menu_item "$menu_image_index" "$menu_image_label" "$C_GREEN"
+      menu_image_index=$((menu_image_index + 1))
+    done <<EOF
+$menu_published_images
+EOF
+    menu_item m "手动输入完整镜像引用（tag / digest）" "$C_GRAY"
+    menu_item 0 "取消，返回主菜单" "$C_GRAY"
+    printf '\n%s>%s 请选择 [默认 1]: ' "$C_YELLOW" "$C_RESET"
+    IFS= read -r menu_image_choice || return 1
+    menu_image_choice=$(printf '%s' "$menu_image_choice" | tr -d '\r')
+    case "$menu_image_choice" in
+      0|q|Q) return 1 ;;
+      ''|1) UPDATE_IMAGE=$menu_default_image ;;
+      m|M)
+        log "示例：ghcr.io/ange-katrina/scrcpygate:latest；也可使用完整 @sha256:digest 引用"
+        printf '%s>%s 完整镜像引用（留空取消）: ' "$C_YELLOW" "$C_RESET"
+        IFS= read -r UPDATE_IMAGE || return 1
+        UPDATE_IMAGE=$(printf '%s' "$UPDATE_IMAGE" | tr -d '\r')
+        [ -n "$UPDATE_IMAGE" ] || return 1
+        case "$UPDATE_IMAGE" in
+          */*:*|*/*@sha256:*) ;;
+          *) warn_msg "请输入带仓库路径和 tag/digest 的完整镜像引用，不能只填版本名"; UPDATE_IMAGE=""; continue ;;
+        esac
+        ;;
+      *)
+        # Compare menu strings rather than evaluating untrusted shell arithmetic.
+        UPDATE_IMAGE=$(printf '%s\n' "$menu_published_images" |
+          awk -v selection="$menu_image_choice" 'NF && ("x" (NR + 1)) == ("x" selection) { print; exit }')
+        if [ -z "$UPDATE_IMAGE" ]; then
+          warn_msg "请输入列表中的编号、m 或 0"
+          continue
+        fi
+        ;;
+    esac
+    case "$UPDATE_IMAGE" in
+      ''|*[!a-zA-Z0-9._/@:-]*) warn_msg "镜像引用格式无效"; UPDATE_IMAGE=""; continue ;;
+    esac
+    panel_line "目标镜像" "$UPDATE_IMAGE"
+    if prompt_confirm_no "确认备份数据并更新到此镜像？"; then
+      return 0
+    fi
+    UPDATE_IMAGE=""
+    return 1
+  done
+}
+
+# 更新到已发布的 GHCR 镜像：只换镜像，不动源码、不动数据。
+# 失败时保留 .env 与数据，自动回滚到更新前的镜像；任何路径都不会退回源码构建。
+update_service() {
+  prepare_readonly_deployment
+  docker compose version >/dev/null 2>&1 || die "镜像更新需要 Docker Compose plugin"
+  detect_scrcpygate_instance
+  [ "${EXISTING_SCRCPYGATE_STATE:-}" = running ] || die "更新需要已运行的服务；首次部署请使用安装流程"
+  existing_instance_can_be_managed || die "当前容器不属于此 bridge 部署；请按对应部署文档更新"
+  prepare_data_directory
+  up_current_ref=$EXISTING_SCRCPYGATE_IMAGE
+  up_current_id=$(docker inspect --format '{{.Image}}' scrcpygate) || die "无法读取当前镜像 ID"
+  [ -n "$up_current_id" ] || die "当前镜像 ID 为空"
+  up_target_ref=${UPDATE_IMAGE:-}
+  [ -n "$up_target_ref" ] || up_target_ref=$(default_update_image)
+  case "$up_target_ref" in
+    ''|*[!a-zA-Z0-9._/@:-]*) die "无效的镜像引用 / invalid image reference" ;;
+  esac
+  # Pin the actual container image before pulling a mutable tag.
+  up_stamp="$(date -u +%Y%m%d-%H%M%S)-$$"
+  up_rollback_ref="scrcpygate:rollback-$up_stamp"
+  docker image tag "$up_current_id" "$up_rollback_ref" || die "无法保留回滚镜像"
+  panel_top "更新到已发布镜像"
+  panel_line "当前镜像" "$(safe_display "$up_current_ref")"
+  panel_line "目标镜像" "$(safe_display "$up_target_ref")"
+  log "正在拉取目标镜像；不会退回源码构建"
+  run_docker_pull "$up_target_ref" || die "拉取失败；当前服务与配置保持原状"
+  up_target_id=$(docker image inspect --format '{{.Id}}' "$up_target_ref") || die "无法读取目标镜像 ID"
+  if [ "$up_target_id" = "$up_current_id" ]; then
+    success_msg "当前已运行相同镜像，无需重建 / already running this image"
+    return 0
+  fi
+  # Persist a registry digest where available; otherwise retain the local ID.
+  up_pinned_ref=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$up_target_id" | head -n 1)
+  [ -n "$up_pinned_ref" ] || up_pinned_ref=$up_target_id
+  up_version_label=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$up_target_id" |
+    sed -n 's/^SCRCPYGATE_VERSION=//p' | head -n 1)
+  case "$up_version_label" in *[!a-zA-Z0-9._/-]*) up_version_label="" ;; esac
+  if [ "$UPDATE_SKIP_BACKUP" = true ]; then
+    warn_msg "已跳过数据备份；仍保留部署配置与回滚镜像"
+    up_env_backup=".env.update-$up_stamp.bak"
+  else
+    up_archive=$(backup_archive_path "")
+    [ ! -e "$up_archive" ] || die "备份文件已存在，未覆盖"
+    create_backup_archive "$DATA_DIR" "$up_archive" pre-update running
+    prune_backups "$(dirname -- "$up_archive")" "$up_archive"
+    up_env_backup="$up_archive.env"
+    success_msg "更新前数据备份: $(safe_display "$up_archive")"
+  fi
+  [ ! -e "$up_env_backup" ] && [ ! -L "$up_env_backup" ] || die "配置备份路径已存在"
+  ( umask 077; set -C; cat .env > "$up_env_backup" ) || die "无法备份 .env"
+  chmod 600 "$up_env_backup" || die "无法保护 .env 备份"
+  # Subshell confines fatal configuration-write errors to the update attempt.
+  if (
+    set_env_value SCRCPYGATE_IMAGE "$up_pinned_ref"
+    set_env_value SCRCPYGATE_VERSION "$up_version_label"
+    unset SCRCPYGATE_IMAGE SCRCPYGATE_VERSION
+    compose up -d --no-build --pull never scrcpygate || exit 1
+    wait_for_health
+    [ "$(docker inspect --format '{{.Image}}' scrcpygate)" = "$up_target_id" ]
+  ); then
+    success_msg "更新完成：$(display_url "$PUBLIC_BASE_URL")"
+    panel_line "运行镜像" "$(safe_display "$up_pinned_ref")"
+    panel_line "配置备份" "$(safe_display "$up_env_backup")"
+    panel_line "回滚镜像" "$up_rollback_ref"
+    log "镜像回滚不恢复数据库；不兼容迁移需要人工恢复配套数据备份"
+    return 0
+  fi
+  warn_msg "更新失败，正在恢复原配置与固定回滚镜像"
+  if (
+    cp -p "$up_env_backup" .env || exit 1
+    chmod 600 .env || exit 1
+    set_env_value SCRCPYGATE_IMAGE "$up_rollback_ref"
+    unset SCRCPYGATE_IMAGE SCRCPYGATE_VERSION
+    compose up -d --no-build --pull never scrcpygate || exit 1
+    wait_for_health
+    [ "$(docker inspect --format '{{.Image}}' scrcpygate)" = "$up_current_id" ]
+  ); then
+    error_msg "更新失败，原镜像已恢复健康；数据未自动回退"
+    log "配置备份: $(safe_display "$up_env_backup")"
+    return 2
+  fi
+  error_msg "更新失败且无法确认回滚健康；请用配置和数据备份人工恢复"
+  log "配置备份: $(safe_display "$up_env_backup")"
+  show_diagnostics
+  return 3
+}
+
 start_service() {
   prepare_deployment
   ensure_startup_conflicts
   prepare_data_directory
   ensure_alas_token_key
   ensure_data_permissions
+  detect_scrcpygate_instance
+  case "${EXISTING_SCRCPYGATE_STATE:-}" in
+    running|restarting|paused) ;;
+    *) initialize_admin ;;
+  esac
   compose_up_checked -d
   wait_for_health
   success_msg "ScrcpyGate 已启动"
@@ -2664,6 +3090,66 @@ show_logs() {
   case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
   if [ "$lines" -lt 1 ] || [ "$lines" -gt 10000 ]; then lines=200; fi
   docker logs --tail="$lines" scrcpygate 2>/dev/null || warn_msg "暂无容器日志"
+}
+
+# ---- 服务器侧安全恢复（BAN）----
+# 与 reset-admin 同样走「运行中就用 exec，否则用一次性容器」，
+# 这样即使服务起不来（例如管理员把自己封了导致后台进不去）也能恢复。
+ban_cli() {
+  # $1..: python -m app.cli 之后的参数
+  prepare_deployment
+  prepare_data_directory
+  ensure_data_permissions
+  container_state=$(docker inspect --format '{{.State.Status}}' scrcpygate 2>/dev/null || true)
+  if [ "$container_state" = running ]; then
+    compose exec -T scrcpygate python -m app.cli "$@"
+  else
+    warn_msg "容器未运行，将使用一次性容器执行"
+    compose run --rm --no-deps scrcpygate python -m app.cli "$@"
+  fi
+}
+
+ban_list() {
+  ban_output=$(ban_cli ban-list) || die "读取封禁列表失败"
+  panel_top "IP 封禁（含已过期/已解除）"
+  printf '%s\n' "$ban_output"
+  print_rule
+}
+
+unban() {
+  [ -n "$UNBAN_IP" ] || die "--unban 需要 IP / --unban requires an IP address"
+  unban_output=$(ban_cli unban "$UNBAN_IP") || die "解封失败（地址不在封禁列表中，或参数无效）"
+  panel_top "已解除封禁"
+  printf '%s\n' "$unban_output"
+  print_rule
+}
+
+ban() {
+  [ -n "$BAN_IP" ] || die "--ban 需要 IP / --ban requires an IP address"
+  [ -n "$BAN_PRESET" ] || [ -n "$BAN_SECONDS" ] \
+    || die "--ban 需要 --preset 或 --seconds / --ban requires --preset or --seconds"
+  set -- ban "$BAN_IP"
+  [ -n "$BAN_PRESET" ] && set -- "$@" --preset "$BAN_PRESET"
+  [ -n "$BAN_SECONDS" ] && set -- "$@" --seconds "$BAN_SECONDS"
+  [ -n "$BAN_REASON" ] && set -- "$@" --reason "$BAN_REASON"
+  ban_output=$(ban_cli "$@") || die "封禁失败（地址无效、时长非法，或属于保护地址）"
+  panel_top "已写入封禁"
+  printf '%s\n' "$ban_output"
+  print_rule
+}
+
+geo_status() {
+  geo_output=$(ban_cli geo-status) || die "读取地域策略状态失败"
+  panel_top "地域限制（GEO）状态"
+  printf '%s\n' "$geo_output"
+  print_rule
+}
+
+geo_off() {
+  geo_output=$(ban_cli geo-off) || die "关闭地域策略失败"
+  panel_top "地域策略已关闭"
+  printf '%s\n' "$geo_output"
+  print_rule
 }
 
 reset_admin() {
@@ -2796,6 +3282,7 @@ create_backup_archive() {
     if export_running_sqlite "$bk_staging/data/webscrcpy.db"; then
       bk_sqlite_mode="online-backup"
     else
+      [ "$bk_kind" != pre-update ] || die "更新前无法取得一致的数据库快照；已停止更新"
       warn_msg "在线备份接口不可用，回退为直接复制数据库文件"
     fi
   fi
@@ -2807,6 +3294,15 @@ create_backup_archive() {
         cp -p "$bk_source_dir/$bk_sidecar" "$bk_staging/data/$bk_sidecar" || die "无法复制 $bk_sidecar"
       fi
     done
+  fi
+
+  # Back up write-only GeoIP credentials with the private data, never with source releases.
+  if [ -L "$bk_source_dir/.geo-credentials.json" ]; then
+    die "地域下载凭据不能是符号链接"
+  fi
+  if [ -f "$bk_source_dir/.geo-credentials.json" ]; then
+    cp -p "$bk_source_dir/.geo-credentials.json" "$bk_staging/data/.geo-credentials.json" || die "无法复制地域下载凭据"
+    chmod 600 "$bk_staging/data/.geo-credentials.json" || die "无法保护地域下载凭据备份"
   fi
 
   bk_key_included=false
@@ -2826,7 +3322,7 @@ create_backup_archive() {
     printf 'sqlite_mode=%s\n' "$bk_sqlite_mode"
     printf 'data_dir_name=%s\n' "$(basename -- "$bk_source_dir")"
     printf 'alas_key_included=%s\n' "$bk_key_included"
-    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key; do
+    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key .geo-credentials.json; do
       if [ -f "$bk_staging/data/$bk_name" ]; then
         bk_file_bytes=$(wc -c < "$bk_staging/data/$bk_name" | tr -d ' ')
         bk_file_sha=$(sha256_of "$bk_staging/data/$bk_name" || printf 'unavailable')
@@ -2877,7 +3373,7 @@ prune_backups() {
     if [ "$bk_prune_victim" = "$bk_prune_current" ]; then
       continue
     fi
-    if rm -f "$bk_prune_victim" "$bk_prune_victim.sha256"; then
+    if rm -f "$bk_prune_victim" "$bk_prune_victim.sha256" "$bk_prune_victim.env"; then
       bk_prune_removed=$((bk_prune_removed + 1))
       log "  已清理旧备份: $(basename -- "$bk_prune_victim")"
     fi
@@ -3155,6 +3651,33 @@ check_service() {
   else
     warn_msg "数据目录不存在: $(safe_display "$WEB_SCRCPY_DATA_HOST")"
   fi
+  # 访问安全（VIS/BAN/GEO）自检：只报告「有没有配置/有没有库」，**绝不打印 License Key**。
+  if [ -f .env ]; then
+    geo_mode=$(dotenv_value_from_file .env GEO_MODE)
+    geo_key=$(dotenv_value_from_file .env GEO_LICENSE_KEY)
+    geo_account=$(dotenv_value_from_file .env GEO_ACCOUNT_ID)
+    if [ -n "$geo_account" ]; then
+      panel_line "GeoIP Account ID" "已配置（不显示内容）"
+    else
+      warn_msg "GeoIP Account ID 未配置；内置地域库更新不会联网"
+    fi
+    case "$geo_mode" in
+      observe|enforce) panel_line "地域限制模式" "$geo_mode" ;;
+      *) panel_line "地域限制模式" "off（默认关闭）" ;;
+    esac
+    if [ -n "$geo_key" ]; then
+      panel_line "GeoIP License Key" "已配置（不显示内容）"
+    else
+      panel_line "GeoIP License Key" "未配置（不联网、不自动更新）"
+    fi
+    if [ -n "$data_dir" ] && [ -d "$data_dir/geoip" ]; then
+      geo_db_count=$(find "$data_dir/geoip" -maxdepth 1 -name '*.mmdb' 2>/dev/null | wc -l | tr -d ' ')
+      panel_line "地域库文件" "${geo_db_count} 个"
+    fi
+    if [ -n "$data_dir" ] && [ -d "$data_dir/geoip" ] && [ ! -w "$data_dir/geoip" ]; then
+      warn_msg "地域库目录不可写: $data_dir/geoip（容器内的自动更新会失败；可设 GEO_UPDATE_ENABLED=false 或修复权限）"
+    fi
+  fi
   if command -v docker >/dev/null 2>&1; then
     panel_line "Docker" "$(docker --version 2>/dev/null | head -1)"
     if docker info >/dev/null 2>&1; then
@@ -3345,6 +3868,25 @@ migrate_alas_token_service() {
     || die "ALAS Token 迁移尚未达到 current key 状态；未显示凭据"
 }
 
+clear_alas_token_service() {
+  # 恢复出口：存不出来的密文（密钥换了/丢了）会一直让 ALAS 报错，清空后可在界面重填。
+  # 只打印脱敏摘要（是否清掉、原值指纹），绝不出示凭据本身。
+  prepare_readonly_deployment
+  token_output=$(token_cli clear-alas-token) || {
+    token_output=""
+    die "清空 ALAS Token 失败；未显示凭据"
+  }
+  if ! token_line=$(parse_single_output_line "$token_output"); then
+    token_output=""
+    die "清空 ALAS Token 返回了无法识别的多行输出"
+  fi
+  token_output=""
+  panel_top "ALAS Token 已清空"
+  panel_line "结果" "$token_line"
+  panel_line "下一步" "在「ALAS 设置」里重新填写 Runtime Token（会用当前密钥重新加密）"
+  print_rule
+}
+
 candidate_manifest_service() {
   manifest_python=$(python_command) || die "生成候选清单需要 Python"
   # Tests and maintenance tools live in the repository, but are not release
@@ -3443,10 +3985,12 @@ resolve_uninstall_data_dir() {
     UNINSTALL_DATA_DIR=$(configured_data_path_from_disk) \
       || UNINSTALL_DATA_DIR=$(existing_container_data_path) \
       || die "无法从磁盘配置解析数据目录: $WEB_SCRCPY_DATA_HOST"
-    actual_data=$(existing_container_data_path) \
-      || die "无法验证现有容器的数据挂载目录"
-    [ "$actual_data" = "$UNINSTALL_DATA_DIR" ] \
-      || die "数据挂载目录不匹配: $actual_data"
+    if [ -n "${EXISTING_SCRCPYGATE_STATE:-}" ]; then
+      actual_data=$(existing_container_data_path) \
+        || die "无法验证现有容器的数据挂载目录"
+      [ "$actual_data" = "$UNINSTALL_DATA_DIR" ] \
+        || die "数据挂载目录不匹配: $actual_data"
+    fi
   fi
   case "$UNINSTALL_DATA_DIR" in
     '/'|"$SCRIPT_DIR"|"${HOME:-}") die "拒绝删除不安全的数据目录: $UNINSTALL_DATA_DIR" ;;
@@ -3468,9 +4012,40 @@ confirm_permanent_data_deletion() {
   answer=$(printf '%s' "$answer" | tr -d '\r')
   [ "$answer" = "$UNINSTALL_DATA_DIR" ] || return 1
   current_data_dir=$(configured_data_dir_from_disk) \
-    || current_data_dir=$(existing_container_data_dir) \
+    || current_data_dir=$(configured_data_path_from_disk) \
     || return 1
   [ "$current_data_dir" = "$UNINSTALL_DATA_DIR" ]
+}
+
+legacy_uninstall_data_is_recognized() {
+  # Without container labels or .env, only recognize the default local SQLite
+  # database. Never infer ownership of arbitrary directories or symlink targets.
+  [ "$UNINSTALL_DATA_DIR" = "$SCRIPT_DIR/data" ] || return 1
+  [ ! -L "$SCRIPT_DIR/data" ] || return 1
+  [ -f "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ ! -L "$UNINSTALL_DATA_DIR/webscrcpy.db" ] || return 1
+  [ "$(LC_ALL=C od -An -tx1 -N16 "$UNINSTALL_DATA_DIR/webscrcpy.db" 2>/dev/null | tr -d ' \n')" = '53514c69746520666f726d6174203300' ]
+}
+
+uninstall_menu_service() {
+  # Keep the destructive choice local to this action, including cancellation.
+  (
+    require_interactive
+    panel_top "选择卸载方式"
+    panel_line "1（默认）" "保留数据卸载：保留账号、数据库、ALAS 密钥、.env 和镜像"
+    panel_line "2" "彻底清理：删除本地数据、密钥、.env 和镜像，重装创建新账号"
+    panel_line "0" "取消"
+    printf '\n%s>%s 请选择 [1/2/0，默认 1]: ' "$C_YELLOW" "$C_RESET"
+    IFS= read -r uninstall_choice || return 0
+    uninstall_choice=$(printf '%s' "$uninstall_choice" | tr -d '\r')
+    case "$uninstall_choice" in
+      ''|1) PURGE=false ;;
+      2) PURGE=true ;;
+      0) return 0 ;;
+      *) warn_msg "无效选项，已取消卸载"; return 0 ;;
+    esac
+    uninstall_service
+  )
 }
 
 compose_down_owned_project() (
@@ -3481,23 +4056,42 @@ compose_down_owned_project() (
 )
 
 uninstall_service() {
+  # Menu actions share shell variables; never reuse an earlier resolved path.
+  UNINSTALL_DATA_DIR=""
+  legacy_cleanup=false
   load_uninstall_settings
   require_docker
   detect_scrcpygate_instance
   if [ -z "$EXISTING_SCRCPYGATE_STATE" ]; then
-    # A previous purge may have removed the container before cleanup finished.
-    # With an explicit purge and an existing project .env, continue the owned
-    # data/config cleanup instead of leaving a half-purged install.
-    # Ordinary --uninstall remains idempotent when no service exists.
-    if [ "$PURGE" != true ] || [ ! -f .env ]; then
-      success_msg "未检测到当前目录所属的 ScrcpyGate 服务容器，无需卸载"
+    if [ "$PURGE" != true ]; then
+      success_msg "未检测到服务容器；已有数据、密钥、.env 和镜像均保留"
+      warn_msg "保留数据重装可能沿用旧账号和 ALAS Token；全新安装请使用卸载菜单的彻底清理或 --uninstall --purge"
       return 0
     fi
-    warn_msg "未检测到服务容器，将继续清理当前项目 .env 与数据目录"
+    resolve_uninstall_data_dir
+    if [ ! -f .env ] && { [ -e "$WEB_SCRCPY_DATA_HOST" ] || [ -L "$WEB_SCRCPY_DATA_HOST" ]; }; then
+      legacy_uninstall_data_is_recognized \
+        || die "无容器和 .env，无法确认残留数据归属；已保留全部文件和镜像。请恢复原 .env 并确认数据目录后重试"
+      legacy_cleanup=true
+    fi
+    warn_msg "未检测到服务容器，将继续清理当前项目的残留安装状态"
   else
     existing_instance_can_be_managed || return 1
     resolve_uninstall_data_dir
+  fi
 
+  if [ "$PURGE" = true ] && is_interactive; then
+    panel_top "彻底清理 ScrcpyGate（不可恢复）"
+    panel_line "数据目录" "$UNINSTALL_DATA_DIR"
+    panel_line "清理范围" "账号、密码、设备、权限、ALAS Token/密钥、ADB 授权、本地镜像和 .env"
+    warn_msg "外置数据目录和项目备份不会自动删除；只有 ALAS 密钥丢失时，可取消并在安装时仅重置 ALAS Token"
+    if ! confirm_permanent_data_deletion; then
+      warn_msg "确认路径不匹配或已取消，未修改任何文件或容器"
+      return 0
+    fi
+  fi
+
+  if [ -n "$EXISTING_SCRCPYGATE_STATE" ]; then
     if is_interactive && [ "$PURGE" != true ]; then
       if [ -d "$UNINSTALL_DATA_DIR" ]; then
         uninstall_data_label="$UNINSTALL_DATA_DIR（默认保留）"
@@ -3523,8 +4117,8 @@ uninstall_service() {
     fi
     success_msg "ScrcpyGate 服务容器和 Compose 网络已移除"
 
-    if ! is_interactive && [ "$PURGE" != true ]; then
-      success_msg "非交互卸载已保留本地镜像、数据目录和 .env（彻底清理请使用 ./deploy.sh --uninstall --purge）"
+    if [ "$PURGE" != true ]; then
+      success_msg "已保留本地镜像、数据库、ALAS 密钥和 .env；运行 ./deploy.sh --install 可重装并继续使用原账号"
       return 0
     fi
   fi
@@ -3532,21 +4126,23 @@ uninstall_service() {
     resolve_uninstall_data_dir
   fi
 
+  if [ "$legacy_cleanup" = true ]; then
+    # Retain retry evidence outside the directory being deleted: interrupted
+    # cleanup may already have removed the database used for recognition.
+    (umask 077; set -C; printf 'WEB_SCRCPY_DATA_HOST=./data\n' > "$SCRIPT_DIR/.env") \
+      || die "无法保存清理重试配置；未继续删除镜像或数据"
+  fi
+
   image_status="不存在"
   cleanup_failed=false
   if docker image inspect scrcpygate:local >/dev/null 2>&1; then
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除本地镜像 scrcpygate:local？下次安装需要重新构建"; then
-      if docker image rm scrcpygate:local; then
-        image_status="已删除"
-        success_msg "本地镜像已删除"
-      else
-        image_status="删除失败"
-        cleanup_failed=true
-        warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
-      fi
+    if docker image rm scrcpygate:local; then
+      image_status="已删除"
+      success_msg "本地镜像已删除"
     else
-      image_status="已保留"
-      success_msg "已保留本地镜像 scrcpygate:local"
+      image_status="删除失败"
+      cleanup_failed=true
+      warn_msg "无法删除镜像 scrcpygate:local，可能仍被其他容器使用；未强制删除"
     fi
   fi
 
@@ -3554,43 +4150,33 @@ uninstall_service() {
     data_status="不存在"
     success_msg "数据目录不存在，无需清理"
   elif uninstall_data_can_be_removed; then
-    data_status="已保留"
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除数据目录 ${UNINSTALL_DATA_DIR}？此操作不可恢复"; then
-      delete_data=false
-      if [ "$PURGE" = true ]; then
-        delete_data=true
-      elif confirm_permanent_data_deletion; then
-        delete_data=true
-      else
-        warn_msg "确认路径不匹配或目录已变化，已保留数据目录"
-      fi
-      if [ "$delete_data" = true ]; then
-        rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
-        data_status="已删除"
-        success_msg "数据目录已删除"
-      fi
-    else
-      success_msg "已保留数据目录"
-    fi
+    rm -rf -- "$UNINSTALL_DATA_DIR" || die "无法删除数据目录: $UNINSTALL_DATA_DIR"
+    data_status="已删除"
+    success_msg "数据目录已删除"
   else
     data_status="已保留"
+    cleanup_failed=true
     warn_msg "数据目录位于项目目录之外，脚本不会自动删除：$(safe_display "$UNINSTALL_DATA_DIR")"
     warn_msg "确认不再需要后请手工删除该目录"
   fi
 
   env_status="不存在"
   if [ -f .env ]; then
-    if [ "$PURGE" = true ] || prompt_confirm_no "是否删除 .env 部署配置？"; then
+    if [ "$data_status" = "已保留" ] || [ "$cleanup_failed" = true ]; then
+      env_status="已保留"
+      warn_msg "清理尚未完成，已保留 .env 以记录原数据目录；处理后可重试 --uninstall --purge"
+    else
       rm -f -- "$SCRIPT_DIR/.env" || die "无法删除 .env"
       env_status="已删除"
       success_msg ".env 部署配置已删除"
-    else
-      env_status="已保留"
-      success_msg "已保留 .env 部署配置"
     fi
   fi
 
-  panel_top "卸载完成"
+  if [ "$cleanup_failed" = true ]; then
+    panel_top "服务已卸载，清理未完成"
+  else
+    panel_top "卸载完成"
+  fi
   panel_line "服务容器" "已移除"
   panel_line "本地镜像" "$image_status"
   panel_line "数据目录" "$data_status"
@@ -3668,38 +4254,41 @@ show_menu() {
     menu_item 1 "引导配置并安装" "$C_GREEN"
     menu_item 2 "使用当前配置安装/更新" "$C_GREEN"
     menu_item 3 "更新基础镜像并重新安装" "$C_YELLOW"
+    menu_item 4 "更新到已发布镜像（GHCR，不重建源码）" "$C_YELLOW"
 
     menu_group "服务管理"
-    menu_item 4 "启动服务" "$C_GREEN"
-    menu_item 5 "停止服务" "$C_RED"
-    menu_item 6 "重启服务" "$C_YELLOW"
-    menu_item 7 "查看状态" "$C_CYAN"
-    menu_item 8 "查看最近日志" "$C_CYAN"
+    menu_item 5 "启动服务" "$C_GREEN"
+    menu_item 6 "停止服务" "$C_RED"
+    menu_item 7 "重启服务" "$C_YELLOW"
+    menu_item 8 "查看状态" "$C_CYAN"
+    menu_item 9 "查看最近日志" "$C_CYAN"
 
     menu_group "配置与账号"
-    menu_item 9 "修改部署配置" "$C_CYAN"
-    menu_item 10 "重置管理员密码" "$C_RED"
+    menu_item 10 "修改部署配置" "$C_CYAN"
+    menu_item 11 "重置管理员密码" "$C_RED"
 
     menu_group "备份与凭据"
-    menu_item 16 "备份数据目录" "$C_GREEN"
-    menu_item 17 "从备份恢复" "$C_YELLOW"
-    menu_item 18 "查看已有备份" "$C_CYAN"
-    menu_item 19 "查看 ALAS 令牌迁移状态" "$C_CYAN"
-    menu_item 20 "导入/轮换 ALAS 令牌" "$C_YELLOW"
-
+    menu_item 12 "备份数据目录" "$C_GREEN"
+    menu_item 13 "从备份恢复" "$C_YELLOW"
+    menu_item 14 "查看已有备份" "$C_CYAN"
+    menu_item 15 "查看 ALAS 令牌迁移状态" "$C_CYAN"
+    menu_item 16 "导入/轮换 ALAS 令牌" "$C_YELLOW"
+    menu_item 17 "清空 ALAS 令牌（密钥丢失时的恢复出口）" "$C_RED"
     menu_group "诊断与帮助"
-    menu_item 11 "检查/安装 Docker 与 Compose" "$C_CYAN"
-    menu_item 12 "查看命令帮助" "$C_GRAY"
-    menu_item 14 "环境检查" "$C_CYAN"
-    menu_item 15 "检测端口占用和旧容器" "$C_YELLOW"
-    menu_item 21 "生产边界校验" "$C_CYAN"
-    menu_item 22 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
+    menu_item 18 "检查/安装 Docker 与 Compose" "$C_CYAN"
+    menu_item 19 "查看命令帮助" "$C_GRAY"
+    menu_item 20 "环境检查" "$C_CYAN"
+    menu_item 21 "检测端口占用和旧容器" "$C_YELLOW"
+    menu_item 22 "生产边界校验" "$C_CYAN"
+    menu_item 23 "生成候选清单（文件哈希 + 镜像 digest）" "$C_GRAY"
 
     menu_group "卸载"
-    menu_item 13 "卸载 ScrcpyGate" "$C_RED"
+    menu_item 24 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
+    printf '\n'
+    print_rule
     menu_item 0 "退出" "$C_GRAY"
 
-    printf '\n%s>%s 请选择 / Choose: ' "$C_YELLOW" "$C_RESET"
+    printf '\n%s>%s 请选择 [0-24] / Choose: ' "$C_YELLOW" "$C_RESET"
     IFS= read -r choice || exit 1
     choice=$(printf '%s' "$choice" | tr -d '\r')
     case "$choice" in
@@ -3709,25 +4298,26 @@ show_menu() {
         ;;
       2) run_menu_action install_current_service || true; pause_menu ;;
       3) run_menu_action install_with_pull_service || true; pause_menu ;;
-      4) run_menu_action start_service || true; pause_menu ;;
-      5) run_menu_action stop_service || true; pause_menu ;;
-      6) run_menu_action restart_service || true; pause_menu ;;
-      7) (show_status) || true; pause_menu ;;
-      8) (show_logs) || true; pause_menu ;;
-      9) run_menu_action configure_only_flow || true; pause_menu ;;
-      10)
+      4)
+        if select_update_image; then
+          run_menu_action update_service || true
+        else
+          log "已取消镜像更新"
+        fi
+        UPDATE_IMAGE=""
+        pause_menu
+        ;;
+      5) run_menu_action start_service || true; pause_menu ;;
+      6) run_menu_action stop_service || true; pause_menu ;;
+      7) run_menu_action restart_service || true; pause_menu ;;
+      8) (show_status) || true; pause_menu ;;
+      9) (show_logs) || true; pause_menu ;;
+      10) run_menu_action configure_only_flow || true; pause_menu ;;
+      11)
         if prompt_confirm_no "确认重置 admin 密码？"; then run_menu_action reset_admin || true; fi
         pause_menu
         ;;
-      11) run_menu_action check_system_dependencies || true; pause_menu ;;
-      12) usage; pause_menu ;;
-      13)
-        run_menu_action uninstall_service || true
-        pause_menu
-        ;;
-      14) (check_service) || true; pause_menu ;;
-      15) run_menu_action check_conflicts_service || true; pause_menu ;;
-      16)
+      12)
         printf '\n%s>%s 保留最近几份备份（留空=不清理旧备份）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r keep_choice || exit 1
         keep_choice=$(printf '%s' "$keep_choice" | tr -d '\r')
@@ -3740,7 +4330,7 @@ show_menu() {
         BACKUP_KEEP=""
         pause_menu
         ;;
-      17)
+      13)
         list_backups_service
         printf '\n%s>%s 备份文件名或完整路径（留空取消）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r restore_choice || exit 1
@@ -3756,14 +4346,26 @@ show_menu() {
         fi
         pause_menu
         ;;
-      18) list_backups_service; pause_menu ;;
-      19) run_menu_action token_status_service || true; pause_menu ;;
-      20)
+      14) list_backups_service; pause_menu ;;
+      15) run_menu_action token_status_service || true; pause_menu ;;
+      16)
         if prompt_confirm_no "确认导入/轮换 ALAS 令牌？"; then run_menu_action migrate_alas_token_service || true; fi
         pause_menu
         ;;
-      21) (check_production_boundary) || true; pause_menu ;;
-      22)
+      17)
+        if prompt_confirm_no "确认清空 ALAS 令牌？（除非你有对应密钥备份，否则无法恢复）"; then
+          run_menu_action clear_alas_token_service || true
+        else
+          warn_msg "已取消"
+        fi
+        pause_menu
+        ;;
+      18) run_menu_action check_system_dependencies || true; pause_menu ;;
+      19) usage; pause_menu ;;
+      20) (check_service) || true; pause_menu ;;
+      21) run_menu_action check_conflicts_service || true; pause_menu ;;
+      22) (check_production_boundary) || true; pause_menu ;;
+      23)
         printf '\n%s>%s 清单输出路径（留空=写入 output/release-manifest/…）: ' "$C_YELLOW" "$C_RESET"
         IFS= read -r manifest_choice || exit 1
         manifest_choice=$(printf '%s' "$manifest_choice" | tr -d '\r')
@@ -3772,8 +4374,12 @@ show_menu() {
         CANDIDATE_MANIFEST=""
         pause_menu
         ;;
+      24)
+        run_menu_action uninstall_menu_service || true
+        pause_menu
+        ;;
       0|q|Q|quit|exit) exit 0 ;;
-      *) error_msg "无效选项 / invalid choice: $choice"; pause_menu ;;
+      *) error_msg "无效选项：请输入 0–24 / invalid choice: $choice"; pause_menu ;;
     esac
   done
 }
@@ -3786,7 +4392,7 @@ fi
 # interactive menu acquires it per action so an idle menu does not block a
 # second operator from running a read-only command.
 case "$ACTION" in
-  configure|install|start|stop|restart|reset_admin|uninstall|migrate_alas_token|candidate_manifest|check_conflicts|restore)
+  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore)
     acquire_deploy_lock
     ;;
 esac
@@ -3795,18 +4401,25 @@ case "$ACTION" in
   menu) show_menu ;;
   configure) configure_only_flow ;;
   install) install_service ;;
+  update) update_service ;;
   start) start_service ;;
   stop) stop_service ;;
   restart) restart_service ;;
   status) show_status ;;
   logs) show_logs ;;
   reset_admin) reset_admin ;;
+  ban_list) ban_list ;;
+  geo_status) geo_status ;;
+  geo_off) geo_off ;;
+  unban) unban ;;
+  ban) ban ;;
   backup) backup_service ;;
   list_backups) list_backups_service ;;
   restore) restore_service ;;
   uninstall) uninstall_service ;;
   token_status) token_status_service ;;
   migrate_alas_token) migrate_alas_token_service ;;
+  clear_alas_token) clear_alas_token_service ;;
   candidate_manifest) candidate_manifest_service ;;
   check) check_service ;;
   check_conflicts) check_conflicts_service ;;

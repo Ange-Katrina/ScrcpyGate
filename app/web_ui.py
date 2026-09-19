@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import i18n
 from .static_assets import asset_url
+from .version import get_version
 
 STATIC_PAGES = Path(__file__).resolve().parent.parent / "static" / "pages"
 
@@ -58,6 +59,9 @@ ENDPOINTS_MAP = {
     # 账户到期策略（提醒提前天数 / 到期自动停止 ALAS），读写 /api/admin/settings 的两个字段。
     "account.policy": {"path": "/api/admin/settings", "method": "GET"},
     "account.policy.update": {"path": "/api/admin/settings", "method": "PUT"},
+    # 日志保存时长（/logs 页面）：与账户策略共用同一个系统设置端点，只读写字段时间不同。
+    "logs.retention": {"path": "/api/admin/settings", "method": "GET"},
+    "logs.retention.update": {"path": "/api/admin/settings", "method": "PUT"},
     # 设备 / 会话 / 控制
     "devices.list": {"path": "/api/devices", "method": "GET"},
     "sessions.list": {"path": "/api/devices", "method": "GET"},
@@ -112,10 +116,26 @@ ENDPOINTS_MAP = {
     "users.reset-password": {"path": "/api/admin/users", "method": "PUT"},
     "logs.list": {"path": "/api/admin/runtime-logs", "method": "GET"},
     "logs.audit": {"path": "/api/admin/logs", "method": "GET"},
+    # 访问记录（VIS）：匿名/已认证都统计；明细与汇总都只对管理员开放。
+    "access.summary": {"path": "/api/admin/access/summary", "method": "GET"},
+    "access.records": {"path": "/api/admin/access/records", "method": "GET"},
+    "access.hints": {"path": "/api/admin/access/hints", "method": "GET"},
+    "access.status": {"path": "/api/admin/access/status", "method": "GET"},
+    "ban.list": {"path": "/api/admin/ip-bans", "method": "GET"},
+    "ban.create": {"path": "/api/admin/ip-bans", "method": "POST"},
+    "ban.lift": {"path": "/api/admin/ip-bans/:ip", "method": "DELETE"},
+    "ban.events": {"path": "/api/admin/ip-bans/:ip/events", "method": "GET"},
+    "geo.status": {"path": "/api/admin/geo/status", "method": "GET"},
+    "geo.check": {"path": "/api/admin/geo/check", "method": "POST"},
+    "geo.simulate": {"path": "/api/admin/geo/simulate", "method": "GET"},
+    "geo.preview": {"path": "/api/admin/geo/preview", "method": "POST"},
+    "access.export": {"path": "/api/admin/access/export", "method": "POST"},
     "logs.audit.detail": {"path": "/api/admin/logs/:id", "method": "GET"},
     "alerts.list": {"path": "/api/admin/alerts", "method": "GET"},
     "alerts.resolve": {"path": "/api/admin/alerts/:id/resolve", "method": "POST"},
     "admin.dashboard.snapshot": {"path": "/api/admin/dashboard/snapshot", "method": "GET"},
+    # 系统更新检查（只读）：后台只显示「有没有更新」，应用更新在宿主机跑 deploy.sh --update。
+    "system.update": {"path": "/api/admin/update-check", "method": "GET"},
     "logs.export": {"path": "/api/admin/logs/export", "method": "POST"},
     "logs.integrity": {"path": "/api/admin/logs/integrity-check", "method": "POST"},
     "alas.overview": {"path": "/api/admin/alas/permissions", "method": "GET"},
@@ -220,7 +240,14 @@ PAGE_SCRIPT_TAGS = {
     name: f'<script defer src="{asset_url(f"shared/{name}-page.js")}"></script>'
     for name in ("alas", "devices", "logs", "mirror", "mirror-admin", "quality", "security", "users", "login")
 }
-COMMON_PAGE_ASSETS = [PAGE_RUNTIME_STYLE_TAG, PAGE_RUNTIME_SCRIPT_TAG, SWITCH_STYLE_TAG, SEGMENTED_STYLE_TAG]
+ACCESS_STATUS_SCRIPT_TAG = f'<script src="{asset_url("shared/access-status.js")}"></script>'
+COMMON_PAGE_ASSETS = [PAGE_RUNTIME_STYLE_TAG, PAGE_RUNTIME_SCRIPT_TAG, ACCESS_STATUS_SCRIPT_TAG, SWITCH_STYLE_TAG, SEGMENTED_STYLE_TAG]
+# 访问记录面板（VIS）：只在安全机制页使用，因此不放进 COMMON_PAGE_ASSETS。
+ACCESS_LOG_SCRIPT_TAG = f'<script defer src="{asset_url("shared/access-log-panel.js")}"></script>'
+# IP 封禁面板（BAN）：同样只在安全机制页使用。
+BAN_SCRIPT_TAG = f'<script defer src="{asset_url("shared/ban-panel.js")}"></script>'
+# 地域限制面板（GEO）：同样只在安全机制页使用。
+GEO_SCRIPT_TAG = f'<script defer src="{asset_url("shared/geo-panel.js")}"></script>'
 # 读模型预取清单：这些页面在 <head> 里同步发起读请求，api.js 复用其 Response。
 # 只放「首屏必读、且已确认是 GET」的接口；写接口不能预取。
 PAGE_PREFETCH_URLS = {
@@ -263,11 +290,17 @@ EXTRA_SCRIPTS = {
     "users.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["users"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["users"]],
     "alas.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["alas"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["alas"]],
     "quality.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["quality"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["quality"]],
-    "security.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["security"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["security"]],
+    "security.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["security"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["security"], ACCESS_LOG_SCRIPT_TAG, BAN_SCRIPT_TAG, GEO_SCRIPT_TAG, POW_SOLVER_SCRIPT_TAG],
     "mirror-admin.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["mirror-admin"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["mirror-admin"]],
     "logs.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["logs"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["logs"]],
     "login.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["login"], AUDIT_MAPPING_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, POW_SOLVER_SCRIPT_TAG, PAGE_SCRIPT_TAGS["login"]],
 }
+
+# Load shared administration refinements after the legacy page styles.
+for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "logs"):
+    EXTRA_SCRIPTS[f"{_page}.html"].append(
+        f'<link rel="stylesheet" href="{asset_url("css/admin-workspace.css")}">'
+    )
 
 
 def _injection(request: Request, file: str, nonce: str = "") -> str:
@@ -333,6 +366,11 @@ def _make_handler(file: str, admin_only: bool):
         # 每响应一次性 nonce：页面构建产物中的内联脚本在服务时附加，CSP 据此去掉 unsafe-inline。
         nonce = secrets.token_urlsafe(16)
         html = path.read_text(encoding="utf-8")
+        version = escape_html(get_version())
+        label = f"v{version}" if version != "dev" else version
+        html = html.replace('<div class="side-version">ScrcpyGate</div>', f'<div class="side-version" data-product-version>ScrcpyGate {label}</div>')
+        if file == "login.html":
+            html = html.replace("© ScrcpyGate", f"© ScrcpyGate · {label}")
         html = canonicalize_asset_paths(html)
         html = _INLINE_SCRIPT_RE.sub(lambda match: f'<script{match.group(1)} nonce="{nonce}">', html)
         head_injection = _prefetch_head_injection(file, nonce)

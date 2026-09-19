@@ -24,8 +24,11 @@ router = APIRouter()
 
 @router.websocket("/ws/devices/{device_id}/video")
 async def ws_video(websocket: WebSocket, device_id: str):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/video")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/devices/*/video")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)
@@ -37,6 +40,12 @@ async def ws_video(websocket: WebSocket, device_id: str):
     if not real_device_id:
         await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
+        return
+    # 到期账户仍可登录浏览，但投屏（含仅观看）必须拒绝；给明确的关码原因，
+    # 前端据此「不再重连」而不是当成网络抖动反复重试。
+    if not await asyncio.to_thread(storage.user_is_active, user):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="account_expired", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403, reason="account expired")
         return
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "view"):
         await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)
@@ -69,8 +78,11 @@ async def ws_video(websocket: WebSocket, device_id: str):
 
 @router.websocket("/ws/devices/{device_id}/control")
 async def ws_control(websocket: WebSocket, device_id: str):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/devices/*/control")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/devices/*/control")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)
@@ -82,6 +94,11 @@ async def ws_control(websocket: WebSocket, device_id: str):
     if not real_device_id:
         await audit_websocket_event(websocket, user, "websocket_access", outcome="failure", reason="device_not_found", target_type="device", target_id=device_id)
         await websocket.close(code=4404)
+        return
+    # 与视频通道同一套语义：到期账户不能控制设备（即使它曾经有控制权限）。
+    if not await asyncio.to_thread(storage.user_is_active, user):
+        await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="account_expired", target_type="device", target_id=real_device_id)
+        await websocket.close(code=4403, reason="account expired")
         return
     if not await asyncio.to_thread(storage.user_can, user["username"], real_device_id, "control"):
         await audit_websocket_event(websocket, user, "websocket_access", outcome="denied", reason="device_permission_denied", target_type="device", target_id=real_device_id)
@@ -126,8 +143,11 @@ async def ws_control(websocket: WebSocket, device_id: str):
 
 @router.websocket("/ws/events")
 async def ws_events(websocket: WebSocket):
-    if not security.websocket_origin_allowed(websocket):
-        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason="origin_denied", target_id="/ws/events")
+    # 握手前的统一判定：来源/Origin 校验 + 访问网关（BAN → GEO）。
+    # WS 不经过 HTTP 中间件，因此这里必须在 accept() 之前拒绝。
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        await audit_websocket_event(websocket, None, "websocket_access", outcome="denied", reason=handshake.reason or "access_denied", target_id="/ws/events")
         await websocket.close(code=4403)
         return
     session_state = await diagnose_websocket_session(websocket)

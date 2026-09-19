@@ -772,6 +772,37 @@ def shutdown_logging() -> None:
         _stop_logging_locked()
 
 
+def prune_rotated_log_files(days: int, now: float | None = None) -> int:
+    """Delete rotated runtime-log segments older than ``days`` (0 = keep forever).
+
+    ``RotatingFileHandler`` 的轮转段是 ``webscrcpy.log.1``、``.2``……；活动文件
+    本身永远不会被删。按体积轮转（``LOG_MAX_BYTES`` / ``LOG_BACKUP_COUNT``）仍是
+    上限，这里只再叠一层「按天数保留」。
+    """
+    days = max(0, int(days))
+    if days <= 0:
+        return 0
+    cutoff = float(now if now is not None else time.time()) - days * 86400
+    _refresh_paths()
+    directory = LOG_FILE.parent
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for candidate in sorted(directory.glob(LOG_FILE.name + ".*")):
+        try:
+            if not candidate.name.removeprefix(LOG_FILE.name + ".").isdigit():
+                continue
+            if not candidate.is_file() or candidate.is_symlink():
+                continue
+            if candidate.stat().st_mtime >= cutoff:
+                continue
+            candidate.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def log_event(logger: logging.Logger, event_name: str, *, level: int = logging.INFO, **fields: object) -> None:
     normalized = normalize_event_name(event_name)
     logger.log(

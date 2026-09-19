@@ -15,41 +15,41 @@
       --brand-soft:rgba(0,122,255,.09); --brand-soft-mid:rgba(0,122,255,.1);
       --brand-soft-hover:rgba(0,122,255,.08); --brand-soft-btn:rgba(0,122,255,.06);
       --brand-border-hover:rgba(0,122,255,.28); --brand-text:#2e8dff;
-      --success-text:#30d158; --success-soft:rgba(52,199,89,.12);
+      --success-text:#0f6b45; --success-soft:rgba(52,199,89,.12);
       --warn-text:#b45309; --warn-soft:rgba(217,119,6,.12);
       --carbon-ambient: radial-gradient(circle at 12% 8%,var(--ambient-blue),rgba(0,122,255,0) 32%),radial-gradient(circle at 90% 92%,var(--ambient-purple),rgba(138,110,255,0) 36%),linear-gradient(165deg,var(--carbon-top) 0%,var(--carbon-mid) 48%,var(--carbon-bottom) 100%);
       --admin-bg:#f2f2f7; --admin-rail:#e9e9ee; --admin-surface:#ffffff;
       --admin-border:rgba(0,0,0,.075); --admin-line:rgba(0,0,0,.065);
       --admin-field:rgba(0,0,0,.03); --admin-hover:rgba(0,0,0,.045);
-      --admin-text:#1d1d1f; --admin-muted:#6e6e73; --admin-faint:#8e8e93;
+      --admin-text:#1d1d1f; --admin-muted:#48484a; --admin-faint:#66666b;
       --admin-brand:#0064d6; --admin-brand-hover:#004fad; --admin-brand-btn:#0064d6; --admin-brand-soft:rgba(0,122,255,.09);
-      --admin-success:#34c759; --admin-success-soft:rgba(52,199,89,.11);
+      --admin-success:#0f6b45; --admin-success-soft:rgba(52,199,89,.11);
       --admin-warn:#ff9f0a; --admin-warn-soft:rgba(217,119,6,.1);
-      --admin-danger:#ef5350; --admin-danger-soft:rgba(239,83,80,.1);
+      --admin-danger:#b4232c; --admin-danger-soft:rgba(239,83,80,.1);
       --admin-on-brand:#fff;
-      --stat-label:#6e6e73; --stat-value-text:#1d1d1f;
-      --trend-good:#30d158; --trend-warn:#ff9f0a; --trend-compare:#6e6e73;
-      --stat-green:#34c759; --stat-green-soft:rgba(52,199,89,.1);
+      --stat-label:#48484a; --stat-value-text:#1d1d1f;
+      --trend-good:#0f6b45; --trend-warn:#ff9f0a; --trend-compare:#48484a;
+      --stat-green:#0f6b45; --stat-green-soft:rgba(52,199,89,.1);
       --stat-blue:#2e8dff; --stat-blue-soft:rgba(0,122,255,.09);
       --stat-cyan:#22c8e8; --stat-cyan-soft:rgba(34,200,232,.12);
       --stat-orange:#ff9f0a; --stat-orange-soft:rgba(217,119,6,.1);
-      --th-text:#6e6e73;
+      --th-text:#48484a;
       --btn-view:#2e8dff; --btn-view-bg:rgba(0,122,255,.05); --btn-view-border:rgba(0,122,255,.09);
       --btn-view-bg-hover:rgba(0,122,255,.09); --btn-view-border-hover:rgba(0,122,255,.2);
-      --btn-cut:#ff5964; --btn-cut-bg:rgba(255,77,87,.05); --btn-cut-border:rgba(255,77,87,.11);
+      --btn-cut:#b4232c; --btn-cut-bg:rgba(255,77,87,.05); --btn-cut-border:rgba(255,77,87,.11);
       --btn-cut-bg-hover:rgba(255,77,87,.12); --btn-cut-border-hover:rgba(255,77,87,.23);
       --admin-elev:#ffffff; --admin-elev-border:rgba(0,0,0,.09);
-      --side-icon:#6e6e73; --side-text:#3c3c43; --side-sub:#8e8e93;
-      --side-text-hover:#2c2c2e; --side-sub-hover:#8e8e93;
+      --side-icon:#48484a; --side-text:#3c3c43; --side-sub:#66666b;
+      --side-text-hover:#2c2c2e; --side-sub-hover:#66666b;
       --side-active-bg:rgba(0,122,255,.12); --side-active-icon:#2e8dff;
-      --side-active-text:#1d1d1f; --side-active-sub:#8e8e93;
+      --side-active-text:#1d1d1f; --side-active-sub:#66666b;
       --side-hover-bg:rgba(0,0,0,.04); --side-rail-border:rgba(0,0,0,.08); --side-rail-bg:rgba(255,255,255,.8);
       --c-surface:#ffffff; --c-surface-soft:#f7f7fa; --c-surface-hover:#ececf1; --c-field:#f2f2f7; --c-pop:#ffffff;
       --c-glass:rgba(255,255,255,.78); --c-glass-strong:rgba(255,255,255,.9);
       --c-border:rgba(0,0,0,.09); --c-line:rgba(0,0,0,.065); --c-hover:rgba(0,0,0,.045); --c-active:#e8f1fd;
       --c-scrollbar:rgba(0,0,0,.14); --c-scrollbar-bright:rgba(0,0,0,.24);
-      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#6e6e73; --c-text-faint:#8e8e93; --c-text-faint-hover:#a8adb6;
-      --c-danger:#e0353f; --c-shadow:rgba(0,0,0,.12);
+      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#48484a; --c-text-faint:#66666b; --c-text-faint-hover:#a8adb6;
+      --c-danger:#b4232c; --c-shadow:rgba(0,0,0,.12);
       --c-rail-bg:rgba(255,255,255,.88);
     }
 .dark {
@@ -226,12 +226,12 @@
   --popover: var(--background-50);
   --popover-foreground: var(--text-900);
 
-  --primary: var(--brand-500);
+  --primary: var(--brand-600);
   --primary-foreground: var(--background-50);
   --secondary: var(--background-200);
   --secondary-foreground: var(--text-800);
   --muted: var(--background-200);
-  --muted-foreground: var(--text-400);
+  --muted-foreground: var(--text-600);
   --accent: var(--background-100);
   --accent-foreground: var(--text-800);
   --destructive: var(--state-error);
@@ -587,7 +587,7 @@ html, body { margin:0; height:100%; }
     .account-menu.open .menu-panel { opacity:1; transform:translateY(0); visibility:visible; pointer-events:auto; transition:opacity var(--motion-base) var(--ease-fade),transform var(--motion-base) var(--ease-standard),visibility 0s linear 0s; }
     .menu-head { display:flex; align-items:center; gap:9px; padding:8px 10px 10px; border-bottom:1px solid var(--admin-line); margin-bottom:6px; }
     .menu-head b { display:block; font-size:13px; font-weight:600; color:var(--admin-text); }
-    .menu-head span { display:block; margin-top:2px; font-size:11px; color:var(--admin-muted); }
+    .menu-head div span { display:block; margin-top:2px; font-size:11px; color:var(--admin-muted); }
     .menu-item { display:flex; align-items:center; gap:9px; width:100%; height:32px; padding:0 10px; border:0; border-radius:8px; color:var(--admin-muted); background:transparent; font-size:12.5px; cursor:pointer; text-align:left; }
     .menu-item:hover { color:var(--admin-text); background:var(--admin-hover); }
     .menu-item [data-lucide] { width:14px; height:14px; flex:0 0 auto; }
@@ -823,7 +823,7 @@ html, body { margin:0; height:100%; }
       .unit-select { height:44px; }
       .viewer-stop-control .num-control { height:44px; }
     }
-    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; transform:none!important; } }
+    @media (prefers-reduced-motion:reduce){ *,*::before,*::after { transition:none!important; animation:none!important; } }
 
 /* Extracted from static/pages/quality.html ( id="quality-page-styles"). */
 /* ── Apple Copy 尺度令牌（本页专用，颜色仍走 admin-shell.css 的语义色）──────
@@ -877,7 +877,17 @@ html, body { margin:0; height:100%; }
     .preset-meta { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
     .preset-meta-chip { display:inline-flex; align-items:center; height:var(--page-h-badge); padding:0 7px; border-radius:var(--page-radius-pill); background:var(--glass-field); color:var(--admin-muted); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .preset-item.selected .preset-meta-chip { background:var(--glass-hover); }
-    .preset-ops { display:flex; align-items:center; gap:4px; margin-top:2px; }
+    .preset-ops { display:flex; flex-wrap:wrap; align-items:center; gap:6px 4px; margin-top:6px; }
+    .preset-ops > .preset-switch { flex:0 0 100%; }
+    .preset-ops > .preset-op-btn,
+    .preset-ops > .preset-op-state { flex:0 0 auto; white-space:nowrap; line-height:1.4; }
+    .preset-switch-label { white-space:nowrap; line-height:1.4; }
+    .preset-ops [data-lucide] { flex-shrink:0; }
+    @media (max-width:767px), (pointer:coarse) {
+      .preset-ops > .preset-switch,
+      .preset-ops > .preset-op-btn,
+      .preset-ops > .preset-op-state { min-height:44px; }
+    }
     .preset-op-btn { display:inline-flex; align-items:center; gap:4px; height:var(--page-h-mini); padding:0 8px; border:1px solid transparent; border-radius:var(--page-radius-xs); color:var(--admin-muted); background:transparent; font-size:11px; cursor:pointer; transition:background-color var(--motion-fast) var(--ease-fade),color var(--motion-fast) var(--ease-fade); }
     .preset-op-btn:hover { color:var(--admin-text); background:var(--admin-hover); }
     .preset-op-btn.primary { color:var(--admin-brand); border-color:var(--brand-border-hover); background:var(--admin-brand-soft); font-weight:600; }

@@ -28,6 +28,7 @@ jobs:
       image: ${{ steps.metadata.outputs.image }}
       publish: ${{ steps.metadata.outputs.publish }}
       tags: ${{ steps.metadata.outputs.tags }}
+      version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,16 +106,21 @@ jobs:
           push: false
           provenance: false
           sbom: false
+          # The checked-in version plus a development suffix, or the exact release version.
+          build-args: |
+            SCRCPYGATE_VERSION=${{ needs.checks.outputs.version }}
           tags: scrcpygate-ci:${{ matrix.arch }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.checks.outputs.version }}
             org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha,scope=verified-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=verified-${{ matrix.arch }}
       - name: Check bridge and host-network startup
         env:
           IMAGE: scrcpygate-ci:${{ matrix.arch }}
+          EXPECTED_VERSION: ${{ needs.checks.outputs.version }}
         run: sh tools/ci_smoke.sh "$IMAGE"
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
         with:

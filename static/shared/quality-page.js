@@ -732,11 +732,17 @@
 
       /* ---------- 错误与摘要 ---------- */
       function clearFieldErrors() {
-        document.querySelectorAll('.param-row.has-error').forEach(function (r) { r.classList.remove('has-error'); });
+        document.querySelectorAll('.param-row.has-error').forEach(function (r) {
+          r.classList.remove('has-error');
+          r.querySelectorAll('[aria-errormessage]').forEach(function (input) { input.removeAttribute('aria-invalid'); });
+        });
       }
       function setRowError(rowId) {
         var r = $(rowId);
-        if (r) { r.classList.add('has-error'); }
+        if (r) {
+          r.classList.add('has-error');
+          r.querySelectorAll('[aria-errormessage]').forEach(function (input) { input.setAttribute('aria-invalid', 'true'); });
+        }
       }
 
       function renderSummary() {

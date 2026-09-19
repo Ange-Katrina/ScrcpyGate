@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import re
 import secrets
 import stat
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -120,6 +123,21 @@ def _restrict_key_file(path: Path) -> None:
         raise AlasTokenError(f"{TOKEN_KEY_ENV} file permissions could not be restricted") from exc
 
 
+def _check_database_before_key_creation() -> None:
+    database = Path(os.environ.get("WEB_SCRCPY_DATA_DIR", "data") or "data") / "webscrcpy.db"
+    if database.is_symlink():
+        raise AlasTokenError("database must not be a symlink during key provisioning")
+    if not database.exists():
+        return
+    try:
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
+    except sqlite3.Error as exc:
+        raise AlasTokenError("database cannot be checked; no key was created") from exc
+    if row and is_encrypted_token(str(row[0] or "")):
+        raise AlasTokenError("encrypted ALAS token exists; restore its matching key before provisioning")
+
+
 def provision_key_file() -> dict[str, object]:
     """Create the server-side key file once, mirroring deploy.sh's contract.
 
@@ -141,11 +159,12 @@ def provision_key_file() -> dict[str, object]:
             raise AlasTokenError(f"{TOKEN_KEY_ENV} file is unreadable") from exc
         except AlasTokenError as exc:
             raise AlasTokenError(
-                f"{TOKEN_KEY_ENV} file is invalid; remove it and run this command again"
+                f"{TOKEN_KEY_ENV} file is invalid; restore a valid matching key from backup"
             ) from exc
         _restrict_key_file(path)
         return {"ok": True, "action": "reused", "path": str(path), "source": "file"}
 
+    _check_database_before_key_creation()
     path.parent.mkdir(parents=True, exist_ok=True)
     value = secrets.token_hex(32)
     temp_path = path.parent / f"{path.name}.{secrets.token_hex(4)}.tmp"
@@ -153,7 +172,12 @@ def provision_key_file() -> dict[str, object]:
     try:
         with os.fdopen(descriptor, "w", encoding="ascii") as handle:
             handle.write(value + "\n")
-        os.replace(temp_path, path)
+        # Publish without replacing a key another process has just created.
+        os.link(temp_path, path)
+        temp_path.unlink()
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise AlasTokenError("key file could not be created without replacing existing state") from exc
     except BaseException:
         try:
             temp_path.unlink()
@@ -203,6 +227,48 @@ def encrypt_token(token: str) -> str:
 
 def is_encrypted_token(value: str) -> bool:
     return str(value or "").startswith(TOKEN_PREFIX)
+
+
+def key_diagnostics() -> dict[str, object]:
+    """Describe the key material this process can see — never the key itself.
+
+    Used by startup warnings and the CLI status command so an operator can tell
+    *which* key source is in play when a stored token cannot be decrypted
+    (env var vs key file vs nothing, and whether a rotation key is present).
+    """
+    diagnostics: dict[str, object] = {
+        "injected": injected_key_present(),
+        "previous_injected": bool(os.environ.get(TOKEN_PREVIOUS_KEY_ENV, "").strip()),
+        "key_file": "",
+        "key_file_exists": False,
+    }
+    try:
+        path = _token_key_file_path()
+    except Exception:  # noqa: BLE001 - diagnostics must never raise
+        return diagnostics
+    diagnostics["key_file"] = str(path)
+    try:
+        diagnostics["key_file_exists"] = bool(path.is_file())
+    except OSError:
+        diagnostics["key_file_exists"] = False
+    return diagnostics
+
+
+def token_summary(value: str) -> dict[str, object]:
+    """Redacted fingerprint of a stored token (ciphertext hash, never plaintext).
+
+    Lets an operator match "the token in this database" against a backup or a
+    key without ever printing the credential.
+    """
+    raw = str(value or "")
+    if not raw:
+        return {"present": False}
+    return {
+        "present": True,
+        "encrypted": is_encrypted_token(raw),
+        "length": len(raw),
+        "fingerprint": hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:12],
+    }
 
 
 def decrypt_token(value: str, *, allow_legacy: bool = False) -> tuple[str, str]:

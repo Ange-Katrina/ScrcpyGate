@@ -14,6 +14,8 @@
 
   function initDrawer() {
     var sidebar = document.getElementById('sidebar');
+    // Admin pages own #admin-sidebar and its scrim in admin-shell.js.
+    if (!sidebar) return;
     var toggle = document.getElementById('sidebarToggle');
     var mobileMenuBtn = document.getElementById('mobile-menu-btn');
     var mobileScrim = document.getElementById('mobile-scrim');
@@ -83,6 +85,7 @@
 
   // 回到桌面宽度时清理移动端状态
   window.addEventListener('resize', function () {
+    if (!document.getElementById('sidebar')) return;
     if (!isMobile()) {
       document.body.classList.remove('sg-mobile-nav');
       var scrim = document.getElementById('mobile-scrim');

@@ -2,6 +2,186 @@
    Apple Copy 取向：安静容器（1px 边框 + 大圆角）、用间距分组而非分隔线、
    胶囊按钮、克制的阴影；状态色只用于开关与提示。 */
 
+/* Section navigation is scoped to this page; existing admin tokens own both themes. */
+.security-content { max-width: 1600px; margin-inline: auto; }
+.security-content [hidden] { display: none !important; }
+.security-content .sec-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.sec-help-link { display: inline-flex; align-items: center; gap: 8px; color: var(--admin-muted); font-size: 13px; text-decoration: none; min-height: 36px; }
+.sec-help-link:hover { color: var(--admin-brand); }
+.sec-help-link svg { width: 16px; height: 16px; }
+.sec-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--admin-border); margin-bottom: 20px; }
+.sec-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 4px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--admin-muted); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.sec-tab svg { width: 17px; height: 17px; }
+.sec-tab:hover { color: var(--admin-text); }
+.sec-tab[aria-selected="true"] { color: var(--admin-brand); border-bottom-color: var(--admin-brand); font-weight: 600; }
+.sec-tab-panel { min-width: 0; }
+.sec-tab:focus-visible, .sec-tab-panel:focus-visible, .security-content summary:focus-visible, .sec-help-link:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 3px; border-radius: 4px; }
+.security-content .sec-card { margin-top: 0; box-shadow: 0 1px 2px var(--c-shadow); }
+.security-content .sec-layout .sec-card { order: 0; }
+.security-content .panel-header { padding: 20px 24px 16px; gap: 12px; border-bottom: 0; }
+.security-content .panel-title { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 16px; line-height: 1.5; }
+.security-content .panel-subtitle { margin: 0; font-size: 12px; font-weight: 400; color: var(--admin-muted); }
+.security-content .guard-body { padding: 0 24px 24px; gap: 12px; }
+.security-content .guard-body > .guard-status:empty { display: none; }
+.security-content .guard-body > .guard-status { overflow-wrap: anywhere; line-height: 1.6; }
+.security-content .sec-hint { font-size: 13px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.security-content .guard-copy span { font-size: 12px; line-height: 1.6; max-width: 52ch; }
+.security-content .guard-copy b { font-size: 14px; }
+.security-content .guard-row { padding: 12px 0; }
+.security-content .guard-btn { min-height: 36px; height: auto; padding: 8px 16px; gap: 6px; font-size: 13px; }
+.security-content .guard-btn svg { width: 16px; height: 16px; }
+.security-content .guard-preset { min-height: 32px; height: auto; padding: 6px 12px; font-size: 12px; }
+.security-content .vis-actions { padding: 0; background: transparent; gap: 8px; }
+.security-content .vis-actions .guard-preset { border: 1px solid var(--admin-border); }
+.security-content .guard-field { min-height: 36px; }
+.security-content .guard-field select { min-width: 120px; max-width: 100%; border: 0; color: var(--admin-text); background: var(--admin-field); font: inherit; font-size: 13px; outline-offset: 4px; }
+.security-content select option { background: var(--admin-surface); color: var(--admin-text); }
+.security-content .guard-field.geo-wide { flex: 0 1 320px; }
+.security-content .guard-field.geo-wide input { width: 100%; }
+.sec-disclosure { border: 1px solid var(--admin-border); border-radius: 12px; background: var(--admin-surface); }
+.sec-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 12px 16px; color: var(--admin-muted); font-size: 13px; font-weight: 500; cursor: pointer; list-style: none; }
+.sec-disclosure > summary::-webkit-details-marker { display: none; }
+.sec-disclosure > summary svg { width: 16px; height: 16px; flex: none; transition: transform 150ms ease; }
+.sec-disclosure[open] > summary { color: var(--admin-text); }
+.sec-disclosure[open] > summary svg { transform: rotate(180deg); }
+.sec-disclosure > .guard-row, .sec-disclosure > .sec-hint { margin-inline: 16px; }
+.sec-disclosure > .sec-hint { margin-bottom: 12px; }
+.security-content .sec-advanced .guard-body { padding-top: 0; padding-bottom: 12px; }
+.security-content .vis-stats { display: flex; flex-wrap: wrap; gap: 0; margin: 4px 0 12px; border-bottom: 1px solid var(--admin-line); padding-bottom: 16px; }
+.security-content .vis-stat { flex: 1 1 120px; border: 0; border-radius: 0; border-inline-end: 1px solid var(--admin-line); padding: 4px 20px; background: transparent; gap: 4px; }
+.security-content .vis-stat:first-child { padding-inline-start: 0; }
+.security-content .vis-stat:last-child { border-inline-end: 0; }
+.security-content .vis-stat b { font-size: 22px; line-height: 1.35; }
+.security-content .vis-stat span { font-size: 12px; color: var(--admin-muted); }
+.security-content #vis-stats .vis-stat:first-child b { color: var(--admin-brand); }
+.security-content .vis-filters { gap: 12px; margin: 0; }
+.security-content .vis-filter { flex: 1 1 144px; }
+.security-content .vis-filter:first-child { flex-grow: 2; }
+.security-content .vis-filter > span { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--admin-muted); }
+.security-content .vis-filter input, .security-content .vis-filter select { width: 100%; min-width: 0; height: 36px; border-radius: 8px; }
+.security-content .vis-check { height: auto; min-height: 36px; line-height: 1.6; }
+.sec-filter-extra { border: 0; border-radius: 0; background: transparent; }
+.sec-filter-extra > summary { justify-content: flex-start; min-height: 36px; width: fit-content; padding: 4px 0; }
+.vis-extra-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 12px; padding: 12px 16px; background: var(--admin-field); border-radius: 12px; }
+.vis-extra-grid .vis-check { grid-column: 1 / -1; }
+.sec-filter-feedback { font-size: 12px; color: var(--admin-brand); }
+.sec-table-hint, .sec-observation-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--admin-muted); overflow-wrap: anywhere; }
+.sec-observation-note[data-tone="warn"] { color: var(--admin-warn); }
+.sec-observation-note[data-tone="error"] { color: var(--admin-danger); }
+.sec-observation-note:not([data-tone="warn"]):not([data-tone="error"]) { display: none; }
+.security-content #vis-settings { border: 0; border-radius: 0; }
+.security-content #vis-settings > summary { padding: 0; min-height: 32px; justify-content: flex-start; width: fit-content; }
+.security-content #vis-settings[open] { padding-bottom: 12px; border-bottom: 1px solid var(--admin-line); }
+.security-content .vis-table { font-size: 13px; }
+.security-content .vis-table th { background: var(--admin-field); font-size: 12px; color: var(--admin-muted); letter-spacing: 0; text-transform: none; font-weight: 500; }
+.security-content .vis-table td, .security-content .vis-table th { padding: 12px; }
+.security-content .vis-table td { font-weight: 400; }
+.security-content .vis-table td.ban-actions { display: table-cell; }
+.security-content .vis-table td.ban-actions button + button { margin-inline-start: 4px; }
+.security-content .vis-table tbody tr:hover { background: var(--admin-hover); }
+.security-content .vis-table .guard-preset { min-height: 30px; padding: 4px 10px; }
+.security-content .vis-card .vis-table th:nth-child(n+3):nth-child(-n+6), .security-content .vis-card .vis-table td:nth-child(n+3):nth-child(-n+6) { text-align: right; }
+.security-content .sec-scroll-table { max-width: 100%; min-width: 0; scrollbar-width: thin; }
+.sec-scroll-table:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
+.sec-scroll-table.has-overflow { box-shadow: inset -12px 0 14px -14px var(--admin-muted); }
+.sec-scroll-hint { margin: 0; color: var(--admin-muted); font-size: 12px; }
+.security-content .vis-detail { margin-top: 12px; padding-top: 20px; border-top: 1px solid var(--admin-border); }
+.security-content .vis-detail-head { align-items: center; margin-bottom: 16px; }
+.security-content .vis-detail-head > b { flex: 1 1 100%; font-size: 14px; overflow-wrap: anywhere; }
+.security-content .vis-hints { margin: 0; }
+.security-content .vis-hints ul { max-height: 144px; overflow-y: auto; }
+.security-content .vis-hint { flex-wrap: wrap; }
+.security-content .ban-editor { margin-bottom: 8px; }
+.security-content .ban-editor:not([open]) { display: none; }
+.security-content .ban-editor-fields { padding: 8px 16px 16px; align-items: end; }
+.ban-editor-fields .guard-btn { flex: 0 0 auto; }
+.security-content #ban-submit { height: auto; }
+.sec-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.sec-pagination .vis-check { margin-inline-end: auto; }
+.sec-pagination #ban-page { color: var(--admin-muted); font-size: 12px; padding: 0 8px; }
+.sec-block-copy { flex: 1 1 100%; }
+.sec-block-copy h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--admin-text); }
+.sec-block-copy p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--admin-muted); }
+.security-content .geo-preview { padding: 16px; border: 1px solid var(--admin-border); border-radius: 12px; margin-top: 8px; }
+.security-content .geo-preview .vis-filter { flex-grow: 1; }
+.security-content #geo-sim-result { flex: 1 1 100%; overflow-wrap: anywhere; line-height: 1.6; }
+.security-content .geo-foot { padding: 16px 0; border: 0; border-radius: 0; box-shadow: none; margin: 0; justify-content: space-between; }
+.security-content .geo-database .vis-stats { padding: 8px 16px 16px; }
+.security-content .geo-database .vis-stat { flex-basis: 180px; padding: 12px; border: 0; }
+.security-content .geo-database .vis-stat b { font-size: 14px; }
+.sec-inline-actions { display: flex; gap: 8px; margin: 0 16px 12px; }
+.security-content .sec-foot:not(.geo-foot) { position: sticky; bottom: 0; z-index: 5; box-shadow: none; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); margin-top: 20px; }
+.security-content .guard-locked-row { flex-wrap: wrap; }
+.security-content .guard-locked-meta { white-space: normal; overflow-wrap: anywhere; }
+.sec-section-intro { margin-bottom: 20px !important; }
+.sec-confirm { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; margin: auto; border: 1px solid var(--admin-border); border-radius: 20px; color: var(--admin-text); background: var(--admin-surface); box-shadow: 0 16px 48px var(--c-shadow); }
+.sec-confirm::backdrop { background: rgba(0, 0, 0, .45); }
+.sec-confirm-heading { display: flex; align-items: center; gap: 12px; }
+.sec-confirm-heading svg { width: 24px; height: 24px; color: var(--admin-warn); }
+.sec-confirm h2 { margin: 0; font-size: 20px; }
+.sec-confirm p { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; margin: 16px 0; }
+.sec-confirm-detail { color: var(--admin-muted); }
+.sec-confirm-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.sec-export { position: relative; }
+.sec-export summary { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 12px; border: 1px solid var(--admin-border); border-radius: 999px; color: var(--admin-muted); font-size: 12px; font-weight: 600; list-style: none; cursor: pointer; }
+.sec-export summary::-webkit-details-marker { display: none; }
+.sec-export summary svg { width: 14px; height: 14px; }
+.sec-export-options { position: absolute; z-index: 20; right: 0; top: calc(100% + 8px); display: flex; flex-direction: column; gap: 4px; min-width: 144px; padding: 8px; background: var(--admin-surface); border: 1px solid var(--admin-border); border-radius: 12px; box-shadow: 0 8px 24px var(--c-shadow); }
+.security-content .sec-export-options .guard-preset { border: 0; border-radius: 8px; text-align: left; }
+.security-content .sec-export-options .guard-preset:hover { background: var(--admin-hover); }
+.security-content .vis-card > .panel-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.security-content .vis-card .vis-actions { width: auto; }
+.security-content #geo-policy-notice { padding: 12px 16px; border-radius: 12px; background: var(--admin-field); color: var(--admin-muted); }
+.security-content #geo-policy-notice[data-tone="error"] { color: var(--admin-danger); }
+
+@media (max-width: 767px) {
+  .security-content .sec-head { flex-direction: row; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .security-content .page-heading-copy { min-width: 0; }
+  .sec-help-link { flex: none; }
+  .sec-help-link svg:last-child { display: none; }
+  .sec-help-link { align-self: flex-start; min-height: 44px; }
+  .sec-tabs { gap: 0; margin-bottom: 16px; }
+  .sec-tab { flex: 1; min-width: 0; padding: 8px 2px; gap: 4px; font-size: 13px; flex-direction: column; }
+  .sec-tab span { white-space: normal; text-align: center; line-height: 1.35; }
+  .security-content .panel-header { padding: 16px; align-items: flex-start; }
+  .security-content .guard-body { padding: 0 16px 16px; }
+  .security-content .vis-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .security-content .guard-preset, .security-content .guard-btn, .security-content .guard-unlock { min-height: 44px; }
+  .security-content .vis-table .guard-preset { min-height: 44px; }
+  .security-content .vis-filter input, .security-content .vis-filter select, .security-content .guard-field, .security-content #vis-retention { min-height: 44px; height: auto; font-size: 16px; }
+  .security-content .guard-field input, .security-content .guard-field select { font-size: 16px; }
+  .security-content .guard-field.geo-wide { flex: 0 0 auto; width: 100%; }
+  .security-content .vis-stat { flex: 0 0 33.333%; min-width: 0; padding: 12px 8px; border: 0; }
+  .security-content .vis-stat span { overflow-wrap: anywhere; }
+  .security-content .vis-stat:first-child { padding-inline-start: 8px; }
+  .security-content .vis-filter { flex: 1 1 calc(50% - 12px); }
+  .security-content .vis-filter:first-child { flex: 1 1 100%; }
+  .security-content .vis-card .guard-body > .vis-filters .vis-filter:first-child { flex: 1 1 144px; }
+  .security-content .vis-filters > .guard-preset { flex: 1 1 auto; }
+  .vis-extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vis-extra-grid .vis-filter:first-child { grid-column: 1 / -1; }
+  .security-content .vis-check { min-height: 44px; }
+  .security-content .sec-foot:not(.geo-foot) { flex-direction: row; align-items: center; }
+  .security-content .sec-foot > .guard-status { flex: 1 1 100%; }
+  .security-content .geo-foot .guard-btn { width: 100%; }
+  .security-content .geo-foot { gap: 12px; align-items: flex-start; }
+  .security-content .ban-editor-fields .guard-btn { flex: 1; }
+  .sec-pagination .vis-check { flex: 1 1 100%; }
+  .security-content .guard-row:has(.sg-switch) { flex-direction: row; align-items: center; }
+  .security-content .guard-presets { justify-content: flex-start; }
+  .security-content .vis-detail-head .guard-btn { flex: 1; margin: 0; }
+  .security-content .vis-hints-head { flex-wrap: wrap; }
+  .security-content #vis-settings > summary { min-height: 44px; }
+  .security-content .sec-disclosure > summary { min-height: 44px; }
+  .security-content .sec-export > summary { min-height: 44px; }
+  .security-content .vis-card .vis-actions { gap: 4px; }
+  .security-content .vis-card .panel-subtitle { font-size: 11px; }
+  .security-content .vis-card .vis-stat { padding: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sec-disclosure > summary svg { transition: none; }
+}
+
 .sec-head { align-items: center; }
 .sec-hint { margin: 0 0 clamp(12px, 1.6vh, 18px); color: var(--admin-muted); font-size: 12px; line-height: 18px; max-width: 860px; }
 .sec-layout { display: flex; flex-direction: column; gap: clamp(12px, 1.5vh, 16px); width: 100%; max-width: 860px; }
@@ -36,6 +216,10 @@
 .guard-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .guard-copy b { color: var(--admin-text); font-size: 13px; font-weight: 600; }
 .guard-copy span { color: var(--admin-muted); font-size: 11.5px; line-height: 17px; }
+/* PoW 难度的动态数值（2^n 与耗时推算）：与说明文字区分开，等宽便于对齐比较；
+   空字符串时不占位（试算前 / 失败后都会被清空）。 */
+.guard-copy .pow-math { color: var(--admin-text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+.guard-copy .pow-math:empty { display: none; }
 
 .is-guard-off .guard-switch:disabled { opacity: .45; }
 
@@ -93,9 +277,152 @@
   .sec-foot { max-width: none; }
 }
 
+/* ===== 访问记录（VIS） ===== */
+/* 这张卡是横向表格，宽度吃满内容区，不再受 .sec-layout 的 860px 限制。 */
+.vis-card { margin-top: clamp(12px, 1.5vh, 16px); }
+.vis-actions { align-self: center; flex: 0 0 auto; }
+.vis-status { margin-left: auto; padding-right: 4px; }
+.vis-actions .guard-preset { height: 26px; }
+
+.vis-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; padding: 0; list-style: none; }
+.vis-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--admin-border); border-radius: 12px; background: var(--admin-field); }
+.vis-stat b { color: var(--admin-text); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vis-stat span { color: var(--admin-muted); font-size: 11px; }
+
+.vis-hints { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--admin-border); border-radius: 12px; background: var(--admin-surface); }
+.vis-hints-head { display: flex; align-items: center; gap: 6px; color: var(--admin-text); font-size: 12px; }
+.vis-hints-head svg { width: 14px; height: 14px; }
+.vis-hints-head span { margin-left: auto; color: var(--admin-faint); font-size: 10.5px; }
+.vis-hints ul { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.vis-hint { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.vis-hint b { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: var(--admin-text); }
+.vis-hint span { color: var(--admin-warn); font-size: 11.5px; }
+.vis-hint small { color: var(--admin-muted); font-size: 11px; }
+
+.vis-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 0 12px; }
+.vis-filter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vis-filter > span { color: var(--admin-faint); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.vis-filter input, .vis-filter select, #vis-retention {
+  height: 32px; padding: 0 10px; border: 1px solid var(--admin-border); border-radius: 10px;
+  background: var(--admin-field); color: var(--admin-text); font: inherit; font-size: 12.5px;
+}
+.vis-filter input { width: 168px; }
+.vis-check { display: inline-flex; align-items: center; gap: 6px; height: 32px; color: var(--admin-muted); font-size: 12px; }
+.vis-filters .guard-preset { height: 32px; border: 1px solid var(--admin-border); }
+
+.vis-table-wrap { overflow-x: auto; border: 1px solid var(--admin-border); border-radius: 12px; }
+.vis-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.vis-table caption { padding: 8px 12px 0; color: var(--admin-faint); font-size: 11px; text-align: left; }
+.vis-table th, .vis-table td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--admin-line); white-space: nowrap; }
+.vis-table th { color: var(--admin-faint); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.vis-table tbody tr:last-child td { border-bottom: 0; }
+.vis-table td { color: var(--admin-text); font-variant-numeric: tabular-nums; }
+.vis-table .table-empty { color: var(--admin-muted); }
+.vis-ip { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.vis-bad { color: var(--admin-danger); }
+.vis-path, .vis-ua { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.vis-detail-btn { height: 24px; border: 1px solid var(--admin-border); }
+.vis-detail { margin-top: 12px; }
+.vis-detail-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 8px; }
+.vis-detail-head b { color: var(--admin-text); font-size: 12.5px; align-self: center; }
+.vis-detail-head .guard-btn:last-child { margin-left: auto; align-self: center; }
+#vis-more { align-self: flex-start; margin-top: 10px; }
+#vis-detail-more { margin-top: 10px; }
+
+/* ===== IP 封禁（BAN） ===== */
+.ban-card { margin-top: clamp(12px, 1.5vh, 16px); }
+.ban-card code { padding: 1px 5px; border-radius: 6px; background: var(--admin-field); font-size: 11.5px; }
+.ban-custom { display: inline-flex; align-items: center; gap: 6px; }
+.ban-custom input { width: 84px; height: 32px; padding: 0 10px; border: 1px solid var(--admin-border); border-radius: 10px; background: var(--admin-field); color: var(--admin-text); font: inherit; font-size: 12.5px; }
+.ban-self-warning { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--admin-danger); border-radius: 12px; color: var(--admin-danger); font-size: 12px; line-height: 18px; }
+.ban-actions { display: flex; gap: 6px; }
+.ban-actions .guard-preset { border: 1px solid var(--admin-border); }
+#ban-submit { height: 32px; }
+#ban-include-inactive { accent-color: var(--admin-brand); }
+
+/* ===== 地域限制（GEO） ===== */
+.geo-card { margin-top: clamp(12px, 1.5vh, 16px); }
+.geo-card code { padding: 1px 5px; border-radius: 6px; background: var(--admin-field); font-size: 11.5px; }
+.geo-card a { color: var(--admin-brand); }
+.geo-wide { flex: 1 1 320px; min-width: 0; }
+.geo-wide input { width: 100%; text-align: left; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.geo-foot { justify-content: flex-end; padding-top: 6px; }
+#geo-sim-result[data-tone="warn"] { color: var(--admin-warn); }
+#geo-sim-result[data-tone="ok"] { color: var(--admin-success); }
+
+/* ===== 状态色 ===== */
+.sec-hint[data-tone="warn"] { color: var(--admin-warn); }
+.sec-hint[data-tone="ok"] { color: var(--admin-success); }
+.sec-hint[data-tone="error"] { color: var(--admin-danger); }
+.panel-subtitle[data-tone="warn"] { color: var(--admin-warn); }
+
+@media (max-width: 767px) {
+  .vis-actions { align-self: stretch; justify-content: space-between; }
+  .vis-filter { flex: 1 1 140px; }
+  .vis-filter input { width: 100%; }
+  .vis-filters .guard-preset { flex: 1 1 100%; }
+  .vis-table th, .vis-table td { padding: 8px 10px; }
+  .vis-path, .vis-ua { max-width: 180px; }
+}
+
 @media (max-width: 767px) {
   /* 触屏：按钮抬到 44px 最小点击区（Apple Copy 触控目标规范），状态文字单独一行。 */
   .sec-foot { align-items: stretch; flex-direction: column; gap: 8px; }
   .sec-foot-spacer { display: none; }
   .sec-foot .guard-btn { height: 44px; }
+}
+
+/* Native controls inherit the actual site theme, including Windows popup menus. */
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+.security-content select { color-scheme: inherit; accent-color: var(--admin-brand); }
+.security-content .guard-field select { padding: 8px 10px; border-radius: 8px; background: transparent; cursor: pointer; }
+@supports (appearance: base-select) {
+  @media (pointer: fine) {
+    .security-content select, .security-content select::picker(select) { appearance: base-select; }
+    .security-content select::picker(select) { padding: 6px; border: 1px solid var(--admin-border); border-radius: 12px; background: var(--admin-surface); color: var(--admin-text); box-shadow: 0 8px 24px var(--c-shadow); }
+    .security-content select option { min-height: 36px; padding: 8px 12px; border-radius: 6px; }
+    .security-content select option:hover, .security-content select option:focus-visible { background: var(--admin-hover); }
+    .security-content select option:checked { color: var(--admin-brand); background: var(--admin-brand-soft); }
+  }
+}
+.geo-credentials-form { margin: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--admin-line); }
+.geo-credentials-fields { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; margin: 16px 0; }
+.geo-credentials-form .sec-inline-actions { padding: 12px 0 0; flex-wrap: wrap; }
+.geo-credentials-form input { width: 100%; min-width: 0; }
+.geo-credentials-form a, .geo-database a { color: var(--admin-brand); font-size: 13px; text-underline-offset: 3px; }
+.geo-credentials-form .guard-status { display: block; margin: 12px 0 0; }
+.pow-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.security-content .pow-presets .guard-preset { border: 1px solid var(--admin-border); border-radius: 8px; }
+.pow-presets [aria-pressed="true"] { color: var(--admin-brand); background: var(--admin-brand-soft); }
+.pow-feedback { color: var(--admin-muted); font-size: 13px; margin: 0; line-height: 1.6; }
+.pow-feedback[data-tone="warn"] { color: var(--admin-warn); }
+.vis-ban-state { display: block; font-size: 12px; color: var(--admin-muted); margin-bottom: 6px; }
+.vis-row-actions { display: inline-flex; gap: 6px; }
+.security-content .vis-row-actions .guard-preset { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 6px 10px; border: 1px solid var(--admin-border); border-radius: 7px; background: transparent; color: var(--admin-text); }
+.security-content .vis-row-actions .guard-preset:hover { background: var(--admin-hover); }
+.vis-row-actions svg { width: 14px; height: 14px; }
+.security-content .vis-detail { scroll-margin-block-start: 24px; }
+.security-content .ban-dialog .ban-editor { border: 0; background: transparent; }
+.ban-dialog .ban-editor > summary { display: none; }
+.security-content .ban-dialog .ban-editor-fields { display: grid; grid-template-columns: 1fr 1fr; padding: 0; gap: 16px; }
+.ban-dialog .ban-editor-fields > label:first-child, .ban-dialog .ban-editor-fields > label:has(#ban-reason) { grid-column: 1 / -1; }
+.security-content .ban-dialog .ban-editor > .sec-hint { margin: 16px 0 0; }
+.ban-dialog .vis-filter input, .ban-dialog .vis-filter select { width: 100%; min-width: 0; min-height: 40px; }
+.ban-dialog .guard-status { display: block; margin-top: 12px; }
+.ban-dialog #ban-cancel { grid-column: 1; }
+.ban-dialog #ban-submit { grid-column: 2; }
+@media (max-width: 640px) {
+  .geo-credentials-fields { grid-template-columns: 1fr; gap: 12px; }
+  .security-content .vis-row-actions .guard-preset { min-height: 44px; }
+  .security-content .ban-dialog { padding: 20px; }
+  .ban-dialog .vis-filter input, .ban-dialog .vis-filter select { min-height: 44px; font-size: 16px; }
+  .geo-credentials-form input { min-height: 44px; font-size: 16px; }
+}
+
+.security-content .geo-database .vis-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.security-content .geo-database .vis-stat { min-width: 0; padding: 8px; }
+.geo-database .vis-stat b { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .security-content .geo-database .vis-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -83,7 +83,7 @@
 
     <section class="admin-stage">
       <div class="admin-scroll overflow-y-auto" data-scroll-region="primary">
-        <div class="admin-content">
+        <div class="admin-content workspace-refined page-alas">
 
           <div class="page-heading alas-head">
             <div>
@@ -91,7 +91,7 @@
               <p>管理配置归属、设备关联与运行状态</p>
             </div>
             <div class="alas-head-actions">
-              <button class="btn-ghost icon-only" id="alasRefreshAllBtn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-ghost" id="alasRefreshAllBtn" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
               <a class="btn-ghost" id="alasOpenPageBtn" href="#" target="_blank" rel="noopener" aria-disabled="true"><i data-lucide="external-link"></i><span>打开 ALAS</span></a>
               <button class="btn-ghost" id="alasConnBtn" type="button"><i data-lucide="settings"></i><span>连接设置</span></button>
             </div>
@@ -143,7 +143,7 @@
                 <button class="btn-ghost alas-btn-ghost-sm" type="button" id="alasUserAlertBtn">处理冲突</button>
               </div>
               <div class="alas-admin-note" id="alasAdminNote" hidden><i data-lucide="circle-check"></i><span>管理员自动获得全部 ALAS 配置权限，无需单独建立配置关联</span></div>
-              <div class="alas-expired-note" id="alasExpiredNote" hidden><i data-lucide="triangle-alert"></i><span id="alasExpiredNoteText">账户到期后其 ALAS 配置已自动停止</span></div>
+              <div class="alas-expired-note" id="alasExpiredNote" hidden><i data-lucide="triangle-alert"></i><span id="alasExpiredNoteText"></span></div>
               <div class="alas-section-head"><h3>配置关联</h3><span id="alasRelCount">0 个配置</span></div>
               <div class="alas-assignment-list" id="alasRelList"></div>
               <div class="alas-detail-foot">
@@ -194,10 +194,10 @@
               <div class="alas-detail-head">
                 <div class="alas-detail-title">
                   <span class="alas-avatar"><i data-lucide="toggle-right"></i></span>
-                  <div><h2>隐藏范围</h2><p>写死在代码里，只读；改范围请改对应的常量</p></div>
+                  <div><h2>隐藏范围</h2><p>查看普通用户不可访问的页面与任务</p></div>
                 </div>
               </div>
-              <p class="alas-features-hint"><b>隐藏范围已改为代码写死</b>，这里只做只读展示：普通用户看不到哪些 ALAS 页面/游戏任务由 <code>app/alas_visibility.py</code> 的 <code>HIDDEN_ALAS_ENTRY_RULES</code> 与 <code>app/alas.py</code> 的 <code>HIDDEN_ALAS_TASKS</code> 决定（ALAS 2.0 适配时改这两处）。下面按 ALAS 任务树分组，仅供对照。</p>
+              <p class="alas-features-hint">以下限制由服务器统一管理，此处仅供查看。按任务分组展示普通用户不可见的内容。</p>
               <div class="alas-feature-groups" id="alasFeatureList"></div>
               <div class="alas-features-foot">
                 <span id="alasFeatureCount">—</span>
@@ -213,15 +213,15 @@
                 </div>
               </div>
               <div class="alas-visibility-body" id="alasVisibilityBody">
-                <p class="alas-features-hint">下面按 <b>ALAS 里的页面和功能</b> 列出边界（<b>只读</b>）：标记为受限的入口，普通用户看不到、直接访问也会被拒（服务端 403）。写死在这里，改范围请改 <code>app/alas_visibility.py</code>。</p>
+                <p class="alas-features-hint">标记为受限的页面与功能对普通用户隐藏，直接访问也会被拒绝。</p>
                 <div class="alas-visibility-warning">
                   <i data-lucide="triangle-alert" aria-hidden="true"></i>
-                  <span>这些规则是普通用户的分权边界：放开条目会把对应的导航入口、管理员工具或模拟器设置暴露给普通用户，改动前请确认影响。</span>
+                  <span>这些限制保护管理员工具和模拟器设置，仅对普通用户生效；管理员仍可访问完整页面。</span>
                 </div>
                 <div class="alas-visibility-entries" id="alasVisibilityEntries"></div>
                 <div class="alas-features-foot">
                   <span id="alasVisibilityStatus" role="status" aria-live="polite">加载中…</span>
-                  <span class="alas-foot-hint">写死的清单，页面只读</span>
+                  <span class="alas-foot-hint">服务器管理 · 只读</span>
                 </div>
               </div>
             </section>
@@ -234,7 +234,7 @@
 
 
   <div class="alas-drawer-mask" id="alasConnMask" hidden></div>
-  <aside class="alas-drawer" id="alasConnDrawer" aria-label="ALAS 连接设置" aria-hidden="true">
+  <aside class="alas-drawer" id="alasConnDrawer" aria-label="ALAS 连接设置" aria-hidden="true" inert>
     <div class="alas-drawer-head">
       <div><h2>ALAS 连接设置</h2><p>Runtime 地址与访问凭据</p></div>
       <button class="alas-row-action" type="button" data-close-drawer="alasConnDrawer" aria-label="关闭连接设置" title="关闭"><i data-lucide="x"></i></button>

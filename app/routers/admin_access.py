@@ -91,6 +91,8 @@ async def admin_upsert_user(request: Request):
         else None
     )
     must_change_password = _strict_bool(payload, "must_change_password") if "must_change_password" in payload else None
+    # 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
+    alas_visible = _strict_bool(payload, "alas_visible") if "alas_visible" in payload else None
     try:
         if "expires_at" in payload:
             await asyncio.to_thread(
@@ -101,6 +103,7 @@ async def admin_upsert_user(request: Request):
                 expires_at=payload.get("expires_at"),
                 must_change_password=must_change_password,
                 enabled=enabled if enabled is not None else storage.ENABLED_UNSET,
+                alas_visible=alas_visible if alas_visible is not None else storage.ALAS_VISIBLE_UNSET,
             )
         else:
             await asyncio.to_thread(
@@ -110,6 +113,7 @@ async def admin_upsert_user(request: Request):
                 role,
                 must_change_password=must_change_password,
                 enabled=enabled if enabled is not None else storage.ENABLED_UNSET,
+                alas_visible=alas_visible if alas_visible is not None else storage.ALAS_VISIBLE_UNSET,
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=public_error_detail(exc)) from exc
@@ -137,6 +141,13 @@ async def admin_upsert_user(request: Request):
                 changed_fields.append("role")
             if previous["expires_at"] != updated["expires_at"]:
                 changed_fields.append("expires_at")
+            # get_user 返回 sqlite3.Row：只能用 keys()/下标，不能用 dict.get。
+            previous_alas_visible = bool(previous["alas_visible"]) if "alas_visible" in previous.keys() else True
+            updated_alas_visible = (
+                bool(updated["alas_visible"]) if updated is not None and "alas_visible" in updated.keys() else True
+            )
+            if previous_alas_visible != updated_alas_visible:
+                changed_fields.append("alas_visible")
         if password:
             changed_fields.append("password")
         if changed_fields:
@@ -161,6 +172,7 @@ async def admin_upsert_user(request: Request):
             "expires_at_after": updated["expires_at"] if updated else None,
             "enabled_before": bool(previous["enabled"]) if previous and "enabled" in previous.keys() else True,
             "enabled_after": bool(updated["enabled"]) if updated and "enabled" in updated.keys() else True,
+            "alas_visible_after": bool(updated["alas_visible"]) if updated and "alas_visible" in updated.keys() else True,
             "connections_revoked": should_close_connections,
             "gateway_contexts_revoked": gateway_contexts_revoked,
         },

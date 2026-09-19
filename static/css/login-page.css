@@ -15,7 +15,7 @@
       --carbon-ambient: radial-gradient(circle at 12% 10%,var(--ambient-blue),rgba(0,122,255,0) 34%),radial-gradient(circle at 88% 90%,var(--ambient-purple),rgba(138,110,255,0) 36%),radial-gradient(circle at 50% 55%,var(--ambient-blue-weak),rgba(0,122,255,0) 48%),linear-gradient(165deg,var(--carbon-top) 0%,var(--carbon-mid) 48%,var(--carbon-bottom) 100%);
       --c-border:rgba(0,0,0,.09);
       --c-surface:#ffffff; --c-surface-hover:#ececf1;
-      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#6e6e73; --c-text-faint:#8e8e93;
+      --c-text-strong:#1d1d1f; --c-text:#3c3c43; --c-text-sub:#48484a; --c-text-faint:#66666b;
     }
 .dark {
   --carbon-top:#16161a; --carbon-mid:#0d0e11; --carbon-bottom:#070708;
@@ -164,7 +164,7 @@
   --secondary: var(--background-200);
   --secondary-foreground: var(--text-800);
   --muted: var(--background-200);
-  --muted-foreground: var(--text-500);
+  --muted-foreground: var(--text-600);
   --accent: var(--background-100);
   --accent-foreground: var(--text-800);
   --destructive: var(--state-error);
@@ -417,7 +417,7 @@
       }
 
 /* Extracted from static/pages/login.html (). */
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition:none !important; animation:none !important; transform:none !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition:none !important; animation:none !important; } }
             @media (max-width:640px){
                 main { padding:16px; }
                 main > section[aria-labelledby="login-title"] { padding:24px 20px; }
@@ -504,28 +504,40 @@
     font-size: 12px; padding: 2px 10px; border-radius: 999px;
     border: 1px solid var(--c-border); color: var(--c-text-sub);
 }
-.login-slider {
-    position: relative; height: 46px; margin-top: 12px; border-radius: 999px;
-    background: var(--glass-field); border: 1px solid var(--c-border); overflow: hidden;
-    user-select: none; touch-action: none;
+/* 输入框上方不再重复「用户名 / 密码」标签：语义由 placeholder + aria-label 承担，
+   视觉上只留字段行本身。原先靠「标签 + 字段行」相邻选择器给字段行的 10px 圆角与
+   46px 高度改为直接落在 .login-field 上，字段尺寸保持不变。 */
+.login-card #login-title { font-size:30px; letter-spacing:-.025em; }
+#login-form .login-field { border-radius:10px; min-height:46px; }
+#login-form input { font-size:16px; }
+#pwd-toggle { min-width:44px; min-height:44px; }
+@media (max-width:640px) {
+  .login-card { padding:24px; }
+  .login-card #login-title { font-size:28px; }
 }
-.login-slider-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: color-mix(in srgb, var(--brand-blue) 14%, transparent); }
-.login-slider-label {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; color: var(--c-text-sub); pointer-events: none;
+@media (max-height:650px) {
+  body:has(.login-card) { align-items:flex-start; }
+  body:has(.login-card) > main { padding-top:84px; padding-bottom:24px; }
 }
-.login-slider-knob {
-    position: absolute; top: 3px; left: 3px; width: 52px; height: 38px; border-radius: 999px;
-    background: var(--c-surface); border: 1px solid var(--c-border); box-shadow: var(--shadow-xs);
-    display: flex; align-items: center; justify-content: center; cursor: grab; color: var(--brand-blue);
-    transition: left 200ms var(--ease-standard), background-color 200ms var(--ease-fade);
-}
-.login-slider.dragging .login-slider-knob { cursor: grabbing; transition: none; }
-.login-slider.done .login-slider-knob { left: calc(100% - 55px); background: var(--success); color: var(--success-foreground); border-color: transparent; }
-.login-slider.done .login-slider-fill { width: 100%; background: color-mix(in srgb, var(--success) 16%, transparent); }
-.login-slider.done .login-slider-label { color: var(--success); }
-.login-slider-knob svg { width: 16px; height: 16px; }
-.login-pow-progress { height: 8px; border-radius: 999px; background: var(--glass-border); overflow: hidden; margin-top: 12px; }
-.login-pow-progress > i { display: block; height: 100%; width: 0%; background: var(--brand-blue); border-radius: 999px; transition: width 120ms linear; }
-.login-pow-progress.done > i { background: var(--success); }
-.login-pow-meta { margin-top: 8px; font-size: 12px; color: var(--c-text-sub); font-variant-numeric: tabular-nums; }
+
+/* Explicit PoW verification: square -> spinner -> drawn checkmark. */
+#login-captcha { padding:0; border:0; background:transparent; }
+.login-pow-button { display:flex; align-items:center; gap:12px; min-height:64px; width:100%; padding:14px 16px; border:1px solid var(--c-border); border-radius:12px; background:var(--card); color:var(--foreground); text-align:left; cursor:pointer; transition:border-color .18s, background-color .18s; }
+.login-pow-button:hover { border-color:var(--primary); }
+.login-pow-button:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
+.login-pow-button[aria-disabled="true"] { cursor:default; }
+.login-pow-indicator { position:relative; display:grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border:1.5px solid var(--muted-foreground); border-radius:6px; }
+.login-pow-indicator svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; opacity:0; }
+.login-pow-brand { margin-left:auto; color:var(--muted-foreground); font-size:10px; letter-spacing:.01em; }
+#login-captcha-label { font-size:14px; font-weight:500; }
+.login-pow-button[data-state="working"] .login-pow-indicator { border-radius:50%; border-color:var(--c-border); border-top-color:var(--primary); animation:login-pow-spin .8s linear infinite; }
+.login-pow-button[data-state="verified"] { border-color:var(--primary); }
+.login-pow-button[data-state="verified"] .login-pow-indicator { border-color:var(--primary); background:var(--primary); color:var(--primary-foreground); }
+.login-pow-button[data-state="verified"] svg { opacity:1; }
+.login-pow-button[data-state="verified"] path { stroke-dasharray:28; stroke-dashoffset:0; animation:login-pow-check .24s ease-out; }
+.login-pow-button[data-state="error"] .login-pow-indicator { border-color:var(--destructive); }
+.login-verification-hint { min-height:20px; margin:8px 2px 0; color:var(--muted-foreground); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+@keyframes login-pow-spin { to { transform:rotate(360deg); } }
+@keyframes login-pow-check { from { stroke-dashoffset:28; } to { stroke-dashoffset:0; } }
+@media (prefers-reduced-motion:reduce) { .login-pow-button, .login-pow-indicator, .login-pow-indicator path { animation:none !important; transition:none !important; } }
+@media (max-width:360px) { .login-pow-brand { display:none; } }

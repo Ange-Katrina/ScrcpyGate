@@ -19,6 +19,7 @@ ROOT_FILES = (
     "Dockerfile",
     "LICENSE",
     "THIRD_PARTY.md",
+    "VERSION",
     "adb_manager.py",
     "compose.host.yaml",
     "compose.yaml",
@@ -31,6 +32,7 @@ ROOT_FILES = (
 ROOT_DIRECTORIES = ("app", "static", "adb/linux")
 SKIPPED_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 FORBIDDEN_NAMES = {
+    ".geo-credentials.json",
     ".env",
     "backups",
     "browser-data",

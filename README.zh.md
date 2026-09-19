@@ -123,8 +123,8 @@ cd ScrcpyGate
 
 1. 从 `.env.example` 生成 `.env`（或用 `--configure` 进入交互式向导）；
 2. 校验配置，并检查端口/容器冲突；
-3. 创建数据目录，并生成 ALAS 令牌加密密钥；
-4. 构建镜像；
+3. 创建数据目录；
+4. 构建镜像，再复用 ALAS 令牌加密密钥，或为新数据生成密钥；
 5. 修正数据目录属主，使其匹配容器用户（`uid 100` / `gid 101`）；
 6. 创建管理员账号并打印密码；
 7. 启动整套服务，并等待 `/healthz` 健康门通过。
@@ -134,6 +134,32 @@ cd ScrcpyGate
 
 不带参数运行 `./deploy.sh` 会打开交互式菜单，功能与命令行一致 —— 安装/更新、启停重启、状态、
 日志、配置、重置管理员、备份、ALAS 令牌状态与迁移、环境检查与卸载。
+
+保留账号和配置重装：先执行 `./deploy.sh --uninstall`，再执行 `./deploy.sh --install`。
+普通卸载始终保留 `.env`、本地镜像、数据库及其 ALAS 密钥，重装沿用原密码。
+管理菜单中的“更新到已发布镜像”会自动查询 GHCR，按编号选择实际存在的
+`latest`（稳定版）、`edge`（开发版）或最近的正式版本，确认完整镜像地址后才开始更新。
+查询需要宿主 Python 3；查询失败时仍可使用配置中的默认目标，或手动输入完整 tag/digest 引用。
+
+菜单中的“卸载 ScrcpyGate”可选择**保留数据卸载**（默认）或**彻底清理**；
+如果原密码未保存，请使用 `./deploy.sh --reset-admin`。
+
+需要清除本地数据后全新安装时，才使用 `./deploy.sh --uninstall --purge`。
+清理中断或失败会保留 `.env`，可修复原因后重复执行同一命令。项目目录外的数据不会自动删除，
+对应配置也会保留，并报告清理未完成。备份不会被删除；迁移部署时须一起保留数据库和匹配的密钥。
+交互式彻底清理会要求输入完整数据路径，确认后才开始删除；留空取消，`--yes` 不会跳过确认。
+非交互的 `--uninstall --purge` 是明确的破坏性命令，不会再次询问。
+如果旧版卸载已删除容器和 `.env`，彻底清理仍可识别默认 `./data` 中带 SQLite 文件头的
+`webscrcpy.db` 并清理。无法识别的目录和符号链接会保留；请恢复原 `.env`、核对数据路径后重试。
+清理已识别的旧版数据前，会先保存仅含数据路径的最小 `.env`；即使中途已删除数据库，也可再次执行清理。
+彻底清理会删除账号、ALAS 凭据和已持久化的 ADB 授权，重装需重新配置。
+如果仅丢失 ALAS 密钥，优先使用下方的“仅重置 ALAS Token”恢复方式。
+如果旧数据库含加密 ALAS Token 而密钥缺失，脚本会优先提示恢复原密钥。
+交互安装会询问是否强行重置 ALAS Token 并继续安装，默认选择“不重置”；确认后只清空 ALAS Token、
+生成新密钥，账号、密码、设备和其他配置保留。非交互安装不会自动接受重置，`--yes` 也不会跳过此确认。
+确实无法找回时，可明确执行 `./deploy.sh --clear-alas-token`，再重装并重新填写 ALAS Token；
+这只清空保存的 ALAS 凭据，不删除账号。已有但无效的密钥文件仍须单独修复，重装不会擅自覆盖。
+安装源码修复时不要使用 `--skip-build`。
 
 ### Docker 用户: Compose
 
@@ -157,6 +183,13 @@ docker compose up -d --build
 有两件事安装脚本替你做了、而 Compose 不会：上面的数据目录属主，以及创建管理员账号。如果没设密码，
 应用会把生成的密码写进 `./data/initial_admin_password.txt`（权限 `0600`，下次启动即删除），
 不会再把你锁在外面 —— 见[高级与故障恢复](#高级与故障恢复)。
+
+容器入口会为新数据或尚未加密的数据配置 ALAS 密钥，复用已有密钥。
+数据库含加密 Token 却缺失密钥时，不生成替代密钥；请恢复匹配密钥，核心服务仍可启动并显示 ALAS 告警。
+在 `.env` 中设置 `SCRCPYGATE_ADMIN_PASSWORD_FILE=false` 可关闭首次密码落盘。
+
+容器内 ADB 的授权身份现在保存在 `data/.android`。替换使用旧 `/tmp` 路径的容器前，
+请先按 [ADB 迁移步骤](docs/deployment/docker-run.zh.md#5-生命周期与升级) 保留原身份。
 
 ### 特殊场景: 宿主网络与 USB
 
@@ -191,6 +224,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 
 CI/CD 验证 amd64 和 arm64 镜像后发布到 GHCR，服务器手动部署。
 版本标签、包权限、镜像证明和部署步骤见 [CI/CD 与手动部署](docs/deployment/ci-cd.zh.md)。
+
+产品版本统一定义在 [`VERSION`](VERSION)，版本递增、开发镜像标识与显示规则见
+[版本号规范](docs/contributing/versioning.zh.md)。
 
 健康检查：`GET /healthz`；日志：stdout（JSON，`LOG_FORMAT=json`），可选写入数据目录。
 
@@ -301,7 +337,7 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 
 - Host / Origin 白名单、可选的反向代理信任（显式 CIDR）、写操作 CSRF 令牌、`SameSite`/secure
   会话 Cookie，生产默认关闭 API 文档。
-- 登录防护：失败计数、封禁窗口、连续失败后要求滑块 + 工作量证明验证码。
+- 登录防护：失败计数、封禁窗口、连续失败后要求内置 PoW 点击验证。
 - 设备按用户授权；观看与控制是两种权限；控制是显式租约，可释放也可被接管（两者都进审计）。
 - ALAS：出站请求受主机/CIDR 白名单与响应体积上限约束；嵌入式界面执行可见性策略，被拒绝的动作
   记审计。
@@ -313,6 +349,26 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
   踢出会同时关闭该会话正在使用的 WebSocket；`MAX_SESSIONS_PER_USER` 限制单账户并发会话数，
   超出时在登录那一刻淘汰最旧的会话。
 - 容器以非 root 运行；compose 样例丢弃全部 capabilities 并启用 `no-new-privileges`。
+
+登录默认使用 ScrcpyGate 自身的 SHA-256 PoW：点击验证按钮后显示加载动画，完成后显示勾选。四道有界小题降低等待波动；签名挑战绑定账号和来源、有有效期且只能成功使用一次。PoW 用来提高自动化成本，不能证明用户是真人，也不能代替限流、TLS 或 WAF。
+
+需要 HTTPS（本机测试可用 localhost）以使用 WebCrypto。默认构建不包含 ALTCHA/Cap 源码或依赖，也不请求外部验证码服务。`LOGIN_POW_PROVIDER=builtin` 选择内置实现；其他提供方需单独安装受信任的适配器包（`scrcpygate.pow` entry point、API v1、专用静态目录及 `client.js`、`issue`/`verify` 方法），仅安装上游库不能直接兼容。Docker 应在派生镜像里安装适配器，再配置其 entry-point 名称并重启。未安装或不兼容的扩展会阻止启动，不会跳过验证。切换后须重新取得挑战；登录限流仍包含进程内状态，不支持多 Worker/多副本部署。
+
+### 后台安全配置
+
+- **访问记录**：点击「明细」原地展开并平滑定位；点击「封禁」弹窗选择时长与原因，改期保留已有原因。封禁会断开现有连接；封禁自己的来源会失去访问权限，可在服务器执行 `./deploy.sh --unban <ip>` 恢复。
+- **登录保护**：可调整 PoW 首题难度、失败递增、难度上限、挑战有效期、签发间隔与失败阈值。轻量／均衡／加强预设只修改计算难度，每增加 1 bit 期望计算量约翻倍。先试算并用手机验证；内置计算期限为 30 秒。保存后对新签发的挑战生效。
+- **地域限制 → 地区库与自动更新**：填写 MaxMind **Account ID 与 License Key**，无需账户密码。留空保留原值，更换 Account ID 时须同时填写新 Key。保存后点击「立即检查更新」验证下载权限；仅保存不会验证 MaxMind 凭据，也不会开启强制执行。
+
+后台凭据作为私有配置文件保存在 `data/.geo-credentials.json`（或自定义数据目录），**不做文件内容加密**。Linux 权限为 `0600`；Windows 请限制数据目录 ACL。接口不会回显 Key，凭据不进入 Git、Docker 构建上下文、SQLite 或设置导出。`deploy.sh` 会将其纳入私有数据备份，备份须按密钥管理。保留数据重装会保留配置，彻底清理数据会删除配置；仅在后台清除凭据，不会删除地区库或取消地域策略。
+
+环境变量 `GEO_ACCOUNT_ID` 或 `GEO_LICENSE_KEY` 任一非空时，整个环境凭据对优先，因此两项均须配置，不会与后台值混用；后台不能覆盖环境凭据。`GEO_UPDATE_ENABLED=false` 时，即使保存凭据也不会下载，适用于外部管理的只读地区库。
+
+默认每 12 小时附加随机延迟检查一次，通过官方 HTTPS 下载并限制重定向目标。检查共用 10 分钟冷却和每日 30 次尝试上限（UTC 日期，失败计入）。远端版本未变时不重复下载，下载或校验失败保留最后可用库。构建超过 30 天的地区库被本项目新鲜度策略视为不可用；强制执行模式下会拒绝访问，启用前请确认更新可用。
+
+建议先「只观察」并预演当前来源。使用 WAF/CDN 时正确配置可信代理网段，不要无条件信任转发头。VPN、代理和移动网络可能影响定位准确性，地域限制不能替代认证与 IP 封禁。误锁恢复：`./deploy.sh --geo-off`，或配置 `GEO_ENFORCE_DISABLED=true` 并重启。
+
+MaxMind 官方文档：[创建 License Key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [下载与更新周期](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases)。GeoLite Country 当前通常每周二、周五更新；定期检查不代表每次都会发布新库。
 
 ---
 

@@ -59,7 +59,7 @@ async def alas_embed_page(request: Request):
     redirect = redirect_to_login(request)
     if redirect:
         return redirect
-    user = security.require_user(request)
+    user = security.require_active_user(request)
     requested = str(request.query_params.get("config") or "").strip()
     device_id = await asyncio.to_thread(alas_device_for_user, user, request.query_params.get("device_id"))
     binding = await asyncio.to_thread(
@@ -325,7 +325,7 @@ async def alas_embed_proxy(request: Request, path: str = ""):
     if gateway_context:
         user, gateway_record = gateway_context
     else:
-        user = security.require_user(request)
+        user = security.require_active_user(request)
         gateway_record = None
     requested_device_ref = request.query_params.get("device_id")
     if gateway_record and gateway_record.device_id:
@@ -426,14 +426,15 @@ async def alas_embed_proxy(request: Request, path: str = ""):
 async def alas_embed_websocket(websocket: WebSocket, path: str = ""):
     """执行 ALAS WebSocket 代理入口权限检查并转发到 Runtime。"""
     connection_id = uuid.uuid4().hex[:12]
-    if not security.websocket_origin_allowed(websocket):
-        log_alas_websocket_close(connection_id, None, "origin_denied", 4403)
+    handshake = security.websocket_access_decision(websocket)
+    if not handshake.allowed:
+        log_alas_websocket_close(connection_id, None, handshake.reason or "access_denied", 4403)
         await audit_websocket_event(
             websocket,
             None,
             "websocket_access",
             outcome="denied",
-            reason="origin_denied",
+            reason=handshake.reason or "access_denied",
             target_id="/alas/embed/proxy/*",
         )
         await websocket.close(code=4403)

@@ -549,6 +549,62 @@ def inject_alas_ready_script(html: str) -> str:
     original = str(html or "")
     if "data-scrcpygate-alas-ready" in original:
         return original
+    guard = """
+<script data-scrcpygate-access-guard>
+(function() {
+  var Native = window.WebSocket, fetchStatus = window.fetch && window.fetch.bind(window);
+  if (!Native) return;
+  var failures = 0, stopped = false, pending = null;
+  function notify(message) {
+    stopped = true;
+    function show() {
+      if (document.getElementById('scrcpygate-access-stopped')) return;
+      var box = document.createElement('div');
+      box.id = 'scrcpygate-access-stopped'; box.setAttribute('role', 'alert');
+      box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#202020;color:white;padding:32px;font:16px sans-serif';
+      box.textContent = message || '连接已停止 / Connection stopped. ';
+      var retry = document.createElement('button'); retry.textContent = '重试 / Retry';
+      retry.onclick = function() { location.reload(); };
+      box.appendChild(retry); document.body.appendChild(box);
+    }
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show, {once:true});
+  }
+  function diagnose() {
+    if (!fetchStatus || pending) return;
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 5000);
+    pending = fetchStatus('/alas/access-status', {credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{Accept:'application/json'}})
+      .then(function(response) {
+        if ([401,403,429,503].indexOf(response.status) < 0) return;
+        return response.json().catch(function() { return {}; }).then(function(data) {
+          notify(typeof data.detail === 'string' ? data.detail : '访问被拒绝 / Access denied. ');
+        });
+      }).catch(function() {}).then(function() { clearTimeout(timer); pending = null; });
+  }
+  window.WebSocket = function(url, protocols) {
+    if (stopped || failures >= 6) { notify(); throw new Error('access_connection_stopped'); }
+    var socket = protocols === undefined ? new Native(url) : new Native(url, protocols);
+    var opened = 0;
+    socket.addEventListener('open', function() { opened = Date.now(); });
+    socket.addEventListener('close', function(event) {
+      if (opened && event.wasClean && (event.code === 1000 || event.code === 1001)) {
+        failures = 0;
+        return;
+      }
+      if (opened && Date.now() - opened > 60000) failures = 0;
+      failures += 1;
+      if (event.code === 4403 || event.code === 1006) diagnose();
+      if (failures >= 6) notify();
+    });
+    return socket;
+  };
+  window.WebSocket.prototype = Native.prototype;
+  Object.setPrototypeOf(window.WebSocket, Native);
+})();
+</script>
+"""
+    head_end = original.lower().find(">", original.lower().find("<head")) if "<head" in original.lower() else -1
+    original = original[:head_end + 1] + guard + original[head_end + 1:] if head_end >= 0 else guard + original
     script = """
 <script data-scrcpygate-alas-ready>
 (function() {
