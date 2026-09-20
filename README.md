@@ -261,6 +261,14 @@ in memory. Exports keep each client's segment separate instead of merging differ
 Timeline payloads are not persisted by the relay; operation metadata is audited separately.
 Server-side events stay in `/logs`.
 
+**Export all retained logs** on the logs page downloads a ZIP containing all retained audit events (`audit.jsonl`), alerts including resolved alerts (`alerts.jsonl`), audit-chain state (`integrity.jsonl`), and `webscrcpy.log` plus numeric rotation files. It ignores page filters, pagination and the existing view export's 31-day/10,000-row limits. Every stored audit column is retained; `metadata_json` is the original stored JSON string. The manifest lists counts, sizes, SHA-256 hashes and snapshot boundaries. Audit and alerts share a database read snapshot; runtime files are captured afterward at their opening lengths. Retention-deleted records and console-only/Docker stdout logs cannot be recovered; installations without log files may export zero runtime files.
+
+Full export requires administrator access and CSRF validation. It excludes databases, environment files and credential files. The default uncompressed limit is 512 MiB (`LOG_EXPORT_MAX_BYTES`), with one export per process and a 120-second generation deadline. Limit, read and rotation failures are explicit; no silently truncated archive is returned. Temporary archives are removed after download or disconnect. Archives retain existing audit identities and source IPs; review their contents before sharing.
+
+The page receives the archive as base64 JSON and saves the ZIP locally in the browser, avoiding a separate attachment request by download managers. Base64 adds about one third to the compressed transfer size; the browser buffers the response and decoded archive, so large exports require sufficient browser memory.
+
+Unknown event names remain stored and exported. The UI uses generic titles and a detail fallback when labels are missing; severity/outcome still control failure styling. Inspect raw `action`, `reason` and `metadata` fields for unmapped events. ALAS WebSocket failures now include exception type, connection phase and available handshake/close codes; normal browser departure and clean upstream closure are not upstream errors. Existing historical records are not rewritten.
+
 Each browser keeps the latest **800 events**, dropping older entries when full. Accepted uploads
 preserve the submitted fields, including unknown keys; this does not recover events already
 evicted by the browser. Sessions default to 15 minutes with a 20-second upload window after
@@ -340,6 +348,38 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 manual upgrades live in [docs/deployment/docker-run.md](docs/deployment/docker-run.md). They mirror
 the two compose files; if you take that path, upgrades and rollbacks are yours to handle.
 
+## Routine upgrades without source uploads
+
+After the selected commit's GitHub Actions publication succeeds, run this in the
+existing deployment directory to follow the `dev` test branch:
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.io/ange-katrina/scrcpygate:dev
+```
+
+Use `edge` for main or `latest` for stable tagged releases. This also switches a
+running, script-managed bridge deployment from a local build to a published image.
+The script pulls, backs up data and configuration, recreates the container, and
+checks health with image rollback on failure. It remembers the successful target,
+so subsequent upgrades only need `sudo sh ./deploy.sh --update`. Older scripts can
+keep using the explicit `--image` command until `deploy.sh` is updated once.
+Application image upgrades do not replace host deployment scripts or Compose files;
+follow release notes when those files change. See the [deployment guide](docs/deployment/ci-cd.md#update-an-existing-bridge-deployment)
+for host-network instructions and backup/rollback limits.
+
+### Disk maintenance
+
+Source rebuilds retain Docker build cache and can leave dangling images. Prefer
+published-image upgrades for routine updates. Menu 25 or `./deploy.sh --disk-usage`
+reports usage; `--prune-images` removes only unused dangling images labeled
+`io.scrcpygate.managed=true`, while `--prune-build-cache` prunes the default
+builder's unused cache with a 1 GiB retention target. Both require confirmation
+unless `--yes` is supplied. Cache cleanup affects other projects using that
+builder; neither command deletes containers, volumes, data, backups or tagged
+rollback images. Older unlabeled images and custom buildx caches need separate
+review. See [disk maintenance](docs/deployment/ci-cd.md#disk-maintenance) for legacy
+commands and backup retention.
+
 ## Configuration
 
 `.env.example` documents every knob (`docker compose` and `deploy.sh` read it; the application
@@ -399,13 +439,23 @@ Saved MaxMind credentials live in `data/.geo-credentials.json` (or the configure
 
 The admin panel distinguishes configured, unverified, verified, rejected, and temporarily unverifiable credentials, with check and verification timestamps. MaxMind download authentication has no web login session and exposes no account/key expiry date. Rotating credentials requires verification again. See the [official update guide](https://dev.maxmind.com/geoip/updating-databases/) and [license key guide](https://support.maxmind.com/knowledge-base/articles/using-maxmind-license-keys).
 
+Automatic updates download **GeoLite2 City** by default using the existing Account ID and License Key. Under **Download options**, select Country, City, or both; City already includes country information. Saving applies to the next check. Selecting neither pauses downloads without immediately deleting existing databases; normal database expiry and cleanup still apply. When both are selected, Country is checked first and City last, making City active after a successful check. If a later download fails, earlier successful files remain installed and the task reports failure. After upgrading, select **Check for updates** and ensure the key has download access. The existing Country database remains usable until City downloads, validates, and activates successfully. Attribution displays available country, region and city names, using English when Chinese names are missing and falling back to the country when details are absent. Country-based enforcement is unchanged; historical details and exports are not rewritten.
+
+The **Download activity** window below the progress bar shows each database, stage, transferred bytes, elapsed time, and safe error messages. It keeps the latest 120 entries for the current task in memory. Use **Follow latest entries** to follow downloads or turn it off to read earlier entries. Starting another task, changing download settings, or restarting the service clears this history.
+
+Choose **Use server proxy settings** (default), **Direct connection**, or **Custom proxy**. Custom URLs require an HTTP/HTTPS scheme and port, for example `http://proxy.example:7890` or `https://user:password@proxy.example:8443`; percent-encode special characters in credentials. This is a forward proxy, not a download mirror. HTTPS certificates are verified, and a failed custom proxy never falls back to a direct connection. A proxy on the Docker host must be reachable from the container; `127.0.0.1` inside a bridge-network container refers to that container.
+
+Selections and the proxy URL are stored in `.geo-downloads.json` in the data volume (0600 on Unix; restrict the directory ACL on Windows). The proxy field stays visible, including after saving or reloading. Only authenticated administrators can read the saved URL through the no-store status endpoint; it is excluded from runtime logs, audits, and diagnostic exports. Leave the field blank to retain the saved proxy; explicitly check **Clear the saved proxy URL** to remove it and select a non-custom connection mode. Deployment backups include this private file: protect backups as credentials. Saving options does not verify connectivity; use **Check for updates** to test the download path.
+
+Lookups use the local MMDB only; visitor IP addresses are not sent to a third party. Coordinates and street addresses are not displayed. City databases need more download time and memory than Country. VPNs, proxies and mobile networks may affect accuracy; results do not identify a person's actual location. See the [MaxMind City / Country database documentation](https://dev.maxmind.com/geoip/docs/databases/city-and-country/).
+
 Set an automatic check interval of 1–168 hours (12 recommended) in the panel. The persisted setting overrides the `GEO_UPDATE_INTERVAL_HOURS` default and reschedules checks without a restart; the environment disable switch still applies. Country presets only fill the form and require Save geo settings to apply. Access summaries resolve attribution with the current local database; country filters, historical details and exports retain recorded values. Private addresses cannot be geolocated.
 
 The built-in updater checks every 12 hours by default, with jitter, using official HTTPS downloads and bounded redirects. Checks share a ten-minute cooldown and a local limit of 30 attempts per UTC day, including failures. Unchanged remote versions avoid a full download; invalid downloads keep the last usable database. A database older than 30 days is considered unavailable by this application's freshness policy. In enforce mode an unavailable database denies access, so configure and test updates before enabling enforcement.
 
 Start with **Observe**, preview your source, and configure trusted proxy CIDRs correctly if using a WAF or CDN. Never trust arbitrary forwarded headers. IP geolocation can be inaccurate for VPNs, proxies, and mobile networks; it supplements authentication and IP bans. Recovery: `./deploy.sh --geo-off`, or set `GEO_ENFORCE_DISABLED=true` and restart.
 
-MaxMind documentation: [generate a license key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [database downloads and update schedule](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases). GeoLite Country currently updates on Tuesdays and Fridays; checking more often does not imply a new database each time.
+MaxMind documentation: [generate a license key](https://support.maxmind.com/hc/en-us/articles/4407111582235-Generate-a-License-Key) · [database downloads and update schedule](https://support.maxmind.com/hc/en-us/articles/4408216129947-Download-and-Update-Databases). The publication schedule is maintained by MaxMind; checking more often does not imply a new database each time.
 
 ---
 

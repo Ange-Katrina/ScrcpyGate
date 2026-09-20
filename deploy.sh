@@ -311,6 +311,7 @@ ScrcpyGate 引导式安装与管理脚本
       不会退回源码构建。--image 支持 tag（ghcr.io/owner/scrcpygate:v1.2.3）
       或 digest（ghcr.io/owner/scrcpygate@sha256:...）；默认取 .env 的
       SCRCPYGATE_UPDATE_IMAGE，未设置时用 ghcr.io/ange-katrina/scrcpygate:latest。
+      成功后记住所选目标；以后直接 --update 即可继续跟随该 tag（dev / edge / latest）。
       管理菜单可自动查询 GHCR 版本并按编号选择，也可手动输入；确认后才更新。
       更新前备份默认开启，--skip-update-backup 可跳过。
 
@@ -319,6 +320,13 @@ ScrcpyGate 引导式安装与管理脚本
   ./deploy.sh --status | --logs [行数] | --reset-admin
   ./deploy.sh --uninstall [--purge]   卸载服务；默认保留数据和配置
   ./deploy.sh --uninstall --purge      卸载服务并删除镜像、数据和配置（不可恢复）
+
+磁盘维护:
+  ./deploy.sh --disk-usage          查看 Docker、数据目录与备份占用（只读）
+  ./deploy.sh --prune-images [--yes] 清理带本项目标识、无标签且未被容器使用的旧镜像
+  ./deploy.sh --prune-build-cache [--yes]
+      清理 Docker 默认构建器的未使用缓存，尽量保留 1 GiB；影响其他项目下次构建速度。
+      默认需确认；不删除容器、卷、数据、备份或带标签的回滚镜像。
 
 服务器侧安全恢复（管理员把自己封了、或后台进不去时用）:
   ./deploy.sh --ban-list           列出 IP 封禁（含已过期/已解除）
@@ -422,6 +430,9 @@ while [ "$#" -gt 0 ]; do
     --stop) ACTION=stop ;;
     --restart) ACTION=restart ;;
     --status) ACTION=status ;;
+    --disk-usage) ACTION=disk_usage ;;
+    --prune-images) ACTION=prune_images ;;
+    --prune-build-cache) ACTION=prune_build_cache ;;
     --check) ACTION=check ;;
     --check-conflicts) ACTION=check_conflicts ;;
     --check-production) ACTION=check_production ;;
@@ -2552,6 +2563,15 @@ ensure_data_permissions() {
   if [ -d "$DATA_DIR/geoip" ] && ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -w /app/data/geoip' >/dev/null 2>&1; then
     data_permissions_need_fix=true
   fi
+  if [ -L "$DATA_DIR/.geo-downloads.json" ]; then
+    die "地域下载配置不能是符号链接"
+  fi
+  if [ -f "$DATA_DIR/.geo-downloads.json" ]; then
+    chmod 600 "$DATA_DIR/.geo-downloads.json" || die "无法限制地域下载配置权限"
+    if ! docker run --rm -v "$DATA_DIR:/app/data" --entrypoint sh scrcpygate:local -c 'test -r /app/data/.geo-downloads.json' >/dev/null 2>&1; then
+      data_permissions_need_fix=true
+    fi
+  fi
   if [ -f "$DATA_DIR/.geo-credentials.json" ]; then
     [ ! -L "$DATA_DIR/.geo-credentials.json" ] || die "地域下载凭据不能是符号链接"
     chmod 600 "$DATA_DIR/.geo-credentials.json" || die "无法限制地域下载凭据权限"
@@ -2796,6 +2816,9 @@ install_service() {
   success_msg "安装/更新完成：$(display_url "$PUBLIC_BASE_URL")"
   log "  状态: docker compose ps"
   log "  日志: docker logs --tail=120 scrcpygate"
+  if [ "$skip_build" != true ]; then
+    log "  磁盘: ./deploy.sh --disk-usage（源码构建会保留缓存；菜单 25 可按需清理）"
+  fi
 }
 
 install_current_service() {
@@ -2808,6 +2831,92 @@ install_with_pull_service() {
   skip_build=false
   pull_images=true
   install_service
+}
+
+require_disk_docker() {
+  # Maintenance must never install dependencies or start the daemon implicitly.
+  command -v docker >/dev/null 2>&1 || die "未安装 Docker，无法检查或清理镜像缓存"
+  docker info >/dev/null 2>&1 || die "无法连接 Docker；请确认服务已启动并有访问权限"
+}
+
+show_disk_usage() {
+  require_disk_docker
+  panel_top "磁盘占用（只读）"
+  log "Docker 汇总（当前 Docker context；共享镜像层不能重复相加）："
+  docker system df || return 1
+  log "宿主部署目录所在文件系统："
+  df -h . || true
+  disk_data_dir=${WEB_SCRCPY_DATA_HOST:-$(dotenv_value WEB_SCRCPY_DATA_HOST)}
+  disk_data_dir=${disk_data_dir:-./data}
+  disk_backup_dir=$(backup_dir_default)
+  for disk_dir in "$disk_data_dir" "$disk_backup_dir"; do
+    if [ -d "$disk_dir" ]; then
+      du -sh -- "$disk_dir" || warn_msg "无法读取目录占用: $(safe_display "$disk_dir")"
+    fi
+  done
+  log "本项目带标识的无标签镜像（容器引用与实际可回收空间由 Docker 清理时判断）："
+  docker image ls --filter dangling=true --filter label=io.scrcpygate.managed=true \
+    --format 'table {{.ID}}\t{{.Size}}\t{{.CreatedSince}}' || return 1
+  log "回滚标签（保留；多个标签可能共享同一镜像）："
+  docker image ls --filter 'reference=scrcpygate:rollback-*' \
+    --format 'table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' || return 1
+  log "旧版未带标识的镜像不会自动列为清理对象。备份保留份数可在 .env 设置 SCRCPYGATE_BACKUP_KEEP。"
+}
+
+prune_docker_storage() {
+  require_disk_docker
+  case "$1" in
+    images)
+      panel_top "清理 ScrcpyGate 无标签镜像"
+      log "只清理 io.scrcpygate.managed=true 且无标签、未被任何容器使用的镜像。"
+      log "保留运行镜像、带标签的回滚镜像、容器、卷、数据、密钥和备份。"
+      disk_confirm="确认清理本项目无标签旧镜像？"
+      ;;
+    build-cache)
+      panel_top "清理构建缓存"
+      warn_msg "范围是当前 Docker context 的默认构建器，包含其他项目的未使用缓存；后续构建可能需要重新下载依赖。"
+      log "尽量保留 1 GiB 缓存；不删除应用镜像、容器、卷、数据或备份。自定义 buildx 构建器需单独管理。"
+      disk_confirm="确认清理该构建器的未使用缓存？"
+      ;;
+    *) die "未知磁盘清理类型" ;;
+  esac
+  if [ "$ASSUME_YES" != true ]; then
+    require_interactive
+    if ! prompt_confirm_no "$disk_confirm"; then
+      log "已取消清理"
+      return 0
+    fi
+  fi
+  case "$1" in
+    images)
+      docker image prune --force --filter label=io.scrcpygate.managed=true \
+        || { error_msg "镜像清理失败，未扩大清理范围"; return 1; }
+      ;;
+    build-cache)
+      docker builder prune --all --force --keep-storage 1GB \
+        || { error_msg "缓存清理失败，未尝试其他清理命令"; return 1; }
+      ;;
+  esac
+  success_msg "清理完成；实际释放空间以上方 Docker 输出为准"
+}
+
+disk_maintenance_menu() {
+  require_interactive
+  panel_top "磁盘占用与清理"
+  menu_item 1 "查看磁盘占用（只读）" "$C_CYAN"
+  menu_item 2 "清理本项目无标签旧镜像" "$C_YELLOW"
+  menu_item 3 "清理 Docker 共用构建缓存（尽量保留 1 GiB）" "$C_YELLOW"
+  menu_item 0 "返回" "$C_GRAY"
+  printf '\n请选择 [0-3]: '
+  IFS= read -r disk_choice || return 0
+  disk_choice=$(printf '%s' "$disk_choice" | tr -d '\r')
+  case "$disk_choice" in
+    1) show_disk_usage ;;
+    2) prune_docker_storage images ;;
+    3) prune_docker_storage build-cache ;;
+    0|'') return 0 ;;
+    *) warn_msg "无效选项，未执行清理" ;;
+  esac
 }
 
 default_update_image() {
@@ -2880,7 +2989,7 @@ try:
         key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
         reverse=True,
     )
-    choices = [tag for tag in ("latest", "edge") if tag in tags] + versions[:10]
+    choices = [tag for tag in ("latest", "edge", "dev") if tag in tags] + versions[:10]
     for tag in choices:
         print(f"ghcr.io/{repository}:{tag}")
 except Exception:
@@ -2911,6 +3020,7 @@ select_update_image() {
       case "$menu_image_tag" in
         latest) menu_image_label="latest — 稳定版（最近完成发布）" ;;
         edge) menu_image_label="edge — 开发版（main 分支，非稳定版）" ;;
+        dev) menu_image_label="dev — 测试版（dev 分支，最新功能验证）" ;;
         *) menu_image_label="$menu_image_tag — 固定版本" ;;
       esac
       menu_item "$menu_image_index" "$menu_image_label" "$C_GREEN"
@@ -2987,7 +3097,9 @@ update_service() {
   run_docker_pull "$up_target_ref" || die "拉取失败；当前服务与配置保持原状"
   up_target_id=$(docker image inspect --format '{{.Id}}' "$up_target_ref") || die "无法读取目标镜像 ID"
   if [ "$up_target_id" = "$up_current_id" ]; then
+    set_env_value SCRCPYGATE_UPDATE_IMAGE "$up_target_ref"
     success_msg "当前已运行相同镜像，无需重建 / already running this image"
+    panel_line "下次更新目标" "$up_target_ref"
     return 0
   fi
   # Persist a registry digest where available; otherwise retain the local ID.
@@ -3014,6 +3126,7 @@ update_service() {
   if (
     set_env_value SCRCPYGATE_IMAGE "$up_pinned_ref"
     set_env_value SCRCPYGATE_VERSION "$up_version_label"
+    set_env_value SCRCPYGATE_UPDATE_IMAGE "$up_target_ref"
     unset SCRCPYGATE_IMAGE SCRCPYGATE_VERSION
     compose up -d --no-build --pull never scrcpygate || exit 1
     wait_for_health
@@ -3021,6 +3134,8 @@ update_service() {
   ); then
     success_msg "更新完成：$(display_url "$PUBLIC_BASE_URL")"
     panel_line "运行镜像" "$(safe_display "$up_pinned_ref")"
+    panel_line "下次更新目标" "$up_target_ref"
+    log "以后在此目录执行 sudo sh ./deploy.sh --update，无需重新上传源码"
     panel_line "配置备份" "$(safe_display "$up_env_backup")"
     panel_line "回滚镜像" "$up_rollback_ref"
     log "镜像回滚不恢复数据库；不兼容迁移需要人工恢复配套数据备份"
@@ -3297,6 +3412,13 @@ create_backup_archive() {
   fi
 
   # Back up write-only GeoIP credentials with the private data, never with source releases.
+  if [ -L "$bk_source_dir/.geo-downloads.json" ]; then
+    die "地域下载配置不能是符号链接"
+  fi
+  if [ -f "$bk_source_dir/.geo-downloads.json" ]; then
+    cp -p "$bk_source_dir/.geo-downloads.json" "$bk_staging/data/.geo-downloads.json" || die "无法复制地域下载配置"
+    chmod 600 "$bk_staging/data/.geo-downloads.json" || die "无法保护地域下载配置备份"
+  fi
   if [ -L "$bk_source_dir/.geo-credentials.json" ]; then
     die "地域下载凭据不能是符号链接"
   fi
@@ -3322,7 +3444,7 @@ create_backup_archive() {
     printf 'sqlite_mode=%s\n' "$bk_sqlite_mode"
     printf 'data_dir_name=%s\n' "$(basename -- "$bk_source_dir")"
     printf 'alas_key_included=%s\n' "$bk_key_included"
-    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key .geo-credentials.json; do
+    for bk_name in webscrcpy.db webscrcpy.db-wal webscrcpy.db-shm .alas-token-encryption-key .geo-credentials.json .geo-downloads.json; do
       if [ -f "$bk_staging/data/$bk_name" ]; then
         bk_file_bytes=$(wc -c < "$bk_staging/data/$bk_name" | tr -d ' ')
         bk_file_sha=$(sha256_of "$bk_staging/data/$bk_name" || printf 'unavailable')
@@ -4252,7 +4374,7 @@ show_menu() {
 
     menu_group "安装与更新"
     menu_item 1 "引导配置并安装" "$C_GREEN"
-    menu_item 2 "使用当前配置安装/更新" "$C_GREEN"
+    menu_item 2 "使用当前配置安装/更新（源码构建）" "$C_GREEN"
     menu_item 3 "更新基础镜像并重新安装" "$C_YELLOW"
     menu_item 4 "更新到已发布镜像（GHCR，不重建源码）" "$C_YELLOW"
 
@@ -4284,11 +4406,14 @@ show_menu() {
 
     menu_group "卸载"
     menu_item 24 "卸载 ScrcpyGate（保留数据 / 彻底清理）" "$C_RED"
+
+    menu_group "磁盘维护"
+    menu_item 25 "磁盘占用与清理" "$C_CYAN"
     printf '\n'
     print_rule
     menu_item 0 "退出" "$C_GRAY"
 
-    printf '\n%s>%s 请选择 [0-24] / Choose: ' "$C_YELLOW" "$C_RESET"
+    printf '\n%s>%s 请选择 [0-25] / Choose: ' "$C_YELLOW" "$C_RESET"
     IFS= read -r choice || exit 1
     choice=$(printf '%s' "$choice" | tr -d '\r')
     case "$choice" in
@@ -4378,8 +4503,9 @@ show_menu() {
         run_menu_action uninstall_menu_service || true
         pause_menu
         ;;
+      25) run_menu_action disk_maintenance_menu || true; pause_menu ;;
       0|q|Q|quit|exit) exit 0 ;;
-      *) error_msg "无效选项：请输入 0–24 / invalid choice: $choice"; pause_menu ;;
+      *) error_msg "无效选项：请输入 0–25 / invalid choice: $choice"; pause_menu ;;
     esac
   done
 }
@@ -4392,7 +4518,7 @@ fi
 # interactive menu acquires it per action so an idle menu does not block a
 # second operator from running a read-only command.
 case "$ACTION" in
-  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore)
+  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore|prune_images|prune_build_cache)
     acquire_deploy_lock
     ;;
 esac
@@ -4406,6 +4532,9 @@ case "$ACTION" in
   stop) stop_service ;;
   restart) restart_service ;;
   status) show_status ;;
+  disk_usage) show_disk_usage ;;
+  prune_images) prune_docker_storage images ;;
+  prune_build_cache) prune_docker_storage build-cache ;;
   logs) show_logs ;;
   reset_admin) reset_admin ;;
   ban_list) ban_list ;;

@@ -42,6 +42,8 @@ RUN mkdir -p /app/data /tmp && \
     chown -R app:app /app /tmp
 
 USER app
+# Scope opt-in dangling-image cleanup to this product. Keep rollback tags intact.
+LABEL io.scrcpygate.managed="true"
 EXPOSE 5000
 # 端口跟随 WEB_SCRCPY_PORT（宿主网络模式下容器直接绑宿主端口，默认 5000 不变）。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

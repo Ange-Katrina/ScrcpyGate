@@ -332,6 +332,9 @@
     var startedAt = Date.now();
     var method = String(opts.method || 'GET').toUpperCase();
     var body = opts.body;
+    // Credential forms must never enter optional mirroring diagnostic exports.
+    var recordedBody = /^\/api\/admin\/geo\/(credentials|downloads)(?:\?|$)/.test(path)
+      ? null : body === undefined ? null : body;
     return Api.request(path, {
       method: method,
       query: opts.query,
@@ -345,7 +348,7 @@
         method: method,
         url: path,
         query: opts.query || null,
-        body: body === undefined ? null : body,
+        body: recordedBody,
         ok: true,
         status: Number(payload && payload.status_code) || 200,
         ms: Date.now() - startedAt,
@@ -358,7 +361,7 @@
         method: method,
         url: path,
         query: opts.query || null,
-        body: body === undefined ? null : body,
+        body: recordedBody,
         ok: false,
         status: httpStatus(error),
         ms: Date.now() - startedAt,
@@ -6166,6 +6169,8 @@
       ok: true,
       running: data.running === true,
       jobState: String(data.job_state || 'idle'),
+      downloadSettings: data.download_settings || { editions: ['GeoLite2-City'], proxy_mode: 'system' },
+      events: Array.isArray(data.events) ? data.events : [],
       credentialSource: String(data.credential_source || "none"),
       credentialsManaged: data.credentials_managed === true,
       credentialsSaved: data.credentials_saved === true,
@@ -6194,6 +6199,20 @@
       oldDatabaseMaxAgeDays: Number(data.old_database_max_age_days || 0),
       databaseAvailable: database.available === true,
       databaseFile: String(database.file || ''),
+      databaseType: String(database.type || ''),
+      cityAvailable: database.city_available === true,
+      progress: (function (raw) {
+        var source = raw && typeof raw === 'object' ? raw : {};
+        return {
+          stage: String(source.stage || 'idle'),
+          edition: String(source.edition || ''),
+          index: Number(source.index || 0),
+          count: Number(source.count || 0),
+          percent: Math.max(0, Math.min(100, Number(source.percent || 0))),
+          downloadedBytes: Number(source.downloaded_bytes || 0),
+          totalBytes: Number(source.total_bytes || 0)
+        };
+      })(data.progress),
       databaseEpoch: Number(database.epoch || 0),
       databaseSizeBytes: Number(database.size_bytes || 0),
       databaseError: String(database.error || ''),
@@ -6334,6 +6353,7 @@
     'geo.credentials.save': function (opts) { return apiPut('/api/admin/geo/credentials', (opts && opts.body) || {}); },
     'geo.credentials.clear': function () { return apiDelete('/api/admin/geo/credentials'); },
     'geo.schedule.save': function (opts) { return apiPut('/api/admin/geo/schedule', (opts && opts.body) || {}); },
+    'geo.downloads.save': function (opts) { return apiPut('/api/admin/geo/downloads', (opts && opts.body) || {}); },
     'geo.status': handlerGeoStatus,
     'geo.check': handlerGeoCheck,
     'geo.simulate': handlerGeoSimulate,
@@ -6398,6 +6418,20 @@
     'alerts.list': handlerAdminAlerts,
     'alerts.resolve': handlerAdminAlertResolve,
     'logs.export': handlerLogsExport,
+    'logs.export.full': function () {
+      return Api.request('/api/admin/logs/export-full', { method: 'POST', body: {}, timeout: 180000 })
+        .then(function (payload) {
+          if (!payload || payload.encoding !== 'base64' || typeof payload.content !== 'string') throw new Error('Invalid log archive response');
+          var parts = [];
+          for (var offset = 0; offset < payload.content.length; offset += 65536) {
+            var binary = window.atob(payload.content.slice(offset, offset + 65536));
+            var bytes = new Uint8Array(binary.length);
+            for (var index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+            parts.push(bytes);
+          }
+          return { blob: new Blob(parts, { type: 'application/octet-stream' }), filename: 'scrcpygate-logs-full.zip' };
+        });
+    },
     'logs.integrity': handlerLogsIntegrity,
     'alas.overview': handlerAlasOverview,
     'alas.settings.update': handlerAlasSettingsUpdate,

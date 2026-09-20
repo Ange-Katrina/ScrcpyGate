@@ -78,3 +78,5 @@ log/
 # Private GeoIP updater configuration (also excluded outside the default data directory).
 **/.geo-credentials.json
 **/.geo-credentials-*.tmp
+**/.geo-downloads.json
+**/.geo-downloads-*.tmp

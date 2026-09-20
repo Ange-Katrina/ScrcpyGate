@@ -71,10 +71,20 @@ license and this attribution when updating or redistributing the sprite.
   feature. The reader never performs network lookups; it opens a local file.
 - License: Apache License 2.0
 
-## GeoLite2 Country data (not bundled)
+## HTTPX
 
-- The optional region restriction feature can download the **GeoLite2-Country**
-  database from MaxMind at runtime. **No MMDB file is shipped with this
+- Package: `httpx==0.28.1` (`requirements.txt`)
+- Upstream: https://github.com/encode/httpx
+- Purpose: GeoIP downloads through explicitly configured HTTP/HTTPS forward proxies,
+  with TLS certificate verification and bounded official-host redirects.
+- License: BSD 3-Clause; the installed distribution includes its license notice.
+
+## GeoLite2 City and Country data (not bundled)
+
+- Region restrictions and access attribution can download **GeoLite2-City**
+  (default), **GeoLite2-Country**, or both from MaxMind at runtime, as selected
+  in the admin console. Country codes determine access policy; available region and city
+  names are used for display only. **No MMDB file is shipped with this
   repository or the container image**, and no license key is bundled: the key is
   supplied with `GEO_ACCOUNT_ID` through the `GEO_LICENSE_KEY` environment variable,
   or configured through the admin console in a private data-volume file. It is

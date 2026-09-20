@@ -60,6 +60,41 @@
 
   function api() { return window.ScrcpyGateApi; }
 
+  var locationItems = Object.create(null);
+  function locationLabel(item) {
+    var engine = window.ScrcpyGateI18n;
+    var locale = engine ? engine.getLang() : 'zh-CN';
+    var lang = locale === 'en-US' ? 'en' : 'zh-CN';
+    var country = item.current_country || (!item.geo_lookup_status ? item.country : '') || '';
+    if (!country) {
+      var label = item.geo_lookup_status === 'private' ? '内网地址'
+        : item.geo_lookup_status === 'unavailable' ? '地区库不可用' : '无法定位';
+      return engine ? engine.t(label) : label;
+    }
+    var location = item.current_location || {};
+    function name(names) { return names && (names[lang] || names.en || names['zh-CN']) || ''; }
+    var countryName = country === 'CN' ? (lang === 'en' ? 'Mainland China' : '中国大陆') : name(location.country_names);
+    if (!countryName) {
+      try { countryName = new Intl.DisplayNames([locale], { type: 'region' }).of(country); } catch (error) { countryName = country; }
+    }
+    var pieces = [countryName || country];
+    (Array.isArray(location.subdivisions) ? location.subdivisions : []).forEach(function (names) {
+      var value = name(names);
+      if (value && pieces.indexOf(value) < 0) pieces.push(value);
+    });
+    var city = name(location.city_names);
+    if (city && pieces.indexOf(city) < 0) pieces.push(city);
+    return pieces.join(' · ');
+  }
+
+  function refreshLocationLabels() {
+    els.rows.querySelectorAll('[data-location-ip]').forEach(function (cell) {
+      var item = locationItems[cell.getAttribute('data-location-ip')];
+      if (item) cell.textContent = locationLabel(item);
+    });
+  }
+  if (window.ScrcpyGateI18n) window.ScrcpyGateI18n.on(refreshLocationLabels);
+
   function escapeText(value) {
     return String(value === null || value === undefined ? '' : value).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
@@ -213,7 +248,7 @@
   function renderRows(append) {
     if (!els.rows) return;
     var items = (state.summary && state.summary.items) || [];
-    if (!append) els.rows.innerHTML = '';
+    if (!append) { els.rows.innerHTML = ''; locationItems = Object.create(null); }
     if (!items.length && !append) {
       els.rows.innerHTML = '<tr><td class="table-empty" colspan="9"><i data-lucide="inbox"></i><span>该时间范围内没有访问记录</span></td></tr>';
       if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
@@ -221,11 +256,10 @@
     }
     var html = items.map(function (item) {
       var ip = String(item.source_ip || '');
+      locationItems[ip] = item;
       return '<tr class="vis-ip-row" data-ip="' + escapeText(ip) + '">'
         + '<td class="vis-ip">' + escapeText(ip) + '</td>'
-        + '<td>' + escapeText(item.current_country || (item.geo_lookup_status === 'private' ? '内网地址'
-          : item.geo_lookup_status === 'unavailable' ? '地区库不可用'
-            : item.geo_lookup_status ? '无法定位' : item.country || '—')) + '</td>'
+        + '<td class="vis-location" data-i18n-skip data-location-ip="' + escapeText(ip) + '">' + escapeText(locationLabel(item)) + '</td>'
         + '<td>' + num(item.requests).toLocaleString() + '</td>'
         + '<td' + (num(item.errors_4xx) ? ' class="vis-bad"' : '') + '>' + num(item.errors_4xx).toLocaleString() + '</td>'
         + '<td' + (num(item.errors_5xx) ? ' class="vis-bad"' : '') + '>' + num(item.errors_5xx).toLocaleString() + '</td>'

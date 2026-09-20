@@ -37,6 +37,24 @@
     simResult: document.getElementById('geo-sim-result'),
     check: document.getElementById('geo-check'),
     checkHint: document.getElementById('geo-check-hint'),
+    progress: document.getElementById('geo-progress'),
+    progressStage: document.getElementById('geo-progress-stage'),
+    progressPercent: document.getElementById('geo-progress-percent'),
+    progressTrack: document.getElementById('geo-progress-track'),
+    progressFill: document.getElementById('geo-progress-fill'),
+    progressDetail: document.getElementById('geo-progress-detail'),
+    downloadForm: document.getElementById('geo-download-form'),
+    downloadCountry: document.getElementById('geo-download-country'),
+    downloadCity: document.getElementById('geo-download-city'),
+    downloadSave: document.getElementById('geo-download-save'),
+    downloadStatus: document.getElementById('geo-download-status'),
+    proxyMode: document.getElementById('geo-proxy-mode'),
+    proxyField: document.getElementById('geo-proxy-field'),
+    proxyUrl: document.getElementById('geo-proxy-url'),
+    proxyClear: document.getElementById('geo-proxy-clear'),
+    proxySaved: document.getElementById('geo-proxy-saved'),
+    runLog: document.getElementById('geo-run-log'),
+    logFollow: document.getElementById('geo-log-follow'),
     refresh: document.getElementById('geo-refresh'),
     save: document.getElementById('geo-save'),
     selfWarning: document.getElementById('geo-self-warning'),
@@ -47,6 +65,7 @@
   var state = { status: null, seq: 0, loaded: false };
 
   function api() { return window.ScrcpyGateApi; }
+  function t(text) { return window.ScrcpyGateI18n ? window.ScrcpyGateI18n.t(text) : text; }
 
   function escapeText(value) {
     return String(value === null || value === undefined ? '' : value).replace(/[&<>"']/g, function (ch) {
@@ -85,6 +104,99 @@
     els.selfWarning.textContent = text || '';
   }
 
+  /* 更新进度：阶段名与后端 PROGRESS_STAGES 一一对应；百分比由服务端算好（下载阶段
+     按真实字节数换算），前端只负责显示，避免两边各自估算出现不一致。 */
+  var progressStages = {
+    queued: '排队中…', credentials: '正在验证下载凭据…', download: '正在下载地区库…',
+    verify: '正在校验地区库…', activate: '正在启用新地区库…', cleanup: '正在清理旧库…',
+    done: '地区库已更新', failed: '本次更新失败'
+  };
+
+  function renderProgress(status) {
+    if (!els.progress) return;
+    var info = status.progress || {};
+    var stage = String(info.stage || 'idle');
+    var running = status.running === true;
+    // 只有任务运行中、刚完成或刚失败才显示：进程重启后进度会回到 idle，不显示过期进度条。
+    var visible = running || (stage === 'done' && (status.jobState === 'completed' || status.jobState === 'unchanged'))
+      || (stage === 'failed' && status.jobState === 'failed');
+    els.progress.hidden = !visible;
+    if (!visible) return;
+    var percent = Math.max(0, Math.min(100, num(info.percent)));
+    var downloaded = num(info.downloadedBytes);
+    var total = num(info.totalBytes);
+    // 下载阶段但拿不到总长度（上游没给 Content-Length）→ 不确定进度动画。
+    var indeterminate = stage === 'download' && total <= 0;
+    els.progress.classList.toggle('is-indeterminate', indeterminate);
+    els.progress.classList.toggle('is-failed', stage === 'failed');
+    var label = progressStages[stage] || '正在更新地区库…';
+    if (stage === 'done' && status.jobState === 'unchanged') label = '地区库已是最新版本';
+    if (els.progressStage) els.progressStage.textContent = label;
+    if (els.progressPercent) els.progressPercent.textContent = indeterminate ? '—' : percent + '%';
+    if (els.progressTrack) {
+      if (indeterminate) els.progressTrack.removeAttribute('aria-valuenow');
+      else els.progressTrack.setAttribute('aria-valuenow', String(percent));
+      var accessibleLabel = window.ScrcpyGateI18n ? window.ScrcpyGateI18n.t(label) : label;
+      els.progressTrack.setAttribute('aria-valuetext', accessibleLabel + (indeterminate ? '' : ' ' + percent + '%'));
+    }
+    if (els.progressFill) els.progressFill.style.width = indeterminate ? '' : percent + '%';
+    if (els.progressDetail) {
+      els.progressDetail.textContent = (info.edition ? info.edition + ' (' + num(info.index) + '/' + num(info.count) + ') · ' : '')
+        + (stage === 'download' ? fmtBytes(downloaded) + (total > 0 ? ' / ' + fmtBytes(total) : '') : '');
+    }
+  }
+
+  function renderLogs(force) {
+    if (!els.runLog) return;
+    var entries = (state.status && state.status.events || []).slice(-120);
+    var signature = entries.length ? entries[0].id + ':' + entries[entries.length - 1].id : 'empty';
+    if (!force && state.logSignature === signature) return;
+    state.logSignature = signature;
+    var oldTop = els.runLog.scrollTop;
+    var existing = new Set();
+    if (force || !entries.length) els.runLog.replaceChildren();
+    Array.prototype.forEach.call(els.runLog.children, function (line) {
+      var id = line.getAttribute('data-event-id');
+      if (!entries.some(function (entry) { return String(entry.id) === id; })) line.remove();
+      else existing.add(id);
+    });
+    entries.forEach(function (entry) {
+      if (existing.has(String(entry.id))) return;
+      var label = progressStages[entry.stage] || ({updated:'该数据库已更新', unchanged:'该数据库已是最新版本', connection:'下载连接', error:'本次更新失败'})[entry.stage] || '正在更新地区库…';
+      if (entry.stage === 'done') label = '本次检查完成';
+      var extra = '';
+      if (entry.stage === 'connection') extra = t(({system:'跟随服务器代理', direct:'直接连接', custom:'自定义代理'})[entry.code] || '');
+      else if (entry.code) extra = t(errorText(entry.code));
+      if (entry.stage === 'download' || entry.stage === 'updated') extra = fmtBytes(entry.downloaded_bytes) + (num(entry.total_bytes) > 0 ? ' / ' + fmtBytes(entry.total_bytes) : '');
+      var line = document.createElement('p');
+      line.setAttribute('data-event-id', String(entry.id));
+      line.setAttribute('data-tone', entry.stage === 'error' || entry.stage === 'failed' ? 'error' : entry.stage === 'updated' || entry.stage === 'unchanged' || entry.stage === 'done' ? 'ok' : '');
+      line.textContent = '[' + fmtTime(entry.ts) + ' · ' + num(entry.elapsed_seconds).toFixed(1) + ' s] '
+        + (entry.edition ? entry.edition + ' · ' : '') + t(label) + (extra ? ' · ' + extra : '');
+      els.runLog.appendChild(line);
+    });
+    if (!entries.length) {
+      var empty = document.createElement('p');
+      empty.textContent = t('暂无运行记录，点击「立即检查更新」后可查看下载过程。');
+      els.runLog.appendChild(empty);
+    }
+    els.runLog.scrollTop = els.logFollow && els.logFollow.checked ? els.runLog.scrollHeight : oldTop;
+  }
+
+  function renderDownloadSettings(status) {
+    if (!els.downloadForm) return;
+    var config = status.downloadSettings || { editions: ['GeoLite2-City'], proxy_mode: 'system' };
+    if (!state.downloadDirty) {
+      els.downloadCountry.checked = config.editions.indexOf('GeoLite2-Country') !== -1;
+      els.downloadCity.checked = config.editions.indexOf('GeoLite2-City') !== -1;
+      els.proxyMode.value = config.proxy_mode;
+      els.proxyUrl.value = config.proxy_url || '';
+    }
+    Array.prototype.forEach.call(els.downloadForm.elements, function (field) { field.disabled = state.downloadBusy || status.running; });
+    els.proxySaved.textContent = config.error ? errorText(config.error)
+      : config.proxy_configured ? '代理地址已保存，可直接修改。' : '尚未保存自定义代理地址。';
+  }
+
   function modeLabel(mode) {
     // 注意：off 的中文用「不启用」而不是「关闭」，避免与封禁卡片的关闭按钮共用同一个
     // 词条（i18n 是整段/子串替换，同词不同义会让另一处翻译错位）。
@@ -92,11 +204,23 @@
   }
 
   var updateErrors = {
+    downloads_disabled: '已暂停所有地区库下载，请先选择下载内容并保存。',
+    download_editions_invalid: '请选择 Country 或 City。',
+    download_settings_invalid: '下载选项格式不正确。',
+    download_settings_unreadable: '无法读取下载配置，请重新保存或检查文件权限。',
+    download_settings_permissions: '下载配置文件权限不安全，请设为仅服务账户可读写（0600）。',
+    download_settings_write_failed: '保存下载配置失败，请检查数据目录权限与磁盘空间。',
+    proxy_invalid: '代理地址无效，请填写包含端口的 HTTP/HTTPS 地址，不要填写下载镜像链接。',
+    proxy_mode_invalid: '请选择有效的下载连接方式。',
+    proxy_required: '请填写代理地址，或选择直接连接。',
+    proxy_error: '无法使用代理隧道，请检查代理地址、认证信息及 CONNECT 支持。',
     interval_invalid: '更新周期必须为 1–168 小时的整数。',
     database_missing: '尚未下载地区库。', database_expired: '地区库已过期，请检查自动更新。',
     database_unreadable: '无法读取地区库，请检查文件和权限。', database_invalid: '下载的地区库校验失败，旧库未替换。',
     dependency_missing: '缺少地区库读取组件，请更新完整镜像。',
     database_lookup_failed: '地区库查询失败，请检查库状态。',
+    unexpected_database_type: '下载的数据库类型不匹配，原有地区库保留。',
+    download_too_large: '地区库超过下载大小限制，原有地区库保留。',
     license_key_missing: '请先配置 License Key。', account_id_missing: '请先配置 Account ID。',
     account_id_invalid: 'Account ID 必须为数字（最多 20 位）。', license_key_invalid: '请填写有效的 License Key（最多 256 个字符）。',
     license_key_required: '更换 Account ID 时请同时填写新 Key。', credentials_invalid: '凭据格式不正确。',
@@ -156,6 +280,7 @@
     if (els.dbStats) {
       var items = [
         ['地区库', status.databaseAvailable ? '可用' : '不可用', status.databaseAvailable ? 'ok' : (status.mode === 'enforce' ? 'error' : 'warn')],
+        ['定位精度', status.cityAvailable ? '国家 / 省份 / 城市' : status.databaseAvailable ? '仅国家' : '不可用', status.cityAvailable ? 'ok' : 'warn'],
         ['库版本', status.databaseEpoch ? fmtTime(status.databaseEpoch) : '—'],
         ['库大小', fmtBytes(status.databaseSizeBytes)],
         ['上次成功', fmtTime(status.lastSuccessTs)],
@@ -186,8 +311,12 @@
       }
     }
     if (els.save) els.save.disabled = false;
+    renderProgress(status);
+    renderDownloadSettings(status);
+    renderLogs();
 
     var notes = [];
+    if (status.databaseAvailable && !status.cityAvailable && (!status.downloadSettings || status.downloadSettings.editions.indexOf('GeoLite2-City') !== -1)) notes.push('当前仍使用国家库。点击「立即检查更新」下载城市库后，归属将显示可用的省市信息。');
     if (status.enabled === false) notes.push(errorText("updater_disabled"));
     if (!status.licenseKeyPresent) {
       notes.push('未配置 License Key：不会联网下载，也不会自动更新（已存在的地区库照常使用）。');
@@ -221,35 +350,82 @@
   }
 
   var jobPoll = null;
+  var pollFailures = 0;
+  var pollExpected = false;
+  var pagePaused = false;
 
-  function load() {
-    if (!api()) return;
+  function clearJobPoll() {
+    if (jobPoll !== null) window.clearTimeout(jobPoll);
+    jobPoll = null;
+  }
+
+  function scheduleJobPoll(delay) {
+    clearJobPoll();
+    if (!pagePaused) jobPoll = window.setTimeout(function () { load(true); }, delay);
+  }
+
+  function load(automatic) {
+    if (!api() || pagePaused) return;
+    clearJobPoll();
+    if (automatic !== true) pollFailures = 0;
     var seq = (state.seq += 1);
     return api().configured('geo.status', { force: true })
       .then(function (status) {
         if (seq !== state.seq) return;
+        pollFailures = 0;
+        pollExpected = status.running === true;
         state.status = status;
-        var databaseSignature = status.databaseAvailable + ':' + status.databaseEpoch + ':' + status.lastSuccessTs;
+        var databaseSignature = status.databaseAvailable + ':' + status.databaseType + ':' + status.databaseEpoch + ':' + status.lastSuccessTs;
         if (state.databaseSignature && state.databaseSignature !== databaseSignature) {
           window.dispatchEvent(new CustomEvent('scrcpygate:geo-updated'));
         }
         state.databaseSignature = databaseSignature;
         state.loaded = true;
         render();
-        if (jobPoll) window.clearTimeout(jobPoll);
-        jobPoll = null;
         if (status.running) {
           setStatus('地区库更新任务运行中…', '');
-          jobPoll = window.setTimeout(load, 2000);
+          // 运行中 1 秒一次：进度条要跟得上下载；结束后回到单次加载不再轮询。
+          scheduleJobPoll(1000);
         } else if (status.jobState === 'completed') setStatus('地区库已更新', 'ok');
         else if (status.jobState === 'unchanged') setStatus('地区库已是最新版本', 'ok');
         else if (status.lastError) setStatus(errorText(status.lastError), 'error');
+        else setStatus('', '');
       })
       .catch(function (error) {
         if (seq !== state.seq) return;
-        if (els.dbStats) els.dbStats.innerHTML = '';
-        setStatus('加载地域状态失败：' + ((error && error.message) || '未知错误'), 'error');
+        var httpStatus = num(error && error.detail && error.detail.status);
+        var transient = !httpStatus || httpStatus === 408 || httpStatus === 429 || httpStatus >= 500;
+        var message;
+        if (pollExpected && transient && pollFailures < 6) {
+          pollFailures += 1;
+          var retryAfter = num(error && error.detail && error.detail.retryAfterMs);
+          scheduleJobPoll(Math.max(Math.min(30000, 1000 * Math.pow(2, pollFailures)), retryAfter));
+          message = '连接暂时中断，正在自动重试；显示的是上次获取的进度。';
+        } else {
+          message = httpStatus === 401 || httpStatus === 403
+            ? '登录已失效或无权读取状态，请重新登录或检查访问权限。'
+            : '状态刷新已暂停，请点击「刷新」重试；后台更新可能仍在运行。';
+        }
+        setStatus(message, 'error');
+        if (els.checkHint) {
+          els.checkHint.textContent = message;
+          els.checkHint.setAttribute('data-tone', 'error');
+        }
       });
+  }
+
+  window.addEventListener('pagehide', function () {
+    pagePaused = true;
+    state.seq += 1;
+    clearJobPoll();
+  });
+  window.addEventListener('pageshow', function (event) {
+    if (!event.persisted) return;
+    pagePaused = false;
+    load();
+  });
+  if (window.ScrcpyGateI18n && window.ScrcpyGateI18n.on) {
+    window.ScrcpyGateI18n.on(function () { renderProgress(state.status || {}); renderLogs(true); });
   }
 
   function currentForm() {
@@ -330,6 +506,7 @@
     setStatus('正在检查并下载地区库…', '');
     api().configured('geo.check', { method: 'POST', body: {} })
       .then(function (result) {
+        pollExpected = true;
         setStatus('地区库更新任务已提交', '');
         return load();
       })
@@ -407,6 +584,38 @@
     });
   });
   window.addEventListener('pagehide', function () { if (els.key) els.key.value = ''; });
+  if (els.logFollow) els.logFollow.addEventListener('change', function () {
+    if (els.logFollow.checked) els.runLog.scrollTop = els.runLog.scrollHeight;
+  });
+  if (els.downloadForm) {
+    els.downloadForm.addEventListener('input', function () { state.downloadDirty = true; els.downloadStatus.textContent = ''; });
+    els.downloadForm.addEventListener('change', function () { state.downloadDirty = true; });
+    els.downloadForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      if (!api() || state.downloadBusy || els.downloadSave.disabled) return;
+      var editions = [];
+      if (els.downloadCountry.checked) editions.push('GeoLite2-Country');
+      if (els.downloadCity.checked) editions.push('GeoLite2-City');
+      var body = { editions: editions, proxy_mode: els.proxyMode.value, proxy_url: els.proxyClear.checked ? '' : els.proxyUrl.value.trim(), clear_proxy: els.proxyClear.checked };
+      state.downloadBusy = true;
+      renderDownloadSettings(state.status || {});
+      els.downloadStatus.textContent = '保存中…';
+      try {
+        await api().configured('geo.downloads.save', {method:'PUT', body:body});
+        state.downloadDirty = false;
+        els.proxyClear.checked = false;
+        els.downloadStatus.textContent = '下载选项已保存，下次检查时生效。';
+        els.downloadStatus.setAttribute('data-tone', 'ok');
+        await load();
+      } catch (error) {
+        els.downloadStatus.textContent = requestError(error);
+        els.downloadStatus.setAttribute('data-tone', 'error');
+      } finally {
+        state.downloadBusy = false;
+        renderDownloadSettings(state.status || {});
+      }
+    });
+  }
 
   function syncPreset() {
     if (!els.preset || !els.countries) return;

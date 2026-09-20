@@ -72,6 +72,9 @@ MMDB_SUFFIX = ".mmdb"
 MAX_DB_BYTES = 512 * 1024 * 1024
 MAX_DATABASE_AGE_SECONDS = 30 * 86400
 READER_CHECK_SECONDS = 2.0
+COUNTRY_DATABASE_TYPES = ("GeoLite2-Country", "GeoIP2-Country")
+CITY_DATABASE_TYPES = ("GeoLite2-City", "GeoIP2-City")
+ACCEPTED_DATABASE_TYPES = COUNTRY_DATABASE_TYPES + CITY_DATABASE_TYPES
 
 
 @dataclass(frozen=True)
@@ -98,15 +101,17 @@ class GeoPolicy:
 
 @dataclass(frozen=True)
 class GeoLookup:
-    status: str  # public / private / invalid / unknown
+    status: str  # public / private / invalid / unknown / unavailable
     country: str = ""
     epoch: int = 0
+    location: dict = field(default_factory=dict)
 
 
 _lock = threading.RLock()
 _reader = None
 _reader_path: str = ""
 _reader_epoch = 0
+_reader_type = ""
 _reader_error: str = ""
 _reader_opened_at = 0.0
 _reader_fingerprint = None
@@ -225,9 +230,9 @@ def _import_maxminddb():
 
 
 def _ensure_reader() -> tuple[object | None, int, str]:
-    """Open a validated Country reader; callers hold the same lock while querying."""
+    """Open a validated Country/City reader; policy always uses country.iso_code."""
     global _reader, _reader_path, _reader_epoch, _reader_error, _reader_opened_at
-    global _reader_fingerprint, _reader_checked_at
+    global _reader_fingerprint, _reader_checked_at, _reader_type
     with _lock:
         moment = time.time()
         if _reader is None and _reader_error and time.monotonic() - _reader_checked_at < READER_CHECK_SECONDS:
@@ -265,7 +270,7 @@ def _ensure_reader() -> tuple[object | None, int, str]:
             metadata = candidate.metadata()
             epoch = int(metadata.get("build_epoch", 0) if isinstance(metadata, dict) else metadata.build_epoch)
             db_type = str(metadata.get("database_type", "") if isinstance(metadata, dict) else metadata.database_type)
-            if db_type not in ("GeoLite2-Country", "GeoIP2-Country"):
+            if db_type not in ACCEPTED_DATABASE_TYPES:
                 raise ValueError("database_type")
             if not (0 < epoch <= moment + 86400 and moment - epoch <= MAX_DATABASE_AGE_SECONDS):
                 candidate.close()
@@ -282,6 +287,7 @@ def _ensure_reader() -> tuple[object | None, int, str]:
             return None, 0, _reader_error
         previous = _reader
         _reader, _reader_path, _reader_epoch = candidate, str(path), epoch
+        _reader_type = db_type
         _reader_fingerprint = fingerprint
         _reader_error = ""
         _reader_opened_at = moment
@@ -294,7 +300,25 @@ def _ensure_reader() -> tuple[object | None, int, str]:
         return _reader, epoch, ""
 
 
-def lookup(raw: object) -> GeoLookup:
+def _location_names(node: object) -> dict:
+    """Keep bounded display names only; no coordinates, postal data or network traits."""
+    names = node.get("names") if isinstance(node, dict) else None
+    if not isinstance(names, dict):
+        return {}
+    return {locale: " ".join(names[locale].split())[:100] for locale in ("zh-CN", "en")
+            if isinstance(names.get(locale), str) and names[locale].strip()}
+
+
+def _location(record: dict) -> dict:
+    subdivisions = record.get("subdivisions")
+    return {
+        "country_names": _location_names(record.get("country")),
+        "subdivisions": [_location_names(node) for node in subdivisions[:2]] if isinstance(subdivisions, list) else [],
+        "city_names": _location_names(record.get("city")),
+    }
+
+
+def lookup(raw: object, *, include_location: bool = False) -> GeoLookup:
     """A missing country is distinct from an unavailable database."""
     _stats["lookups"] += 1
     kind, address = classify_ip(raw)
@@ -314,7 +338,8 @@ def lookup(raw: object) -> GeoLookup:
         node = record.get("country") or {}
         if isinstance(node, dict):
             country = normalize_country(node.get("iso_code"))
-    return GeoLookup(status="public" if country else "unknown", country=country, epoch=epoch)
+    return GeoLookup(status="public" if country else "unknown", country=country, epoch=epoch,
+                     location=_location(record) if country and include_location else {})
 
 
 def access_geo_lookup(raw: object) -> tuple[str, int | None]:
@@ -531,6 +556,8 @@ def status() -> dict:
             "modified_ts": modified,
             "max_age_days": MAX_DATABASE_AGE_SECONDS // 86400,
             "epoch": int(epoch or 0),
+            "type": _reader_type if reader is not None and not error else "",
+            "city_available": bool(reader is not None and not error and _reader_type in CITY_DATABASE_TYPES),
             "available": reader is not None and not error,
             "error": error,
         },
@@ -556,7 +583,7 @@ def self_check() -> dict:
 
 def close() -> None:
     """关闭 reader（进程退出/测试用）。"""
-    global _reader, _reader_path, _reader_epoch, _reader_fingerprint, _reader_checked_at
+    global _reader, _reader_path, _reader_epoch, _reader_fingerprint, _reader_checked_at, _reader_type
     with _lock:
         if _reader is not None:
             try:
@@ -566,6 +593,7 @@ def close() -> None:
         _reader = None
         _reader_path = ""
         _reader_epoch = 0
+        _reader_type = ""
         _reader_fingerprint = None
         _reader_checked_at = 0.0
 

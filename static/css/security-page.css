@@ -46,6 +46,48 @@
 .sec-disclosure[open] > summary svg { transform: rotate(180deg); }
 .sec-disclosure > .guard-row, .sec-disclosure > .sec-hint { margin-inline: 16px; }
 .sec-disclosure > .sec-hint { margin-bottom: 12px; }
+/* 「地区库与自动更新」固定展开：原先用 <details>，点标题或内容都会误收起，改成静态分区。
+   标题沿用 summary 的排版，视觉上不跳变。 */
+.sec-disclosure-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 12px 16px; }
+.sec-disclosure-title { margin: 0; color: var(--admin-text); font-size: 14px; font-weight: 600; }
+.geo-database > .sec-hint { margin-inline: 16px; }
+.geo-database > .geo-progress { margin: 0 16px 12px; }
+.geo-download-form { display: grid; gap: 12px; margin: 16px; padding-block: 16px; border-block: 1px solid var(--admin-line); }
+.geo-download-form .sec-hint, .geo-run-window .sec-hint { margin: 0; }
+.geo-editions { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.geo-editions legend { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.geo-editions label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; flex: 1 1 200px; }
+.geo-editions label span { display: grid; gap: 4px; }
+.geo-editions small { color: var(--admin-muted); font-size: 12px; }
+.geo-proxy-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.geo-proxy-fields .vis-filter { min-width: 0; }
+.geo-proxy-fields [hidden] { display: none; }
+.geo-run-window { margin: 0 16px 16px; min-width: 0; }
+.geo-run-toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.geo-run-toolbar h4 { margin: 0; font-size: 13px; }
+.geo-run-log { height: 200px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--admin-border); border-radius: 8px; padding: 12px; background: var(--admin-field); font: 12px/1.8 ui-monospace, "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.geo-run-log:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
+.geo-run-log p { margin: 0; font-weight: 400; }
+.geo-run-log [data-tone="error"] { color: var(--admin-danger); }
+.geo-run-log [data-tone="ok"] { color: var(--admin-success); }
+.geo-run-window > .sec-hint { margin-top: 8px; }
+
+/* 更新进度条：下载阶段按真实字节数推进；上游没给 Content-Length 时用不确定动画。 */
+.geo-progress[hidden] { display: none; }
+.geo-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--admin-text); font-size: 13px; }
+.geo-progress-head > span:last-child { color: var(--admin-muted); font-variant-numeric: tabular-nums; }
+.geo-progress-track { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: var(--admin-field); }
+.geo-progress-track > i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--admin-brand); transition: width 240ms ease; }
+.geo-progress.is-indeterminate .geo-progress-track > i { width: 40%; animation: geo-progress-slide 1.2s ease-in-out infinite; }
+.geo-progress.is-failed .geo-progress-track > i { background: var(--admin-danger); }
+@keyframes geo-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(260%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .geo-progress-track > i { transition: none; }
+  .geo-progress.is-indeterminate .geo-progress-track > i { width: 100%; animation: none; opacity: .45; }
+}
 .security-content .sec-advanced .guard-body { padding-top: 0; padding-bottom: 12px; }
 .security-content .vis-stats { display: flex; flex-wrap: wrap; gap: 0; margin: 4px 0 12px; border-bottom: 1px solid var(--admin-line); padding-bottom: 16px; }
 .security-content .vis-stat { flex: 1 1 120px; border: 0; border-radius: 0; border-inline-end: 1px solid var(--admin-line); padding: 4px 20px; background: transparent; gap: 4px; }
@@ -185,6 +227,7 @@
 .sec-head { align-items: center; }
 .sec-hint { margin: 0 0 clamp(12px, 1.6vh, 18px); color: var(--admin-muted); font-size: 12px; line-height: 18px; max-width: 860px; }
 .sec-layout { display: flex; flex-direction: column; gap: clamp(12px, 1.5vh, 16px); width: 100%; max-width: 860px; }
+.sec-login-activity { margin-top: 16px; }
 /* 窄屏没有列壳：.sec-col 不生成盒子，卡片直接进 flex 流，用 order 保持
    总开关 → 阈值与时长 → 高级 → 当前封禁 的阅读顺序。 */
 .sec-col { display: contents; }
@@ -247,9 +290,8 @@
 .guard-status[data-tone="error"] { color: var(--admin-danger); }
 
 @media (min-width: 1180px) {
-  /* 宽屏：左列 总开关 / 高级，右列 阈值与时长 / 当前封禁。两列各自堆叠（列壳成为
-     弹性列），因此短卡片下方不会留出与邻列高度差相等的空洞；整列占满内容区宽度，
-     不再在右侧留下空白。 */
+  /* 宽屏：左列总开关 / 阈值，右列 PoW / 高级设置；限制和会话另起一行。
+     两列按内容自然堆叠，避免把所有配置压在左侧。 */
   .sec-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; column-gap: 16px; max-width: none; }
   .sec-col { display: flex; flex-direction: column; gap: clamp(12px, 1.5vh, 16px); min-width: 0; }
   .sec-hint { max-width: none; }
@@ -319,6 +361,7 @@
 .vis-table td { color: var(--admin-text); font-variant-numeric: tabular-nums; }
 .vis-table .table-empty { color: var(--admin-muted); }
 .vis-ip { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.vis-table .vis-location { min-width: 130px; max-width: 240px; white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
 .vis-bad { color: var(--admin-danger); }
 .vis-path, .vis-ua { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .vis-detail-btn { height: 24px; border: 1px solid var(--admin-border); }
@@ -380,8 +423,11 @@ html.dark { color-scheme: dark; }
 @supports (appearance: base-select) {
   @media (pointer: fine) {
     .security-content select, .security-content select::picker(select) { appearance: base-select; }
+    /* base-select uses flex layout; fixed-height triggers need explicit centering. */
+    .security-content select { align-items: center; }
+    .security-content select::picker-icon { align-self: center; }
     .security-content select::picker(select) { padding: 6px; border: 1px solid var(--admin-border); border-radius: 12px; background: var(--admin-surface); color: var(--admin-text); box-shadow: 0 8px 24px var(--c-shadow); }
-    .security-content select option { min-height: 36px; padding: 8px 12px; border-radius: 6px; }
+    .security-content select option { min-height: 36px; padding: 8px 12px; border-radius: 6px; align-items: center; }
     .security-content select option:hover, .security-content select option:focus-visible { background: var(--admin-hover); }
     .security-content select option:checked { color: var(--admin-brand); background: var(--admin-brand-soft); }
   }

@@ -286,7 +286,11 @@
             || ('请求失败（' + response.status + '）');
           var responseCode = response.status === 429 ? 'RATE_LIMITED' : (response.status === 444 ? 'WAF_BLOCKED' : 'HTTP_ERROR');
           throw createError(responseCode, message, {
-            status: response.status, retryAfterMs: retryMs, payload: payload
+            status: response.status, retryAfterMs: retryMs, payload: payload,
+            headers: {
+              'x-geo-update-error': response.headers.get('x-geo-update-error') || '',
+              'x-geo-self-lockout': response.headers.get('x-geo-self-lockout') || ''
+            }
           });
         }
         if (cacheTtl && requestEpoch === readCacheEpoch) {

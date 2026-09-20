@@ -18,7 +18,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from .. import geo_access, geo_updater, i18n, security
+from .. import geo_access, geo_downloads, geo_updater, i18n, security
 from ..http_helpers import parse_body
 from ..services.audit_service import audit_request
 
@@ -30,6 +30,10 @@ _UPDATE_STATUS_BY_CODE = {
     "update_in_progress": 409,
     "credentials_managed": 409,
     "credentials_write_failed": 503,
+    "download_settings_write_failed": 503,
+    "download_settings_unreadable": 409,
+    "download_settings_permissions": 409,
+    "downloads_disabled": 409,
     "credentials_unreadable": 409,
     "license_key_missing": 409,
     "account_id_missing": 409,
@@ -60,9 +64,10 @@ def _update_error_response(exc: geo_updater.GeoUpdateError) -> HTTPException:
 
 @router.get("/api/admin/geo/status")
 async def admin_geo_status(request: Request):
-    """地域策略 + 库状态 + 更新器状态（不含任何凭据）。"""
+    """Admin-only status, including the editable saved proxy URL."""
     security.require_admin(request)
     payload = await asyncio.to_thread(geo_updater.status)
+    payload["download_settings"] = await asyncio.to_thread(geo_downloads.admin_status)
     payload["simulation_supported"] = True
     payload["max_allowed_countries"] = geo_access.MAX_ALLOWED_COUNTRIES
     payload["max_allow_cidrs"] = geo_access.MAX_ALLOW_CIDRS
@@ -115,6 +120,25 @@ async def admin_geo_schedule(request: Request):
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+@router.put("/api/admin/geo/downloads")
+async def admin_geo_downloads(request: Request):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    body = await parse_body(request)
+    if (not isinstance(body, dict) or not {"editions", "proxy_mode"} <= set(body)
+            or set(body) - {"editions", "proxy_mode", "proxy_url", "clear_proxy"}):
+        raise HTTPException(status_code=400, detail="Invalid download settings")
+    try:
+        result = await asyncio.to_thread(geo_updater.configure_downloads, body["editions"], body["proxy_mode"],
+                                        body.get("proxy_url", ""), clear_proxy=body.get("clear_proxy", False))
+    except geo_updater.GeoUpdateError as exc:
+        audit_request(request, admin, "geo_download_settings_update", outcome="failure", reason=exc.code)
+        raise _update_error_response(exc) from None
+    audit_request(request, admin, "geo_download_settings_update", target_type="geo_database",
+                  metadata={"editions": result["editions"], "proxy_mode": result["proxy_mode"]})
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/api/admin/geo/check")
 async def admin_geo_check(request: Request):
     """立即检查并更新库（服务端限频；失败返回稳定错误码）。"""
@@ -128,7 +152,7 @@ async def admin_geo_check(request: Request):
             admin,
             "geo_database_update_requested",
             target_type="geo_database",
-            target_id=geo_updater.EDITION,
+            target_id="selected_geo_databases",
             outcome="failure",
             reason=exc.code,
         )
@@ -138,7 +162,7 @@ async def admin_geo_check(request: Request):
         admin,
         "geo_database_update_requested",
         target_type="geo_database",
-        target_id=geo_updater.EDITION,
+        target_id="selected_geo_databases",
         metadata={
             "trigger": "manual",
             "database_epoch": int(result.get("database_epoch") or 0),

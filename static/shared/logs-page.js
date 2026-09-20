@@ -798,8 +798,8 @@
       return true;
     }
     var content = typeof d.content === 'string' ? d.content : (typeof d.data === 'string' ? d.data : '');
-    if (!content) return false;
-    var blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/plain' });
+    if (!content && !(d.blob instanceof Blob)) return false;
+    var blob = d.blob instanceof Blob ? d.blob : new Blob([content], { type: format === 'json' ? 'application/json' : 'text/plain' });
     var blobUrl = URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.href = blobUrl;
@@ -807,7 +807,7 @@
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(blobUrl);
+    window.setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 60000);
     return true;
   }
   function doExport(format) {
@@ -831,6 +831,29 @@
       else $('logs-export-fail-banner').classList.remove('is-hidden');
       showToast(apiError(error), 'error');
     });
+  }
+
+  async function exportFullLogs() {
+    var button = $('export-all-btn');
+    if (button.disabled) return;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.querySelector('span').textContent = tr('正在导出…');
+    showToast('正在整理全部保留的日志，请稍候', 'info');
+    try {
+      var payload = await window.ScrcpyGateApi.configured('logs.export.full', { method: 'POST' });
+      if (triggerDownload(payload, 'zip') !== true) throw new Error('export_content_unavailable');
+      showToast('完整日志已生成，开始下载 ZIP', 'success');
+    } catch (error) {
+      var status = error && error.detail && error.detail.status;
+      if (status === 401 || status === 403) $('logs-permission-banner').classList.remove('is-hidden');
+      else $('logs-export-fail-banner').classList.remove('is-hidden');
+      showToast(apiError(error), 'error');
+    } finally {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.querySelector('span').textContent = tr('导出完整日志');
+    }
   }
 
   function renderIntegrity(payload) {
@@ -907,6 +930,7 @@
   $('logs-fail-retry').addEventListener('click', function () { loadActive({ show:true }).catch(function () {}); });
   $('logs-down-close').addEventListener('click', function () { $('logs-down-banner').classList.add('is-hidden'); });
   $('export-btn').addEventListener('click', function (e) { e.stopPropagation(); showExportPop(); });
+  $('export-all-btn').addEventListener('click', exportFullLogs);
   $('export-csv').addEventListener('click', function () { doExport('csv'); });
   $('export-json').addEventListener('click', function () { doExport('json'); });
   $('export-text').addEventListener('click', function () { doExport('text'); });

@@ -33,9 +33,10 @@ def _current_attribution(items: list[dict]) -> list[dict]:
     enriched = []
     for item in items:
         kind, _ = geo_access.classify_ip(item.get("source_ip"))
-        result = geo_access.lookup(item.get("source_ip")) if kind == "public" else geo_access.GeoLookup(status=kind)
+        result = geo_access.lookup(item.get("source_ip"), include_location=True) if kind == "public" else geo_access.GeoLookup(status=kind)
         enriched.append({**item, "current_country": result.country,
-                         "geo_lookup_status": result.status, "geo_db_epoch": result.epoch})
+                         "geo_lookup_status": result.status, "geo_db_epoch": result.epoch,
+                         "current_location": result.location})
     return enriched
 
 

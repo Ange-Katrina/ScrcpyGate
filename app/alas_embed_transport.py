@@ -8,6 +8,8 @@ import ipaddress
 import json
 import logging
 import re
+import socket
+import ssl
 import time
 import uuid
 import zlib
@@ -17,7 +19,9 @@ from urllib.request import Request, build_opener
 
 from fastapi import HTTPException, Request as FastAPIRequest
 from fastapi.responses import Response
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 from websockets import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, InvalidHandshake
 
 from . import alas_gateway, i18n
 from .alas_embed_content import (
@@ -485,6 +489,34 @@ def _websocket_connect_kwargs(target: OutboundTarget) -> dict[str, object]:
     return connect_kwargs
 
 
+def _websocket_failure(exc: Exception, phase: str) -> tuple[str, dict]:
+    """Classify transport failures without retaining addresses, headers or close reasons."""
+    info = {"phase": phase, "exception_type": type(exc).__name__}
+    if isinstance(exc, ConnectionClosed):
+        info["close_code"] = getattr(exc.rcvd, "code", 1006)
+        if exc.sent is not None:
+            info["sent_close_code"] = exc.sent.code
+        return "upstream_connection_closed", info
+    if isinstance(exc, InvalidHandshake):
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(status, int) and 100 <= status <= 599:
+            info["upstream_status"] = status
+        return "upstream_handshake_failed", info
+    if isinstance(exc, ssl.SSLError):
+        return "upstream_tls_failed", info
+    if isinstance(exc, socket.gaierror):
+        return "upstream_dns_failed", info
+    if isinstance(exc, ConnectionRefusedError):
+        return "upstream_connection_refused", info
+    if isinstance(exc, TimeoutError):
+        return "upstream_connect_timeout" if phase == "connect" else "upstream_timeout", info
+    if isinstance(exc, OSError):
+        return "upstream_network_error", info
+    return "proxy_internal_error", info
+
+
 async def _cancel_and_join_proxy_tasks(
     tasks: list[asyncio.Task],
     connection_id: str,
@@ -566,6 +598,7 @@ class _WsAuditEmitter:
         severity: str = "warning",
         permission: str = "",
         event: str = "",
+        diagnostics: dict | None = None,
     ) -> None:
         if self._callback is None:
             return
@@ -578,6 +611,15 @@ class _WsAuditEmitter:
             "permission": permission or "none",
             "event": safe_event,
         }
+        # Only structural diagnostics; never forward exception messages or URLs.
+        for name in ("phase", "exception_type"):
+            value = (diagnostics or {}).get(name)
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value):
+                metadata[name] = value
+        for name in ("close_code", "sent_close_code", "upstream_status"):
+            value = (diagnostics or {}).get(name)
+            if type(value) is int and 100 <= value <= 4999:
+                metadata[name] = value
         try:
             result = self._callback(
                 action,
@@ -969,8 +1011,8 @@ class _WebSocketProxySession:
             return close_reason
 
     async def supervise(self) -> int:
-        client_task = asyncio.create_task(self.client_to_upstream())
-        upstream_task = asyncio.create_task(self.upstream_to_client())
+        client_task = asyncio.create_task(self._run_pump(self.client_to_upstream))
+        upstream_task = asyncio.create_task(self._run_pump(self.upstream_to_client))
         tasks = [client_task, upstream_task]
         if self.session_check is not None or self.authorization_check is not None:
             tasks.append(asyncio.create_task(self.authorization_watchdog()))
@@ -1020,11 +1062,6 @@ class _WebSocketProxySession:
                     # join so the outer handler keeps the existing 1011
                     # failure semantics without leaving a sibling task.
                     task_exception = exc
-                    log.warning(
-                        "ALAS_WS_TASK_FAILED connection=%s event=pump reason=task_exception exception_type=%s permission=none task=none",
-                        self.connection_id,
-                        type(exc).__name__,
-                    )
                     continue
                 if task is upstream_task:
                     upstream_result = result
@@ -1070,10 +1107,6 @@ class _WebSocketProxySession:
                         pass
                     except Exception as exc:
                         task_exception = task_exception or exc
-                        log.warning(
-                            "ALAS_WS_TASK_FAILED connection=%s event=pump reason=task_exception permission=none task=none",
-                            self.connection_id,
-                        )
                     else:
                         if isinstance(result, int):
                             close_code = _prefer_proxy_close_code(close_code, result)
@@ -1108,6 +1141,28 @@ class _WebSocketProxySession:
             self.connection_id,
         )
         return close_code
+
+    async def _run_pump(self, pump) -> int | None:
+        """Treat peer departure as lifecycle completion, not an upstream incident."""
+        try:
+            return await pump()
+        except WebSocketDisconnect:
+            # ASGI may discover a departed browser while sending, before receive()
+            # has delivered websocket.disconnect (including network loss / 1006).
+            return 1000
+        except ConnectionClosedOK:
+            return 1000
+        except RuntimeError as exc:
+            closed = (
+                getattr(self.websocket, "application_state", None) is WebSocketState.DISCONNECTED
+                or getattr(self.websocket, "client_state", None) is WebSocketState.DISCONNECTED
+            )
+            if closed and str(exc) in {
+                'Cannot call "send" once a close message has been sent.',
+                'Cannot call "receive" once a disconnect message has been received.',
+            }:
+                return 1000
+            raise
 
 
 async def proxy_websocket(
@@ -1144,7 +1199,6 @@ async def proxy_websocket(
         await websocket.close(code=1011)
         return
 
-    await websocket.accept()
     policy = (
         PyWebIOSessionPolicy(
             decision.config_name,
@@ -1155,14 +1209,14 @@ async def proxy_websocket(
         else None
     )
     authorization_lock = asyncio.Lock()
-    log.debug(
-        "ALAS_WS_OPEN connection=%s event=connect reason=accepted permission=none task=none",
-        connection_id,
-    )
-
+    phase = "accept"
     try:
+        await websocket.accept()
+        log.debug("ALAS_WS_OPEN connection=%s event=connect reason=accepted permission=none task=none", connection_id)
+        phase = "connect"
         connect_kwargs = _websocket_connect_kwargs(validated_target)
         async with websocket_connect(target, **connect_kwargs) as upstream:
+            phase = "transfer"
             session = _WebSocketProxySession(
                 websocket=websocket,
                 upstream=upstream,
@@ -1175,18 +1229,25 @@ async def proxy_websocket(
                 authorization_lock=authorization_lock,
             )
             await session.supervise()
+    except (WebSocketDisconnect, ConnectionClosedOK):
+        log.debug("ALAS_WS_CLOSE connection=%s event=close reason=peer_departed", connection_id)
+        await _close_websocket_safely(websocket, 1000)
     except Exception as exc:
+        reason, diagnostics = _websocket_failure(exc, phase)
         log.warning(
-            "ALAS_WS_CLOSE connection=%s event=exception reason=exception exception_type=%s permission=none task=none",
+            "ALAS_WS_CLOSE connection=%s event=exception reason=%s phase=%s exception_type=%s",
             connection_id,
+            reason,
+            phase,
             type(exc).__name__,
         )
         await audit.emit(
             "alas_embed_ws_failed",
             outcome="failure",
-            reason="upstream_exception",
+            reason=reason,
             severity="error",
             event="exception",
+            diagnostics=diagnostics,
         )
         await _close_websocket_safely(websocket, 1011)
 def _content_type_media_type(content_type: str) -> str:

@@ -8,3 +8,5 @@ cryptography==50.0.0
 # 地域限制（GEO）读库：官方 wheel 覆盖 musllinux x86_64/aarch64，Alpine 不需要编译器。
 # 只读取本地 MMDB，不联网、不做每请求外部查询。
 maxminddb==3.2.0
+# Explicit HTTP/HTTPS download proxies, including TLS-to-proxy tunneling.
+httpx==0.28.1

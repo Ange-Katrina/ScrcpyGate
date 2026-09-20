@@ -351,7 +351,7 @@
     <p class="sec-table-hint">
      按来源 IP 汇总。选择明细查看请求，或直接管理封禁。
     </p>
-    <p class="sec-hint">归属按当前地区库查询；国家筛选、明细与导出保留访问当时的记录。内网地址无法定位国家。</p>
+    <p class="sec-hint">归属按当前地区库显示国家、省份和城市，缺失时显示已有信息。国家筛选、明细与导出保留访问当时的记录；内网地址无法定位。IP 位置仅为网络出口估算。</p>
     <div aria-label="访问记录表格" class="vis-table-wrap sec-scroll-table" role="region" tabindex="0">
      <table class="vis-table">
       <caption class="sr-only">
@@ -742,13 +742,14 @@
       保存地域设置
      </button>
     </div>
-    <details class="sec-disclosure geo-database">
-     <summary>
-      地区库与自动更新
-      <i aria-hidden="true" data-lucide="chevron-down">
-      </i>
-     </summary>
+    <section aria-labelledby="geo-database-title" class="sec-disclosure geo-database">
+     <div class="sec-disclosure-head">
+      <h3 class="sec-disclosure-title" id="geo-database-title">
+       地区库与自动更新
+      </h3>
+     </div>
      <p class="sec-hint" id="geo-database-note"></p>
+     <p class="sec-hint">选择需要下载的国家库或城市库，使用同一组 MaxMind 凭据。City 已包含国家信息；通常只需启用 City。</p>
      <div class="geo-verification" role="status" aria-live="polite">
       <b id="geo-verification-state">正在读取凭据状态…</b>
       <p class="sec-hint" id="geo-verification-time"></p>
@@ -771,6 +772,43 @@
       <p class="sec-hint" id="geo-check-hint" role="status" aria-live="polite"></p>
       <p class="sec-hint">首次配置请填写两项。保存只验证格式；点击「立即检查更新」后，将通过 MaxMind 官方下载端点验证权限并更新地区库。</p>
      </form>
+     <form class="geo-download-form" id="geo-download-form" autocomplete="off">
+      <fieldset class="geo-editions">
+       <legend>下载内容</legend>
+       <label><input id="geo-download-country" type="checkbox"/><span><b>Country</b><small>国家归属，下载较小</small></span></label>
+       <label><input id="geo-download-city" type="checkbox" checked/><span><b>City</b><small>国家、省份与城市（推荐）</small></span></label>
+      </fieldset>
+      <p class="sec-hint">关闭某项不会删除已有数据库；全部关闭将暂停地区库下载，过期后仍按地域策略处理。</p>
+      <div class="geo-proxy-fields">
+       <label class="vis-filter" for="geo-proxy-mode"><span>下载连接</span><select id="geo-proxy-mode"><option value="system">跟随服务器代理</option><option value="direct">直接连接</option><option value="custom">自定义代理</option></select></label>
+       <label class="vis-filter" for="geo-proxy-url" id="geo-proxy-field"><span>HTTP / HTTPS 代理地址</span><input id="geo-proxy-url" type="text" inputmode="url" maxlength="2048" placeholder="http://proxy.example:7890" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="geo-proxy-hint"/></label>
+      </div>
+      <p class="sec-hint" id="geo-proxy-hint">地址须包含端口，可使用 http://用户名:密码@主机:端口；特殊字符需 URL 编码。保存后保持显示，仅在选择自定义代理时使用。</p>
+      <label class="vis-check"><input id="geo-proxy-clear" type="checkbox"/>清除已保存的代理地址</label>
+      <p class="sec-hint" id="geo-proxy-saved"></p>
+      <div class="sec-inline-actions"><button class="guard-btn primary" type="submit" id="geo-download-save">保存下载选项</button></div>
+      <p class="guard-status" id="geo-download-status" role="status" aria-live="polite"></p>
+     </form>
+     <div class="geo-progress" hidden="" id="geo-progress">
+      <div class="geo-progress-head">
+       <span id="geo-progress-stage">
+        正在准备…
+       </span>
+       <span id="geo-progress-percent">
+        0%
+       </span>
+      </div>
+      <div aria-labelledby="geo-progress-stage" aria-valuemax="100" aria-valuemin="0" aria-valuenow="0" class="geo-progress-track" id="geo-progress-track" role="progressbar">
+       <i id="geo-progress-fill">
+       </i>
+      </div>
+      <p class="sec-hint" id="geo-progress-detail"></p>
+     </div>
+     <section class="geo-run-window" aria-labelledby="geo-run-title">
+      <div class="geo-run-toolbar"><h4 id="geo-run-title">下载运行记录</h4><label class="vis-check"><input id="geo-log-follow" type="checkbox" checked/>跟随最新日志</label></div>
+      <div class="geo-run-log" id="geo-run-log" role="log" aria-live="off" aria-label="下载运行记录" tabindex="0" data-i18n-skip></div>
+      <p class="sec-hint">仅保留本次任务最近 120 条记录；重启服务或更改下载配置后清空。不显示密钥或代理地址。</p>
+     </section>
      <form id="geo-schedule-form" class="geo-schedule-form">
       <label class="vis-filter" for="geo-interval"><span>自动检查间隔（小时）</span><input id="geo-interval" type="number" min="1" max="168" step="1" required aria-describedby="geo-schedule-hint"/></label>
       <button type="submit" class="guard-btn ghost" id="geo-schedule-save">保存更新周期</button>
@@ -791,7 +829,7 @@
       </a>
       。
      </p>
-    </details>
+    </section>
    </div>
   </section>
  </div>
@@ -931,6 +969,8 @@
       </div>
      </div>
     </section>
+   </div>
+   <div class="sec-col">
     <section aria-labelledby="sec-pow-title" class="panel sec-card" data-card="pow">
      <div class="panel-header">
       <h2 class="panel-title" id="sec-pow-title">
@@ -1065,6 +1105,8 @@
      </div>
     </details>
    </div>
+  </div>
+  <div class="sec-layout sec-login-activity">
    <div class="sec-col">
     <section aria-labelledby="sec-locked-title" class="panel sec-card" data-card="locked">
      <div class="panel-header">
@@ -1087,6 +1129,8 @@
       </ul>
      </div>
     </section>
+   </div>
+   <div class="sec-col">
     <details aria-labelledby="sec-login-sessions-title" class="panel sec-card sec-disclosure" data-card="login-sessions">
      <summary class="panel-header">
       <h2 class="panel-title" id="sec-login-sessions-title">

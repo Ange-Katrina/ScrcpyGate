@@ -13,7 +13,7 @@
 
 1. 下载到数据目录下的临时文件；
 2. 校验 tar.gz 结构、只取其中的 ``.mmdb``，且**必须**能用 maxminddb 打开、
-   且类型与构建时间满足 Country 库校验；
+   且类型与构建时间满足 City 库校验；
 3. ``os.replace()`` 原子换入正式文件名（同目录内 rename，替换的是 inode，
    `geo_access` 重新加载 reader，外部同路径替换通过文件指纹检测）；
 4. 先复制备份，替换失败保留旧库；激活失败从备份恢复。
@@ -38,14 +38,15 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from collections import deque
 
-from . import geo_access, geo_credentials, security, storage
+from . import geo_access, geo_credentials, geo_downloads, security, storage
 
 log = logging.getLogger("webscrcpy.geo.updater")
 
 DOWNLOAD_BASE_ENV = "GEO_DOWNLOAD_BASE_URL"
 DEFAULT_DOWNLOAD_BASE = "https://download.maxmind.com"
-EDITION = "GeoLite2-Country"
+EDITION = "GeoLite2-City"
 # 官方端点固定路径与查询，凭据仅通过 Authorization 发送。
 DOWNLOAD_PATH = f"/geoip/databases/{EDITION}/download?suffix=tar.gz"
 ACCOUNT_ID_ENV = "GEO_ACCOUNT_ID"
@@ -61,20 +62,18 @@ DEFAULT_JITTER_SECONDS = 1800.0
 # 手动检查的最小间隔与每日下载上限。
 MIN_MANUAL_INTERVAL_SECONDS = 600.0
 MAX_DOWNLOADS_PER_DAY = 30
-# 单个下载的体积上限（GeoLite2-Country tar.gz 约 6 MB 量级；给足余量但不给无限）。
-MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+# City is larger than Country; keep separate compressed and expanded bounds.
+MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
+MAX_DATABASE_BYTES = 256 * 1024 * 1024
 DOWNLOAD_TIMEOUT_SECONDS = 120.0
 # 应用采用构建后 30 天的保守有效期；这不是 MaxMind EULA 的原文期限定义。
 OLD_DATABASE_MAX_AGE_DAYS = 30
 STATE_SETTING = "_geo_update_state"
 INTERVAL_SETTING = "_geo_update_interval_hours"
 _USER_AGENT = "ScrcpyGate-GeoUpdater/1.0"
-_MANAGED_NAME_RE = re.compile(r"^GeoLite2-Country.*\.mmdb$", re.IGNORECASE)
-_MEMBER_RE = re.compile(r"(?:^|/)GeoLite2-Country\.mmdb$", re.IGNORECASE)
-# 接受的库类型：GeoLite2-Country 是默认下载的免费库；持证用户也可以直接放 GeoIP2-Country
-# （同一套 Country 数据结构，maxminddb 读取方式一致）。City/ASN 等其它类型一律拒绝——
-# 它们不是「国家码」库，拿来做地域判定会得到非预期的结果。
-_ACCEPTED_DATABASE_TYPES = ("GeoLite2-Country", "GeoIP2-Country")
+_MEMBER_RE = re.compile(r"(?:^|/)GeoLite2-City\.mmdb$", re.IGNORECASE)
+_ACCEPTED_DATABASE_TYPES = geo_access.CITY_DATABASE_TYPES
+_MANAGED_EDITIONS = ("GeoLite2-Country", EDITION)
 
 _lock = threading.Lock()
 _update_lock = threading.Lock()
@@ -83,6 +82,84 @@ _task: "threading.Thread | None" = None
 _stop_event = threading.Event()
 _wake_event = threading.Event()
 _next_check_ts = 0.0
+
+# 更新进度：只存在于内存（进程重启即清空），供后台界面显示进度条。
+# stage 取值固定，便于前端做翻译映射：
+#   idle → queued → credentials → download → verify → activate → cleanup → done / failed
+# percent 是「整体完成度」，下载阶段按 Content-Length 实时换算；没有 Content-Length
+# 时 total_bytes 为 0，前端显示为不确定进度。
+PROGRESS_STAGES = ("idle", "queued", "credentials", "download", "verify", "activate", "cleanup", "done", "failed")
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS: dict[str, object] = {
+    "stage": "idle", "percent": 0, "downloaded_bytes": 0, "total_bytes": 0, "updated_ts": 0.0,
+}
+_EVENTS: deque[dict] = deque(maxlen=120)
+_EVENT_SEQ = 0
+_TASK_STARTED = 0.0
+_LAST_DOWNLOAD_EVENT = 0.0
+_TASK_EDITION = ""
+_TASK_INDEX = 0
+_TASK_COUNT = 1
+
+
+def _event(stage: str, *, code: str = "", downloaded: int = 0, total: int = 0) -> None:
+    """Fixed event fields only: never accept request URLs, headers or exception text."""
+    global _EVENT_SEQ
+    with _PROGRESS_LOCK:
+        _EVENT_SEQ += 1
+        _EVENTS.append({"id": _EVENT_SEQ, "ts": int(time.time()), "stage": stage,
+                        "edition": _TASK_EDITION, "code": code if re.fullmatch(r"[a-z_]{1,48}", code) else "",
+                        "downloaded_bytes": max(0, downloaded), "total_bytes": max(0, total),
+                        "elapsed_seconds": round(max(0, time.monotonic() - _TASK_STARTED), 1) if _TASK_STARTED else 0})
+
+
+def events() -> list[dict]:
+    with _PROGRESS_LOCK:
+        return [dict(item) for item in _EVENTS]
+
+
+def _set_progress(
+    stage: str,
+    percent: int,
+    *,
+    downloaded: int | None = None,
+    total: int | None = None,
+) -> None:
+    """记录一次进度（stage 非法时归一到 idle，绝不写入非预期内容）。"""
+    safe_stage = stage if stage in PROGRESS_STAGES else "idle"
+    global _LAST_DOWNLOAD_EVENT
+    with _PROGRESS_LOCK:
+        changed = _PROGRESS["stage"] != safe_stage
+        _PROGRESS["stage"] = safe_stage
+        overall = ((_TASK_INDEX - 1) * 100 + percent) / _TASK_COUNT if _TASK_INDEX else percent
+        _PROGRESS["percent"] = max(0, min(100, int(overall)))
+        _PROGRESS.update(edition=_TASK_EDITION, index=_TASK_INDEX, count=_TASK_COUNT)
+        if downloaded is not None:
+            _PROGRESS["downloaded_bytes"] = max(0, int(downloaded))
+        if total is not None:
+            _PROGRESS["total_bytes"] = max(0, int(total))
+        _PROGRESS["updated_ts"] = time.time()
+    now = time.monotonic()
+    if changed or (safe_stage == "download" and (now - _LAST_DOWNLOAD_EVENT >= 2 or (total and downloaded == total))):
+        _LAST_DOWNLOAD_EVENT = now
+        _event(safe_stage, downloaded=downloaded or 0, total=total or 0)
+
+
+def reset_progress() -> None:
+    """开始新任务前清掉上一次的进度，避免界面显示过期进度条。"""
+    global _TASK_STARTED, _TASK_EDITION, _TASK_INDEX, _TASK_COUNT, _LAST_DOWNLOAD_EVENT
+    with _PROGRESS_LOCK:
+        _EVENTS.clear()
+        _TASK_STARTED = 0.0
+        _TASK_EDITION, _TASK_INDEX, _TASK_COUNT = "", 0, 1
+        _LAST_DOWNLOAD_EVENT = 0.0
+        _PROGRESS.clear()
+        _PROGRESS.update(stage="idle", percent=0, downloaded_bytes=0, total_bytes=0, updated_ts=0.0)
+
+
+def progress() -> dict:
+    with _PROGRESS_LOCK:
+        return dict(_PROGRESS)
 
 
 class GeoUpdateError(RuntimeError):
@@ -153,7 +230,8 @@ def _credential_fingerprint() -> str:
 
 def _verification_status(state: dict, credentials: dict) -> dict:
     fingerprint = _credential_fingerprint()
-    matches = bool(fingerprint and fingerprint == state.get("credential_fingerprint"))
+    matches = bool(fingerprint and fingerprint == state.get("credential_fingerprint")
+                   and state.get("credential_edition") == ",".join(geo_downloads.public_status()["editions"]))
     configured = credentials["account_id_present"] and credentials["license_key_present"]
     return {
         "credential_verification": (state.get("credential_verification", "unverified") if matches
@@ -196,7 +274,10 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     try:
-        storage.set_settings({STATE_SETTING: json.dumps(state, ensure_ascii=False, sort_keys=True)[:2000]})
+        payload = json.dumps(state, ensure_ascii=False, sort_keys=True)
+        if len(payload) > 8192:
+            raise ValueError("state_too_large")
+        storage.set_settings({STATE_SETTING: payload})
     except Exception:
         raise GeoUpdateError("state_persist_failed") from None
 
@@ -214,8 +295,10 @@ def _downloads_today(state: dict, now: float | None = None) -> int:
         return 0
 
 
-def _download_url(key: str = "") -> str:
-    return f"{DEFAULT_DOWNLOAD_BASE}{DOWNLOAD_PATH}"
+def _download_url(key: str = "", *, edition: str = EDITION) -> str:
+    if edition not in geo_downloads.EDITIONS:
+        raise GeoUpdateError("download_editions_invalid")
+    return f"{DEFAULT_DOWNLOAD_BASE}/geoip/databases/{edition}/download?suffix=tar.gz"
 
 
 def _check_download_url(url: str) -> None:
@@ -242,29 +325,57 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
-def _fetch(url: str, *, method: str = "GET", deadline: float | None = None) -> tuple[bytes, str]:
-    """Bounded official HTTPS download; credentials never enter URLs or redirected headers."""
+def _fetch(
+    url: str,
+    *,
+    method: str = "GET",
+    deadline: float | None = None,
+    on_progress=None,
+) -> tuple[bytes, str]:
+    """Bounded official HTTPS download; credentials never enter URLs or redirected headers.
+
+    ``on_progress(downloaded, total)`` 在每个分片后回调（最多 4 次/秒），用于界面进度条；
+    total 为 0 表示上游没给 Content-Length，调用方应按「不确定进度」显示。
+    """
     _check_download_url(url)
     deadline = deadline if deadline is not None else time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
     try:
         account, key = geo_credentials.resolve()
     except geo_credentials.CredentialError:
         raise GeoUpdateError("credentials_unreadable") from None
+    try:
+        download_config = geo_downloads.resolve()
+    except geo_downloads.DownloadConfigError as exc:
+        raise GeoUpdateError(str(exc)) from None
     credential = base64.b64encode(f"{account}:{key}".encode()).decode("ascii")
+    if download_config["proxy_mode"] == "custom":
+        return _fetch_via_proxy(url, method=method, deadline=deadline, on_progress=on_progress,
+                                proxy=download_config["proxy_url"], credential=credential)
     request = urllib.request.Request(url, method=method, headers={
         "User-Agent": _USER_AGENT, "Accept": "application/octet-stream",
         "Authorization": "Basic " + credential,
     })
     chunks, total = [], 0
+    reported_at = 0.0
     try:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise GeoUpdateError("timeout")
-        opener = urllib.request.build_opener(_SafeRedirect(deadline))
+        proxy_handler = urllib.request.ProxyHandler({}) if download_config["proxy_mode"] == "direct" else urllib.request.ProxyHandler()
+        opener = urllib.request.build_opener(proxy_handler, _SafeRedirect(deadline))
         with opener.open(request, timeout=min(10.0, remaining)) as response:
             version = str(response.headers.get("Last-Modified", ""))[:128]
             if method == "HEAD":
                 return b"", version
+            try:
+                expected = max(0, int(response.headers.get("Content-Length") or 0))
+            except (TypeError, ValueError):
+                expected = 0
+            if expected:
+                # 长度已知就先报一次 0%，界面立刻从「检查凭据」切到下载阶段。
+                reported_at = time.monotonic()
+                if on_progress is not None:
+                    on_progress(0, expected)
             while True:
                 if time.monotonic() >= deadline or _stop_event.is_set():
                     raise GeoUpdateError("timeout")
@@ -276,6 +387,10 @@ def _fetch(url: str, *, method: str = "GET", deadline: float | None = None) -> t
                 if total > MAX_DOWNLOAD_BYTES:
                     raise GeoUpdateError("download_too_large")
                 chunks.append(chunk)
+                now = time.monotonic()
+                if on_progress is not None and (now - reported_at >= 0.25 or total == expected):
+                    reported_at = now
+                    on_progress(total, expected)
     except urllib.error.HTTPError as error:
         raise GeoUpdateError("license_rejected" if error.code in (401, 403) else "http_error") from None
     except (TimeoutError, urllib.error.URLError, OSError):
@@ -285,40 +400,107 @@ def _fetch(url: str, *, method: str = "GET", deadline: float | None = None) -> t
     return b"".join(chunks), version
 
 
-def _extract_mmdb(payload: bytes) -> bytes:
-    """从 tar.gz 里取出 GeoLite2-Country.mmdb（只读成员，不解压到磁盘，天然免疫路径穿越）。"""
+def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, proxy: str, credential: str) -> tuple[bytes, str]:
+    # HTTPX supports both HTTP CONNECT and TLS-to-proxy with verified target TLS.
+    import httpx
+
+    # Do not let library debug logs expose signed redirect URLs or proxy auth.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    headers = {"User-Agent": _USER_AGENT, "Accept": "application/octet-stream", "Authorization": "Basic " + credential}
+    try:
+        with httpx.Client(proxy=proxy, trust_env=False, follow_redirects=False) as client:
+            for _ in range(6):
+                _check_download_url(url)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or _stop_event.is_set():
+                    raise GeoUpdateError("timeout")
+                with client.stream(method, url, headers=headers, timeout=min(10.0, remaining)) as response:
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        target = str(response.url.join(response.headers.get("location", "")))
+                        _check_download_url(target)
+                        if urlparse(url).hostname != urlparse(target).hostname:
+                            headers.pop("Authorization", None)
+                        url = target
+                        continue
+                    if response.status_code in (401, 403):
+                        raise GeoUpdateError("license_rejected")
+                    if response.status_code == 407:
+                        raise GeoUpdateError("proxy_error")
+                    if response.status_code != 200:
+                        raise GeoUpdateError("http_error")
+                    version = response.headers.get("last-modified", "")[:128]
+                    if method == "HEAD":
+                        return b"", version
+                    try:
+                        expected = max(0, int(response.headers.get("content-length", "0")))
+                    except ValueError:
+                        expected = 0
+                    if expected > MAX_DOWNLOAD_BYTES:
+                        raise GeoUpdateError("download_too_large")
+                    chunks, downloaded, reported = [], 0, 0.0
+                    if on_progress:
+                        on_progress(0, expected)
+                    for chunk in response.iter_raw():
+                        now = time.monotonic()
+                        if now >= deadline or _stop_event.is_set():
+                            raise GeoUpdateError("timeout")
+                        downloaded += len(chunk)
+                        if downloaded > MAX_DOWNLOAD_BYTES:
+                            raise GeoUpdateError("download_too_large")
+                        chunks.append(chunk)
+                        if on_progress and (now - reported >= .25 or downloaded == expected):
+                            reported = now
+                            on_progress(downloaded, expected)
+                    if not downloaded:
+                        raise GeoUpdateError("empty_download")
+                    return b"".join(chunks), version
+            raise GeoUpdateError("download_destination_rejected")
+    except httpx.ProxyError:
+        raise GeoUpdateError("proxy_error") from None
+    except httpx.TimeoutException:
+        raise GeoUpdateError("timeout") from None
+    except (httpx.HTTPError, ValueError, OSError):
+        raise GeoUpdateError("network_error") from None
+
+
+def _extract_mmdb(payload: bytes, *, edition: str = EDITION) -> bytes:
+    """Read only the selected member; never extract archive paths to disk."""
+    if edition not in geo_downloads.EDITIONS:
+        raise GeoUpdateError("download_editions_invalid")
+    member_pattern = re.compile(r"(?:^|/)" + re.escape(edition) + r"\.mmdb$", re.IGNORECASE)
     try:
         with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
             target = None
             expanded = 0
             for index, member in enumerate(archive):
                 expanded += member.size
-                if index > 128 or expanded > MAX_DOWNLOAD_BYTES * 2:
+                if index > 128 or expanded > MAX_DATABASE_BYTES * 2:
                     raise GeoUpdateError("archive_too_large")
                 if not member.isfile():
                     continue
-                if _MEMBER_RE.search(member.name.replace("\\", "/")):
+                if member_pattern.search(member.name.replace("\\", "/")):
                     target = member
                     break
-            if target is None or target.size > MAX_DOWNLOAD_BYTES:
+            if target is None or target.size > MAX_DATABASE_BYTES:
                 raise GeoUpdateError("archive_missing_database")
             handle = archive.extractfile(target)
             if handle is None:
                 raise GeoUpdateError("archive_missing_database")
-            data = handle.read(MAX_DOWNLOAD_BYTES + 1)
+            data = handle.read(MAX_DATABASE_BYTES + 1)
     except GeoUpdateError:
         raise
     except (tarfile.TarError, OSError, EOFError):
         raise GeoUpdateError("archive_unreadable") from None
-    if len(data) > MAX_DOWNLOAD_BYTES:
+    if len(data) > MAX_DATABASE_BYTES:
         raise GeoUpdateError("download_too_large")
     if not data:
         raise GeoUpdateError("empty_database")
     return data
 
 
-def _validate_mmdb(path: Path) -> int:
-    """用 maxminddb 打开并确认是 Country 库；返回 build epoch。"""
+def _validate_mmdb(path: Path, *, accepted_types: tuple = _ACCEPTED_DATABASE_TYPES) -> int:
+    """Validate the edition, then return its build epoch."""
     try:
         import maxminddb  # type: ignore
     except Exception:
@@ -332,7 +514,7 @@ def _validate_mmdb(path: Path) -> int:
         if callable(metadata):
             metadata = metadata()
         database_type = str(getattr(metadata, "database_type", "") or "")
-        if database_type not in _ACCEPTED_DATABASE_TYPES:
+        if database_type not in accepted_types:
             raise GeoUpdateError("unexpected_database_type", database_type)
         return int(getattr(metadata, "build_epoch", 0) or 0)
     finally:
@@ -356,12 +538,14 @@ def _cleanup_old_databases(keep: Path | None, *, now: float | None = None) -> in
         try:
             if entry.is_symlink() or not entry.is_file():
                 continue
-            owned_temp = entry.name.startswith(f".{EDITION}-") and entry.suffix == ".tmp"
+            if keep is not None and entry == keep:
+                continue
+            owned_temp = any(entry.name.startswith(f".{edition}-") for edition in _MANAGED_EDITIONS) and entry.suffix == ".tmp"
             if owned_temp:
                 stale = entry.stat().st_mtime < moment - 3600
-            elif entry.name in (f"{EDITION}.mmdb", f"{EDITION}.mmdb.bak"):
+            elif entry.name in tuple(name for edition in _MANAGED_EDITIONS for name in (f"{edition}.mmdb", f"{edition}.mmdb.bak")):
                 try:
-                    epoch = _validate_mmdb(entry)
+                    epoch = _validate_mmdb(entry, accepted_types=geo_access.ACCEPTED_DATABASE_TYPES)
                 except GeoUpdateError:
                     continue
                 stale = epoch > 0 and moment - epoch > geo_access.MAX_DATABASE_AGE_SECONDS
@@ -378,6 +562,11 @@ def _cleanup_old_databases(keep: Path | None, *, now: float | None = None) -> in
 
 
 def can_update_now(*, now: float | None = None) -> tuple[bool, str]:
+    config = geo_downloads.public_status()
+    if config["error"]:
+        return False, config["error"]
+    if not config["editions"]:
+        return False, "downloads_disabled"
     moment = time.time() if now is None else now
     state = _load_state()
     if not enabled():
@@ -407,6 +596,8 @@ def _reserve(trigger: str, moment: float) -> dict:
     state.update(last_attempt_ts=int(moment), trigger=str(trigger)[:24],
                  attempts=int(state.get("attempts") or 0) + 1, last_error="", job_state="running")
     _save_state(state)
+    reset_progress()
+    _set_progress("queued", 1)
     return state
 
 
@@ -414,72 +605,143 @@ def _audit_result(actor: str, outcome: str, reason: str) -> None:
     try:
         storage.record_audit_event(username=actor or "system", action="geo_database_update_result",
                                    actor_role="admin" if actor else "system", outcome=outcome,
-                                   reason=reason, target_type="geo_database", target_id=EDITION)
+                                   reason=reason, target_type="geo_database",
+                                   target_id=",".join(geo_downloads.public_status()["editions"]))
     except Exception:
         log.warning("GEO_UPDATE_AUDIT_FAILED")
 
 
 def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
+    global _TASK_STARTED, _TASK_EDITION, _TASK_INDEX, _TASK_COUNT
+    reset_progress()
+    _TASK_STARTED = time.monotonic()
+    previous_success = state.get("last_success_ts", 0)
+    try:
+        config = geo_downloads.resolve()
+        editions = config["editions"]
+        if not editions:
+            raise GeoUpdateError("downloads_disabled")
+        _TASK_COUNT = len(editions)
+        _set_progress("queued", 1)
+        _event("connection", code=config["proxy_mode"])
+        outcomes = []
+        for index, edition in enumerate(editions, 1):
+            _TASK_EDITION, _TASK_INDEX = edition, index
+            _set_progress("queued", 1, downloaded=0, total=0)
+            outcomes.append(_perform_edition(state, edition=edition, moment=moment, actor=actor))
+        state.update(job_state="completed" if "completed" in outcomes else "unchanged", last_error="", last_error_ts=0)
+        _save_state(state)
+        _audit_result(actor, "success", state["job_state"])
+        _set_progress("done", 100)
+        return status(now=moment)
+    except (GeoUpdateError, geo_downloads.DownloadConfigError) as exc:
+        code = exc.code if isinstance(exc, GeoUpdateError) else str(exc)
+        state.update(job_state="failed", last_error=code, last_error_ts=int(moment), last_success_ts=previous_success)
+        _save_state(state)
+        # Keep the overall percentage rather than rescaling it a second time.
+        with _PROGRESS_LOCK:
+            _PROGRESS["stage"] = "failed"
+            _PROGRESS["updated_ts"] = time.time()
+        _event("failed", code=code)
+        raise GeoUpdateError(code) from None
+
+
+def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "") -> str:
     temp_path = backup_temp = None
     head_verified = False
     fingerprint = _credential_fingerprint()
-    if fingerprint != state.get("credential_fingerprint"):
+    if fingerprint != state.get("credential_fingerprint") or state.get("credential_edition") != ",".join(geo_downloads.resolve()["editions"]):
         state.update(credential_verified_ts=0, credential_verification="unverified")
-    state.update(credential_fingerprint=fingerprint, credential_checked_ts=int(moment))
+    state.update(credential_fingerprint=fingerprint, credential_checked_ts=int(moment), credential_edition=",".join(geo_downloads.resolve()["editions"]))
     deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
     try:
         directory = _state_path()
         directory.mkdir(parents=True, exist_ok=True)
-        target = directory / f"{EDITION}.mmdb"
-        _, version = _fetch(_download_url(), method="HEAD", deadline=deadline)
+        target = directory / f"{edition}.mmdb"
+        _set_progress("credentials", 5)
+        _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline)
         head_verified = True
         state.update(credential_verification="verified", credential_verified_ts=int(moment))
-        reader, _, error = geo_access._ensure_reader()
-        if version and version == state.get("remote_version") and reader is not None and not error:
-            state.update(job_state="unchanged", last_success_ts=int(moment), last_error="")
-            _save_state(state)
-            _audit_result(actor, "success", "unchanged")
-            return status(now=moment)
-        payload, downloaded_version = _fetch(_download_url(), deadline=deadline)
+        versions = state.get("edition_versions", {})
+        remote_version = versions.get(edition, state.get("remote_version") if state.get("edition") == edition else "")
+        if version and version == remote_version and target.is_file():
+            try:
+                epoch = _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
+                fresh = 0 < epoch <= moment + 86400 and moment - epoch <= geo_access.MAX_DATABASE_AGE_SECONDS
+            except GeoUpdateError:
+                fresh = False
+            if fresh:
+                # Process Country before City. A current City must become the active
+                # reader again if a Country download just replaced the newest file.
+                with geo_access._lock:
+                    reader, _, error = geo_access._ensure_reader()
+                    if geo_access._reader_path != str(target) or error or reader is None:
+                        os.utime(target, None)
+                        geo_access.close()
+                        reader, _, error = geo_access._ensure_reader()
+                    if reader is None or error or geo_access._reader_path != str(target):
+                        raise GeoUpdateError("database_load_failed")
+                state.update(last_success_ts=int(moment), last_error="")
+                _save_state(state)
+                _event("unchanged")
+                return "unchanged"
+
+        def on_download(downloaded: int, total: int) -> None:
+            # 下载占总进度 5% → 75%：这是最长的一段，真实字节数比阶段文字更有用。
+            if total > 0:
+                percent = 5 + int(min(1.0, downloaded / total) * 70)
+            else:
+                percent = 5
+            _set_progress("download", percent, downloaded=downloaded, total=total)
+
+        _set_progress("download", 5, downloaded=0, total=0)
+        payload, downloaded_version = _fetch(_download_url(edition=edition), deadline=deadline, on_progress=on_download)
         state["downloads"] = int(state.get("downloads") or 0) + 1
-        data = _extract_mmdb(payload)
-        with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{EDITION}-", suffix=".tmp", delete=False) as handle:
+        _set_progress("verify", 76, downloaded=len(payload), total=len(payload))
+        data = _extract_mmdb(payload, edition=edition)
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
             temp_path = Path(handle.name)
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        epoch = _validate_mmdb(temp_path)
+        epoch = _validate_mmdb(temp_path, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
         if not (0 < epoch <= moment + 86400 and moment - epoch <= geo_access.MAX_DATABASE_AGE_SECONDS):
             raise GeoUpdateError("database_expired")
         if time.monotonic() >= deadline:
             raise GeoUpdateError("timeout")
+        _set_progress("activate", 88, downloaded=len(payload), total=len(payload))
         # Copy rather than move the active file: failed final replace cannot remove it.
         with geo_access._lock:
-            if target.exists():
-                with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{EDITION}-", suffix=".tmp", delete=False) as handle:
+            had_target = target.exists()
+            if had_target:
+                with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
                     backup_temp = Path(handle.name)
                 shutil.copyfile(target, backup_temp)
-                os.replace(backup_temp, directory / f"{EDITION}.mmdb.bak")
+                os.replace(backup_temp, directory / f"{edition}.mmdb.bak")
             os.replace(temp_path, target)
             geo_access.close()
             reader, reader_epoch, reader_error = geo_access._ensure_reader()
-            if reader is None or reader_error:
-                backup = directory / f"{EDITION}.mmdb.bak"
-                if backup.exists():
-                    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{EDITION}-", suffix=".tmp", delete=False) as handle:
+            if reader is None or reader_error or geo_access._reader_path != str(target):
+                backup = directory / f"{edition}.mmdb.bak"
+                geo_access.close()
+                if had_target and backup.exists():
+                    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
                         backup_temp = Path(handle.name)
                     shutil.copyfile(backup, backup_temp)
                     os.replace(backup_temp, target)
-                    geo_access.close()
-                    geo_access._ensure_reader()
+                else:
+                    target.unlink(missing_ok=True)
+                geo_access._ensure_reader()
                 raise GeoUpdateError("database_load_failed")
+        _set_progress("cleanup", 96)
         state.update(last_download_ts=int(moment), last_success_ts=int(moment), last_error="",
                      database_epoch=reader_epoch, database_size_bytes=target.stat().st_size,
                      removed_old_databases=_cleanup_old_databases(target, now=moment),
-                     remote_version=downloaded_version or version, job_state="completed")
+                     remote_version=downloaded_version or version, edition=edition)
+        state.setdefault("edition_versions", {})[edition] = downloaded_version or version
         _save_state(state)
-        _audit_result(actor, "success", "updated")
-        return status(now=moment)
+        _event("updated", downloaded=len(payload), total=len(payload))
+        return "completed"
     except Exception as exc:
         code = exc.code if isinstance(exc, GeoUpdateError) else "update_io_failed"
         if code == "license_rejected":
@@ -489,6 +751,8 @@ def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
         state.update(last_error=code, last_error_ts=int(moment), job_state="failed")
         _save_state(state)
         _audit_result(actor, "failure", code)
+        # 失败时保留停在哪个阶段，界面据此显示「在哪一步失败」，而不是把进度清零。
+        _event("error", code=code)
         raise GeoUpdateError(code) from None
     finally:
         for path in (temp_path, backup_temp):
@@ -553,12 +817,16 @@ def status(*, now: float | None = None) -> dict:
     last_success = float(state.get("last_success_ts") or 0)
     credentials = geo_credentials.status()
     next_due = 0.0
-    if enabled() and credentials["account_id_present"] and credentials["license_key_present"]:
+    if enabled() and credentials["account_id_present"] and credentials["license_key_present"] and geo_downloads.public_status()["editions"]:
         next_due = _next_check_ts or (last_success + interval_seconds() if last_success else 0)
     return {
         "enabled": enabled(),
         "running": _update_lock.locked(),
         "job_state": "running" if _update_lock.locked() else ("interrupted" if state.get("job_state") == "running" else state.get("job_state", "idle")),
+        # 进度只用于显示：进程重启后回到 idle/0%，界面据此隐藏进度条。
+        "progress": progress(),
+        "events": events(),
+        "download_settings": geo_downloads.public_status(),
         "attempts_today": int(state.get("attempts") or 0) if state.get("day") == _today(moment) else 0,
         **credentials,
         **_verification_status(state, credentials),
@@ -592,6 +860,26 @@ def status(*, now: float | None = None) -> dict:
     }
 
 
+def configure_downloads(editions: object, mode: object, proxy: object = "", *, clear_proxy: bool = False) -> dict:
+    global _next_check_ts
+    if not _update_lock.acquire(blocking=False):
+        raise GeoUpdateError("update_in_progress")
+    try:
+        geo_downloads.save(editions, mode, proxy, clear_proxy=clear_proxy)
+        state = _load_state()
+        state.update(job_state="idle", last_error="", last_error_ts=0)
+        _save_state(state)
+        reset_progress()
+    except geo_downloads.DownloadConfigError as exc:
+        raise GeoUpdateError(str(exc)) from None
+    finally:
+        _update_lock.release()
+    _next_check_ts = 0.0
+    _wake_event.set()
+    start()
+    return geo_downloads.public_status()
+
+
 def configure_credentials(account: object = "", key: object = "", *, clear: bool = False) -> dict:
     """Serialize credential rotation with downloads; never change an in-flight pair."""
     if not _update_lock.acquire(blocking=False):
@@ -608,6 +896,7 @@ def configure_credentials(account: object = "", key: object = "", *, clear: bool
                 state.pop(field, None)
             state.update(last_error="", last_error_ts=0, job_state="idle")
             _save_state(state)
+            reset_progress()
     except geo_credentials.CredentialError as exc:
         raise GeoUpdateError(str(exc)) from None
     finally:

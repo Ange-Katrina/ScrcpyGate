@@ -129,13 +129,33 @@ plugin. Host-network installations must follow their separate manual procedure.
 
 For an interactive update, run `./deploy.sh --menu` and choose **Update to a
 published image**. The menu queries the public GHCR registry and lists existing
-`latest` (stable), `edge` (development), and the ten highest stable version tags.
+`latest` (stable), `edge` (main), `dev` (development testing), and the ten highest stable version tags.
 Choose a number, review the full image reference, and confirm to start the update.
 Discovery uses host Python 3 and requires no GitHub login. If discovery fails,
 the configured default and manual tag/digest entry remain available. A custom
 `SCRCPYGATE_UPDATE_IMAGE` is preserved as the default; discovery lists only the
 official ScrcpyGate package. Tag discovery does not replace the subsequent image
 pull and health checks. Canceling the selector makes no deployment changes.
+
+For features published from `dev`, use `--image ghcr.io/ange-katrina/scrcpygate:dev`.
+A running bridge deployment originally built from source can switch to published
+images with the same command; no source archive upload is needed. Wait for the
+selected commit's GHCR publication job to succeed first.
+
+Successful updates, including an already-current image, save the selected target
+in `SCRCPYGATE_UPDATE_IMAGE`. Later updates only require:
+
+```sh
+sudo sh ./deploy.sh --update
+```
+
+The running image stays pinned by digest while the update target retains its
+selected tag. Fixed version/digest targets remain fixed until selected again.
+Pull or health-check failures do not switch the saved update target. Older scripts
+can continue using the explicit `--image` command; update `deploy.sh` once to gain
+target persistence and the `dev` menu entry. Updating the application image does
+not replace host deployment scripts or Compose files. Sync those files separately
+only when the release's upgrade notes require it.
 
 The script preserves the actual old image under a local rollback tag, pulls before
 changing configuration, and creates an online SQLite snapshot with its matching
@@ -153,6 +173,56 @@ The Logs page now defaults to 30 days of age-based retention. Existing row-count
 and file-rotation limits still apply. Choose **Do not clean up** to disable only
 age-based deletion; export any audit history needed before upgrading. Audit cleanup
 preserves the chain anchor and only removes a continuous expired prefix.
+
+## Disk maintenance
+
+Source installation rebuilds the image; Docker retains cache and may retain old
+untagged images. Published-image updates avoid building on the server, but keep
+data/configuration backups and tagged rollback images. Container stdout already
+rotates according to the Compose logging limits. Check actual usage before
+choosing what to remove:
+
+```sh
+sudo sh ./deploy.sh --disk-usage
+sudo sh ./deploy.sh --prune-images
+sudo sh ./deploy.sh --prune-build-cache
+```
+
+Menu 25 exposes the same operations. Cleanup requires interactive confirmation
+or an explicit `--yes`. Image cleanup matches only `io.scrcpygate.managed=true`
+and Docker's default dangling-image rules: tagged images and images referenced
+by any container are retained. The label is included in new builds; old unlabeled
+images are not silently included. Cleanup does not select by a broad name prefix.
+
+Build-cache cleanup runs `docker builder prune --all --force --keep-storage 1GB`
+after confirmation. This targets unused cache in the current Docker context's
+default builder, including cache from other projects. Future builds may need to
+download dependencies again. The retention target is not a hard total-disk cap;
+active cache and custom buildx builders may retain additional space. Neither
+cleanup command removes containers, volumes, application data, keys or backups.
+Docker reports the actual reclaimed bytes; image sizes share layers and cannot
+simply be added together. Host directory usage refers to the host running the
+script, which may differ from a remote Docker context.
+
+With an older script, inspect `sudo docker system df` first. The following native
+commands retain Docker's own confirmation prompts:
+
+```sh
+sudo docker builder prune --all --keep-storage 1GB
+sudo docker image ls --filter dangling=true
+sudo docker image prune
+```
+
+The last command covers unused dangling images across the entire Docker context,
+including other projects and old unlabeled builds. Use it only after reviewing
+that scope. Tagged rollback images are retained. Avoid using volume removal or
+`docker system prune -a --volumes` as an update cleanup shortcut.
+
+To bound ordinary/pre-update backups, set `SCRCPYGATE_BACKUP_KEEP=3` in `.env`.
+Pruning happens when a subsequent backup is created, including matching checksum
+and configuration sidecars. Pre-restore archives and tagged rollback images are
+retained separately; review those against recovery needs rather than deleting
+them automatically. No new automatic deletion policy is enabled by upgrading.
 
 ## Deploy manually
 

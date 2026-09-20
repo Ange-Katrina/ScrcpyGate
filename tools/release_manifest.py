@@ -33,6 +33,7 @@ ROOT_DIRECTORIES = ("app", "static", "adb/linux")
 SKIPPED_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 FORBIDDEN_NAMES = {
     ".geo-credentials.json",
+    ".geo-downloads.json",
     ".env",
     "backups",
     "browser-data",
