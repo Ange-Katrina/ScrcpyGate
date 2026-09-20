@@ -215,7 +215,9 @@
     var method = String(options.method || 'GET').toUpperCase();
     var headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
-    if (options.body !== undefined && options.body !== null && !(options.body instanceof FormData)) {
+    if (options.body instanceof Blob) {
+      headers.set('Content-Type', 'application/octet-stream');
+    } else if (options.body !== undefined && options.body !== null && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json');
     }
     var token = csrfToken();

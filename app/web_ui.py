@@ -297,7 +297,7 @@ EXTRA_SCRIPTS = {
 }
 
 # Load shared administration refinements after the legacy page styles.
-for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "logs"):
+for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "logs", "security"):
     EXTRA_SCRIPTS[f"{_page}.html"].append(
         f'<link rel="stylesheet" href="{asset_url("css/admin-workspace.css")}">'
     )

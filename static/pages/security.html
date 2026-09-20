@@ -747,6 +747,18 @@
      <p class="sec-hint geo-intro">City 包含国家、省份与城市，通常只需选择 City；下载成功前继续使用现有地区库。</p>
      <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats"></ul>
      <p class="sec-hint" id="geo-database-note"></p>
+     <div id="geo-database-inventory" class="geo-inventory" aria-label="已安装地区库" data-i18n-skip></div>
+     <section class="geo-import-section" aria-labelledby="geo-import-title">
+      <h4 id="geo-import-title">手动上传地区库</h4>
+      <p class="sec-hint" id="geo-upload-help">服务器无法下载时，可从 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。</p>
+      <form id="geo-upload-form" class="geo-upload-form">
+       <label class="vis-filter"><span>数据库类型</span><select id="geo-upload-edition" name="edition"><option value="GeoLite2-City">City · 国家、省份与城市</option><option value="GeoLite2-Country">Country · 仅国家</option></select></label>
+       <label class="vis-filter geo-upload-file"><span>选择数据库文件</span><input type="file" id="geo-upload-file" name="database" accept=".mmdb,.tar.gz" required aria-describedby="geo-upload-help geo-upload-status"/></label>
+       <button class="guard-btn primary" id="geo-upload-submit" type="submit">校验并启用</button>
+      </form>
+      <p class="sec-hint">先检查类型、构建时间、大小和 SHA-256；相同内容不重复替换。更新前保留一份旧库备份，失败时继续使用原库。</p>
+      <p class="guard-status" id="geo-upload-status" role="status" aria-live="polite" data-i18n-skip></p>
+     </section>
      <div class="geo-settings-grid">
       <section class="geo-settings-section" aria-labelledby="geo-credentials-title">
        <div class="geo-credentials-heading"><h4 id="geo-credentials-title">下载凭据</h4><span id="geo-credentials-presence" role="status">读取中…</span></div>
@@ -868,7 +880,7 @@
          人机验证
         </b>
         <span>
-         失败后要求完成滑块 + 工作量证明；关闭则只保留失败计数与封禁
+         失败后点击验证按钮完成工作量证明；关闭则只保留失败计数与封禁
         </span>
        </div>
        <button aria-checked="true" aria-label="人机验证" class="guard-switch sg-switch" data-field="captcha_enabled" id="security-guard-captcha" role="switch" type="button">
@@ -1043,15 +1055,15 @@
       <div class="guard-row" id="security-pow-bench-row">
        <div class="guard-copy">
         <b>
-         本机试算
+         验证耗时预估
         </b>
         <span>
-         按期望计算量估算；点右侧按钮用本机浏览器把难度换算成真实耗时
+         测一下这台设备完成验证大约需要多久。手机或较慢设备可能耗时更长，每次结果会有波动。
         </span>
         <span class="pow-math" id="security-pow-math">
          —
         </span>
-        <span class="pow-math" id="security-pow-bench-result">
+        <span class="pow-math" id="security-pow-bench-result" role="status" aria-live="polite" data-i18n-skip>
         </span>
        </div>
        <div class="guard-field">
@@ -1062,6 +1074,9 @@
       </div>
      </div>
     </section>
+
+   </div>
+  </div>
     <details class="sec-disclosure sec-advanced">
      <summary>
       高级登录设置
@@ -1103,8 +1118,6 @@
       </div>
      </div>
     </details>
-   </div>
-  </div>
   <div class="sec-layout sec-login-activity">
    <div class="sec-col">
     <section aria-labelledby="sec-locked-title" class="panel sec-card" data-card="locked">

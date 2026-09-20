@@ -22,6 +22,12 @@
     policyNotice: document.getElementById('geo-policy-notice'),
     databaseNote: document.getElementById('geo-database-note'),
     dbStats: document.getElementById('geo-db-stats'),
+    inventory: document.getElementById('geo-database-inventory'),
+    uploadForm: document.getElementById('geo-upload-form'),
+    uploadFile: document.getElementById('geo-upload-file'),
+    uploadEdition: document.getElementById('geo-upload-edition'),
+    uploadSubmit: document.getElementById('geo-upload-submit'),
+    uploadStatus: document.getElementById('geo-upload-status'),
     mode: document.getElementById('geo-mode'),
     countries: document.getElementById('geo-countries'),
     preset: document.getElementById('geo-country-preset'),
@@ -166,6 +172,8 @@
       var label = progressStages[entry.stage] || ({updated:'该数据库已更新', unchanged:'该数据库已是最新版本', connection:'下载连接', error:'本次更新失败', head_unsupported:'服务器不支持 HEAD 检查，正在尝试直接下载', backup:'新库已校验，正在备份旧库', backup_saved:'旧库已备份为 .bak，正在替换'})[entry.stage] || '正在更新地区库…';
       if (entry.stage === 'done') label = '本次检查完成';
       var extra = '';
+      if (entry.stage === 'identical') label = '内容校验一致，未重复替换或增加备份';
+      if (entry.stage === 'imported') label = '手动上传的地区库已启用';
       if (entry.stage === 'connection') extra = t(({system:'跟随服务器代理', direct:'直接连接', custom:'自定义代理'})[entry.code] || '');
       else if (entry.code) extra = t(errorText(entry.code));
       var httpDetail = httpErrorText(entry.http);
@@ -224,6 +232,8 @@
     database_lookup_failed: '地区库查询失败，请检查库状态。',
     unexpected_database_type: '下载的数据库类型不匹配，原有地区库保留。',
     download_too_large: '地区库超过下载大小限制，原有地区库保留。',
+    download_size_mismatch: '下载文件大小与服务器声明不一致，原有地区库保留。',
+    download_checksum_mismatch: '下载文件校验值不一致，原有地区库保留。',
     license_key_missing: '请先配置 License Key。', account_id_missing: '请先配置 Account ID。',
     account_id_invalid: 'Account ID 必须为数字（最多 20 位）。', license_key_invalid: '请填写有效的 License Key（最多 256 个字符）。',
     license_key_required: '更换 Account ID 时请同时填写新 Key。', credentials_invalid: '凭据格式不正确。',
@@ -246,7 +256,7 @@
     daily_limit: '已达到今日 30 次尝试上限，请明日重试。', update_in_progress: '更新正在进行，请完成后再修改凭据。',
     updater_disabled: '自动更新已由服务器关闭（GEO_UPDATE_ENABLED=false）。'
   };
-  function errorText(code) { return updateErrors[code] || code; }
+  function errorText(code) { return updateErrors[code] || uploadError(code) || code; }
   function httpErrorText(value) {
     var status = value && Number(value.status);
     if (!Number.isInteger(status) || status < 100 || status > 599) return '';
@@ -350,6 +360,7 @@
       var items = [
         ['定位精度', status.cityAvailable ? '国家 / 省份 / 城市' : status.databaseAvailable ? '仅国家' : '不可用', status.cityAvailable ? 'ok' : 'warn'],
         ['库版本', status.databaseEpoch ? fmtTime(status.databaseEpoch) : '—'],
+        ['当前库大小', fmtBytes(status.databaseSizeBytes)],
         ['上次成功', fmtTime(status.lastSuccessTs)],
         ['下次自动检查', fmtTime(status.nextDueTs)]
       ];
@@ -358,6 +369,7 @@
       }).join('');
     }
 
+    renderInventory(status);
     renderCheck();
     if (els.save) els.save.disabled = false;
     renderProgress(status);
@@ -393,6 +405,76 @@
           : '地区库尚未就绪。请展开「地区库与自动更新」完成配置，再开启地域限制。';
       els.policyNotice.setAttribute('data-tone', status.mode === 'enforce' && !status.forcedOff ? 'error' : '');
     }
+  }
+
+  function renderInventory(status) {
+    if (!els.inventory) return;
+    els.inventory.replaceChildren();
+    ['GeoLite2-Country', 'GeoLite2-City'].forEach(function (edition) {
+      var item = (status.databases || []).find(function (row) { return row.edition === edition; });
+      var row = document.createElement('section');
+      row.className = 'geo-inventory-row';
+      var heading = document.createElement('h5');
+      heading.textContent = edition;
+      var badge = document.createElement('span');
+      badge.textContent = t(!item ? '未安装' : item.error ? '需要更新' : item.active ? '正在使用' : '已安装');
+      badge.dataset.tone = !item || item.error ? 'warn' : 'ok';
+      heading.appendChild(badge);
+      row.appendChild(heading);
+      var info = document.createElement('dl');
+      var fields = item ? [
+        ['库大小', fmtBytes(item.size_bytes)], ['构建时间', fmtTime(item.epoch)],
+        ['更新时间', fmtTime(item.modified_ts)],
+        ['来源', t(item.source === 'upload' ? '手动上传' : item.source === 'download' ? '在线下载' : '服务器文件')],
+        ['备份占用', item.backup_size_bytes ? fmtBytes(item.backup_size_bytes) : t('无备份')]
+      ] : [['状态', t('可在线下载或手动上传')]];
+      fields.forEach(function (pair) {
+        var cell = document.createElement('div');
+        var term = document.createElement('dt'); term.textContent = t(pair[0]);
+        var value = document.createElement('dd'); value.textContent = pair[1];
+        cell.append(term, value); info.appendChild(cell);
+      });
+      row.appendChild(info); els.inventory.appendChild(row);
+    });
+    els.uploadSubmit.disabled = !!state.uploadBusy || status.running;
+  }
+
+  async function uploadDatabase(event) {
+    event.preventDefault();
+    if (!api() || state.uploadBusy || !els.uploadForm.reportValidity()) return;
+    var file = els.uploadFile.files[0];
+    var archive = /\.tar\.gz$/i.test(file.name);
+    var limit = archive ? (state.status || {}).uploadArchiveMaxBytes || 134217728 : (state.status || {}).uploadMaxBytes || 268435456;
+    function report(text, tone) { els.uploadStatus.textContent = t(text); els.uploadStatus.dataset.tone = tone || ''; }
+    if (!archive && !/\.mmdb$/i.test(file.name)) { report('请选择 .mmdb 或官方 .tar.gz 文件。', 'error'); return; }
+    if (!file.size || file.size > limit) { report('文件为空或超过上传大小限制。', 'error'); return; }
+    state.uploadBusy = true;
+    els.uploadSubmit.disabled = true;
+    els.uploadForm.setAttribute('aria-busy', 'true');
+    report('正在上传并校验，请勿关闭页面…');
+    try {
+      var result = await api().configured('geo.upload', { file: file, edition: els.uploadEdition.value, format: archive ? 'tar.gz' : 'mmdb' });
+      report(result.unchanged ? '内容校验一致，未重复替换或增加备份' : '手动上传的地区库已启用', 'ok');
+      els.uploadStatus.textContent += ' · ' + fmtBytes(result.size_bytes) + ' · SHA-256: ' + result.sha256;
+      els.uploadFile.value = '';
+    } catch (error) {
+      var headers = error && error.detail && error.detail.headers || {};
+      var code = headers['x-geo-update-error'];
+      report(uploadError(code) || requestError(error), 'error');
+    } finally {
+      state.uploadBusy = false;
+      els.uploadForm.removeAttribute('aria-busy');
+      els.uploadSubmit.disabled = false;
+      await load();
+    }
+  }
+
+  function uploadError(code) {
+    return ({database_invalid:'文件不是有效的 MMDB 数据库。', unexpected_database_type:'所选类型与文件中的数据库类型不一致。',
+      database_expired:'地区库已过期或构建时间异常，请上传近期发布的库。', database_older:'上传的数据库比当前版本旧，请选择较新的库。',
+      archive_unreadable:'压缩文件无法读取，请选择官方 tar.gz 文件。', archive_missing_database:'压缩包中未找到所选类型的数据库。',
+      download_too_large:'文件为空或超过上传大小限制。', download_size_mismatch:'文件长度不一致，请重新上传。',
+      update_in_progress:'已有地区库任务运行中，请完成后重试。', upload_timeout:'上传超时，请检查网络后重试。'})[code] || '';
   }
 
   var jobPoll = null;
@@ -487,7 +569,7 @@
     load();
   });
   if (window.ScrcpyGateI18n && window.ScrcpyGateI18n.on) {
-    window.ScrcpyGateI18n.on(function () { renderProgress(state.status || {}); renderLogs(true); renderCheck(); renderPresence(); });
+    window.ScrcpyGateI18n.on(function () { renderProgress(state.status || {}); renderInventory(state.status || {}); renderLogs(true); renderCheck(); renderPresence(); });
   }
 
   function currentForm() {
@@ -737,6 +819,12 @@
   });
   if (els.check) els.check.addEventListener('click', checkNow);
   if (els.refresh) els.refresh.addEventListener('click', load);
+  if (els.uploadForm) els.uploadForm.addEventListener('submit', uploadDatabase);
+  if (els.uploadFile) els.uploadFile.addEventListener('change', function () {
+    var file = els.uploadFile.files[0];
+    els.uploadStatus.textContent = file ? file.name + ' · ' + fmtBytes(file.size) : '';
+    els.uploadStatus.dataset.tone = '';
+  });
 
   load();
 })();

@@ -1,6 +1,12 @@
 /* Shared navigation and account interactions for admin pages. */
 (function () {
       'use strict';
+      // Content disclosures default open on desktop. Action popovers/editors remain closed.
+      // Only initialise once: resizing and refreshes must not override a user's choice.
+      var compactSettings = window.matchMedia('(max-width:767px)').matches;
+      document.querySelectorAll('details.admin-disclosure, details.sec-disclosure:not(.ban-editor), details.geo-help').forEach(function (details) {
+        if (!details.closest('dialog')) details.open = !compactSettings;
+      });
       if (window.lucide) { lucide.createIcons(); }
 
       function closeAllMenus() {

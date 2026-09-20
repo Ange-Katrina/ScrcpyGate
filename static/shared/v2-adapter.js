@@ -6218,6 +6218,9 @@
       })(data.progress),
       databaseEpoch: Number(database.epoch || 0),
       databaseSizeBytes: Number(database.size_bytes || 0),
+      databases: Array.isArray(data.databases) ? data.databases : [],
+      uploadMaxBytes: Number(data.upload_max_bytes || 268435456),
+      uploadArchiveMaxBytes: Number(data.upload_archive_max_bytes || 134217728),
       databaseError: String(database.error || ''),
       mode: String(policy.mode || 'off'),
       forcedOff: policy.forced_off === true,
@@ -6359,6 +6362,11 @@
     'geo.downloads.save': function (opts) { return apiPut('/api/admin/geo/downloads', (opts && opts.body) || {}); },
     'geo.status': handlerGeoStatus,
     'geo.check': handlerGeoCheck,
+    'geo.upload': function (opts) {
+      // File bodies bypass mirroring diagnostics; keep shared auth/CSRF/error handling.
+      return Api.request('/api/admin/geo/upload', { method: 'POST', body: opts.file,
+        query: { edition: opts.edition, format: opts.format }, timeout: 660000 });
+    },
     'geo.simulate': handlerGeoSimulate,
     'geo.preview': handlerGeoPreview,
     'geo.settings.update': handlerGeoSettingsUpdate,

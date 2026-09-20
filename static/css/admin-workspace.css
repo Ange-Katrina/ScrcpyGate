@@ -1,4 +1,42 @@
 /* Shared task hierarchy for administration pages. Existing page tokens remain authoritative. */
+.admin-shell {
+  --control-height:36px;
+  --control-radius:8px;
+  --control-text:13px;
+}
+/* Shared control geometry, retaining each action's primary/danger semantics. */
+.admin-shell :is(.btn-primary,.btn-ghost,.tool-btn,.refresh-btn,.empty-btn,.dash-log-btn,.dash-resolve-btn,.q-btn,.wb-btn,.guard-btn,.guard-preset) {
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  box-sizing:border-box; min-height:var(--control-height); height:auto;
+  padding:8px 12px; border-radius:var(--control-radius); font-family:inherit;
+  font-size:var(--control-text); line-height:1.4; vertical-align:middle;
+}
+.admin-shell :is(.dev-btn-sm,.row-btn,.alas-row-action,.alas-btn-sm,.alas-btn-ghost-sm) {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px;
+  padding:6px 10px; border-radius:var(--control-radius); font-size:var(--control-text); line-height:1.4;
+}
+.admin-shell :is(.btn-primary-lg,.btn-danger-lg) { min-height:44px; border-radius:var(--control-radius); font:inherit; }
+.admin-shell :is(button,select,input,textarea) { font-family:inherit; }
+.admin-shell :is(input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),select,textarea) {
+  box-sizing:border-box; max-width:100%; min-height:var(--control-height);
+  border-radius:var(--control-radius); font-size:var(--control-text); line-height:1.5;
+  color:var(--admin-text); background-color:var(--admin-field);
+}
+.admin-shell select { padding-block:6px; padding-inline:10px 28px; }
+.admin-shell select option { background:var(--admin-surface); color:var(--admin-text); }
+.admin-shell :is(input[type=checkbox],input[type=radio]) { accent-color:var(--admin-brand); }
+.admin-shell :is(button,input,select,textarea,summary,a):focus-visible { outline:2px solid var(--admin-brand); outline-offset:3px; }
+.admin-shell :is(button,input,select,textarea):disabled { cursor:not-allowed; }
+.admin-shell :is(.guard-field,.search-box) input { min-height:0; background:transparent; }
+.admin-shell .guard-field { min-height:var(--control-height); height:auto; border-radius:var(--control-radius); }
+.admin-shell .guard-field select { border-radius:0; background:transparent; }
+.admin-shell :is(.sec-inline-actions,.panel-tools,.wb-actions,.quality-actions-btns) { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.admin-shell :is(.sec-tab,.alas-tab,.quality-seg,.filter-tab,.view-tab,.seg-btn,.alert-seg-btn) { min-height:var(--control-height); font-size:var(--control-text); line-height:1.5; }
+@media (max-width:767px) {
+  .admin-shell { --control-height:44px; --control-text:14px; }
+  .admin-shell :is(.dev-btn-sm,.row-btn,.alas-row-action,.alas-btn-sm,.alas-btn-ghost-sm) { min-height:44px; }
+  .admin-shell :is(input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),select,textarea) { font-size:16px; }
+}
 .workspace-refined { --workspace-gap:16px; }
 .workspace-refined .page-heading { margin-bottom:20px; }
 .workspace-refined .page-heading h1 { letter-spacing:-.025em; }

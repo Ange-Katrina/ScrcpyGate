@@ -302,14 +302,6 @@
     return { base: base, step: step, max: ceiling };
   }
 
-  function fmtHashCount(bits) {
-    // 顺序搜索的期望尝试次数就是 2^bits（每次尝试等价一次 SHA-256）。
-    var value = Math.pow(2, bits);
-    if (value >= 1e6) return (value / 1e6).toFixed(value / 1e6 >= 10 ? 0 : 1) + 'M';
-    if (value >= 1e3) return (value / 1e3).toFixed(value / 1e3 >= 10 ? 0 : 1) + 'k';
-    return String(Math.round(value));
-  }
-
   function fmtDuration(seconds) {
     if (!isFinite(seconds) || seconds <= 0) return '—';
     if (seconds < 1) return Math.max(1, Math.round(seconds * 1000)) + ' ms';
@@ -326,7 +318,7 @@
 
   function renderPow() {
     var values = powNumbers();
-    // 动态部分刻意只用 2^n / k / ms 这类与语言无关的记号，静态句子留在 HTML 里走 i18n。
+    // Keep technical difficulty fields, but explain their effect in waiting time.
     if (powSummary) {
       powSummary.textContent = values ? (values.base + ' → ' + values.max + ' bits') : '—';
     }
@@ -343,9 +335,8 @@
       button.setAttribute('aria-pressed', String(!!values && values.base === parts[0] && values.step === parts[1] && values.max === parts[2]));
     });
     if (powMath) {
-      powMath.textContent = values
-        ? ('2^' + values.base + ' ≈ ' + fmtHashCount(values.base) + ' · 2^' + values.max + ' ≈ ' + fmtHashCount(values.max))
-        : '—';
+      powMath.textContent = translate('点击「开始试算」，查看当前难度在这台设备上的预计等待时间。');
+      powMath.hidden = !!powBench;
     }
   }
 
@@ -367,41 +358,46 @@
       powBenchResult.textContent = '';
       return;
     }
-    powBenchResult.textContent = 'ref 2^' + powBench.referenceBits + ' = ' + Math.round(powBench.elapsedMs) + ' ms → '
-      + '2^' + values.base + ' ≈ ' + powTimeRange(values.base)
-      + ' · 2^' + values.max + ' ≈ ' + powTimeRange(values.max);
+    powBenchResult.replaceChildren();
+    [['首次验证', values.base], ['连续失败后（难度上限）', values.max]].forEach(function (entry) {
+      var row = document.createElement('span');
+      var label = document.createElement('span'); label.textContent = translate(entry[0]);
+      var value = document.createElement('strong'); value.textContent = translate('约') + ' ' + powTimeRange(entry[1]);
+      row.append(label, value); powBenchResult.appendChild(row);
+    });
+    var note = document.createElement('small');
+    note.textContent = translate('这是本机性能估算，不是每次验证的保证时间；不会修改当前设置。');
+    powBenchResult.appendChild(note);
   }
 
   function runPowBenchmark() {
     if (!powBenchmarkBtn) return;
     var solver = window.ScrcpyGatePow;
     if (!solver || typeof solver.benchmark !== 'function') {
-      if (powBenchResult) powBenchResult.textContent = 'webcrypto_unavailable';
+      if (powBenchResult) powBenchResult.textContent = translate('当前浏览器无法试算，请使用支持 Web Crypto 的浏览器。');
       return;
     }
     // 基准难度取 12 bits（期望 4096 次哈希），几十毫秒出结果；再用
     // 「单次哈希耗时 × 2^bits」推算目标难度，避免真去算配置里的 18+ bits。
-    var REFERENCE_BITS = 12;
     powBenchmarkBtn.disabled = true;
-    powBenchmarkBtn.textContent = '试算中…';
+    powBenchmarkBtn.textContent = translate('试算中…');
     var started = performance.now();
     function finish() {
       powBenchmarkBtn.disabled = false;
-      powBenchmarkBtn.textContent = '重新试算';
+      powBenchmarkBtn.textContent = translate('重新试算');
     }
     solver.benchmark().then(function (result) {
       powBench = {
         msPerHash: (performance.now() - started) / Math.max(1, result.hashes),
         hashes: result.hashes,
-        elapsedMs: performance.now() - started,
-        referenceBits: REFERENCE_BITS
+        elapsedMs: performance.now() - started
       };
       renderPow();
       renderPowBenchResult();
       finish();
     })['catch'](function () {
       powBench = null;
-      if (powBenchResult) powBenchResult.textContent = 'benchmark_failed';
+      if (powBenchResult) powBenchResult.textContent = translate('试算失败，请重试。');
       finish();
     });
   }
@@ -476,6 +472,9 @@
 
   // 试算按钮复用 guard-preset 的样式，但不是「强度预置」，所以不进预置选择器。
   if (powBenchmarkBtn) powBenchmarkBtn.addEventListener('click', runPowBenchmark);
+  if (window.ScrcpyGateI18n && window.ScrcpyGateI18n.on) {
+    window.ScrcpyGateI18n.on(function () { renderPow(); renderPowBenchResult(); });
+  }
 
   if (saveBtn) saveBtn.addEventListener('click', function () {
     // 只提交被修改过的字段：未触碰的项保持服务端当前值，避免把按秒存储的

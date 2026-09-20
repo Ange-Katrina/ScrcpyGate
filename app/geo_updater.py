@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import io
+import gzip
 import hashlib
 import base64
 import shutil
@@ -379,12 +380,68 @@ def _http_failure(status_code: int, url: str, method: str) -> GeoUpdateError:
                           http={"status": status_code, "method": method, "endpoint": endpoint})
 
 
+def _response_metadata(headers) -> dict:
+    """ETag is a version validator, never assume it is an MD5 checksum."""
+    try:
+        size = max(0, int(headers.get("Content-Length") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    etag = str(headers.get("ETag") or "")
+    strong_etag = etag.startswith('"') and etag.endswith('"') and len(etag) <= 512
+    md5 = str(headers.get("Content-MD5") or "")
+    try:
+        digest = base64.b64decode(md5, validate=True)
+        if len(digest) != 16:
+            md5 = ""
+    except ValueError:
+        md5 = ""
+    return {"size": size, "etag": hashlib.sha256(etag.encode()).hexdigest() if strong_etag else "",
+            "md5": md5, "modified": str(headers.get("Last-Modified") or "")[:128]}
+
+
+def _verify_transfer(payload: bytes, info: dict) -> None:
+    if info.get("size") and len(payload) != info["size"]:
+        raise GeoUpdateError("download_size_mismatch")
+    if info.get("md5") and base64.b64encode(hashlib.md5(payload, usedforsecurity=False).digest()).decode() != info["md5"]:
+        raise GeoUpdateError("download_checksum_mismatch")
+
+
+def _file_digest(path: Path) -> dict:
+    sha = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_DATABASE_BYTES:
+                raise GeoUpdateError("download_too_large")
+            sha.update(chunk)
+    return {"size": size, "sha256": sha.hexdigest()}
+
+
+def _same_remote(current: dict, previous: dict) -> bool:
+    # Missing evidence never implies equality. All available validators must agree.
+    return bool(current.get("size") and current.get("modified") and (current.get("etag") or current.get("md5"))
+                and current == previous)
+
+
+def _matches_local(path: Path, expected: dict | None) -> bool:
+    """A broken existing file needs repair; only candidates fail hard on bad hashes."""
+    if not isinstance(expected, dict) or not expected.get("sha256"):
+        return False
+    try:
+        size = path.stat().st_size
+        return bool(0 < size <= MAX_DATABASE_BYTES and size == expected.get("size") and _file_digest(path) == expected)
+    except (OSError, GeoUpdateError):
+        return False
+
+
 def _fetch(
     url: str,
     *,
     method: str = "GET",
     deadline: float | None = None,
     on_progress=None,
+    metadata: dict | None = None,
 ) -> tuple[bytes, str]:
     """Bounded official HTTPS download; credentials never enter URLs or redirected headers.
 
@@ -404,7 +461,7 @@ def _fetch(
     credential = base64.b64encode(f"{account}:{key}".encode()).decode("ascii")
     if download_config["proxy_mode"] == "custom":
         return _fetch_via_proxy(url, method=method, deadline=deadline, on_progress=on_progress,
-                                proxy=download_config["proxy_url"], credential=credential)
+                                proxy=download_config["proxy_url"], credential=credential, metadata=metadata)
     request = urllib.request.Request(url, method=method, headers={
         "User-Agent": _USER_AGENT, "Accept": "*/*",
         "Authorization": "Basic " + credential,
@@ -421,12 +478,17 @@ def _fetch(
             if response.status != 200:
                 raise _http_failure(response.status, response.url, method)
             version = str(response.headers.get("Last-Modified", ""))[:128]
+            info = _response_metadata(response.headers)
+            if metadata is not None:
+                metadata.update(info)
             if method == "HEAD":
                 return b"", version
             try:
                 expected = max(0, int(response.headers.get("Content-Length") or 0))
             except (TypeError, ValueError):
                 expected = 0
+            if expected > MAX_DOWNLOAD_BYTES:
+                raise GeoUpdateError("download_too_large")
             if expected:
                 # 长度已知就先报一次 0%，界面立刻从「检查凭据」切到下载阶段。
                 reported_at = time.monotonic()
@@ -453,10 +515,13 @@ def _fetch(
         raise GeoUpdateError(_network_error_code(error)) from None
     if not chunks:
         raise GeoUpdateError("empty_download")
-    return b"".join(chunks), version
+    payload = b"".join(chunks)
+    _verify_transfer(payload, info)
+    return payload, version
 
 
-def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, proxy: str, credential: str) -> tuple[bytes, str]:
+def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, proxy: str, credential: str,
+                     metadata: dict | None = None) -> tuple[bytes, str]:
     # HTTPX supports both HTTP CONNECT and TLS-to-proxy with verified target TLS.
     import httpx
 
@@ -482,6 +547,9 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                     if response.status_code != 200:
                         raise _http_failure(response.status_code, url, method)
                     version = response.headers.get("last-modified", "")[:128]
+                    info = _response_metadata(response.headers)
+                    if metadata is not None:
+                        metadata.update(info)
                     if method == "HEAD":
                         return b"", version
                     try:
@@ -506,7 +574,9 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                             on_progress(downloaded, expected)
                     if not downloaded:
                         raise GeoUpdateError("empty_download")
-                    return b"".join(chunks), version
+                    payload = b"".join(chunks)
+                    _verify_transfer(payload, info)
+                    return payload, version
             raise GeoUpdateError("download_destination_rejected")
     except httpx.ProxyError:
         raise GeoUpdateError("proxy_error") from None
@@ -521,8 +591,21 @@ def _extract_mmdb(payload: bytes, *, edition: str = EDITION) -> bytes:
     if edition not in geo_downloads.EDITIONS:
         raise GeoUpdateError("download_editions_invalid")
     member_pattern = re.compile(r"(?:^|/)" + re.escape(edition) + r"\.mmdb$", re.IGNORECASE)
+    class BoundedGzip:
+        def __init__(self, handle):
+            self.handle, self.count = handle, 0
+
+        def read(self, size):
+            data = self.handle.read(min(size, 1024 * 1024))
+            self.count += len(data)
+            if self.count > MAX_DATABASE_BYTES * 2:
+                raise GeoUpdateError("archive_too_large")
+            return data
+
     try:
-        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+        # Count every decompressed byte, including PAX/GNU headers hidden by tarfile.
+        with gzip.GzipFile(fileobj=io.BytesIO(payload)) as expanded_stream, tarfile.open(
+                fileobj=BoundedGzip(expanded_stream), mode="r|") as archive:
             target = None
             expanded = 0
             for index, member in enumerate(archive):
@@ -568,7 +651,14 @@ def _validate_mmdb(path: Path, *, accepted_types: tuple = _ACCEPTED_DATABASE_TYP
         database_type = str(getattr(metadata, "database_type", "") or "")
         if database_type not in accepted_types:
             raise GeoUpdateError("unexpected_database_type", database_type)
+        # Opening metadata alone can miss a truncated/corrupt search tree.
+        for address in ("1.1.1.1", "8.8.8.8", "2001:4860:4860::8888"):
+            reader.get(address)
         return int(getattr(metadata, "build_epoch", 0) or 0)
+    except GeoUpdateError:
+        raise
+    except Exception:
+        raise GeoUpdateError("database_invalid") from None
     finally:
         try:
             reader.close()
@@ -707,6 +797,60 @@ def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
         raise GeoUpdateError(code, http=http) from None
 
 
+
+def _select_database(target: Path) -> None:
+    with geo_access._lock:
+        reader, _, error = geo_access._ensure_reader()
+        if reader is not None and not error and geo_access._reader_path == str(target):
+            return
+        os.utime(target, None)
+        geo_access.close()
+        reader, _, error = geo_access._ensure_reader()
+        if reader is None or error or geo_access._reader_path != str(target):
+            raise GeoUpdateError("database_load_failed")
+
+
+def _activate_database(temp_path: Path, target: Path, *, persist=None) -> int:
+    directory = target.parent
+    edition = target.stem
+    backup_temp = None
+    try:
+        # Copy rather than move the active file: failed final replace cannot remove it.
+        with geo_access._lock:
+            had_target = target.exists()
+            if had_target:
+                _event("backup")
+                with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
+                    backup_temp = Path(handle.name)
+                shutil.copy2(target, backup_temp)
+                os.replace(backup_temp, directory / f"{edition}.mmdb.bak")
+                _event("backup_saved")
+            os.replace(temp_path, target)
+            try:
+                geo_access.close()
+                reader, reader_epoch, reader_error = geo_access._ensure_reader()
+                if reader is None or reader_error or geo_access._reader_path != str(target):
+                    raise GeoUpdateError("database_load_failed")
+                if persist is not None:
+                    persist(reader_epoch)
+            except Exception:
+                backup = directory / f"{edition}.mmdb.bak"
+                geo_access.close()
+                if had_target and backup.exists():
+                    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
+                        backup_temp = Path(handle.name)
+                    shutil.copy2(backup, backup_temp)
+                    os.replace(backup_temp, target)
+                else:
+                    target.unlink(missing_ok=True)
+                geo_access._ensure_reader()
+                raise
+        return reader_epoch
+    finally:
+        if backup_temp is not None:
+            backup_temp.unlink(missing_ok=True)
+
+
 def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "") -> str:
     temp_path = backup_temp = None
     head_verified = False
@@ -721,8 +865,9 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
         target = directory / f"{edition}.mmdb"
         _set_progress("credentials", 5)
         version = ""
+        remote_info = {}
         try:
-            _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline)
+            _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline, metadata=remote_info)
             head_verified = True
             state.update(credential_verification="verified", credential_verified_ts=int(moment))
         except GeoUpdateError as exc:
@@ -731,24 +876,24 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
             if exc.http.get("status") not in (405, 501):
                 raise
             _event("head_unsupported", http=exc.http)
-        versions = state.get("edition_versions", {})
-        remote_version = versions.get(edition, state.get("remote_version") if state.get("edition") == edition else "")
-        if version and version == remote_version and target.is_file():
+        receipt = state.get("edition_receipts", {}).get(edition, {})
+        if _same_remote(remote_info, receipt.get("remote", {})) and target.is_file():
             try:
                 epoch = _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
                 fresh = 0 < epoch <= moment + 86400 and moment - epoch <= geo_access.MAX_DATABASE_AGE_SECONDS
             except GeoUpdateError:
                 fresh = False
-            if fresh:
+            if fresh and _matches_local(target, receipt.get("local")):
                 # Process Country before City. A current City must become the active
                 # reader again if a Country download just replaced the newest file.
                 with geo_access._lock:
                     reader, _, error = geo_access._ensure_reader()
-                    if geo_access._reader_path != str(target) or error or reader is None:
+                    prefer_target = edition == geo_downloads.resolve()["editions"][-1]
+                    if (prefer_target and geo_access._reader_path != str(target)) or error or reader is None:
                         os.utime(target, None)
                         geo_access.close()
                         reader, _, error = geo_access._ensure_reader()
-                    if reader is None or error or geo_access._reader_path != str(target):
+                    if reader is None or error or (prefer_target and geo_access._reader_path != str(target)):
                         raise GeoUpdateError("database_load_failed")
                 state.update(last_success_ts=int(moment), last_error="")
                 _save_state(state)
@@ -764,7 +909,8 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
             _set_progress("download", percent, downloaded=downloaded, total=total)
 
         _set_progress("download", 5, downloaded=0, total=0)
-        payload, downloaded_version = _fetch(_download_url(edition=edition), deadline=deadline, on_progress=on_download)
+        downloaded_info = {}
+        payload, downloaded_version = _fetch(_download_url(edition=edition), deadline=deadline, on_progress=on_download, metadata=downloaded_info)
         head_verified = True
         state.update(credential_verification="verified", credential_verified_ts=int(moment))
         state["downloads"] = int(state.get("downloads") or 0) + 1
@@ -780,39 +926,29 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
             raise GeoUpdateError("database_expired")
         if time.monotonic() >= deadline:
             raise GeoUpdateError("timeout")
+        local_info = _file_digest(temp_path)
+        identical = _matches_local(target, local_info)
+        state.setdefault("edition_receipts", {})[edition] = {"remote": downloaded_info, "local": local_info}
+        state.setdefault("edition_sources", {})[edition] = {"source": "download", "installed_ts": int(moment), "epoch": epoch}
+        if identical:
+            _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
+            if edition == geo_downloads.resolve()["editions"][-1] or not geo_access.status()["database"]["available"]:
+                _select_database(target)
+            state.update(last_success_ts=int(moment), last_error="")
+            _save_state(state)
+            _event("identical")
+            return "unchanged"
         _set_progress("activate", 88, downloaded=len(payload), total=len(payload))
-        # Copy rather than move the active file: failed final replace cannot remove it.
-        with geo_access._lock:
-            had_target = target.exists()
-            if had_target:
-                _event("backup")
-                with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
-                    backup_temp = Path(handle.name)
-                shutil.copyfile(target, backup_temp)
-                os.replace(backup_temp, directory / f"{edition}.mmdb.bak")
-                _event("backup_saved")
-            os.replace(temp_path, target)
-            geo_access.close()
-            reader, reader_epoch, reader_error = geo_access._ensure_reader()
-            if reader is None or reader_error or geo_access._reader_path != str(target):
-                backup = directory / f"{edition}.mmdb.bak"
-                geo_access.close()
-                if had_target and backup.exists():
-                    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
-                        backup_temp = Path(handle.name)
-                    shutil.copyfile(backup, backup_temp)
-                    os.replace(backup_temp, target)
-                else:
-                    target.unlink(missing_ok=True)
-                geo_access._ensure_reader()
-                raise GeoUpdateError("database_load_failed")
+        def persist_install(reader_epoch):
+            state.update(last_download_ts=int(moment), last_success_ts=int(moment), last_error="",
+                         database_epoch=reader_epoch, database_size_bytes=local_info["size"],
+                         remote_version=downloaded_version or version, edition=edition)
+            state.setdefault("edition_versions", {})[edition] = downloaded_version or version
+            _save_state(state)
+
+        _activate_database(temp_path, target, persist=persist_install)
         _set_progress("cleanup", 96)
-        state.update(last_download_ts=int(moment), last_success_ts=int(moment), last_error="",
-                     database_epoch=reader_epoch, database_size_bytes=target.stat().st_size,
-                     removed_old_databases=_cleanup_old_databases(target, now=moment),
-                     remote_version=downloaded_version or version, edition=edition)
-        state.setdefault("edition_versions", {})[edition] = downloaded_version or version
-        _save_state(state)
+        state["removed_old_databases"] = _cleanup_old_databases(target, now=moment)
         _event("updated", downloaded=len(payload), total=len(payload))
         return "completed"
     except Exception as exc:
@@ -834,6 +970,102 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
                     path.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+
+def import_database(path: Path, *, edition: str, archive: bool = False) -> dict:
+    """Import an admin's bounded upload. Caller owns _update_lock through reception."""
+    global _TASK_STARTED, _TASK_EDITION, _TASK_INDEX, _TASK_COUNT
+    if edition not in _MANAGED_EDITIONS:
+        raise GeoUpdateError("download_editions_invalid")
+    moment = time.time()
+    reset_progress()
+    _TASK_STARTED, _TASK_EDITION, _TASK_INDEX, _TASK_COUNT = time.monotonic(), edition, 1, 1
+    temp = None
+    try:
+        state = _load_state()
+        _set_progress("verify", 76)
+        if archive:
+            if path.stat().st_size > MAX_DOWNLOAD_BYTES:
+                raise GeoUpdateError("download_too_large")
+            data = _extract_mmdb(path.read_bytes(), edition=edition)
+            with tempfile.NamedTemporaryFile(dir=_state_path(), prefix=".geo-import-", suffix=".tmp", delete=False) as handle:
+                temp = Path(handle.name)
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            candidate = temp
+        else:
+            candidate = path
+        accepted = geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES
+        local = _file_digest(candidate)
+        epoch = _validate_mmdb(candidate, accepted_types=accepted)
+        if not (0 < epoch <= moment + 86400 and moment - epoch <= geo_access.MAX_DATABASE_AGE_SECONDS):
+            raise GeoUpdateError("database_expired")
+        target = _state_path() / f"{edition}.mmdb"
+        identical = _matches_local(target, local)
+        # Persist inside the activation transaction, so state-write failures roll back.
+        state.setdefault("edition_receipts", {})[edition] = {"local": local, "remote": {}}
+        state.setdefault("edition_sources", {})[edition] = {"source": "upload", "installed_ts": int(moment), "epoch": epoch}
+        state.update(job_state="unchanged" if identical else "completed", last_success_ts=int(moment),
+                     last_error="", last_error_ts=0, last_http_error={})
+        if not identical:
+            if target.is_file():
+                try:
+                    old_epoch = _validate_mmdb(target, accepted_types=accepted)
+                except GeoUpdateError:
+                    old_epoch = 0
+                if old_epoch > epoch:
+                    raise GeoUpdateError("database_older")
+            _set_progress("activate", 88)
+            _activate_database(candidate, target, persist=lambda _: _save_state(state))
+        else:
+            _select_database(target)
+            _save_state(state)
+        _event("identical" if identical else "imported")
+        _set_progress("done", 100)
+        return {"ok": True, "unchanged": identical, "edition": edition, "size_bytes": local["size"],
+                "sha256": local["sha256"], "database_epoch": epoch}
+    except Exception as exc:
+        code = exc.code if isinstance(exc, GeoUpdateError) else "update_io_failed"
+        with _PROGRESS_LOCK:
+            _PROGRESS.update(stage="failed", updated_ts=time.time())
+        _event("failed", code=code)
+        try:
+            failed_state = _load_state()
+            failed_state.update(job_state="failed", last_error=code, last_error_ts=int(moment), last_http_error={})
+            _save_state(failed_state)
+        except GeoUpdateError:
+            log.warning("GEO_IMPORT_FAILURE_STATE_UNAVAILABLE")
+        raise GeoUpdateError(code) from None
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+
+
+def database_inventory(state: dict) -> list[dict]:
+    """Metadata only; never return server paths or hash a large file while polling."""
+    result = []
+    active = geo_access.latest_database()
+    for edition in _MANAGED_EDITIONS:
+        target = _state_path() / f"{edition}.mmdb"
+        try:
+            stats = target.stat()
+            if not target.is_file():
+                continue
+            try:
+                epoch = _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
+                error = "" if 0 < epoch <= time.time() + 86400 and time.time() - epoch <= geo_access.MAX_DATABASE_AGE_SECONDS else "database_expired"
+            except GeoUpdateError as exc:
+                epoch, error = 0, exc.code
+            backup = target.with_suffix(".mmdb.bak")
+            source = state.get("edition_sources", {}).get(edition, {})
+            result.append({"edition": edition, "size_bytes": stats.st_size, "epoch": epoch, "error": error,
+                           "active": active == target, "modified_ts": int(stats.st_mtime),
+                           "source": source.get("source", "external"),
+                           "backup_size_bytes": backup.stat().st_size if backup.is_file() else 0})
+        except OSError:
+            continue
+    return result
 
 
 def update_now(*, trigger: str = "manual", actor: str = "", now: float | None = None) -> dict:
@@ -927,6 +1159,9 @@ def status(*, now: float | None = None) -> dict:
         "next_due_ts": int(next_due),
         "old_database_max_age_days": OLD_DATABASE_MAX_AGE_DAYS,
         "database": base["database"],
+        "databases": database_inventory(state),
+        "upload_max_bytes": MAX_DATABASE_BYTES,
+        "upload_archive_max_bytes": MAX_DOWNLOAD_BYTES,
         "policy": {
             "mode": base["mode"],
             "forced_off": base["forced_off"],

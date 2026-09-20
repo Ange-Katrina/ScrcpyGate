@@ -14,6 +14,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
+from pathlib import Path
+
+import anyio
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -57,6 +62,8 @@ _UPDATE_STATUS_BY_CODE = {
     "http_401": 502,
     "http_403": 502,
     "directory_unwritable": 500,
+    "download_too_large": 413,
+    "upload_timeout": 408,
 }
 
 
@@ -181,6 +188,72 @@ async def admin_geo_check(request: Request):
         },
     )
     return JSONResponse({"ok": True, "status": result}, status_code=202, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/admin/geo/upload")
+async def admin_geo_upload(request: Request, edition: str = Query(...), format: str = Query("mmdb")):
+    """Bounded raw upload: authenticate before reading, ignore user filenames entirely."""
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    if edition not in geo_downloads.EDITIONS or format not in ("mmdb", "tar.gz"):
+        raise HTTPException(400, "Invalid database edition or format")
+    if request.headers.get("content-type", "").split(";")[0] != "application/octet-stream":
+        raise HTTPException(415, "Expected application/octet-stream")
+    limit = geo_updater.MAX_DOWNLOAD_BYTES if format == "tar.gz" else geo_updater.MAX_DATABASE_BYTES
+    try:
+        length = int(request.headers.get("content-length", "0"))
+    except ValueError:
+        raise HTTPException(400, "Invalid Content-Length") from None
+    if length < 0 or length > limit:
+        raise _update_error_response(geo_updater.GeoUpdateError("download_too_large"))
+    if not geo_updater._update_lock.acquire(blocking=False):
+        raise _update_error_response(geo_updater.GeoUpdateError("update_in_progress"))
+    temp = None
+    try:
+        directory = geo_access.database_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".geo-upload-", suffix=".tmp", delete=False) as handle:
+            temp = Path(handle.name)
+            received = 0
+            with anyio.fail_after(600):
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > limit:
+                        raise geo_updater.GeoUpdateError("download_too_large")
+                    handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if received == 0:
+            raise geo_updater.GeoUpdateError("empty_database")
+        if length and received != length:
+            raise geo_updater.GeoUpdateError("download_size_mismatch")
+        # Shield activation: don't release the shared lock while its worker still runs.
+        task = asyncio.create_task(asyncio.to_thread(geo_updater.import_database, temp, edition=edition, archive=format == "tar.gz"))
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        result = task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        audit_request(request, admin, "geo_database_import", target_type="geo_database", target_id=edition,
+                      metadata={"size_bytes": result["size_bytes"], "unchanged": result["unchanged"]})
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except (geo_updater.GeoUpdateError, OSError, TimeoutError) as exc:
+        error = exc if isinstance(exc, geo_updater.GeoUpdateError) else geo_updater.GeoUpdateError(
+            "upload_timeout" if isinstance(exc, TimeoutError) else "update_io_failed")
+        audit_request(request, admin, "geo_database_import", target_type="geo_database", target_id=edition,
+                      outcome="failure", reason=error.code)
+        raise _update_error_response(error) from None
+    finally:
+        try:
+            if temp is not None:
+                temp.unlink(missing_ok=True)
+        finally:
+            geo_updater._update_lock.release()
+            geo_updater._wake_event.set()
 
 
 @router.get("/api/admin/geo/simulate")
