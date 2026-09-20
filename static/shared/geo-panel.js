@@ -163,11 +163,13 @@
     });
     entries.forEach(function (entry) {
       if (existing.has(String(entry.id))) return;
-      var label = progressStages[entry.stage] || ({updated:'该数据库已更新', unchanged:'该数据库已是最新版本', connection:'下载连接', error:'本次更新失败'})[entry.stage] || '正在更新地区库…';
+      var label = progressStages[entry.stage] || ({updated:'该数据库已更新', unchanged:'该数据库已是最新版本', connection:'下载连接', error:'本次更新失败', head_unsupported:'服务器不支持 HEAD 检查，正在尝试直接下载', backup:'新库已校验，正在备份旧库', backup_saved:'旧库已备份为 .bak，正在替换'})[entry.stage] || '正在更新地区库…';
       if (entry.stage === 'done') label = '本次检查完成';
       var extra = '';
       if (entry.stage === 'connection') extra = t(({system:'跟随服务器代理', direct:'直接连接', custom:'自定义代理'})[entry.code] || '');
       else if (entry.code) extra = t(errorText(entry.code));
+      var httpDetail = httpErrorText(entry.http);
+      if (httpDetail) extra += (extra ? ' · ' : '') + httpDetail;
       if (entry.stage === 'download' || entry.stage === 'updated') extra = fmtBytes(entry.downloaded_bytes) + (num(entry.total_bytes) > 0 ? ' / ' + fmtBytes(entry.total_bytes) : '');
       var line = document.createElement('p');
       line.setAttribute('data-event-id', String(entry.id));
@@ -245,6 +247,16 @@
     updater_disabled: '自动更新已由服务器关闭（GEO_UPDATE_ENABLED=false）。'
   };
   function errorText(code) { return updateErrors[code] || code; }
+  function httpErrorText(value) {
+    var status = value && Number(value.status);
+    if (!Number.isInteger(status) || status < 100 || status > 599) return '';
+    var method = ['HEAD', 'GET'].indexOf(value.method) >= 0 ? value.method : '';
+    var endpoint = value.endpoint === 'maxmind' ? 'MaxMind' : value.endpoint === 'storage' ? t('文件存储服务') : '';
+    var hint = ({400:'下载请求被拒绝，请检查更新服务版本。', 404:'下载地址或数据库版本不存在，请检查更新服务版本和下载权限。',
+      405:'下载服务不接受此请求方法。', 406:'下载服务不接受请求的内容格式，请更新应用后重试。',
+      451:'下载服务因地区或法律限制拒绝请求。'})[status];
+    return [method, 'HTTP ' + status, endpoint, hint ? t(hint) : ''].filter(Boolean).join(' · ');
+  }
   function requestError(error) {
     var headers = error && error.detail && error.detail.headers || {};
     return errorText(headers['x-geo-update-error'] || headers['X-Geo-Update-Error'] || '') || (error && error.message) || '未知错误';
@@ -280,6 +292,10 @@
       : status.jobState === 'completed' ? t('地区库已更新')
       : status.jobState === 'unchanged' ? t('地区库已是最新版本')
       : !status.canUpdateNow ? t(errorText(status.blockedReason || '')) : t('已就绪，可以检查更新。');
+    if (status.lastError && status.lastHttpError) {
+      var detail = httpErrorText(status.lastHttpError);
+      if (detail) hint += ' ' + detail;
+    }
     if (remaining && status.blockedReason === 'too_soon' && !state.downloadDirty) {
       hint += ' ' + t('可重试倒计时：') + Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0');
     }

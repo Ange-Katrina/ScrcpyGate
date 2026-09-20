@@ -6195,6 +6195,7 @@
       blockedReason: String(data.blocked_reason || ''),
       lastSuccessTs: Number(data.last_success_ts || 0),
       lastError: String(data.last_error || ''),
+      lastHttpError: data.last_http_error || {},
       lastErrorTs: Number(data.last_error_ts || 0),
       nextDueTs: Number(data.next_due_ts || 0),
       removedOldDatabases: Number(data.removed_old_databases || 0),

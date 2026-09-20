@@ -106,20 +106,31 @@ _TASK_INDEX = 0
 _TASK_COUNT = 1
 
 
-def _event(stage: str, *, code: str = "", downloaded: int = 0, total: int = 0) -> None:
+def _safe_http_details(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    status_code = value.get("status")
+    if type(status_code) is not int or not 100 <= status_code <= 599:
+        return {}
+    return {"status": status_code,
+            "method": value.get("method") if value.get("method") in ("HEAD", "GET") else "",
+            "endpoint": value.get("endpoint") if value.get("endpoint") in ("maxmind", "storage") else ""}
+
+
+def _event(stage: str, *, code: str = "", downloaded: int = 0, total: int = 0, http: dict | None = None) -> None:
     """Fixed event fields only: never accept request URLs, headers or exception text."""
     global _EVENT_SEQ
     with _PROGRESS_LOCK:
         _EVENT_SEQ += 1
         _EVENTS.append({"id": _EVENT_SEQ, "ts": int(time.time()), "stage": stage,
                         "edition": _TASK_EDITION, "code": code if re.fullmatch(r"[a-z_]{1,48}", code) else "",
-                        "downloaded_bytes": max(0, downloaded), "total_bytes": max(0, total),
+                        "downloaded_bytes": max(0, downloaded), "total_bytes": max(0, total), "http": _safe_http_details(http),
                         "elapsed_seconds": round(max(0, time.monotonic() - _TASK_STARTED), 1) if _TASK_STARTED else 0})
 
 
 def events() -> list[dict]:
     with _PROGRESS_LOCK:
-        return [dict(item) for item in _EVENTS]
+        return [{**item, "http": dict(item["http"])} for item in _EVENTS]
 
 
 def _set_progress(
@@ -169,10 +180,11 @@ def progress() -> dict:
 class GeoUpdateError(RuntimeError):
     """更新失败（携带稳定错误码，绝不携带密钥）。"""
 
-    def __init__(self, code: str, detail: str = "") -> None:
+    def __init__(self, code: str, detail: str = "", *, http: dict | None = None) -> None:
         super().__init__(code)
         self.code = code
         self.detail = redact(detail)
+        self.http = _safe_http_details(http)
 
 
 def redact(text: object) -> str:
@@ -360,6 +372,13 @@ def _http_error_code(status_code: int, host: str | None) -> str:
     return "http_error"
 
 
+def _http_failure(status_code: int, url: str, method: str) -> GeoUpdateError:
+    host = urlparse(url).hostname
+    endpoint = "maxmind" if host == "download.maxmind.com" else "storage" if host == _REDIRECT_HOST else ""
+    return GeoUpdateError(_http_error_code(status_code, host),
+                          http={"status": status_code, "method": method, "endpoint": endpoint})
+
+
 def _fetch(
     url: str,
     *,
@@ -387,7 +406,7 @@ def _fetch(
         return _fetch_via_proxy(url, method=method, deadline=deadline, on_progress=on_progress,
                                 proxy=download_config["proxy_url"], credential=credential)
     request = urllib.request.Request(url, method=method, headers={
-        "User-Agent": _USER_AGENT, "Accept": "application/octet-stream",
+        "User-Agent": _USER_AGENT, "Accept": "*/*",
         "Authorization": "Basic " + credential,
     })
     chunks, total = [], 0
@@ -399,6 +418,8 @@ def _fetch(
         proxy_handler = urllib.request.ProxyHandler({}) if download_config["proxy_mode"] == "direct" else urllib.request.ProxyHandler()
         opener = urllib.request.build_opener(proxy_handler, _SafeRedirect(deadline))
         with opener.open(request, timeout=min(30.0, remaining)) as response:
+            if response.status != 200:
+                raise _http_failure(response.status, response.url, method)
             version = str(response.headers.get("Last-Modified", ""))[:128]
             if method == "HEAD":
                 return b"", version
@@ -427,7 +448,7 @@ def _fetch(
                     reported_at = now
                     on_progress(total, expected)
     except urllib.error.HTTPError as error:
-        raise GeoUpdateError(_http_error_code(error.code, urlparse(error.url).hostname)) from None
+        raise _http_failure(error.code, error.url, method) from None
     except (TimeoutError, urllib.error.URLError, OSError) as error:
         raise GeoUpdateError(_network_error_code(error)) from None
     if not chunks:
@@ -442,7 +463,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
     # Do not let library debug logs expose signed redirect URLs or proxy auth.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    headers = {"User-Agent": _USER_AGENT, "Accept": "application/octet-stream", "Authorization": "Basic " + credential}
+    headers = {"User-Agent": _USER_AGENT, "Accept": "*/*", "Authorization": "Basic " + credential}
     try:
         with httpx.Client(proxy=proxy, trust_env=False, follow_redirects=False) as client:
             for _ in range(6):
@@ -459,7 +480,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                         url = target
                         continue
                     if response.status_code != 200:
-                        raise GeoUpdateError(_http_error_code(response.status_code, urlparse(url).hostname))
+                        raise _http_failure(response.status_code, url, method)
                     version = response.headers.get("last-modified", "")[:128]
                     if method == "HEAD":
                         return b"", version
@@ -633,7 +654,7 @@ def _reserve(trigger: str, moment: float) -> dict:
     if state.get("day") != _today(moment):
         state.update(day=_today(moment), attempts=0, downloads=0)
     state.update(last_attempt_ts=int(moment), trigger=str(trigger)[:24],
-                 attempts=int(state.get("attempts") or 0) + 1, last_error="", job_state="running", retry_configuration_changed=False)
+                 attempts=int(state.get("attempts") or 0) + 1, last_error="", last_http_error={}, job_state="running", retry_configuration_changed=False)
     _save_state(state)
     reset_progress()
     _set_progress("queued", 1)
@@ -668,21 +689,22 @@ def _perform_update(state: dict, *, moment: float, actor: str = "") -> dict:
             _TASK_EDITION, _TASK_INDEX = edition, index
             _set_progress("queued", 1, downloaded=0, total=0)
             outcomes.append(_perform_edition(state, edition=edition, moment=moment, actor=actor))
-        state.update(job_state="completed" if "completed" in outcomes else "unchanged", last_error="", last_error_ts=0)
+        state.update(job_state="completed" if "completed" in outcomes else "unchanged", last_error="", last_error_ts=0, last_http_error={})
         _save_state(state)
         _audit_result(actor, "success", state["job_state"])
         _set_progress("done", 100)
         return status(now=moment)
     except (GeoUpdateError, geo_downloads.DownloadConfigError) as exc:
         code = exc.code if isinstance(exc, GeoUpdateError) else str(exc)
-        state.update(job_state="failed", last_error=code, last_error_ts=int(moment), last_success_ts=previous_success)
+        http = exc.http if isinstance(exc, GeoUpdateError) else {}
+        state.update(job_state="failed", last_error=code, last_http_error=http, last_error_ts=int(moment), last_success_ts=previous_success)
         _save_state(state)
         # Keep the overall percentage rather than rescaling it a second time.
         with _PROGRESS_LOCK:
             _PROGRESS["stage"] = "failed"
             _PROGRESS["updated_ts"] = time.time()
-        _event("failed", code=code)
-        raise GeoUpdateError(code) from None
+        _event("failed", code=code, http=http)
+        raise GeoUpdateError(code, http=http) from None
 
 
 def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "") -> str:
@@ -698,9 +720,17 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{edition}.mmdb"
         _set_progress("credentials", 5)
-        _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline)
-        head_verified = True
-        state.update(credential_verification="verified", credential_verified_ts=int(moment))
+        version = ""
+        try:
+            _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline)
+            head_verified = True
+            state.update(credential_verification="verified", credential_verified_ts=int(moment))
+        except GeoUpdateError as exc:
+            # Some gateways reject HEAD while accepting GET. Retry only that case,
+            # under the same deadline and attempt budget; never bypass auth errors.
+            if exc.http.get("status") not in (405, 501):
+                raise
+            _event("head_unsupported", http=exc.http)
         versions = state.get("edition_versions", {})
         remote_version = versions.get(edition, state.get("remote_version") if state.get("edition") == edition else "")
         if version and version == remote_version and target.is_file():
@@ -735,6 +765,8 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
 
         _set_progress("download", 5, downloaded=0, total=0)
         payload, downloaded_version = _fetch(_download_url(edition=edition), deadline=deadline, on_progress=on_download)
+        head_verified = True
+        state.update(credential_verification="verified", credential_verified_ts=int(moment))
         state["downloads"] = int(state.get("downloads") or 0) + 1
         _set_progress("verify", 76, downloaded=len(payload), total=len(payload))
         data = _extract_mmdb(payload, edition=edition)
@@ -753,10 +785,12 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
         with geo_access._lock:
             had_target = target.exists()
             if had_target:
+                _event("backup")
                 with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
                     backup_temp = Path(handle.name)
                 shutil.copyfile(target, backup_temp)
                 os.replace(backup_temp, directory / f"{edition}.mmdb.bak")
+                _event("backup_saved")
             os.replace(temp_path, target)
             geo_access.close()
             reader, reader_epoch, reader_error = geo_access._ensure_reader()
@@ -787,12 +821,12 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
             state["credential_verification"] = "rejected"
         elif not head_verified:
             state["credential_verification"] = "unavailable"
-        state.update(last_error=code, last_error_ts=int(moment), job_state="failed")
+        http = exc.http if isinstance(exc, GeoUpdateError) else {}
+        state.update(last_error=code, last_http_error=http, last_error_ts=int(moment), job_state="failed")
         _save_state(state)
         _audit_result(actor, "failure", code)
         # 失败时保留停在哪个阶段，界面据此显示「在哪一步失败」，而不是把进度清零。
-        _event("error", code=code)
-        raise GeoUpdateError(code) from None
+        raise GeoUpdateError(code, http=http) from None
     finally:
         for path in (temp_path, backup_temp):
             if path is not None:
@@ -825,7 +859,8 @@ def enqueue_update(*, trigger: str = "manual", actor: str = "") -> dict:
             try:
                 _perform_update(state, moment=moment, actor=actor)
             except GeoUpdateError as exc:
-                log.warning("GEO_UPDATE_FAILED code=%s", exc.code)
+                log.warning("GEO_UPDATE_FAILED code=%s http_status=%s method=%s endpoint=%s",
+                            exc.code, exc.http.get("status", 0), exc.http.get("method", ""), exc.http.get("endpoint", ""))
             finally:
                 _update_lock.release()
                 _wake_event.set()
@@ -884,6 +919,7 @@ def status(*, now: float | None = None) -> dict:
         "last_success_ts": int(last_success),
         "last_download_ts": int(state.get("last_download_ts") or 0),
         "last_error": redact(state.get("last_error") or ""),
+        "last_http_error": _safe_http_details(state.get("last_http_error")),
         "last_error_ts": int(state.get("last_error_ts") or 0),
         "database_epoch": int(state.get("database_epoch") or 0),
         "database_size_bytes": int(state.get("database_size_bytes") or 0),
@@ -913,7 +949,7 @@ def configure_downloads(editions: object, mode: object, proxy: object = "", *, c
         geo_downloads.save(editions, mode, proxy, clear_proxy=clear_proxy)
         if previous != geo_downloads.resolve():
             state = _load_state()
-            state.update(job_state="idle", last_error="", last_error_ts=0, retry_configuration_changed=True)
+            state.update(job_state="idle", last_error="", last_error_ts=0, last_http_error={}, retry_configuration_changed=True)
             _save_state(state)
             reset_progress()
     except geo_downloads.DownloadConfigError as exc:
@@ -940,7 +976,7 @@ def configure_credentials(account: object = "", key: object = "", *, clear: bool
             state = _load_state()
             for field in ("credential_fingerprint", "credential_verification", "credential_checked_ts", "credential_verified_ts"):
                 state.pop(field, None)
-            state.update(last_error="", last_error_ts=0, job_state="idle", retry_configuration_changed=True)
+            state.update(last_error="", last_error_ts=0, last_http_error={}, job_state="idle", retry_configuration_changed=True)
             _save_state(state)
             reset_progress()
     except geo_credentials.CredentialError as exc:

@@ -20,6 +20,15 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "新库已校验，正在备份旧库": "New database validated; backing up the current database",
+    "旧库已备份为 .bak，正在替换": "Current database backed up as .bak; replacing it now",
+    "服务器不支持 HEAD 检查，正在尝试直接下载": "The server does not support HEAD checks; trying a direct download",
+    "文件存储服务": "File storage service",
+    "下载请求被拒绝，请检查更新服务版本。": "The download request was rejected. Check the updater version.",
+    "下载地址或数据库版本不存在，请检查更新服务版本和下载权限。": "The download URL or database edition was not found. Check the updater version and download permissions.",
+    "下载服务不接受此请求方法。": "The download service does not accept this request method.",
+    "下载服务不接受请求的内容格式，请更新应用后重试。": "The download service does not accept the requested format. Update the application and retry.",
+    "下载服务因地区或法律限制拒绝请求。": "The download service denied the request due to regional or legal restrictions.",
     "下载凭据": "Download credentials",
     "下载配置": "Download settings",
     "更新状态": "Update status",
