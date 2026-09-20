@@ -118,6 +118,7 @@
     videoRevealFirstFrameAt: null,
     videoRevealMaxWaitTimer: null,
     staleVideoEl: null,
+    videoTransition: null,
     staleVideoRetireTimer: null,
     videoOrientation: '',
     pendingControlMove: null,
@@ -196,11 +197,6 @@
   var VIDEO_REVEAL_HOLD_MS = 120;
   // 静态画面可能长时间不产生新帧；超过这个等待上限就照常显示，避免卡在等待态。
   var VIDEO_REVEAL_MAX_WAIT_MS = 600;
-  // 设备端转屏会让画面尺寸/朝向突变；用过渡把它变成平滑的旋转动画。
-  var VIDEO_LAYOUT_ANIMATION_MS = 300;
-  var VIDEO_LAYOUT_TRANSITION = 'width ' + VIDEO_LAYOUT_ANIMATION_MS + 'ms cubic-bezier(.22,1,.36,1),'
-    + 'height ' + VIDEO_LAYOUT_ANIMATION_MS + 'ms cubic-bezier(.22,1,.36,1),'
-    + 'transform ' + VIDEO_LAYOUT_ANIMATION_MS + 'ms cubic-bezier(.22,1,.36,1),opacity 80ms linear';
   // 重建解码器期间保留上一帧，避免黑屏断开。
   var VIDEO_STALE_FADE_MS = 180;
   // 保留的上一帧最迟保留这么久：新解码器迟迟拿不到关键帧时，宁可露出黑屏也不能
@@ -1608,19 +1604,6 @@
   function videoSurface() { return document.getElementById('video-surface'); }
   function videoCanvas() { return document.getElementById('raw-v2-surface'); }
 
-  function animateVideoLayout() {
-    // 设备端转屏时让画框与画面平滑过渡，而不是瞬间跳变。
-    var panel = document.getElementById('mirror-panel');
-    var targets = [panel, state.videoEl, state.staleVideoEl].filter(function (el) { return !!el; });
-    var saved = targets.map(function (el) { return el.style ? el.style.transition : ''; });
-    targets.forEach(function (el) { if (el.style) el.style.transition = VIDEO_LAYOUT_TRANSITION; });
-    window.setTimeout(function () {
-      targets.forEach(function (el, index) {
-        if (el && el.style) el.style.transition = saved[index] || '';
-      });
-    }, VIDEO_LAYOUT_ANIMATION_MS + 60);
-  }
-
   function emitVideoSize(width, height, authoritative) {
     var rawWidth = Number(width);
     var rawHeight = Number(height);
@@ -1632,7 +1615,6 @@
     state.videoWidth = normalizedWidth;
     state.videoHeight = normalizedHeight;
     var orientation = normalizedWidth >= normalizedHeight ? 'landscape' : 'portrait';
-    if (changed && state.videoOrientation && state.videoOrientation !== orientation) animateVideoLayout();
     state.videoOrientation = orientation;
     if (!changed) return;
     try {
@@ -1826,6 +1808,8 @@
     el.style.transition = 'opacity 80ms linear';
     updateVideoRotationLayout();
     var refreshVideoGeometry = function () {
+      // A retired decoder can still dispatch resize/metadata while it drains.
+      if (state.videoEl !== el) return;
       if (Number(el.videoWidth) > 0 && Number(el.videoHeight) > 0) {
         var sizeKey = Number(el.videoWidth) + 'x' + Number(el.videoHeight);
         if (state.videoRecordLastSize !== sizeKey) {
@@ -1836,6 +1820,11 @@
       }
       updateVideoRotationLayout();
       syncScrcpyInputGeometry();
+      if (state.videoTransition) {
+        var landscape = Number(el.videoWidth) >= Number(el.videoHeight);
+        var turn = state.videoTransition.landscape !== landscape ? (landscape ? -90 : 90) : 0;
+        state.videoTransition.moveTo(el, turn);
+      }
     };
     el.addEventListener('loadedmetadata', refreshVideoGeometry);
     el.addEventListener('resize', refreshVideoGeometry);
@@ -1986,6 +1975,8 @@
       destroyScrcpyInput();
     }
     if (!keepElement) {
+      if (state.videoTransition) state.videoTransition.dispose();
+      state.videoTransition = null;
       if (state.videoEl && state.videoEl.parentNode) state.videoEl.parentNode.removeChild(state.videoEl);
       removeStaleVideoElement();
     }
@@ -2008,8 +1999,10 @@
     }
     state.videoFrameReady = true;
     state.videoPlaying = true;
+    state.firstFrameRecoveryCount = 0;
     clearFirstFrameWatchdog();
     el.style.opacity = '1';
+    if (state.videoTransition) state.videoTransition.reveal();
     if (staleVideoRetireReady()) {
       retireStaleVideoElement(el);
     } else {
@@ -2204,6 +2197,7 @@
       state.videoHeight = 0;
       state.videoDimensionsAuthoritative = false;
     if (clearTransport) {
+      state.videoOrientation = '';
       state.rawV2Transport = '';
       state.rawV2PacketUnit = '';
       state.rawV2ProtocolVersion = 0;
@@ -2272,9 +2266,21 @@
       feed_count: state.jmuxerFeedCount || 0
     });
     var previous = state.videoEl;
+    var transition = window.ScrcpyGateVideoTransition;
+    var snapshot = transition && transition.capture(previous);
+    if (snapshot) {
+      if (state.videoTransition) state.videoTransition.dispose();
+      state.videoTransition = snapshot;
+    }
     destroyPlayer(true);
     var ok = ensurePlayer();
-    if (previous && previous.parentNode) {
+    // Normal rotation stays visually connected, but a decoder that never
+    // presents a new frame must still enter the existing bounded recovery.
+    if (ok) scheduleFirstFrameWatchdog();
+    if (state.videoTransition) {
+      removeStaleVideoElement();
+      if (previous && previous.parentNode) previous.parentNode.removeChild(previous);
+    } else if (previous && previous.parentNode) {
       // 保留上一帧：新解码器就绪前继续显示旧画面，避免重建期间黑屏。
       removeStaleVideoElement();
       state.staleVideoEl = previous;
@@ -2367,20 +2373,31 @@
     state.rawV2SequenceSeen = true;
     state.rawV2ConfigGeneration = configGeneration;
     state.rawV2ConfigGenerationSeen = true;
-    if (packet.width > 0 && packet.height > 0) {
+    if (packet.discontinuity || generationChanged) {
+      // A new SPS/PPS is a normal decoder boundary (rotation/quality), not a
+      // lost viewing connection. Transport failures retain their recovery UI.
+      var wasVisible = state.videoFrameReady || state.videoPlaying;
+      if (wasVisible && !generationChanged) emitVideoLifecycle('scrcpygate:videodrop');
+      if (!recreateVideoPlayer(packet.discontinuity ? 'discontinuity' : 'config_change')) {
+        schedulePlayerRecovery();
+        return false;
+      }
+    }
+    // scrcpy codec metadata is sent once at startup; after a rotation only the
+    // decoded dimensions are current. Do not overwrite those on every packet.
+    if (packet.width > 0 && packet.height > 0 &&
+        (generationChanged || packet.discontinuity || !state.videoDimensionsAuthoritative)) {
       var canvas = videoCanvas();
       if (canvas) { canvas.width = packet.width; canvas.height = packet.height; }
       emitVideoSize(packet.width, packet.height, true);
       updateVideoRotationLayout();
       syncScrcpyInputGeometry(packet.width, packet.height);
     }
-    if (packet.discontinuity || generationChanged) {
-      var wasVisible = state.videoFrameReady || state.videoPlaying;
-      if (wasVisible) emitVideoLifecycle('scrcpygate:videodrop');
-      if (!recreateVideoPlayer(packet.discontinuity ? 'discontinuity' : 'config_change')) {
-        schedulePlayerRecovery();
-        return false;
-      }
+    if ((packet.discontinuity || generationChanged) && state.videoTransition) {
+      var oldOrientation = state.videoTransition.landscape ? 'landscape' : 'portrait';
+      var turn = oldOrientation !== state.videoOrientation
+        ? (state.videoOrientation === 'landscape' ? -90 : 90) : 0;
+      state.videoTransition.moveTo(state.videoEl, turn);
     }
     return true;
   }

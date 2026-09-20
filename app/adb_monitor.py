@@ -94,10 +94,13 @@ class AdbDeviceMonitor:
         self.connect_timeout = max(2, _env_int("ADB_CONNECT_TIMEOUT", 8))
         self.reconnect_backoff = max(1, _env_int("ADB_RECONNECT_BACKOFF", 5))
         self.concurrency = max(1, min(32, _env_int("ADB_HEARTBEAT_CONCURRENCY", 4)))
-        # 跟随设备转屏：scrcpy 起流时把采集方向锁定在那一刻，之后设备自己转了方向不会
-        # 自动改变画面。这里按更短的周期读一次「正在投屏的设备」的显示方向，变了就重启
-        # 一次采集（约 0.7s，观看端会拿到补发的关键帧）。0 表示关闭这个跟随。
-        self.rotation_interval = max(0, _env_int("ADB_ROTATION_POLL_INTERVAL", 3))
+        # scrcpy 3.1 follows display rotation without restarting its transport.
+        # Old deployments already set POLL_INTERVAL=3: require a separate opt-in
+        # so upgrading them also removes the redundant capture restart.
+        self.rotation_interval = (
+            max(0, _env_int("ADB_ROTATION_POLL_INTERVAL", 3))
+            if _env_bool("ADB_ROTATION_RESTART_FALLBACK", False) else 0
+        )
         self._task: asyncio.Task | None = None
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._statuses: dict[str, dict[str, Any]] = {}
@@ -267,15 +270,12 @@ class AdbDeviceMonitor:
             await asyncio.sleep(poll)
 
     async def sync_display_rotation(self) -> dict[str, Any]:
-        """重启「设备自己转了方向」的采集，让画面跟着设备转。
-
-        scrcpy 在起流时确定采集方向（3.x 的 capture orientation 默认锁在起始方向），
-        之后设备转屏不会改变已经跑着的编码器。这里拿会话里记录的「起流时方向」当基线，
-        读到当前方向不同就重启该设备的采集 —— 观看端由既有重启路径补发关键帧。
-        """
+        """Opt-in workaround for devices whose encoder cannot follow rotation."""
         from .mirror_manager import manager
 
         result: dict[str, Any] = {"checked": 0, "rotated": [], "failed": []}
+        if self.rotation_interval <= 0:
+            return result
         try:
             sessions = await manager.snapshot()
         except Exception:

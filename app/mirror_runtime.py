@@ -120,8 +120,8 @@ RAW_V2_HEADER = struct.Struct(">4sBBHIIQHHI")
 def read_capture_display_rotation(address: str) -> int | None:
     """Best-effort read of the device's current display rotation (0..3).
 
-    Used as the baseline for "the device rotated its own screen" so the stream can be
-    restarted to follow it. Never raises: an unknown rotation just disables the follow.
+    Baseline for the opt-in encoder compatibility workaround. Normal rotation is
+    handled by scrcpy itself. Never raises: unknown rotation disables the workaround.
     """
     try:
         from adb_manager import ADBManager
@@ -932,12 +932,12 @@ class MirrorSession:
                     self.last_error = ""
                     self.started_at = time.monotonic()
                     self.stream_started_at = int(time.time())
-                    # 记住这条流是在设备的哪个显示方向下起的：scrcpy 起流时把采集方向
-                    # 定死，之后设备自己转屏不会改变画面 —— 跟随逻辑靠这个基线判断
-                    # 「设备转了」（见 adb_monitor.sync_display_rotation）。
-                    self.capture_display_rotation = await asyncio.to_thread(
-                        read_capture_display_rotation, self.address
-                    )
+                    # Only the opt-in encoder workaround needs an ADB baseline.
+                    self.capture_display_rotation = None
+                    if str(os.environ.get("ADB_ROTATION_RESTART_FALLBACK", "false")).strip().lower() in ("1", "true", "yes", "on"):
+                        self.capture_display_rotation = await asyncio.to_thread(
+                            read_capture_display_rotation, self.address
+                        )
                     log.info(
                         "MIRROR_HEALTHY device=%s mode=%s last_keyframe_at=%s display_rotation=%s",
                         self.device_id,

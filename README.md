@@ -75,7 +75,7 @@ Whatever you choose runs the same image and the same `app.main:app`.
 | --- | --- |
 | **Mirror and control** | Network ADB devices, several viewers per device, one controller at a time — control is an explicit lease with expiry, and admin takeovers are audited. |
 | **Raw v2 streaming** | scrcpy server → per-viewer bounded queue → WebSocket → browser, with keyframe-aware recovery, slow-viewer isolation, adaptive frame sizing and optional low-latency encoder hints. |
-| **Rotation follow** | When the device display rotates, capture is rebuilt and viewers are re-primed; the browser keeps the picture upright and fullscreen asks the OS to rotate the screen itself. |
+| **Rotation follow** | Device rotation keeps the capture transport and viewer connection open. The workbench and grid retain the last frame during decoder changes, with a brief rotation transition that respects reduced-motion preferences. Fullscreen can request OS orientation changes. |
 | **Accounts and roles** | Per-user device grants, view/control separation, session and expiry handling, per-role workbench configuration. |
 | **Shaped workbench** | Admins choose, per role, which dock buttons exist, which status-bar blocks show, the dock layout (level 1 / "More") and fullscreen behaviour switches. |
 | **Audit and notifications** | Hash-chained audit events with alerts and retention controls, plus in-app notifications and viewer history. |
@@ -417,7 +417,7 @@ itself never does).
 | --- | --- |
 | Networking | `WEB_SCRCPY_BIND`, `WEB_SCRCPY_PORT`, `WEB_SCRCPY_DATA_HOST`, `PUBLIC_BASE_URL`, `ALLOWED_HOSTS`, `ALLOWED_ORIGINS`, `TRUST_PROXY`, `TRUSTED_PROXY_IPS` |
 | Sessions and login guard | `SESSION_COOKIE_SECURE`, `MIN_PASSWORD_LENGTH`, `LOGIN_RATE_LIMIT_*`, `LOGIN_CAPTCHA_*` |
-| ADB and devices | `ADB_AUTOCONNECT`, `ADB_PATH`, `ADB_SERVER_SOCKET`, `ADB_HEARTBEAT_INTERVAL`, `ADB_ROTATION_POLL_INTERVAL`, `ADB_CONNECT_TIMEOUT` |
+| ADB and devices | `ADB_AUTOCONNECT`, `ADB_PATH`, `ADB_SERVER_SOCKET`, `ADB_HEARTBEAT_INTERVAL`, `ADB_ROTATION_RESTART_FALLBACK`, `ADB_ROTATION_POLL_INTERVAL`, `ADB_CONNECT_TIMEOUT` |
 | Streaming | `SCRCPY_STREAM_MODE`, `SCRCPY_SERVER_LOG_LEVEL`, `SCRCPY_I_FRAME_INTERVAL`, `VIDEO_QUEUE_*`, `SCRCPY_RAW_*` |
 | Logging and audit | `LOG_*`, `AUDIT_*`, `VIEWER_WATCH_RETENTION_DAYS` |
 | ALAS (optional) | `ALAS_EMBED_ORIGIN`, `ALAS_ALLOWED_HOSTS`, `ALAS_ALLOWED_CIDRS`, `ALAS_POLICY_*`, `ALAS_TOKEN_*` |
@@ -426,6 +426,10 @@ itself never does).
 - `SCRCPYGATE_IMAGE` selects the image to run: empty means the locally built `scrcpygate:local`;
   for releases pin an immutable reference such as `ghcr.io/<owner>/scrcpygate@sha256:<digest>`.
 - Behind a slow network, set `PIP_INDEX_URL` to a nearby PyPI mirror before building.
+- Normal rotation uses scrcpy's native orientation handling. Only for a device whose
+  encoder fails to follow rotation, set `ADB_ROTATION_RESTART_FALLBACK=true` and recreate
+  the container; this compatibility mode briefly restarts capture. Existing
+  `ADB_ROTATION_POLL_INTERVAL` settings alone do not enable restarts.
 - ALAS token encryption keys are injected by your secret manager, or provisioned once into the
   data directory; never put key material in `.env`.
 

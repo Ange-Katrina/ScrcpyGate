@@ -72,7 +72,7 @@ cd ScrcpyGate
 | --- | --- |
 | **实时投屏与控制** | 面向网络 ADB 设备，单设备多观看端，同一时刻一个控制者 —— 控制权是带过期的显式租约，管理员强制接管会留审计记录。 |
 | **Raw v2 流式通道** | scrcpy server → 每观看端独立有界队列 → WebSocket → 浏览器；关键帧感知恢复、慢观看端隔离、自适应画框，可选低延迟编码器提示。 |
-| **跟随设备转屏** | 设备屏幕方向变化时重建采集并重新预备观看端；浏览器保持画面方向正确，全屏时还会请求系统真的转屏。 |
+| **跟随设备转屏** | 横竖屏切换保留采集与观看连接；工作台、宫格在解码器切换期间保留上一帧，并加入短暂旋转过渡，遵循系统“减少动态效果”设置。全屏时可请求系统调整屏幕方向。 |
 | **账号、角色与权限** | 按用户授权设备，观看与控制分离，会话与到期处理，按角色配置工作台。 |
 | **可编排的工作台** | 管理员按角色决定：控制栏按钮、状态条功能块、一级/二级菜单布局、全屏行为开关。 |
 | **审计与通知** | 带哈希链的审计事件、告警与保留策略，应用内通知与观看历史。 |
@@ -392,7 +392,7 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 | --- | --- |
 | 网络 | `WEB_SCRCPY_BIND`、`WEB_SCRCPY_PORT`、`WEB_SCRCPY_DATA_HOST`、`PUBLIC_BASE_URL`、`ALLOWED_HOSTS`、`ALLOWED_ORIGINS`、`TRUST_PROXY`、`TRUSTED_PROXY_IPS` |
 | 会话与登录防护 | `SESSION_COOKIE_SECURE`、`MIN_PASSWORD_LENGTH`、`LOGIN_RATE_LIMIT_*`、`LOGIN_CAPTCHA_*` |
-| ADB 与设备 | `ADB_AUTOCONNECT`、`ADB_PATH`、`ADB_SERVER_SOCKET`、`ADB_HEARTBEAT_INTERVAL`、`ADB_ROTATION_POLL_INTERVAL`、`ADB_CONNECT_TIMEOUT` |
+| ADB 与设备 | `ADB_AUTOCONNECT`、`ADB_PATH`、`ADB_SERVER_SOCKET`、`ADB_HEARTBEAT_INTERVAL`、`ADB_ROTATION_RESTART_FALLBACK`、`ADB_ROTATION_POLL_INTERVAL`、`ADB_CONNECT_TIMEOUT` |
 | 流媒体 | `SCRCPY_STREAM_MODE`、`SCRCPY_SERVER_LOG_LEVEL`、`SCRCPY_I_FRAME_INTERVAL`、`VIDEO_QUEUE_*`、`SCRCPY_RAW_*` |
 | 日志与审计 | `LOG_*`、`AUDIT_*`、`VIEWER_WATCH_RETENTION_DAYS` |
 | ALAS（可选） | `ALAS_EMBED_ORIGIN`、`ALAS_ALLOWED_HOSTS`、`ALAS_ALLOWED_CIDRS`、`ALAS_POLICY_*`、`ALAS_TOKEN_*` |
@@ -401,6 +401,9 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 - `SCRCPYGATE_IMAGE` 决定跑哪个镜像：留空 = 本地构建的 `scrcpygate:local`；发布时钉不可变引用
   `ghcr.io/<owner>/scrcpygate@sha256:<digest>`。
 - 网络慢时构建前设置 `PIP_INDEX_URL` 指向就近的 PyPI 镜像。
+- 正常转屏由 scrcpy 原生处理。仅在设备编码器无法跟随转屏时，设置
+  `ADB_ROTATION_RESTART_FALLBACK=true` 并重建容器，启用会短暂重启采集的兼容模式；
+  旧配置中的 `ADB_ROTATION_POLL_INTERVAL` 本身不会启用重启。
 - ALAS 令牌加密密钥由你的密钥管理服务注入，或一次性生成到数据目录；**不要**把密钥材料写进 `.env`。
 
 ## 安全模型

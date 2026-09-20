@@ -259,23 +259,32 @@
       tile.buttons.control.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: true }); });
       tiles[device.id] = tile;
       // 屏幕区按真实画面比例自适应：竖屏手机不再被塞进 16:9 的黑框里。
-      tile.video.addEventListener('loadedmetadata', function () { syncStageAspect(tile); });
-      tile.video.addEventListener('resize', function () { syncStageAspect(tile); });
+      tile.video.addEventListener('loadedmetadata', function () { syncStageAspect(tile, true); });
+      tile.video.addEventListener('resize', function () { syncStageAspect(tile, true); });
       syncTileWidth(tile);
       applyStageAspect(tile);
       return tile;
     }
 
-    function syncStageAspect(tile) {
+    function syncStageAspect(tile, decoded) {
       var video = tile && tile.video;
-      var width = Number(video && video.videoWidth) || 0;
-      var height = Number(video && video.videoHeight) || 0;
+      if (decoded && video.videoWidth > 0 && video.videoHeight > 0) {
+        tile.packetWidth = video.videoWidth;
+        tile.packetHeight = video.videoHeight;
+      }
+      var width = tile.packetWidth || Number(video && video.videoWidth) || 0;
+      var height = tile.packetHeight || Number(video && video.videoHeight) || 0;
       if (!width || !height || !tile.element) return;
       var ratio = width / height;
       if (!isFinite(ratio) || ratio <= 0) return;
       // 记住画面本身的宽高比，「统一横屏」切换回来时不必等下一帧元数据。
       tile.sourceAspect = Math.max(0.5, Math.min(2.2, ratio));
       applyStageAspect(tile);
+      if (tile.transitionFrame) {
+        var landscape = width >= height;
+        var turn = tile.transitionFrame.landscape !== landscape ? (landscape ? -90 : 90) : 0;
+        tile.transitionFrame.moveTo(video, turn);
+      }
     }
 
     /* 按当前方向模式写入格子比例：统一竖屏固定 9:16，跟随设备时用画面比例。
@@ -413,7 +422,11 @@
 
     /* ---------------- 播放器 ---------------- */
 
-    function destroyPlayer(tile) {
+    function destroyPlayer(tile, keepSnapshot) {
+      if (!keepSnapshot && tile.transitionFrame) {
+        tile.transitionFrame.dispose();
+        tile.transitionFrame = null;
+      }
       if (tile.jmuxer) {
         try { tile.jmuxer.destroy(); } catch (error) {}
         tile.jmuxer = null;
@@ -457,7 +470,7 @@
 
     /* ---------------- 数据包处理 ---------------- */
 
-    function resetStreamState(tile) {
+    function resetStreamState(tile, keepSnapshot) {
       tile.sequence = 0;
       tile.sequenceSeen = false;
       tile.lastFedSequence = 0;
@@ -466,7 +479,8 @@
       tile.configGeneration = 0;
       tile.configGenerationSeen = false;
       tile.keyframeSeen = false;
-      destroyPlayer(tile);
+      tile.packetWidth = tile.packetHeight = 0;
+      destroyPlayer(tile, keepSnapshot);
     }
 
     function acceptPacket(tile, packet) {
@@ -487,12 +501,34 @@
         // 只在配置真正换代（分辨率/编码参数变化）时重建播放器。
         // 服务端会把 SPS/PPS 前置到每个关键帧，因此 containsConfig 每帧都为真；
         // 若据此重建播放器，就会在每个关键帧黑屏一次（画面持续闪）。
-        resetStreamState(tile);
+        var transition = global.ScrcpyGateVideoTransition;
+        var snapshot = transition && transition.capture(tile.video);
+        if (snapshot) {
+          if (tile.transitionFrame) tile.transitionFrame.dispose();
+          tile.transitionFrame = snapshot;
+        }
+        resetStreamState(tile, true);
         tile.sequence = sequence;
         tile.sequenceSeen = true;
         tile.configGeneration = configGeneration;
         tile.configGenerationSeen = true;
         if (!ensurePlayer(tile)) return false;
+      }
+      if (packet.width > 0 && packet.height > 0 &&
+          (generationChanged || packet.discontinuity || !tile.packetWidth)) {
+        tile.packetWidth = packet.width;
+        tile.packetHeight = packet.height;
+        syncStageAspect(tile);
+      }
+      if ((packet.discontinuity || generationChanged) && tile.transitionFrame) {
+        // Raw streams have no size metadata; wait for decoded dimensions
+        // rather than interpreting 0 x 0 as a landscape transition.
+        if (packet.width > 0 && packet.height > 0) {
+          var landscape = packet.width >= packet.height;
+          var turn = tile.transitionFrame.landscape !== landscape ? (landscape ? -90 : 90) : 0;
+          tile.transitionFrame.moveTo(tile.video, turn);
+        }
+        tile.transitionFrame.revealWhenReady(tile.video);
       }
       return true;
     }

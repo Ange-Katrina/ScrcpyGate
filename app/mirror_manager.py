@@ -297,12 +297,10 @@ class MirrorManager:
         return result
 
     async def restart_for_display_rotation(self, device_id: str) -> dict[str, Any]:
-        """Device rotated its own display: recreate the capture so the stream follows.
+        """Explicit compatibility fallback; normal scrcpy rotation needs no restart.
 
-        scrcpy fixes the capture orientation when the stream starts, so a later device
-        rotation does not change the running encoder. Restarting with the same options
-        re-reads the current orientation; existing viewers keep their slot and are
-        re-primed by the restart path (same mechanism as a quality restart).
+        Existing viewers keep their slots and are re-primed as for a quality restart.
+        Only the opt-in ADB rotation monitor calls this workaround.
         """
         now = time.monotonic()
         if now - self._last_rotation_restart.get(device_id, 0.0) < ROTATION_RESTART_COOLDOWN:

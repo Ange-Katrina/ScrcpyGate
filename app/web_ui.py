@@ -205,6 +205,7 @@ DASHBOARD_STATE_SCRIPT_TAG = f'<script src="{asset_url("shared/dashboard-state.j
 V2_ADAPTER_SCRIPT_TAG = f'<script src="{asset_url("shared/v2-adapter.js")}"></script>'
 # 宫格视图与适配器共用同一份 Raw v2 解析器；必须在适配器之前加载。
 RAW_V2_SCRIPT_TAG = f'<script src="{asset_url("shared/raw-v2.js")}"></script>'
+VIDEO_TRANSITION_SCRIPT_TAG = f'<script src="{asset_url("shared/video-transition.js")}"></script>'
 MIRROR_GRID_SCRIPT_TAG = f'<script src="{asset_url("shared/mirror-grid.js")}"></script>'
 # 登录页验证码：工作量证明求解器（WebCrypto），需在登录页脚本之前加载。
 POW_SOLVER_SCRIPT_TAG = f'<script src="{asset_url("shared/pow-solver.js")}"></script>'
@@ -269,6 +270,7 @@ EXTRA_SCRIPTS = {
         # 显示状态层（画面方向自动摆正 / 源尺寸与可用空间的换算）必须在页面控制器之前。
         f'<script src="{asset_url("shared/display-control.js")}"></script>',
         RAW_V2_SCRIPT_TAG,
+        VIDEO_TRANSITION_SCRIPT_TAG,
         ADMIN_DASHBOARD_SCRIPT_TAG,
         AUDIT_MAPPING_SCRIPT_TAG,
         DASHBOARD_STATE_SCRIPT_TAG,
