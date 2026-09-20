@@ -128,14 +128,37 @@ This command requires a running service owned by that directory and Docker Compo
 plugin. Host-network installations must follow their separate manual procedure.
 
 For an interactive update, run `./deploy.sh --menu` and choose **Update to a
-published image**. The menu queries the public GHCR registry and lists existing
+published image**. The menu queries the selected registry and lists existing
 `latest` (stable), `edge` (main), `dev` (development testing), and the ten highest stable version tags.
 Choose a number, review the full image reference, and confirm to start the update.
 Discovery uses host Python 3 and requires no GitHub login. If discovery fails,
-the configured default and manual tag/digest entry remain available. A custom
-`SCRCPYGATE_UPDATE_IMAGE` is preserved as the default; discovery lists only the
-official ScrcpyGate package. Tag discovery does not replace the subsequent image
+the configured default, explicitly unverified common channels, and manual tag/digest
+entry remain available. A custom `SCRCPYGATE_UPDATE_IMAGE` is preserved as the
+default; discovery lists the `ange-katrina/scrcpygate` path at the selected source.
+Tag discovery does not replace the subsequent image
 pull and health checks. Canceling the selector makes no deployment changes.
+
+Enter **s** to switch between GHCR, the **Nanjing University mirror**
+(`ghcr.nju.edu.cn`), and a custom GHCR mirror. Custom addresses accept
+`host[:port][/prefix]`, without a URL scheme or credentials; the mirror must
+support the GHCR repository path. Public tag discovery uses HTTPS and does not
+send Docker credentials or an official GHCR bearer token to a mirror. Sources
+requiring authentication or lacking tag-list support can still be used through
+manual references and the Docker client's existing registry authentication.
+
+Following [Nanjing University's documented replacement](https://doc.nju.edu.cn/books/e1654/page/ghcr):
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.nju.edu.cn/ange-katrina/scrcpygate:dev
+```
+
+The selected source is part of the saved update reference, including its tag or
+digest. Switching sources preserves an existing ScrcpyGate tag/digest; switching
+from an unrelated custom default starts with ScrcpyGate `latest` and shows the
+new reference before confirmation. Neither Docker daemon settings nor other
+projects are modified. Failures do not silently switch sources. Mirror caches
+may lag; pin a known digest when exact content matters. A mirror does not create
+unpublished tags: `latest` is unavailable until a stable release has published it.
 
 For features published from `dev`, use `--image ghcr.io/ange-katrina/scrcpygate:dev`.
 A running bridge deployment originally built from source can switch to published

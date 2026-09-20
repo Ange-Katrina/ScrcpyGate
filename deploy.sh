@@ -312,6 +312,7 @@ ScrcpyGate 引导式安装与管理脚本
       或 digest（ghcr.io/owner/scrcpygate@sha256:...）；默认取 .env 的
       SCRCPYGATE_UPDATE_IMAGE，未设置时用 ghcr.io/ange-katrina/scrcpygate:latest。
       成功后记住所选目标；以后直接 --update 即可继续跟随该 tag（dev / edge / latest）。
+      菜单输入 s 可切换 GHCR 官方、南京大学国内镜像或自定义镜像源；保存完整目标地址。
       管理菜单可自动查询 GHCR 版本并按编号选择，也可手动输入；确认后才更新。
       更新前备份默认开启，--skip-update-backup 可跳过。
 
@@ -2928,7 +2929,7 @@ default_update_image() {
 # successfully published image. Never load Docker credentials for discovery.
 published_update_images() {
   image_python=$(python_command 2>/dev/null) || return 1
-  "$image_python" - <<'PY'
+  "$image_python" - "${1:-ghcr.io}" <<'PY'
 import json
 import re
 import sys
@@ -2945,6 +2946,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 opener = urllib.request.build_opener(NoRedirect)
 deadline = time.monotonic() + 20
 repository = "ange-katrina/scrcpygate"
+registry = sys.argv[1] if len(sys.argv) > 1 else "ghcr.io"
 
 
 def read_json(url, token=None):
@@ -2962,15 +2964,21 @@ def read_json(url, token=None):
 
 
 try:
-    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
-    token = read_json("https://ghcr.io/token?" + query)["token"]
-    if not isinstance(token, str) or not token or len(token) > 16384:
-        raise ValueError("invalid registry token")
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*", registry):
+        raise ValueError("invalid registry")
+    token = None
+    if registry == "ghcr.io":
+        query = urllib.parse.urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
+        token = read_json("https://ghcr.io/token?" + query)["token"]
+        if not isinstance(token, str) or not token or len(token) > 16384:
+            raise ValueError("invalid registry token")
+    host, _, prefix = registry.partition("/")
+    api_repository = f"{prefix}/{repository}" if prefix else repository
     tags = set()
     last = ""
     for _ in range(5):
         query = urllib.parse.urlencode({"n": 1000, "last": last})
-        page = read_json(f"https://ghcr.io/v2/{repository}/tags/list?{query}", token)
+        page = read_json(f"https://{host}/v2/{api_repository}/tags/list?{query}", token)
         batch = page.get("tags") or []
         if not isinstance(batch, list) or len(batch) > 1000:
             raise ValueError("invalid tag page")
@@ -2991,26 +2999,89 @@ try:
     )
     choices = [tag for tag in ("latest", "edge", "dev") if tag in tags] + versions[:10]
     for tag in choices:
-        print(f"ghcr.io/{repository}:{tag}")
+        print(f"{registry}/{repository}:{tag}")
 except Exception:
     # Do not echo network exceptions, proxy URLs, or registry bearer tokens.
     sys.exit(1)
 PY
 }
 
+valid_update_registry() {
+  # HTTPS is implicit. Do not accept URLs, credentials, query strings or tags.
+  case "$1" in ''|*[!a-z0-9./:-]*) return 1 ;; esac
+  printf '%s\n' "$1" | LC_ALL=C awk '
+    /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)*$/ {
+      split($0, parts, "/"); host = parts[1]
+      if (host ~ /\.\./) exit 1
+      if (host ~ /:/) {
+        split(host, endpoint, ":")
+        if (length(endpoint[2]) > 5 || endpoint[2] + 0 < 1 || endpoint[2] + 0 > 65535) exit 1
+      }
+      valid = 1
+    }
+    END { if (!valid) exit 1 }
+  '
+}
+
+select_update_registry() {
+  menu_registry_selected=""
+  while :; do
+    menu_group "选择镜像源"
+    menu_item 1 "GHCR 官方（ghcr.io）" "$C_CYAN"
+    menu_item 2 "南京大学国内镜像（ghcr.nju.edu.cn）" "$C_GREEN"
+    menu_item 3 "自定义 GHCR 镜像地址" "$C_GRAY"
+    menu_item 0 "返回，不修改" "$C_GRAY"
+    printf '\n请选择 [0-3]: '
+    IFS= read -r menu_registry_choice || return 1
+    menu_registry_choice=$(printf '%s' "$menu_registry_choice" | tr -d '\r')
+    case "$menu_registry_choice" in
+      0|'') return 1 ;;
+      1) menu_registry_selected=ghcr.io ;;
+      2) menu_registry_selected=ghcr.nju.edu.cn ;;
+      3)
+        log "填写镜像域名[:端口][/前缀]，不含 https://、账号密码、项目路径或 tag"
+        log "例如 mirror.example.com 或 mirror.example.com/ghcr.io；需由该服务支持 GHCR 代理"
+        printf '镜像地址（留空返回）: '
+        IFS= read -r menu_registry_selected || return 1
+        menu_registry_selected=$(printf '%s' "$menu_registry_selected" | tr -d '\r')
+        [ -n "$menu_registry_selected" ] || return 1
+        ;;
+      *) warn_msg "请输入 0–3"; continue ;;
+    esac
+    if valid_update_registry "$menu_registry_selected"; then
+      return 0
+    fi
+    warn_msg "镜像地址无效，请使用域名[:端口][/前缀]，不含协议或凭据"
+  done
+}
+
 select_update_image() {
   UPDATE_IMAGE=""
   menu_default_image=$(default_update_image)
-  panel_top "选择更新镜像"
-  panel_line "默认目标" "$menu_default_image"
-  log "正在查询 GHCR 已发布版本…"
-  if menu_published_images=$(published_update_images); then
-    [ -n "$menu_published_images" ] || warn_msg "暂无可列出的稳定版或开发版镜像"
-  else
-    menu_published_images=""
-    warn_msg "无法获取版本列表（网络、仓库权限或 Python 不可用）；可使用配置或手动输入"
-  fi
+  menu_registry=ghcr.io
+  case "$menu_default_image" in
+    */ange-katrina/scrcpygate:*|*/ange-katrina/scrcpygate@sha256:*)
+      menu_registry=${menu_default_image%/ange-katrina/scrcpygate*} ;;
+  esac
+  valid_update_registry "$menu_registry" || menu_registry=ghcr.io
+  menu_reload_images=true
   while :; do
+    if [ "$menu_reload_images" = true ]; then
+      panel_top "选择更新镜像"
+      panel_line "镜像源" "$menu_registry"
+      panel_line "默认目标" "$menu_default_image"
+      log "正在查询此镜像源已发布版本…"
+      if menu_published_images=$(published_update_images "$menu_registry") && [ -n "$menu_published_images" ]; then
+        menu_unverified_images=false
+      else
+        warn_msg "无法列出版本（网络、权限、Python 或镜像源不支持列表）；可输入 s 切换镜像源"
+        warn_msg "下列为常用通道，尚未验证是否存在；不会自动改用其他源或版本"
+        menu_unverified_images=true
+        menu_published_images=$(printf '%s\n' "$menu_registry/ange-katrina/scrcpygate:latest" \
+          "$menu_registry/ange-katrina/scrcpygate:edge" "$menu_registry/ange-katrina/scrcpygate:dev")
+      fi
+      menu_reload_images=false
+    fi
     menu_group "更新目标"
     menu_item 1 "使用默认目标（配置优先，未设置则 latest；可用性以拉取结果为准）" "$C_CYAN"
     menu_image_index=2
@@ -3023,11 +3094,17 @@ select_update_image() {
         dev) menu_image_label="dev — 测试版（dev 分支，最新功能验证）" ;;
         *) menu_image_label="$menu_image_tag — 固定版本" ;;
       esac
-      menu_item "$menu_image_index" "$menu_image_label" "$C_GREEN"
+      menu_image_color=$C_GREEN
+      if [ "$menu_unverified_images" = true ]; then
+        menu_image_label="$menu_image_label（未验证）"
+        menu_image_color=$C_YELLOW
+      fi
+      menu_item "$menu_image_index" "$menu_image_label" "$menu_image_color"
       menu_image_index=$((menu_image_index + 1))
     done <<EOF
 $menu_published_images
 EOF
+    menu_item s "切换镜像源（官方 / 南京大学国内镜像 / 自定义）" "$C_CYAN"
     menu_item m "手动输入完整镜像引用（tag / digest）" "$C_GRAY"
     menu_item 0 "取消，返回主菜单" "$C_GRAY"
     printf '\n%s>%s 请选择 [默认 1]: ' "$C_YELLOW" "$C_RESET"
@@ -3036,6 +3113,18 @@ EOF
     case "$menu_image_choice" in
       0|q|Q) return 1 ;;
       ''|1) UPDATE_IMAGE=$menu_default_image ;;
+      s|S)
+        if select_update_registry; then
+          menu_registry=$menu_registry_selected
+          case "$menu_default_image" in
+            */ange-katrina/scrcpygate:*|*/ange-katrina/scrcpygate@sha256:*)
+              menu_default_image="$menu_registry/ange-katrina/${menu_default_image##*/}" ;;
+            *) menu_default_image="$menu_registry/ange-katrina/scrcpygate:latest" ;;
+          esac
+          menu_reload_images=true
+        fi
+        continue
+        ;;
       m|M)
         log "示例：ghcr.io/ange-katrina/scrcpygate:latest；也可使用完整 @sha256:digest 引用"
         printf '%s>%s 完整镜像引用（留空取消）: ' "$C_YELLOW" "$C_RESET"
@@ -3052,7 +3141,7 @@ EOF
         UPDATE_IMAGE=$(printf '%s\n' "$menu_published_images" |
           awk -v selection="$menu_image_choice" 'NF && ("x" (NR + 1)) == ("x" selection) { print; exit }')
         if [ -z "$UPDATE_IMAGE" ]; then
-          warn_msg "请输入列表中的编号、m 或 0"
+          warn_msg "请输入列表中的编号、s、m 或 0"
           continue
         fi
         ;;

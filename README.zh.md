@@ -139,7 +139,17 @@ cd ScrcpyGate
 普通卸载始终保留 `.env`、本地镜像、数据库及其 ALAS 密钥，重装沿用原密码。
 管理菜单中的“更新到已发布镜像”会自动查询 GHCR，按编号选择实际存在的
 `latest`（稳定版）、`edge`（main 分支）、`dev`（dev 分支测试版）或最近的正式版本，确认完整镜像地址后才开始更新。
-查询需要宿主 Python 3；查询失败时仍可使用配置中的默认目标，或手动输入完整 tag/digest 引用。
+查询需要宿主 Python 3；查询失败时提供标注「未验证」的常用通道，也可使用默认目标或手动输入完整 tag/digest 引用。
+输入 **s → 2** 可切换南京大学国内镜像；也可切回 GHCR 官方或配置自定义 GHCR 镜像域名（支持端口和路径前缀）。
+版本查询与拉取均使用所选源，成功后记住完整镜像地址；不修改 Docker daemon，也不在失败时偷偷切换来源。
+按[南京大学说明](https://doc.nju.edu.cn/books/e1654/page/ghcr)，也可直接执行：
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.nju.edu.cn/ange-katrina/scrcpygate:dev
+```
+
+国内源属于第三方缓存，可能存在同步延迟；固定版本或 digest 可减少浮动标签差异。
+`latest` 仅在正式发布后存在，换源不能创建未发布的标签。仅有 `edge` / `dev` 时按需要选择对应通道。
 
 **日常更新无需上传源码包**：GitHub Actions 在 `dev` / `main` 推送后构建、验证并发布镜像。
 先等待对应提交的 **Builds → Publish verified images to GHCR** 成功，然后在服务器原部署目录执行：

@@ -367,6 +367,21 @@ Application image upgrades do not replace host deployment scripts or Compose fil
 follow release notes when those files change. See the [deployment guide](docs/deployment/ci-cd.md#update-an-existing-bridge-deployment)
 for host-network instructions and backup/rollback limits.
 
+For GHCR access from China, enter **s → 2** in the image-update selector to use
+the [Nanjing University mirror](https://doc.nju.edu.cn/books/e1654/page/ghcr).
+The selector also supports the official registry and custom GHCR mirror hosts
+with optional ports and path prefixes. Discovery and pulls use the selected
+source; a successful update remembers the full reference without changing Docker
+daemon settings. If discovery fails, common channels remain selectable and are
+marked unverified. There is no automatic fallback to a different source.
+
+```sh
+sudo sh ./deploy.sh --update --image ghcr.nju.edu.cn/ange-katrina/scrcpygate:dev
+```
+
+Third-party caches can lag behind GHCR. Use fixed tags or digests when needed;
+switching registries cannot provide a `latest` tag that has not been published.
+
 ### Disk maintenance
 
 Source rebuilds retain Docker build cache and can leave dangling images. Prefer
