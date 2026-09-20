@@ -388,10 +388,23 @@ Source rebuilds retain Docker build cache and can leave dangling images. Prefer
 published-image upgrades for routine updates. Menu 25 or `./deploy.sh --disk-usage`
 reports usage; `--prune-images` removes only unused dangling images labeled
 `io.scrcpygate.managed=true`, while `--prune-build-cache` prunes the default
-builder's unused cache with a 1 GiB retention target. Both require confirmation
-unless `--yes` is supplied. Cache cleanup affects other projects using that
-builder; neither command deletes containers, volumes, data, backups or tagged
-rollback images. Older unlabeled images and custom buildx caches need separate
+builder's unused cache with a 1 GiB retention target. For small disks, use
+`--prune-build-cache-all` (submenu 4) to set the retention target to zero.
+The script prefers `--reserved-space`, falls back to the legacy `--keep-storage`
+flag when supported, and stops if neither is available. Cleanup affects other
+projects using that builder and may reclaim zero bytes when nothing qualifies.
+
+`--prune-rollback-images` (submenu 5) previews removal of old installer-generated
+rollback tags. It retains the newest unused image version by image ID, all
+versions referenced by running or stopped containers, the configured image
+reference, and unrecognized tags. Duplicate tags count as one version. Tag targets
+and container references are checked again before deletion; removal never uses
+force. Shared layers or remaining tags may prevent space from being reclaimed.
+
+All cleanup requires confirmation unless `--yes` is supplied. These operations
+never remove containers, volumes, application data, keys or backups. Image and
+cache totals can share layers and must not be added together. Old source folders,
+uploaded archives, system logs, unlabeled images and custom buildx caches need separate
 review. See [disk maintenance](docs/deployment/ci-cd.md#disk-maintenance) for legacy
 commands and backup retention.
 

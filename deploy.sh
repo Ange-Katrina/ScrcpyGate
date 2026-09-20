@@ -327,7 +327,11 @@ ScrcpyGate 引导式安装与管理脚本
   ./deploy.sh --prune-images [--yes] 清理带本项目标识、无标签且未被容器使用的旧镜像
   ./deploy.sh --prune-build-cache [--yes]
       清理 Docker 默认构建器的未使用缓存，尽量保留 1 GiB；影响其他项目下次构建速度。
-      默认需确认；不删除容器、卷、数据、备份或带标签的回滚镜像。
+  ./deploy.sh --prune-build-cache-all [--yes]
+      清空默认构建器的未使用缓存（保留目标为 0，适合小磁盘）；不删除容器或数据。
+  ./deploy.sh --prune-rollback-images [--yes]
+      预览并清理旧回滚标签，保留最近一个未被容器引用的镜像版本及所有容器引用版本。
+      清理默认需确认；不删除容器、卷、数据或备份。回滚标签只由专用清理入口处理。
 
 服务器侧安全恢复（管理员把自己封了、或后台进不去时用）:
   ./deploy.sh --ban-list           列出 IP 封禁（含已过期/已解除）
@@ -434,6 +438,8 @@ while [ "$#" -gt 0 ]; do
     --disk-usage) ACTION=disk_usage ;;
     --prune-images) ACTION=prune_images ;;
     --prune-build-cache) ACTION=prune_build_cache ;;
+    --prune-build-cache-all) ACTION=prune_build_cache_all ;;
+    --prune-rollback-images) ACTION=prune_rollback_images ;;
     --check) ACTION=check ;;
     --check-conflicts) ACTION=check_conflicts ;;
     --check-production) ACTION=check_production ;;
@@ -2845,6 +2851,12 @@ show_disk_usage() {
   panel_top "磁盘占用（只读）"
   log "Docker 汇总（当前 Docker context；共享镜像层不能重复相加）："
   docker system df || return 1
+  log "镜像与构建缓存可能共享层，不能把两项 SIZE 相加；多个标签也不代表多个副本。"
+  log "容器占用（不含挂载数据；只查看，不删除已停止容器）："
+  docker ps --all --size --format 'table {{.Names}}\t{{.Status}}\t{{.Size}}' || return 1
+  disk_docker_root=$(docker info --format '{{.DockerRootDir}}') || return 1
+  log "Docker 数据目录: $(safe_display "$disk_docker_root")"
+  log "Docker 镜像层在 daemon 所在主机；远程 context 的路径不能按本机目录统计。"
   log "宿主部署目录所在文件系统："
   df -h . || true
   disk_data_dir=${WEB_SCRCPY_DATA_HOST:-$(dotenv_value WEB_SCRCPY_DATA_HOST)}
@@ -2862,6 +2874,23 @@ show_disk_usage() {
   docker image ls --filter 'reference=scrcpygate:rollback-*' \
     --format 'table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' || return 1
   log "旧版未带标识的镜像不会自动列为清理对象。备份保留份数可在 .env 设置 SCRCPYGATE_BACKUP_KEEP。"
+  log "回滚标签需用磁盘维护子菜单 5 单独预览清理；缓存约 1 GiB 时，保留 1 GiB 的清理可能释放 0B。"
+  log "小磁盘可选磁盘维护子菜单 4 清空未使用缓存；部署目录内旧源码/压缩包、数据、备份均不会自动删除。"
+  log "共享/独占空间明细: docker system df -v；宿主目录占用: du -x -h -d 1 ."
+}
+
+prune_builder_cache() {
+  # Probe flags before mutation; never retry a failed prune with broader scope.
+  cache_help=$(docker builder prune --help) || return 1
+  if printf '%s\n' "$cache_help" | grep -q -- '--reserved-space'; then
+    cache_flag=--reserved-space
+  elif printf '%s\n' "$cache_help" | grep -q -- '--keep-storage'; then
+    cache_flag=--keep-storage
+  else
+    error_msg "当前 Docker 不支持设置缓存保留量；未执行清理，请检查 docker builder prune --help"
+    return 1
+  fi
+  docker builder prune --all --force "$cache_flag" "$1"
 }
 
 prune_docker_storage() {
@@ -2873,10 +2902,15 @@ prune_docker_storage() {
       log "保留运行镜像、带标签的回滚镜像、容器、卷、数据、密钥和备份。"
       disk_confirm="确认清理本项目无标签旧镜像？"
       ;;
-    build-cache)
+    build-cache|build-cache-all)
       panel_top "清理构建缓存"
       warn_msg "范围是当前 Docker context 的默认构建器，包含其他项目的未使用缓存；后续构建可能需要重新下载依赖。"
-      log "尽量保留 1 GiB 缓存；不删除应用镜像、容器、卷、数据或备份。自定义 buildx 构建器需单独管理。"
+      if [ "$1" = build-cache-all ]; then
+        log "缓存保留目标为 0，清理全部可回收缓存；下次源码构建可能需要重新下载依赖。"
+      else
+        log "尽量保留 1 GiB 缓存；缓存总量接近 1 GiB 时可能释放 0B。小磁盘可选择清空缓存。"
+      fi
+      log "不删除应用镜像、容器、卷、数据或备份。自定义 buildx 构建器需单独管理。"
       disk_confirm="确认清理该构建器的未使用缓存？"
       ;;
     *) die "未知磁盘清理类型" ;;
@@ -2894,12 +2928,89 @@ prune_docker_storage() {
         || { error_msg "镜像清理失败，未扩大清理范围"; return 1; }
       ;;
     build-cache)
-      docker builder prune --all --force --keep-storage 1GB \
+      prune_builder_cache 1GB \
+        || { error_msg "缓存清理失败，未尝试其他清理命令"; return 1; }
+      ;;
+    build-cache-all)
+      prune_builder_cache 0 \
         || { error_msg "缓存清理失败，未尝试其他清理命令"; return 1; }
       ;;
   esac
-  success_msg "清理完成；实际释放空间以上方 Docker 输出为准"
+  success_msg "清理命令执行完成；实际释放空间以上方 Docker 输出为准"
+  log "若释放 0B，表示没有满足本次条件的可回收内容，并不表示磁盘已经清空。"
+  docker system df || return 1
 }
+
+rollback_container_images() {
+  rollback_containers=$(docker container ls --all --quiet) || return 1
+  [ -n "$rollback_containers" ] || return 0
+  # IDs are Docker-generated hexadecimal values, not names or user arguments.
+  for rollback_container in $rollback_containers; do
+    case "$rollback_container" in *[!a-f0-9]*) return 1 ;; esac
+    docker container inspect --format '{{.Image}}' "$rollback_container" || return 1
+  done
+}
+
+prune_rollback_images() (
+  require_disk_docker
+  panel_top "清理旧回滚镜像（按镜像版本保留）"
+  rollback_rows=$(docker image ls --no-trunc --filter 'reference=scrcpygate:rollback-*' \
+    --format '{{.Repository}}:{{.Tag}} {{.ID}}') || return 1
+  rollback_used=$(rollback_container_images) || { error_msg "无法确认容器引用，未清理"; return 1; }
+  rollback_config=${SCRCPYGATE_IMAGE:-$(dotenv_value SCRCPYGATE_IMAGE)}
+  rollback_rows=$(printf '%s\n' "$rollback_rows" | LC_ALL=C sort -r)
+  rollback_keep=""
+  rollback_plan=""
+  while read -r rollback_ref rollback_id; do
+    [ -n "$rollback_ref" ] || continue
+    # Only tags created by this installer qualify; unknown tags are preserved.
+    if ! printf '%s\n' "$rollback_ref $rollback_id" | grep -Eq '^scrcpygate:rollback-[0-9]{8}-[0-9]{6}-[0-9]+ sha256:[0-9a-f]{64}$'; then
+      warn_msg "保留无法识别的回滚标签: $(safe_display "$rollback_ref")"
+      continue
+    fi
+    if printf '%s\n' "$rollback_used" | grep -Fxq -- "$rollback_id"; then
+      log "保留（容器引用）: $rollback_ref"
+    elif [ "$rollback_ref" = "$rollback_config" ]; then
+      log "保留（当前配置）: $rollback_ref"
+    elif [ -z "$rollback_keep" ] || [ "$rollback_keep" = "$rollback_id" ]; then
+      rollback_keep=$rollback_id
+      log "保留（最近回滚版本）: $rollback_ref"
+    else
+      rollback_plan="${rollback_plan}${rollback_ref} ${rollback_id}
+"
+    fi
+  done <<EOF
+$rollback_rows
+EOF
+  if [ -z "$rollback_plan" ]; then
+    log "没有符合条件的旧回滚标签，无需清理。"
+    return 0
+  fi
+  log "以下标签将被删除（同镜像的其他标签/共享层可能使释放量为 0B）："
+  printf '%s' "$rollback_plan"
+  log "不删除容器、卷、数据、密钥或备份；这些旧标签将无法再用于回滚。"
+  if [ "$ASSUME_YES" != true ]; then
+    require_interactive
+    if ! prompt_confirm_no "确认删除上述旧回滚标签？"; then log "已取消清理"; return 0; fi
+  fi
+  while read -r rollback_ref rollback_id; do
+    [ -n "$rollback_ref" ] || continue
+    rollback_actual=$(docker image inspect --format '{{.Id}}' "$rollback_ref") \
+      || { error_msg "回滚标签状态已变化，停止清理"; return 1; }
+    [ "$rollback_actual" = "$rollback_id" ] \
+      || { error_msg "回滚标签目标已变化，停止清理"; return 1; }
+    rollback_used=$(rollback_container_images) || { error_msg "无法重新确认容器引用，停止清理"; return 1; }
+    if printf '%s\n' "$rollback_used" | grep -Fxq -- "$rollback_id"; then
+      log "跳过（已被容器引用）: $rollback_ref"
+      continue
+    fi
+    docker image rm "$rollback_ref" || { error_msg "删除回滚标签失败，未强制删除"; return 1; }
+  done <<EOF
+$rollback_plan
+EOF
+  success_msg "旧回滚标签清理完成；共享层或其他标签仍可能保留镜像内容"
+  docker system df
+)
 
 disk_maintenance_menu() {
   require_interactive
@@ -2907,14 +3018,18 @@ disk_maintenance_menu() {
   menu_item 1 "查看磁盘占用（只读）" "$C_CYAN"
   menu_item 2 "清理本项目无标签旧镜像" "$C_YELLOW"
   menu_item 3 "清理 Docker 共用构建缓存（尽量保留 1 GiB）" "$C_YELLOW"
+  menu_item 4 "清空 Docker 未使用构建缓存（小磁盘推荐）" "$C_YELLOW"
+  menu_item 5 "预览并清理旧回滚镜像（保留最近一个版本）" "$C_YELLOW"
   menu_item 0 "返回" "$C_GRAY"
-  printf '\n请选择 [0-3]: '
+  printf '\n请选择 [0-5]: '
   IFS= read -r disk_choice || return 0
   disk_choice=$(printf '%s' "$disk_choice" | tr -d '\r')
   case "$disk_choice" in
     1) show_disk_usage ;;
     2) prune_docker_storage images ;;
     3) prune_docker_storage build-cache ;;
+    4) prune_docker_storage build-cache-all ;;
+    5) prune_rollback_images ;;
     0|'') return 0 ;;
     *) warn_msg "无效选项，未执行清理" ;;
   esac
@@ -4607,7 +4722,7 @@ fi
 # interactive menu acquires it per action so an idle menu does not block a
 # second operator from running a read-only command.
 case "$ACTION" in
-  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore|prune_images|prune_build_cache)
+  configure|install|update|start|stop|restart|reset_admin|uninstall|migrate_alas_token|clear_alas_token|candidate_manifest|check_conflicts|restore|prune_images|prune_build_cache|prune_build_cache_all|prune_rollback_images)
     acquire_deploy_lock
     ;;
 esac
@@ -4624,6 +4739,8 @@ case "$ACTION" in
   disk_usage) show_disk_usage ;;
   prune_images) prune_docker_storage images ;;
   prune_build_cache) prune_docker_storage build-cache ;;
+  prune_build_cache_all) prune_docker_storage build-cache-all ;;
+  prune_rollback_images) prune_rollback_images ;;
   logs) show_logs ;;
   reset_admin) reset_admin ;;
   ban_list) ban_list ;;

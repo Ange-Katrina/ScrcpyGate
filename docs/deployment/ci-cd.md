@@ -209,6 +209,8 @@ choosing what to remove:
 sudo sh ./deploy.sh --disk-usage
 sudo sh ./deploy.sh --prune-images
 sudo sh ./deploy.sh --prune-build-cache
+sudo sh ./deploy.sh --prune-build-cache-all
+sudo sh ./deploy.sh --prune-rollback-images
 ```
 
 Menu 25 exposes the same operations. Cleanup requires interactive confirmation
@@ -217,15 +219,33 @@ and Docker's default dangling-image rules: tagged images and images referenced
 by any container are retained. The label is included in new builds; old unlabeled
 images are not silently included. Cleanup does not select by a broad name prefix.
 
-Build-cache cleanup runs `docker builder prune --all --force --keep-storage 1GB`
-after confirmation. This targets unused cache in the current Docker context's
+Build-cache cleanup probes `docker builder prune --help` and uses `--reserved-space`
+on newer versions or `--keep-storage` on older versions. It stops if neither flag
+is supported. The normal cleanup retains up to a 1 GiB target;
+`--prune-build-cache-all` (submenu 4) sets that target to zero for small disks.
+A failed prune is never retried with broader arguments.
+This targets unused cache in the current Docker context's
 default builder, including cache from other projects. Future builds may need to
 download dependencies again. The retention target is not a hard total-disk cap;
-active cache and custom buildx builders may retain additional space. Neither
-cleanup command removes containers, volumes, application data, keys or backups.
+active cache and custom buildx builders may retain additional space. Cleanup
+does not remove containers, volumes, application data, keys or backups.
 Docker reports the actual reclaimed bytes; image sizes share layers and cannot
 simply be added together. Host directory usage refers to the host running the
 script, which may differ from a remote Docker context.
+
+`--prune-rollback-images` (submenu 5) previews old installer-generated rollback
+tags before confirmation. The newest unused image version is retained by full
+image ID, along with all images referenced by running or stopped containers,
+the currently configured image reference, and unrecognized tags. Duplicate tags
+do not count as separate versions. Before each removal, the script rechecks the
+tag's image ID and container references; lookup failures stop cleanup. No forced
+image removal is used. Removed tags are no longer available for rollback; other
+tags and shared layers can still retain their contents. Do not retag images or
+run unrelated container operations concurrently with cleanup.
+
+Zero reclaimed bytes means nothing matched the chosen cleanup policy. With
+roughly 1 GiB of cache, retaining 1 GiB may reclaim nothing. Old source folders,
+uploaded deployment archives and system logs are outside these cleanup commands.
 
 With an older script, inspect `sudo docker system df` first. The following native
 commands retain Docker's own confirmation prompts:
