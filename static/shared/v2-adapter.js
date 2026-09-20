@@ -6186,6 +6186,8 @@
       intervalHours: Number(data.interval_hours || 0),
       jitterSeconds: Number(data.jitter_seconds || 0),
       minManualIntervalSeconds: Number(data.min_manual_interval_seconds || 0),
+      retryAfterSeconds: Number(data.retry_after_seconds || 0),
+      retryIntervalSeconds: Number(data.retry_interval_seconds || 30),
       maxDownloadsPerDay: Number(data.max_downloads_per_day || 0),
       downloadsToday: Number(data.downloads_today || 0),
       attemptsToday: Number(data.attempts_today || 0),

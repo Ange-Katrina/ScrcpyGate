@@ -16,6 +16,7 @@
     credentialClear: document.getElementById('geo-credentials-clear'),
     credentialSource: document.getElementById('geo-credentials-source'),
     credentialStatus: document.getElementById('geo-credentials-status'),
+    credentialPresence: document.getElementById('geo-credentials-presence'),
     summary: document.getElementById('geo-summary'),
     status: document.getElementById('geo-status'),
     policyNotice: document.getElementById('geo-policy-notice'),
@@ -230,7 +231,16 @@
     credentials_write_failed: '保存失败，请检查数据目录写入权限与剩余空间。',
     license_rejected: 'MaxMind 拒绝了凭据，请确认 Account ID、Key 和数据库下载权限。',
     network_error: '无法连接 MaxMind，请检查服务器 HTTPS 出站网络和代理设置。',
-    timeout: '下载超时，请稍后重试。', too_soon: '检查过于频繁，请等待 10 分钟冷却结束。',
+    timeout: '下载连接或传输超时，原有地区库保留；可检查代理后重试。', too_soon: '正在短暂冷却，请按倒计时重试。',
+    dns_error: '无法解析下载服务器域名，请检查服务器 DNS。',
+    tls_error: 'HTTPS 证书校验失败，请检查服务器时间、CA 证书和代理。',
+    connection_refused: '下载连接被拒绝，请检查服务器出站规则和代理端口。',
+    download_forbidden: '地区库文件下载被拒绝，请重试或检查代理；这不代表 Key 无效。',
+    upstream_rate_limited: 'MaxMind 暂时限制下载频率，请稍后重试。',
+    upstream_unavailable: '下载服务暂时不可用，请稍后重试。',
+    http_error: '下载服务返回异常状态，请查看运行记录后重试。',
+    update_io_failed: '地区库文件操作失败，请检查数据目录权限和剩余磁盘空间。',
+    download_destination_rejected: '下载重定向地址未通过安全校验，请检查代理或更新服务版本。',
     daily_limit: '已达到今日 30 次尝试上限，请明日重试。', update_in_progress: '更新正在进行，请完成后再修改凭据。',
     updater_disabled: '自动更新已由服务器关闭（GEO_UPDATE_ENABLED=false）。'
   };
@@ -239,13 +249,55 @@
     var headers = error && error.detail && error.detail.headers || {};
     return errorText(headers['x-geo-update-error'] || headers['X-Geo-Update-Error'] || '') || (error && error.message) || '未知错误';
   }
+  function renderPresence() {
+    var status = state.status || {};
+    var edited = (els.account && els.account.value.trim()) || (els.key && els.key.value.trim());
+    var complete = status.accountIdPresent && status.licenseKeyPresent && !status.credentialsError;
+    var partial = status.accountIdPresent || status.licenseKeyPresent || status.credentialsError;
+    if (els.credentialPresence) {
+      els.credentialPresence.textContent = t(edited ? '有未保存修改' : complete ? '已配置' : partial ? '配置不完整' : '未配置');
+      els.credentialPresence.setAttribute('data-tone', !edited && complete ? 'ok' : 'warn');
+    }
+    if (els.account) els.account.placeholder = t(status.accountIdPresent ? '留空保留现有值' : 'MaxMind Account ID');
+    if (els.key) els.key.placeholder = t(status.licenseKeyPresent ? '留空保留现有值' : '填写 License Key');
+  }
+
+  function renderCheck() {
+    if (!els.check) return;
+    var status = state.status || {};
+    var remaining = Math.max(0, Math.ceil(((state.retryDeadline || 0) - Date.now()) / 1000));
+    var canSaveFirst = state.downloadDirty && ['too_soon', 'downloads_disabled'].indexOf(status.blockedReason) >= 0;
+    els.check.disabled = !!(state.checkBusy || state.credentialBusy || state.downloadBusy || status.running
+      || !status.licenseKeyPresent || !status.accountIdPresent || (!status.canUpdateNow && !canSaveFirst));
+    els.check.textContent = t(status.running ? '正在更新…' : state.downloadDirty ? '保存选项并检查更新' : status.lastError ? '重试更新' : '立即检查更新');
+    var hint = state.credentialBusy || state.downloadBusy || state.checkBusy ? t('保存或提交中…')
+      : status.running ? t('地区库更新任务运行中…')
+      : !status.accountIdPresent ? t(errorText('account_id_missing'))
+      : !status.licenseKeyPresent ? t(errorText('license_key_missing'))
+      : !status.canUpdateNow && status.blockedReason !== 'too_soon' && !canSaveFirst ? t(errorText(status.blockedReason || ''))
+      : state.downloadDirty ? t('检查时会先保存当前下载选项。')
+      : status.lastError ? t(errorText(status.lastError))
+      : status.jobState === 'completed' ? t('地区库已更新')
+      : status.jobState === 'unchanged' ? t('地区库已是最新版本')
+      : !status.canUpdateNow ? t(errorText(status.blockedReason || '')) : t('已就绪，可以检查更新。');
+    if (remaining && status.blockedReason === 'too_soon' && !state.downloadDirty) {
+      hint += ' ' + t('可重试倒计时：') + Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0');
+    }
+    els.check.title = hint;
+    if (els.checkHint) {
+      els.checkHint.textContent = hint;
+      els.checkHint.setAttribute('data-tone', status.lastError ? 'error' : status.running || remaining ? 'warn'
+        : status.jobState === 'completed' || status.jobState === 'unchanged' ? 'ok' : '');
+    }
+  }
+
   function render() {
     var status = state.status || {};
     if (!state.intervalDirty && els.interval) els.interval.value = status.intervalHours || 12;
     var verificationLabels = {
-      unconfigured: '未配置下载凭据', unverified: '凭据已配置 · 待验证',
+      unconfigured: '下载权限尚未验证', unverified: '下载权限尚未验证',
       verified: '下载权限已验证', rejected: '凭据被拒绝 · 请检查或更换 Key',
-      unavailable: '暂时无法验证 · 请检查网络后重试'
+      unavailable: '下载权限尚未验证'
     };
     if (els.verificationState) els.verificationState.textContent = status.credentialsError ? errorText(status.credentialsError)
       : verificationLabels[status.credentialVerification] || verificationLabels.unverified;
@@ -255,12 +307,13 @@
           : status.credentialVerification === 'unconfigured' ? '' : 'warn');
     if (els.verificationTime) els.verificationTime.textContent = '最近检查：' + fmtTime(status.credentialCheckedTs)
       + ' · 最近验证通过：' + fmtTime(status.credentialVerifiedTs);
+    renderPresence();
     var managed = status.credentialsManaged === true;
     [els.account, els.key, els.credentialSave].forEach(function (node) { if (node) node.disabled = managed || state.credentialBusy || status.running; });
     if (els.credentialClear) els.credentialClear.disabled = !status.credentialsSaved || state.credentialBusy || status.running;
     if (els.credentialSource) els.credentialSource.textContent = status.credentialsError ? errorText(status.credentialsError)
       : managed ? '当前使用服务器环境变量，后台无法覆盖。清除仅删除后台保存的副本。'
-        : status.licenseKeyPresent ? '已保存下载凭据。Key 不会回显，留空保留。' : '尚未配置下载凭据。';
+        : '';
     if (els.summary) {
       var pieces = [modeLabel(status.mode)];
       if (status.forcedOff) pieces.push('已被环境变量强制关闭');
@@ -279,13 +332,9 @@
 
     if (els.dbStats) {
       var items = [
-        ['地区库', status.databaseAvailable ? '可用' : '不可用', status.databaseAvailable ? 'ok' : (status.mode === 'enforce' ? 'error' : 'warn')],
         ['定位精度', status.cityAvailable ? '国家 / 省份 / 城市' : status.databaseAvailable ? '仅国家' : '不可用', status.cityAvailable ? 'ok' : 'warn'],
         ['库版本', status.databaseEpoch ? fmtTime(status.databaseEpoch) : '—'],
-        ['库大小', fmtBytes(status.databaseSizeBytes)],
         ['上次成功', fmtTime(status.lastSuccessTs)],
-        ['今日下载', num(status.downloadsToday)],
-        ['今日尝试', num(status.attemptsToday) + ' / ' + num(status.maxDownloadsPerDay)],
         ['下次自动检查', fmtTime(status.nextDueTs)]
       ];
       els.dbStats.innerHTML = items.map(function (pair) {
@@ -293,23 +342,7 @@
       }).join('');
     }
 
-    if (els.check) {
-      els.check.disabled = state.credentialBusy || status.running || !status.licenseKeyPresent || !status.accountIdPresent || !status.canUpdateNow;
-      var checkHint = state.credentialBusy ? '保存中…' : status.running ? '地区库更新任务运行中…'
-        : !status.accountIdPresent ? errorText('account_id_missing')
-        : !status.licenseKeyPresent ? errorText('license_key_missing')
-        : !status.canUpdateNow ? errorText(status.blockedReason || '')
-        : '凭据已配置，可点击「立即检查更新」验证下载权限。';
-      els.check.title = checkHint;
-      if (!status.running && status.jobState === 'completed') checkHint = '地区库已更新';
-      else if (!status.running && status.jobState === 'unchanged') checkHint = '地区库已是最新版本';
-      else if (!status.running && status.lastError) checkHint = errorText(status.lastError);
-      if (els.checkHint) {
-        els.checkHint.textContent = checkHint;
-        els.checkHint.setAttribute('data-tone', status.running ? 'warn' : status.lastError ? 'error'
-          : status.jobState === 'completed' || status.jobState === 'unchanged' ? 'ok' : '');
-      }
-    }
+    renderCheck();
     if (els.save) els.save.disabled = false;
     renderProgress(status);
     renderDownloadSettings(status);
@@ -327,9 +360,6 @@
     }
     if (status.databaseError) {
       notes.push('地区库错误：' + errorText(status.databaseError) + '（强制执行时会按保护策略拒绝请求）。');
-    }
-    if (status.lastError) {
-      notes.push('上次更新失败：' + errorText(status.lastError) + '（' + fmtTime(status.lastErrorTs) + '）。');
     }
     if (status.removedOldDatabases) {
       notes.push('已清理过期地区库 ' + num(status.removedOldDatabases) + ' 个（保留期 ' + num(status.oldDatabaseMaxAgeDays) + ' 天）。');
@@ -353,6 +383,19 @@
   var pollFailures = 0;
   var pollExpected = false;
   var pagePaused = false;
+  var cooldownTimer = null;
+
+  function scheduleCooldown() {
+    if (cooldownTimer !== null) window.clearTimeout(cooldownTimer);
+    cooldownTimer = null;
+    if (pagePaused || !state.status || state.status.running || state.status.blockedReason !== 'too_soon') return;
+    cooldownTimer = window.setTimeout(function () {
+      cooldownTimer = null;
+      renderCheck();
+      if (Date.now() >= state.retryDeadline) load(true);
+      else scheduleCooldown();
+    }, 1000);
+  }
 
   function clearJobPoll() {
     if (jobPoll !== null) window.clearTimeout(jobPoll);
@@ -375,6 +418,8 @@
         pollFailures = 0;
         pollExpected = status.running === true;
         state.status = status;
+        state.retryDeadline = Date.now() + Math.max(0, num(status.retryAfterSeconds)) * 1000;
+        scheduleCooldown();
         var databaseSignature = status.databaseAvailable + ':' + status.databaseType + ':' + status.databaseEpoch + ':' + status.lastSuccessTs;
         if (state.databaseSignature && state.databaseSignature !== databaseSignature) {
           window.dispatchEvent(new CustomEvent('scrcpygate:geo-updated'));
@@ -418,6 +463,7 @@
     pagePaused = true;
     state.seq += 1;
     clearJobPoll();
+    if (cooldownTimer !== null) window.clearTimeout(cooldownTimer);
   });
   window.addEventListener('pageshow', function (event) {
     if (!event.persisted) return;
@@ -425,7 +471,7 @@
     load();
   });
   if (window.ScrcpyGateI18n && window.ScrcpyGateI18n.on) {
-    window.ScrcpyGateI18n.on(function () { renderProgress(state.status || {}); renderLogs(true); });
+    window.ScrcpyGateI18n.on(function () { renderProgress(state.status || {}); renderLogs(true); renderCheck(); renderPresence(); });
   }
 
   function currentForm() {
@@ -499,23 +545,26 @@
       });
   }
 
-  function checkNow() {
-    if (!api()) return;
-    if (els.check) els.check.disabled = true;
-    if (els.checkHint) els.checkHint.textContent = '正在检查并下载地区库…';
-    setStatus('正在检查并下载地区库…', '');
-    api().configured('geo.check', { method: 'POST', body: {} })
-      .then(function (result) {
-        pollExpected = true;
-        setStatus('地区库更新任务已提交', '');
-        return load();
-      })
-      .catch(function (error) {
-        var message = requestError(error);
-        setStatus('更新失败：' + message, 'error');
-        if (els.checkHint) els.checkHint.textContent = message;
-        return load();
-      });
+  async function checkNow() {
+    if (!api() || state.checkBusy || state.downloadBusy || state.credentialBusy) return;
+    if (els.account.value.trim() || els.key.value.trim()) {
+      els.credentialStatus.textContent = t('请先保存已填写的下载凭据，再检查更新。');
+      els.credentialStatus.setAttribute('data-tone', 'warn');
+      els.credentialSave.focus();
+      return;
+    }
+    if (state.downloadDirty && !await saveDownloadSettings()) return;
+    if (state.status && (state.status.running || !state.status.canUpdateNow)) { renderCheck(); return; }
+    state.checkBusy = true;
+    renderCheck();
+    try {
+      await api().configured('geo.check', { method: 'POST', body: {} });
+      pollExpected = true;
+      await load();
+    } catch (error) {
+      setStatus('更新失败：' + requestError(error), 'error');
+      await load();
+    } finally { state.checkBusy = false; renderCheck(); }
   }
 
   function credentialFieldError(field, message) {
@@ -581,40 +630,46 @@
       field.removeAttribute('aria-invalid');
       els.credentialStatus.textContent = '';
       els.credentialStatus.removeAttribute('data-tone');
+      renderPresence();
     });
   });
   window.addEventListener('pagehide', function () { if (els.key) els.key.value = ''; });
   if (els.logFollow) els.logFollow.addEventListener('change', function () {
     if (els.logFollow.checked) els.runLog.scrollTop = els.runLog.scrollHeight;
   });
-  if (els.downloadForm) {
-    els.downloadForm.addEventListener('input', function () { state.downloadDirty = true; els.downloadStatus.textContent = ''; });
-    els.downloadForm.addEventListener('change', function () { state.downloadDirty = true; });
-    els.downloadForm.addEventListener('submit', async function (event) {
-      event.preventDefault();
-      if (!api() || state.downloadBusy || els.downloadSave.disabled) return;
-      var editions = [];
-      if (els.downloadCountry.checked) editions.push('GeoLite2-Country');
-      if (els.downloadCity.checked) editions.push('GeoLite2-City');
-      var body = { editions: editions, proxy_mode: els.proxyMode.value, proxy_url: els.proxyClear.checked ? '' : els.proxyUrl.value.trim(), clear_proxy: els.proxyClear.checked };
-      state.downloadBusy = true;
+  async function saveDownloadSettings() {
+    if (!api() || state.downloadBusy || els.downloadSave.disabled) return false;
+    var editions = [];
+    if (els.downloadCountry.checked) editions.push('GeoLite2-Country');
+    if (els.downloadCity.checked) editions.push('GeoLite2-City');
+    var body = { editions: editions, proxy_mode: els.proxyMode.value, proxy_url: els.proxyClear.checked ? '' : els.proxyUrl.value.trim(), clear_proxy: els.proxyClear.checked };
+    state.downloadBusy = true;
+    renderDownloadSettings(state.status || {});
+    renderCheck();
+    els.downloadStatus.textContent = '保存中…';
+    try {
+      await api().configured('geo.downloads.save', {method:'PUT', body:body});
+      state.downloadDirty = false;
+      els.proxyClear.checked = false;
+      els.downloadStatus.textContent = '下载选项已保存，下次检查时生效。';
+      els.downloadStatus.setAttribute('data-tone', 'ok');
+      await load();
+      return true;
+    } catch (error) {
+      els.downloadStatus.textContent = requestError(error);
+      els.downloadStatus.setAttribute('data-tone', 'error');
+      return false;
+    } finally {
+      state.downloadBusy = false;
       renderDownloadSettings(state.status || {});
-      els.downloadStatus.textContent = '保存中…';
-      try {
-        await api().configured('geo.downloads.save', {method:'PUT', body:body});
-        state.downloadDirty = false;
-        els.proxyClear.checked = false;
-        els.downloadStatus.textContent = '下载选项已保存，下次检查时生效。';
-        els.downloadStatus.setAttribute('data-tone', 'ok');
-        await load();
-      } catch (error) {
-        els.downloadStatus.textContent = requestError(error);
-        els.downloadStatus.setAttribute('data-tone', 'error');
-      } finally {
-        state.downloadBusy = false;
-        renderDownloadSettings(state.status || {});
-      }
-    });
+      renderCheck();
+    }
+  }
+  if (els.downloadForm) {
+    function downloadsChanged() { state.downloadDirty = true; els.downloadStatus.textContent = ''; renderCheck(); }
+    els.downloadForm.addEventListener('input', downloadsChanged);
+    els.downloadForm.addEventListener('change', downloadsChanged);
+    els.downloadForm.addEventListener('submit', function (event) { event.preventDefault(); saveDownloadSettings(); });
   }
 
   function syncPreset() {

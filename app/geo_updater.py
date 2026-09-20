@@ -7,7 +7,7 @@
 * 只从 MaxMind 官方下载端点取库，使用 Account ID 与 License Key 的 Basic Auth；
   跨主机重定向仅允许官方对象存储，并移除 Authorization。
 * 不随产品分发 MMDB；本地验收用 MaxMind 官方公开**测试库**伪造一次「下载 → 校验 → 原子替换」。
-* 更新尝试有上限（默认每天 30 次，包含失败），检查有最小间隔（默认 10 分钟）。
+* 更新尝试有上限（每天 30 次，包含失败）；成功检查间隔 10 分钟，失败或配置变更后为 30 秒。
 
 原子替换与 keep-last-good：
 
@@ -28,9 +28,12 @@ import shutil
 from urllib.parse import urlparse
 import json
 import logging
+import math
 import os
 import random
 import re
+import socket
+import ssl
 import tarfile
 import tempfile
 import threading
@@ -61,11 +64,12 @@ MIN_INTERVAL_HOURS = 1.0
 DEFAULT_JITTER_SECONDS = 1800.0
 # 手动检查的最小间隔与每日下载上限。
 MIN_MANUAL_INTERVAL_SECONDS = 600.0
+RETRY_INTERVAL_SECONDS = 30.0
 MAX_DOWNLOADS_PER_DAY = 30
 # City is larger than Country; keep separate compressed and expanded bounds.
 MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
 MAX_DATABASE_BYTES = 256 * 1024 * 1024
-DOWNLOAD_TIMEOUT_SECONDS = 120.0
+DOWNLOAD_TIMEOUT_SECONDS = 600.0
 # 应用采用构建后 30 天的保守有效期；这不是 MaxMind EULA 的原文期限定义。
 OLD_DATABASE_MAX_AGE_DAYS = 30
 STATE_SETTING = "_geo_update_state"
@@ -325,6 +329,37 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
+def _network_error_code(error: BaseException) -> str:
+    """Classify connectivity failures without exposing URLs or exception text."""
+    current = error
+    for _ in range(8):
+        if isinstance(current, ssl.SSLError):
+            return "tls_error"
+        if isinstance(current, socket.gaierror):
+            return "dns_error"
+        if isinstance(current, TimeoutError):
+            return "timeout"
+        if isinstance(current, ConnectionRefusedError):
+            return "connection_refused"
+        nested = getattr(current, "reason", None)
+        current = nested if isinstance(nested, BaseException) else current.__cause__ or current.__context__
+        if current is None:
+            break
+    return "network_error"
+
+
+def _http_error_code(status_code: int, host: str | None) -> str:
+    if status_code in (401, 403):
+        return "license_rejected" if host == "download.maxmind.com" else "download_forbidden"
+    if status_code == 407:
+        return "proxy_error"
+    if status_code == 429:
+        return "upstream_rate_limited"
+    if status_code >= 500:
+        return "upstream_unavailable"
+    return "http_error"
+
+
 def _fetch(
     url: str,
     *,
@@ -363,7 +398,7 @@ def _fetch(
             raise GeoUpdateError("timeout")
         proxy_handler = urllib.request.ProxyHandler({}) if download_config["proxy_mode"] == "direct" else urllib.request.ProxyHandler()
         opener = urllib.request.build_opener(proxy_handler, _SafeRedirect(deadline))
-        with opener.open(request, timeout=min(10.0, remaining)) as response:
+        with opener.open(request, timeout=min(30.0, remaining)) as response:
             version = str(response.headers.get("Last-Modified", ""))[:128]
             if method == "HEAD":
                 return b"", version
@@ -392,9 +427,9 @@ def _fetch(
                     reported_at = now
                     on_progress(total, expected)
     except urllib.error.HTTPError as error:
-        raise GeoUpdateError("license_rejected" if error.code in (401, 403) else "http_error") from None
-    except (TimeoutError, urllib.error.URLError, OSError):
-        raise GeoUpdateError("network_error") from None
+        raise GeoUpdateError(_http_error_code(error.code, urlparse(error.url).hostname)) from None
+    except (TimeoutError, urllib.error.URLError, OSError) as error:
+        raise GeoUpdateError(_network_error_code(error)) from None
     if not chunks:
         raise GeoUpdateError("empty_download")
     return b"".join(chunks), version
@@ -415,7 +450,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or _stop_event.is_set():
                     raise GeoUpdateError("timeout")
-                with client.stream(method, url, headers=headers, timeout=min(10.0, remaining)) as response:
+                with client.stream(method, url, headers=headers, timeout=min(30.0, remaining)) as response:
                     if response.status_code in (301, 302, 303, 307, 308):
                         target = str(response.url.join(response.headers.get("location", "")))
                         _check_download_url(target)
@@ -423,12 +458,8 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                             headers.pop("Authorization", None)
                         url = target
                         continue
-                    if response.status_code in (401, 403):
-                        raise GeoUpdateError("license_rejected")
-                    if response.status_code == 407:
-                        raise GeoUpdateError("proxy_error")
                     if response.status_code != 200:
-                        raise GeoUpdateError("http_error")
+                        raise GeoUpdateError(_http_error_code(response.status_code, urlparse(url).hostname))
                     version = response.headers.get("last-modified", "")[:128]
                     if method == "HEAD":
                         return b"", version
@@ -460,8 +491,8 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
         raise GeoUpdateError("proxy_error") from None
     except httpx.TimeoutException:
         raise GeoUpdateError("timeout") from None
-    except (httpx.HTTPError, ValueError, OSError):
-        raise GeoUpdateError("network_error") from None
+    except (httpx.HTTPError, ValueError, OSError) as error:
+        raise GeoUpdateError(_network_error_code(error)) from None
 
 
 def _extract_mmdb(payload: bytes, *, edition: str = EDITION) -> bytes:
@@ -561,6 +592,15 @@ def _cleanup_old_databases(keep: Path | None, *, now: float | None = None) -> in
     return removed
 
 
+def retry_after_seconds(*, now: float | None = None, state: dict | None = None) -> int:
+    state = _load_state() if state is None else state
+    moment = time.time() if now is None else now
+    last = float(state.get("last_attempt_ts") or 0)
+    retry = bool(state.get("last_error") or state.get("job_state") == "failed" or state.get("retry_configuration_changed"))
+    interval = RETRY_INTERVAL_SECONDS if retry else MIN_MANUAL_INTERVAL_SECONDS
+    return max(0, math.ceil(last + interval - moment)) if last else 0
+
+
 def can_update_now(*, now: float | None = None) -> tuple[bool, str]:
     config = geo_downloads.public_status()
     if config["error"]:
@@ -578,8 +618,7 @@ def can_update_now(*, now: float | None = None) -> tuple[bool, str]:
         return False, "license_key_missing"
     if not credentials["account_id_present"]:
         return False, "account_id_missing"
-    last = float(state.get("last_attempt_ts") or 0)
-    if last and moment - last < MIN_MANUAL_INTERVAL_SECONDS:
+    if retry_after_seconds(now=moment, state=state):
         return False, "too_soon"
     if state.get("day") == _today(moment) and int(state.get("attempts") or 0) >= MAX_DOWNLOADS_PER_DAY:
         return False, "daily_limit"
@@ -594,7 +633,7 @@ def _reserve(trigger: str, moment: float) -> dict:
     if state.get("day") != _today(moment):
         state.update(day=_today(moment), attempts=0, downloads=0)
     state.update(last_attempt_ts=int(moment), trigger=str(trigger)[:24],
-                 attempts=int(state.get("attempts") or 0) + 1, last_error="", job_state="running")
+                 attempts=int(state.get("attempts") or 0) + 1, last_error="", job_state="running", retry_configuration_changed=False)
     _save_state(state)
     reset_progress()
     _set_progress("queued", 1)
@@ -835,6 +874,8 @@ def status(*, now: float | None = None) -> dict:
         "interval_hours": round(interval_seconds() / 3600.0, 2),
         "jitter_seconds": int(jitter_seconds()),
         "min_manual_interval_seconds": int(MIN_MANUAL_INTERVAL_SECONDS),
+        "retry_interval_seconds": int(RETRY_INTERVAL_SECONDS),
+        "retry_after_seconds": retry_after_seconds(now=moment, state=state),
         "max_downloads_per_day": MAX_DOWNLOADS_PER_DAY,
         "downloads_today": _downloads_today(state, moment),
         "can_update_now": allowed and not _update_lock.locked(),
@@ -865,11 +906,16 @@ def configure_downloads(editions: object, mode: object, proxy: object = "", *, c
     if not _update_lock.acquire(blocking=False):
         raise GeoUpdateError("update_in_progress")
     try:
+        try:
+            previous = geo_downloads.resolve()
+        except geo_downloads.DownloadConfigError:
+            previous = None
         geo_downloads.save(editions, mode, proxy, clear_proxy=clear_proxy)
-        state = _load_state()
-        state.update(job_state="idle", last_error="", last_error_ts=0)
-        _save_state(state)
-        reset_progress()
+        if previous != geo_downloads.resolve():
+            state = _load_state()
+            state.update(job_state="idle", last_error="", last_error_ts=0, retry_configuration_changed=True)
+            _save_state(state)
+            reset_progress()
     except geo_downloads.DownloadConfigError as exc:
         raise GeoUpdateError(str(exc)) from None
     finally:
@@ -894,7 +940,7 @@ def configure_credentials(account: object = "", key: object = "", *, clear: bool
             state = _load_state()
             for field in ("credential_fingerprint", "credential_verification", "credential_checked_ts", "credential_verified_ts"):
                 state.pop(field, None)
-            state.update(last_error="", last_error_ts=0, job_state="idle")
+            state.update(last_error="", last_error_ts=0, job_state="idle", retry_configuration_changed=True)
             _save_state(state)
             reset_progress()
     except geo_credentials.CredentialError as exc:

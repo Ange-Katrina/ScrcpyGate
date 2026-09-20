@@ -743,20 +743,15 @@
      </button>
     </div>
     <section aria-labelledby="geo-database-title" class="sec-disclosure geo-database">
-     <div class="sec-disclosure-head">
-      <h3 class="sec-disclosure-title" id="geo-database-title">
-       地区库与自动更新
-      </h3>
-     </div>
+     <div class="sec-disclosure-head"><h3 class="sec-disclosure-title" id="geo-database-title">地区库与自动更新</h3></div>
+     <p class="sec-hint geo-intro">City 包含国家、省份与城市，通常只需选择 City；下载成功前继续使用现有地区库。</p>
+     <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats"></ul>
      <p class="sec-hint" id="geo-database-note"></p>
-     <p class="sec-hint">选择需要下载的国家库或城市库，使用同一组 MaxMind 凭据。City 已包含国家信息；通常只需启用 City。</p>
-     <div class="geo-verification" role="status" aria-live="polite">
-      <b id="geo-verification-state">正在读取凭据状态…</b>
-      <p class="sec-hint" id="geo-verification-time"></p>
-      <p class="sec-hint">使用 Account ID 和 License Key 验证下载权限，无网页登录会话，也无法查询账户或 Key 的到期日。状态仅代表最近一次检查结果。</p>
-     </div>
-     <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off" novalidate>
-      <p class="sec-hint">配置 MaxMind 下载凭据，不需要提供账户登录密码。留空保留已保存的值；更换 Account ID 时须同时填写新 Key。</p>
+     <div class="geo-settings-grid">
+      <section class="geo-settings-section" aria-labelledby="geo-credentials-title">
+       <div class="geo-credentials-heading"><h4 id="geo-credentials-title">下载凭据</h4><span id="geo-credentials-presence" role="status">读取中…</span></div>
+       <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off" novalidate>
+      <p class="sec-hint">留空保留已保存的凭据；更换 Account ID 时须同时填写新 Key。</p>
       <div class="geo-credentials-fields">
        <label class="vis-filter"><span>Account ID</span><input id="geo-account-id" name="account_id" type="text" inputmode="numeric" pattern="[0-9]{1,20}" placeholder="MaxMind Account ID" autocomplete="off" spellcheck="false" aria-describedby="geo-account-hint geo-credentials-status"/><small id="geo-account-hint">填写账户数字编号，不是邮箱或用户名；粘贴时会去除首尾空白。</small></label>
        <label class="vis-filter"><span>License Key</span><input id="geo-license-key" name="license_key" type="password" placeholder="填写新 Key；留空保留" autocomplete="new-password" spellcheck="false" aria-describedby="geo-key-hint geo-credentials-status"/><small id="geo-key-hint">使用同一账户生成的完整 Key，不是登录密码或仅显示的前四位。</small></label>
@@ -764,15 +759,20 @@
       <p class="sec-hint" id="geo-credentials-source"></p>
       <div class="sec-inline-actions">
        <button class="guard-btn primary" id="geo-credentials-save" type="submit">保存下载凭据</button>
-       <button class="guard-btn ghost" id="geo-check" type="button" disabled aria-describedby="geo-check-hint">立即检查更新</button>
        <button class="guard-btn ghost" id="geo-credentials-clear" type="button" disabled>清除已保存凭据</button>
        <a class="guard-btn ghost" href="https://www.maxmind.com/en/accounts/current/license-key" target="_blank" rel="noopener noreferrer">获取 License Key<span aria-hidden="true">↗</span></a>
       </div>
       <p class="guard-status" id="geo-credentials-status" role="status" aria-live="polite"></p>
-      <p class="sec-hint" id="geo-check-hint" role="status" aria-live="polite"></p>
-      <p class="sec-hint">首次配置请填写两项。保存只验证格式；点击「立即检查更新」后，将通过 MaxMind 官方下载端点验证权限并更新地区库。</p>
+      <p class="sec-hint">保存只校验格式，检查更新时验证下载权限。Key 不回显。</p>
      </form>
-     <form class="geo-download-form" id="geo-download-form" autocomplete="off">
+       <div class="geo-verification" role="status" aria-live="polite">
+      <b id="geo-verification-state">正在读取凭据状态…</b>
+      <p class="sec-hint" id="geo-verification-time"></p>
+     </div>
+      </section>
+      <section class="geo-settings-section" aria-labelledby="geo-download-title">
+       <h4 id="geo-download-title">下载配置</h4>
+       <form class="geo-download-form" id="geo-download-form" autocomplete="off">
       <fieldset class="geo-editions">
        <legend>下载内容</legend>
        <label><input id="geo-download-country" type="checkbox"/><span><b>Country</b><small>国家归属，下载较小</small></span></label>
@@ -789,7 +789,18 @@
       <div class="sec-inline-actions"><button class="guard-btn primary" type="submit" id="geo-download-save">保存下载选项</button></div>
       <p class="guard-status" id="geo-download-status" role="status" aria-live="polite"></p>
      </form>
-     <div class="geo-progress" hidden="" id="geo-progress">
+       <form id="geo-schedule-form" class="geo-schedule-form">
+      <label class="vis-filter" for="geo-interval"><span>自动检查间隔（小时）</span><input id="geo-interval" type="number" min="1" max="168" step="1" required aria-describedby="geo-schedule-hint"/></label>
+      <button type="submit" class="guard-btn ghost" id="geo-schedule-save">保存更新周期</button>
+      <p class="guard-status" id="geo-schedule-status" role="status" aria-live="polite"></p>
+     </form>
+       <p class="sec-hint" id="geo-schedule-hint">自动检查间隔可设为 1–168 小时，保存后立即生效。</p>
+      </section>
+     </div>
+     <section class="geo-update-section" aria-labelledby="geo-update-title">
+      <div class="geo-update-toolbar"><h4 id="geo-update-title">更新状态</h4><button class="guard-btn primary" id="geo-check" type="button" disabled aria-describedby="geo-check-hint">立即检查更新</button></div>
+      <p class="sec-hint" id="geo-check-hint" role="status" aria-live="polite" data-i18n-skip></p>
+      <div class="geo-progress" hidden="" id="geo-progress">
       <div class="geo-progress-head">
        <span id="geo-progress-stage">
         正在准备…
@@ -804,31 +815,19 @@
       </div>
       <p class="sec-hint" id="geo-progress-detail"></p>
      </div>
-     <section class="geo-run-window" aria-labelledby="geo-run-title">
+      <section class="geo-run-window" aria-labelledby="geo-run-title">
       <div class="geo-run-toolbar"><h4 id="geo-run-title">下载运行记录</h4><label class="vis-check"><input id="geo-log-follow" type="checkbox" checked/>跟随最新日志</label></div>
       <div class="geo-run-log" id="geo-run-log" role="log" aria-live="off" aria-label="下载运行记录" tabindex="0" data-i18n-skip></div>
       <p class="sec-hint">仅保留本次任务最近 120 条记录；重启服务或更改下载配置后清空。不显示密钥或代理地址。</p>
      </section>
-     <form id="geo-schedule-form" class="geo-schedule-form">
-      <label class="vis-filter" for="geo-interval"><span>自动检查间隔（小时）</span><input id="geo-interval" type="number" min="1" max="168" step="1" required aria-describedby="geo-schedule-hint"/></label>
-      <button type="submit" class="guard-btn ghost" id="geo-schedule-save">保存更新周期</button>
-      <p class="guard-status" id="geo-schedule-status" role="status" aria-live="polite"></p>
-     </form>
-     <p class="sec-hint" id="geo-schedule-hint">可设为 1–168 小时，推荐 12 小时。后台设置优先于环境变量默认值，保存后立即重新安排检查；会附加随机延迟以错开下载高峰。</p>
-     <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats">
-     </ul>
-     <p class="sec-hint">
-      手动检查至少间隔 10 分钟，每日最多尝试 30 次。地区库不可用时，强制执行会拒绝访问。
-     </p>
-     <p class="sec-hint">IP 地域是估算结果，代理、VPN 和移动网络可能造成偏差。建议先使用「只观察」并预演当前来源，再启用强制执行。</p>
-     <p class="sec-hint"><a href="https://dev.maxmind.com/geoip/updating-databases/" target="_blank" rel="noopener noreferrer">MaxMind 更新文档</a> · 凭据保存在私有数据卷，保留数据重装会保留配置；清除凭据不会删除现有地区库或取消地域策略。</p>
-     <p class="sec-hint">
-      本产品使用 GeoLite2 数据，来源：
-      <a href="https://www.maxmind.com" rel="noopener noreferrer" target="_blank">
-       MaxMind
-      </a>
-      。
-     </p>
+     </section>
+     <details class="geo-help sec-disclosure">
+      <summary>更新规则与帮助<i data-lucide="chevron-down"></i></summary>
+      <p class="sec-hint">成功检查且配置未变时，间隔 10 分钟；失败重试或修改配置后，距上次尝试满 30 秒即可重试。每天最多尝试 30 次。</p>
+      <p class="sec-hint">凭据保存在私有数据卷，保留数据重装会保留配置。下载权限状态仅代表最近检查结果，不是网页登录状态，无法查询 Key 到期日。</p>
+      <p class="sec-hint">IP 地域是网络出口估算，可能受代理或移动网络影响。请先使用「只观察」预演，再启用强制执行。</p>
+      <p class="sec-hint"><a href="https://dev.maxmind.com/geoip/updating-databases/" target="_blank" rel="noopener noreferrer">MaxMind 更新文档</a> · 本产品使用 <a href="https://www.maxmind.com" target="_blank" rel="noopener noreferrer">MaxMind GeoLite2</a> 数据。</p>
+     </details>
     </section>
    </div>
   </section>

@@ -9,11 +9,11 @@
 .sec-help-link { display: inline-flex; align-items: center; gap: 8px; color: var(--admin-muted); font-size: 13px; text-decoration: none; min-height: 36px; }
 .sec-help-link:hover { color: var(--admin-brand); }
 .sec-help-link svg { width: 16px; height: 16px; }
-.sec-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--admin-border); margin-bottom: 20px; }
-.sec-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 4px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--admin-muted); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.sec-tabs { display: inline-flex; max-width: 100%; gap: 3px; padding: 3px; border: 1px solid var(--admin-border); border-radius: 999px; background: var(--admin-field); margin-bottom: 16px; }
+.sec-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 16px; border: 0; border-radius: 999px; background: transparent; color: var(--admin-muted); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; transition: background-color 120ms, color 120ms; }
 .sec-tab svg { width: 17px; height: 17px; }
 .sec-tab:hover { color: var(--admin-text); }
-.sec-tab[aria-selected="true"] { color: var(--admin-brand); border-bottom-color: var(--admin-brand); font-weight: 600; }
+.sec-tab[aria-selected="true"] { color: var(--admin-text); background: var(--admin-surface); box-shadow: 0 1px 3px var(--c-shadow); font-weight: 600; }
 .sec-tab-panel { min-width: 0; }
 .sec-tab:focus-visible, .sec-tab-panel:focus-visible, .security-content summary:focus-visible, .sec-help-link:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 3px; border-radius: 4px; }
 .security-content .sec-card { margin-top: 0; box-shadow: 0 1px 2px var(--c-shadow); }
@@ -182,8 +182,9 @@
   .sec-help-link { flex: none; }
   .sec-help-link svg:last-child { display: none; }
   .sec-help-link { align-self: flex-start; min-height: 44px; }
-  .sec-tabs { gap: 0; margin-bottom: 16px; }
-  .sec-tab { flex: 1; min-width: 0; padding: 8px 2px; gap: 4px; font-size: 13px; flex-direction: column; }
+  .sec-tabs { display: flex; gap: 3px; margin-bottom: 16px; border-radius: 16px; }
+  .sec-tab { flex: 1; min-width: 0; padding: 8px 4px; gap: 4px; font-size: 13px; border-radius: 12px; }
+  .sec-tab svg { display: none; }
   .sec-tab span { white-space: normal; text-align: center; line-height: 1.35; }
   .security-content .panel-header { padding: 16px; align-items: flex-start; }
   .security-content .guard-body { padding: 0 16px 16px; }
@@ -491,6 +492,42 @@ html.dark .security-content { --geo-ok: #67d492; --geo-warn: #ffb258; --geo-erro
 .geo-verification[data-tone="error"] b, .geo-card [data-tone="error"].sec-hint, .geo-card [data-tone="error"].guard-status, .geo-card [data-tone="error"].panel-subtitle, #geo-db-stats [data-tone="error"] b { color: var(--geo-error); }
 .geo-card #geo-check:not(:disabled) { color: var(--admin-brand); border-color: var(--admin-brand); background: var(--admin-brand-soft); }
 .geo-card #geo-credentials-clear:not(:disabled) { color: var(--geo-error); }
+
+/* Separate persistent setup from the update task, using the shared admin tokens. */
+.geo-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); margin: 16px; border-block: 1px solid var(--admin-border); }
+.geo-settings-section { min-width: 0; padding: 20px 0; }
+.geo-settings-section + .geo-settings-section { margin-left: 24px; padding-left: 24px; border-left: 1px solid var(--admin-border); }
+.geo-settings-section h4, .geo-update-section h4 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--admin-text); }
+.geo-settings-section .geo-credentials-form, .geo-settings-section .geo-download-form { margin: 0; padding: 0; border: 0; }
+.geo-settings-section .geo-credentials-fields { grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 12px 0; }
+.geo-credentials-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.geo-credentials-heading h4 { margin: 0; }
+.geo-credentials-heading [role="status"] { font-size: 12px; font-weight: 500; }
+.geo-credentials-heading [data-tone="ok"] { color: var(--geo-ok); }
+.geo-credentials-heading [data-tone="warn"] { color: var(--geo-warn); }
+.geo-settings-section .geo-verification { margin: 16px 0 0; padding: 12px; }
+.geo-settings-section .geo-proxy-fields { grid-template-columns: minmax(0, 1fr); }
+.geo-settings-section .geo-schedule-form { margin: 20px 0 8px; padding: 16px 0 0; border-top: 1px solid var(--admin-border); }
+.geo-settings-section .sec-inline-actions { gap: 8px; }
+.geo-update-section { min-width: 0; padding: 0 16px 16px; }
+.geo-update-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.geo-update-toolbar h4 { margin: 0; }
+.geo-update-section .geo-progress { margin: 12px 0; }
+.geo-update-section .geo-run-window { margin: 16px 0 0; }
+.geo-update-section .geo-run-log { max-height: 200px; }
+.geo-help { margin: 0 16px 16px; background: var(--admin-field); border: 0; }
+.geo-database .guard-status:empty, .geo-database #geo-database-note:empty, #geo-credentials-source:empty { display: none; }
+.security-content .geo-database .vis-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); padding-block: 16px; }
+@media (max-width: 1100px) {
+  .geo-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .geo-settings-section + .geo-settings-section { margin-left: 0; padding-left: 0; border-left: 0; border-top: 1px solid var(--admin-border); }
+  .geo-settings-section .geo-credentials-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .geo-settings-section .geo-credentials-fields { grid-template-columns: minmax(0, 1fr); }
+  .security-content .geo-database .vis-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .geo-update-toolbar .guard-btn { width: 100%; min-height: 44px; }
+}
 .geo-schedule-form { margin-inline: 16px; }
 .geo-schedule-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 20px; }
 .geo-schedule-form .vis-filter { flex: 1 1 180px; max-width: 280px; }

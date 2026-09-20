@@ -45,6 +45,14 @@ _UPDATE_STATUS_BY_CODE = {
     "too_soon": 429,
     "daily_limit": 429,
     "network_error": 502,
+    "dns_error": 502,
+    "tls_error": 502,
+    "connection_refused": 502,
+    "proxy_error": 502,
+    "download_forbidden": 502,
+    "upstream_rate_limited": 502,
+    "upstream_unavailable": 502,
+    "http_error": 502,
     "timeout": 502,
     "http_401": 502,
     "http_403": 502,
@@ -55,10 +63,13 @@ _UPDATE_STATUS_BY_CODE = {
 def _update_error_response(exc: geo_updater.GeoUpdateError) -> HTTPException:
     status_code = _UPDATE_STATUS_BY_CODE.get(exc.code, 400)
     detail = i18n.translate("server.error.geo_update_failed")
+    headers = {"X-Geo-Update-Error": exc.code}
+    if exc.code == "too_soon":
+        headers["Retry-After"] = str(max(1, geo_updater.retry_after_seconds()))
     return HTTPException(
         status_code=status_code,
         detail=detail,
-        headers={"X-Geo-Update-Error": exc.code},
+        headers=headers,
     )
 
 
