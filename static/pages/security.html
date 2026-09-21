@@ -750,7 +750,7 @@
      <div id="geo-database-inventory" class="geo-inventory" aria-label="已安装地区库" data-i18n-skip></div>
      <section class="geo-import-section" aria-labelledby="geo-import-title">
       <h4 id="geo-import-title">手动上传地区库</h4>
-      <p class="sec-hint" id="geo-upload-help">服务器无法下载时，可从 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。</p>
+      <p class="sec-hint" id="geo-upload-help">服务器无法下载时，可从 GitHub 或 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。</p>
       <form id="geo-upload-form" class="geo-upload-form">
        <label class="vis-filter"><span>数据库类型</span><select id="geo-upload-edition" name="edition"><option value="GeoLite2-City">City · 国家、省份与城市</option><option value="GeoLite2-Country">Country · 仅国家</option></select></label>
        <label class="vis-filter geo-upload-file"><span>选择数据库文件</span><input type="file" id="geo-upload-file" name="database" accept=".mmdb,.tar.gz" required aria-describedby="geo-upload-help geo-upload-status"/></label>
@@ -759,8 +759,8 @@
       <p class="sec-hint">先检查类型、构建时间、大小和 SHA-256；相同内容不重复替换。更新前保留一份旧库备份，失败时继续使用原库。</p>
       <p class="guard-status" id="geo-upload-status" role="status" aria-live="polite" data-i18n-skip></p>
      </section>
-     <div class="geo-settings-grid">
-      <section class="geo-settings-section" aria-labelledby="geo-credentials-title">
+     <div class="geo-settings-grid is-github" id="geo-settings-grid">
+      <section class="geo-settings-section" id="geo-credentials-section" aria-labelledby="geo-credentials-title" hidden>
        <div class="geo-credentials-heading"><h4 id="geo-credentials-title">下载凭据</h4><span id="geo-credentials-presence" role="status">读取中…</span></div>
        <form class="geo-credentials-form" id="geo-credentials-form" autocomplete="off" novalidate>
       <p class="sec-hint">留空保留已保存的凭据；更换 Account ID 时须同时填写新 Key。</p>
@@ -785,6 +785,9 @@
       <section class="geo-settings-section" aria-labelledby="geo-download-title">
        <h4 id="geo-download-title">下载配置</h4>
        <form class="geo-download-form" id="geo-download-form" autocomplete="off">
+      <label class="vis-filter" for="geo-download-source"><span>更新来源</span><select id="geo-download-source" aria-describedby="geo-source-hint"><option value="github">GitHub · P3TERX/GeoLite.mmdb（默认）</option><option value="maxmind">MaxMind 官方（需要 ID / Key）</option></select></label>
+      <p class="sec-hint" id="geo-source-hint" role="status" data-i18n-skip>GitHub 源无需 ID / Key；下载前检查发布信息，下载后校验大小与 SHA-256。</p>
+      <p class="sec-hint"><a href="https://github.com/P3TERX/GeoLite.mmdb/releases/latest" target="_blank" rel="noopener noreferrer">查看 GitHub 数据库发布</a></p>
       <fieldset class="geo-editions">
        <legend>下载内容</legend>
        <label><input id="geo-download-country" type="checkbox"/><span><b>Country</b><small>国家归属，下载较小</small></span></label>

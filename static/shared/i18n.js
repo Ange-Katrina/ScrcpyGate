@@ -20,6 +20,19 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "更新来源": "Update source",
+    "GitHub · P3TERX/GeoLite.mmdb（默认）": "GitHub · P3TERX/GeoLite.mmdb (default)",
+    "MaxMind 官方（需要 ID / Key）": "MaxMind official (ID / Key required)",
+    "MaxMind 官方": "MaxMind official",
+    "查看 GitHub 数据库发布": "View database releases on GitHub",
+    "GitHub 源无需 ID / Key；下载前检查发布信息，下载后校验大小与 SHA-256。": "GitHub requires no ID / Key. Release metadata is checked before download; file size and SHA-256 are verified afterward.",
+    "MaxMind 官方源需要 Account ID 与 License Key；凭据只发送给 MaxMind。": "The official MaxMind source requires an Account ID and License Key. Credentials are sent only to MaxMind.",
+    "正在检查 GitHub 发布版本…": "Checking the latest GitHub release…",
+    "请选择 GitHub 或 MaxMind 更新源。": "Select GitHub or MaxMind as the update source.",
+    "GitHub 发布信息缺少有效文件、大小或 SHA-256，已停止更新并保留原库。": "The GitHub release lacks a valid asset, size or SHA-256. The update stopped and the existing database was preserved.",
+    "无法连接下载服务，请检查服务器 HTTPS 出站网络和代理设置。": "Cannot reach the download service. Check outbound HTTPS connectivity and proxy settings.",
+    "下载服务暂时限制请求频率，请稍后重试。": "The download service temporarily rate-limited requests. Retry later.",
+    "服务器无法下载时，可从 GitHub 或 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。": "If the server cannot download, upload a file obtained from GitHub or MaxMind. Supports .mmdb (up to 256 MiB) or official .tar.gz (up to 128 MiB). Download credentials are not required.",
     "失败后点击验证按钮完成工作量证明；关闭则只保留失败计数与封禁": "After failed sign-ins, select the verification button to complete proof of work. When disabled, only failure counting and bans remain.",
     "手动上传地区库": "Upload a database",
     "服务器无法下载时，可从 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。": "If the server cannot download, upload a file obtained from MaxMind. Supports .mmdb (up to 256 MiB) or official .tar.gz (up to 128 MiB). Download credentials are not required.",

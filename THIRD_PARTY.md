@@ -82,17 +82,22 @@ license and this attribution when updating or redistributing the sprite.
 ## GeoLite2 City and Country data (not bundled)
 
 - Region restrictions and access attribution can download **GeoLite2-City**
-  (default), **GeoLite2-Country**, or both from MaxMind at runtime, as selected
+  (default), **GeoLite2-Country**, or both at runtime, as selected
   in the admin console. Country codes determine access policy; available region and city
   names are used for display only. **No MMDB file is shipped with this
-  repository or the container image**, and no license key is bundled: the key is
+  repository or the container image**. The default download source is the third-party
+  [P3TERX/GeoLite.mmdb release mirror](https://github.com/P3TERX/GeoLite.mmdb/releases),
+  which requires no download credentials. Asset sizes and SHA-256 digests from GitHub
+  release metadata are verified; this verifies transfer integrity, not a MaxMind signature.
+  The optional official MaxMind source requires a license key. No key is bundled: it is
   supplied with `GEO_ACCOUNT_ID` through the `GEO_LICENSE_KEY` environment variable,
   or configured through the admin console in a private data-volume file. It is
   never written to SQLite, logs, responses, or image layers. See the README for
   file permissions and backup handling.
-- Using GeoLite2 (including the download itself) requires accepting MaxMind's
-  GeoLite2 End User License Agreement and having a MaxMind account with a
-  license key: https://www.maxmind.com/en/geolite2/eula
+- The mirror identifies MaxMind as the database owner and links the GeoLite2 EULA
+  and CC BY-SA 4.0. Using a mirror does not replace applicable data-license obligations:
+  https://www.maxmind.com/en/geolite2/eula and https://creativecommons.org/licenses/by-sa/4.0/.
+  Direct downloads from MaxMind require a MaxMind account and license key.
 - Attribution requirement: applications using GeoLite2 data must be accompanied
   by the notice *"This product includes GeoLite2 data created by MaxMind,
   available from https://www.maxmind.com"*. The admin console shows this

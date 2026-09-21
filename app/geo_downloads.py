@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 FILE_NAME = ".geo-downloads.json"
 EDITIONS = ("GeoLite2-Country", "GeoLite2-City")
-DEFAULT = {"editions": ["GeoLite2-City"], "proxy_mode": "system", "proxy_url": ""}
+DEFAULT = {"source": "github", "editions": ["GeoLite2-City"], "proxy_mode": "system", "proxy_url": ""}
 
 
 class DownloadConfigError(ValueError):
@@ -48,8 +48,12 @@ def validate_proxy(value: object) -> str:
 
 
 def _validate(data: object) -> dict:
-    if not isinstance(data, dict) or set(data) != {"editions", "proxy_mode", "proxy_url"}:
+    if (not isinstance(data, dict) or not {"editions", "proxy_mode", "proxy_url"} <= set(data)
+            or set(data) - {"source", "editions", "proxy_mode", "proxy_url"}):
         raise DownloadConfigError("download_settings_invalid")
+    source = data.get("source", DEFAULT["source"])
+    if not isinstance(source, str) or source not in ("github", "maxmind"):
+        raise DownloadConfigError("download_source_invalid")
     editions = data["editions"]
     if (not isinstance(editions, list) or len(editions) > 2
             or any(not isinstance(item, str) or item not in EDITIONS for item in editions)
@@ -61,7 +65,7 @@ def _validate(data: object) -> dict:
     proxy = validate_proxy(data["proxy_url"])
     if mode == "custom" and not proxy:
         raise DownloadConfigError("proxy_required")
-    return {"editions": [item for item in EDITIONS if item in editions], "proxy_mode": mode, "proxy_url": proxy}
+    return {"source": source, "editions": [item for item in EDITIONS if item in editions], "proxy_mode": mode, "proxy_url": proxy}
 
 
 def resolve() -> dict:
@@ -89,8 +93,8 @@ def public_status() -> dict:
     try:
         data = resolve()
     except DownloadConfigError as exc:
-        return {"editions": [], "proxy_mode": "system", "proxy_configured": False, "error": str(exc)}
-    return {"editions": data["editions"], "proxy_mode": data["proxy_mode"],
+        return {"source": DEFAULT["source"], "editions": [], "proxy_mode": "system", "proxy_configured": False, "error": str(exc)}
+    return {"source": data["source"], "editions": data["editions"], "proxy_mode": data["proxy_mode"],
             "proxy_configured": bool(data["proxy_url"]), "error": ""}
 
 
@@ -99,11 +103,11 @@ def admin_status() -> dict:
     try:
         data = resolve()
     except DownloadConfigError as exc:
-        return {"editions": [], "proxy_mode": "system", "proxy_configured": False, "proxy_url": "", "error": str(exc)}
+        return {"source": DEFAULT["source"], "editions": [], "proxy_mode": "system", "proxy_configured": False, "proxy_url": "", "error": str(exc)}
     return {**data, "proxy_configured": bool(data["proxy_url"]), "error": ""}
 
 
-def save(editions: object, mode: object, proxy: object = "", *, clear_proxy: bool = False) -> None:
+def save(editions: object, mode: object, proxy: object = "", *, clear_proxy: bool = False, source: object = None) -> None:
     if type(clear_proxy) is not bool or not isinstance(proxy, str):
         raise DownloadConfigError("download_settings_invalid")
     if clear_proxy and proxy.strip():
@@ -111,7 +115,9 @@ def save(editions: object, mode: object, proxy: object = "", *, clear_proxy: boo
     proxy = proxy.strip()
     if not proxy and not clear_proxy:
         proxy = resolve()["proxy_url"]
-    data = _validate({"editions": editions, "proxy_mode": mode, "proxy_url": "" if clear_proxy else proxy})
+    if source is None:
+        source = resolve()["source"]
+    data = _validate({"source": source, "editions": editions, "proxy_mode": mode, "proxy_url": "" if clear_proxy else proxy})
     path = _path()
     temp = None
     try:

@@ -57,6 +57,7 @@ _UPDATE_STATUS_BY_CODE = {
     "download_forbidden": 502,
     "upstream_rate_limited": 502,
     "upstream_unavailable": 502,
+    "release_metadata_invalid": 502,
     "http_error": 502,
     "timeout": 502,
     "http_401": 502,
@@ -144,16 +145,17 @@ async def admin_geo_downloads(request: Request):
     admin = security.require_admin(request)
     body = await parse_body(request)
     if (not isinstance(body, dict) or not {"editions", "proxy_mode"} <= set(body)
-            or set(body) - {"editions", "proxy_mode", "proxy_url", "clear_proxy"}):
+            or set(body) - {"source", "editions", "proxy_mode", "proxy_url", "clear_proxy"}):
         raise HTTPException(status_code=400, detail="Invalid download settings")
     try:
         result = await asyncio.to_thread(geo_updater.configure_downloads, body["editions"], body["proxy_mode"],
-                                        body.get("proxy_url", ""), clear_proxy=body.get("clear_proxy", False))
+                                        body.get("proxy_url", ""), clear_proxy=body.get("clear_proxy", False),
+                                        source=body.get("source"))
     except geo_updater.GeoUpdateError as exc:
         audit_request(request, admin, "geo_download_settings_update", outcome="failure", reason=exc.code)
         raise _update_error_response(exc) from None
     audit_request(request, admin, "geo_download_settings_update", target_type="geo_database",
-                  metadata={"editions": result["editions"], "proxy_mode": result["proxy_mode"]})
+                  metadata={"source": result["source"], "editions": result["editions"], "proxy_mode": result["proxy_mode"]})
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 

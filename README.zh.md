@@ -431,17 +431,19 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 
 - **访问记录**：点击「明细」原地展开并平滑定位；点击「封禁」弹窗选择时长与原因，改期保留已有原因。封禁会断开现有连接；封禁自己的来源会失去访问权限，可在服务器执行 `./deploy.sh --unban <ip>` 恢复。
 - **登录保护**：可调整 PoW 首题难度、失败递增、难度上限、挑战有效期、签发间隔与失败阈值。轻量／均衡／加强预设只修改计算难度，每增加 1 bit 期望计算量约翻倍。先试算并用手机验证；内置计算期限为 30 秒。保存后对新签发的挑战生效。
-- **地域限制 → 地区库与自动更新**：填写 MaxMind **Account ID 与 License Key**，无需账户密码。留空保留原值，更换 Account ID 时须同时填写新 Key。保存后点击「立即检查更新」验证下载权限；仅保存不会验证 MaxMind 凭据，也不会开启强制执行。
+- **地域限制 → 地区库与自动更新**：默认从 [P3TERX/GeoLite.mmdb 的 GitHub Release](https://github.com/P3TERX/GeoLite.mmdb/releases/latest) 更新，无需 Account ID、License Key 或 GitHub Token。选择 Country / City 后点击「立即检查更新」。可在「更新来源」切换到 MaxMind 官方源，再填写同一账户的 **Account ID 与 License Key**；保存凭据不会开启地域强制执行。
 
 后台凭据作为私有配置文件保存在 `data/.geo-credentials.json`（或自定义数据目录），**不做文件内容加密**。Linux 权限为 `0600`；Windows 请限制数据目录 ACL。接口不会回显 Key，凭据不进入 Git、Docker 构建上下文、SQLite 或设置导出。`deploy.sh` 会将其纳入私有数据备份，备份须按密钥管理。保留数据重装会保留配置，彻底清理数据会删除配置；仅在后台清除凭据，不会删除地区库或取消地域策略。
 
-环境变量 `GEO_ACCOUNT_ID` 或 `GEO_LICENSE_KEY` 任一非空时，整个环境凭据对优先，因此两项均须配置，不会与后台值混用；后台不能覆盖环境凭据。`GEO_UPDATE_ENABLED=false` 时，即使保存凭据也不会下载，适用于外部管理的只读地区库。
+仅选择 MaxMind 官方源时使用凭据；环境变量 `GEO_ACCOUNT_ID` 或 `GEO_LICENSE_KEY` 任一非空时，整个环境凭据对优先，因此两项均须配置，不会与后台值混用。GitHub 源不会发送这些凭据。`GEO_UPDATE_ENABLED=false` 会关闭所有源的在线更新，适用于外部管理的只读地区库。
+
+升级后，未指定来源的旧下载配置自动使用 GitHub，保留原 Country / City 选择、代理地址和官方凭据；可在后台切回 MaxMind。GitHub 是第三方数据镜像，仍需遵守数据许可。更新器通过 GitHub API 获取最新正式发布，固定下载该版本资产，要求发布元数据包含大小和 SHA-256；校验下载内容、MMDB 类型和构建日期后才启用。缺少校验信息、过期、损坏或早于已安装版本的库均拒绝替换。相同发布信息、本地大小与 SHA-256、库有效期共同满足时跳过重复下载。代理设置同时用于发布查询和文件下载，服务器需能访问 `api.github.com`、`github.com` 和 `release-assets.githubusercontent.com`。GitHub API 限频或网络失败会显示错误并保留现有库，不会静默改用其他源。
 
 后台显示凭据配置状态、最近检查和最近验证通过的时间。MaxMind 下载认证没有网页登录会话，不提供可查询的账户/Key 到期日；网络故障不会显示为凭据失效，轮换凭据后需重新验证。参见 [MaxMind 更新文档](https://dev.maxmind.com/geoip/updating-databases/) 与 [License Key 文档](https://support.maxmind.com/knowledge-base/articles/using-maxmind-license-keys)。
 
 可在后台保存 1–168 小时的自动检查周期（推荐 12），优先于 `GEO_UPDATE_INTERVAL_HOURS` 默认值，持久化并立即重新调度，无需重启；禁用自动更新的环境开关仍然有效。国家/地区预设仅填入代码，保存地域设置后才生效。访问记录列表按当前地区库查询归属；国家筛选、历史明细和导出仍按记录时的值，内网地址不定位。
 
-自动更新默认下载 **GeoLite2 City**，复用现有 Account ID / License Key。在「下载选项」中可分别开关 Country 国家库和 City 省市库；City 已包含国家信息。保存后下次检查生效，全部取消即暂停下载，不会立即删除已有数据库，但原有过期与清理规则仍然适用。两项都选时，先检查 Country、再检查 City，全部成功后使用 City；后续库失败时保留前面已成功的文件，整次任务标记为失败。升级后点击「立即检查更新」；若 Key 无下载权限，按提示检查 MaxMind 授权。已有 Country 库在 City 下载、校验和激活成功前继续使用。City 可显示“中国大陆 · 广东省 · 深圳市”等可用信息；缺少中文名称时使用英文，缺少省市时回退到国家。国家代码及地域限制判定不变，历史明细和导出不补写省市。
+自动更新默认下载 **GeoLite2 City**。在「下载选项」中可分别开关 Country 国家库和 City 省市库；City 已包含国家信息。保存后下次检查生效，全部取消即暂停下载，不会立即删除已有数据库，但原有过期与清理规则仍然适用。两项都选时，先检查 Country、再检查 City，全部成功后使用 City；后续库失败时保留前面已成功的文件，整次任务标记为失败。已有 Country 库在 City 下载、校验和激活成功前继续使用。City 可显示“中国大陆 · 广东省 · 深圳市”等可用信息；缺少中文名称时使用英文，缺少省市时回退到国家。国家代码及地域限制判定不变，历史明细和导出不补写省市。
 
 进度条下方的「下载运行记录」显示各数据库的阶段、已下载字节、耗时与错误提示，可切换是否跟随最新记录。仅在内存保留本次任务最近 120 条，开始新任务、修改下载设置或重启服务后清空，不输出密钥或代理地址。
 

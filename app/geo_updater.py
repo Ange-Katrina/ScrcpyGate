@@ -1,11 +1,11 @@
-"""GEO 库自动更新：12 小时 + 抖动、手动立即检查、原子替换、旧库清理与状态持久化。
+"""GeoIP updates from GitHub releases or the optional MaxMind official source.
 
 安全与授权约束（任务书 §12 + MaxMind 条款）：
 
 * License Key 来自环境变量或数据卷内权限受限的凭据文件，绝不写入数据库、日志、响应或镜像；
   `status()` 只报告「是否存在」。所有错误信息在返回前都会做密钥打码。
-* 只从 MaxMind 官方下载端点取库，使用 Account ID 与 License Key 的 Basic Auth；
-  跨主机重定向仅允许官方对象存储，并移除 Authorization。
+* GitHub assets require release metadata, size and SHA-256 verification.
+  MaxMind credentials are sent only to the official MaxMind origin.
 * 不随产品分发 MMDB；本地验收用 MaxMind 官方公开**测试库**伪造一次「下载 → 校验 → 原子替换」。
 * 更新尝试有上限（每天 30 次，包含失败）；成功检查间隔 10 分钟，失败或配置变更后为 30 秒。
 
@@ -50,6 +50,10 @@ log = logging.getLogger("webscrcpy.geo.updater")
 
 DOWNLOAD_BASE_ENV = "GEO_DOWNLOAD_BASE_URL"
 DEFAULT_DOWNLOAD_BASE = "https://download.maxmind.com"
+GITHUB_REPOSITORY = "P3TERX/GeoLite.mmdb"
+GITHUB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+GITHUB_ASSET_PREFIX = f"https://github.com/{GITHUB_REPOSITORY}/releases/download/"
+_GITHUB_STORAGE_HOST = "release-assets.githubusercontent.com"
 EDITION = "GeoLite2-City"
 # 官方端点固定路径与查询，凭据仅通过 Authorization 发送。
 DOWNLOAD_PATH = f"/geoip/databases/{EDITION}/download?suffix=tar.gz"
@@ -93,7 +97,7 @@ _next_check_ts = 0.0
 #   idle → queued → credentials → download → verify → activate → cleanup → done / failed
 # percent 是「整体完成度」，下载阶段按 Content-Length 实时换算；没有 Content-Length
 # 时 total_bytes 为 0，前端显示为不确定进度。
-PROGRESS_STAGES = ("idle", "queued", "credentials", "download", "verify", "activate", "cleanup", "done", "failed")
+PROGRESS_STAGES = ("idle", "queued", "release", "credentials", "download", "verify", "activate", "cleanup", "done", "failed")
 _PROGRESS_LOCK = threading.Lock()
 _PROGRESS: dict[str, object] = {
     "stage": "idle", "percent": 0, "downloaded_bytes": 0, "total_bytes": 0, "updated_ts": 0.0,
@@ -115,7 +119,7 @@ def _safe_http_details(value: object) -> dict:
         return {}
     return {"status": status_code,
             "method": value.get("method") if value.get("method") in ("HEAD", "GET") else "",
-            "endpoint": value.get("endpoint") if value.get("endpoint") in ("maxmind", "storage") else ""}
+            "endpoint": value.get("endpoint") if value.get("endpoint") in ("maxmind", "github", "storage") else ""}
 
 
 def _event(stage: str, *, code: str = "", downloaded: int = 0, total: int = 0, http: dict | None = None) -> None:
@@ -208,8 +212,18 @@ def license_key_present() -> bool:
 
 
 def download_base() -> str:
-    """Production downloads use only the official origin."""
-    return DEFAULT_DOWNLOAD_BASE
+    """Return the configured fixed origin, never an operator-supplied URL."""
+    return f"https://github.com/{GITHUB_REPOSITORY}" if geo_downloads.public_status()["source"] == "github" else DEFAULT_DOWNLOAD_BASE
+
+
+def _source_ready() -> bool:
+    config = geo_downloads.public_status()
+    if config["error"] or not config["editions"]:
+        return False
+    if config["source"] == "github":
+        return True
+    credentials = geo_credentials.status()
+    return bool(not credentials["credentials_error"] and credentials["account_id_present"] and credentials["license_key_present"])
 
 
 def interval_seconds() -> float:
@@ -246,6 +260,8 @@ def _credential_fingerprint() -> str:
 
 
 def _verification_status(state: dict, credentials: dict) -> dict:
+    if geo_downloads.public_status()["source"] == "github":
+        return {"credential_verification": "not_required", "credential_checked_ts": 0, "credential_verified_ts": 0}
     fingerprint = _credential_fingerprint()
     matches = bool(fingerprint and fingerprint == state.get("credential_fingerprint")
                    and state.get("credential_edition") == ",".join(geo_downloads.public_status()["editions"]))
@@ -319,9 +335,18 @@ def _download_url(key: str = "", *, edition: str = EDITION) -> str:
 
 
 def _check_download_url(url: str) -> None:
-    parsed = urlparse(url)
-    if (parsed.scheme != "https" or parsed.hostname not in ("download.maxmind.com", _REDIRECT_HOST)
-            or parsed.username or parsed.password or parsed.port not in (None, 443)):
+    try:
+        parsed = urlparse(url)
+        valid = (parsed.scheme == "https" and not parsed.username and not parsed.password
+                 and parsed.port in (None, 443) and not parsed.fragment
+                 and not re.search(r"[\s\\\x00-\x1f\x7f]", url))
+        allowed = (parsed.hostname in ("download.maxmind.com", _REDIRECT_HOST, _GITHUB_STORAGE_HOST)
+                   or url == GITHUB_RELEASE_API
+                   or (url.startswith(GITHUB_ASSET_PREFIX) and not parsed.query
+                       and re.fullmatch(r"[A-Za-z0-9._-]+/GeoLite2-(?:City|Country)\.mmdb", url[len(GITHUB_ASSET_PREFIX):])))
+    except ValueError:
+        valid = allowed = False
+    if not valid or not allowed:
         raise GeoUpdateError("download_destination_rejected")
 
 
@@ -373,10 +398,15 @@ def _http_error_code(status_code: int, host: str | None) -> str:
     return "http_error"
 
 
-def _http_failure(status_code: int, url: str, method: str) -> GeoUpdateError:
+def _http_failure(status_code: int, url: str, method: str, headers=None) -> GeoUpdateError:
     host = urlparse(url).hostname
-    endpoint = "maxmind" if host == "download.maxmind.com" else "storage" if host == _REDIRECT_HOST else ""
-    return GeoUpdateError(_http_error_code(status_code, host),
+    endpoint = ("maxmind" if host == "download.maxmind.com" else "github" if host in ("api.github.com", "github.com")
+                else "storage" if host in (_REDIRECT_HOST, _GITHUB_STORAGE_HOST) else "")
+    code = _http_error_code(status_code, host)
+    if (status_code == 403 and host == "api.github.com" and headers is not None
+            and (headers.get("x-ratelimit-remaining") == "0" or headers.get("retry-after"))):
+        code = "upstream_rate_limited"
+    return GeoUpdateError(code,
                           http={"status": status_code, "method": method, "endpoint": endpoint})
 
 
@@ -404,6 +434,8 @@ def _verify_transfer(payload: bytes, info: dict) -> None:
         raise GeoUpdateError("download_size_mismatch")
     if info.get("md5") and base64.b64encode(hashlib.md5(payload, usedforsecurity=False).digest()).decode() != info["md5"]:
         raise GeoUpdateError("download_checksum_mismatch")
+    if info.get("sha256") and hashlib.sha256(payload).hexdigest() != info["sha256"]:
+        raise GeoUpdateError("download_checksum_mismatch")
 
 
 def _file_digest(path: Path) -> dict:
@@ -420,6 +452,8 @@ def _file_digest(path: Path) -> dict:
 
 def _same_remote(current: dict, previous: dict) -> bool:
     # Missing evidence never implies equality. All available validators must agree.
+    if current.get("source") == "github":
+        return bool(current.get("size") and current.get("sha256") and current.get("asset_id") and current == previous)
     return bool(current.get("size") and current.get("modified") and (current.get("etag") or current.get("md5"))
                 and current == previous)
 
@@ -442,30 +476,33 @@ def _fetch(
     deadline: float | None = None,
     on_progress=None,
     metadata: dict | None = None,
+    max_bytes: int = MAX_DOWNLOAD_BYTES,
 ) -> tuple[bytes, str]:
-    """Bounded official HTTPS download; credentials never enter URLs or redirected headers.
+    """Bounded HTTPS download; credentials never enter URLs or foreign origins.
 
     ``on_progress(downloaded, total)`` 在每个分片后回调（最多 4 次/秒），用于界面进度条；
     total 为 0 表示上游没给 Content-Length，调用方应按「不确定进度」显示。
     """
     _check_download_url(url)
     deadline = deadline if deadline is not None else time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
-    try:
-        account, key = geo_credentials.resolve()
-    except geo_credentials.CredentialError:
-        raise GeoUpdateError("credentials_unreadable") from None
+    credential = ""
+    if urlparse(url).hostname == "download.maxmind.com":
+        try:
+            account, key = geo_credentials.resolve()
+        except geo_credentials.CredentialError:
+            raise GeoUpdateError("credentials_unreadable") from None
+        credential = base64.b64encode(f"{account}:{key}".encode()).decode("ascii")
     try:
         download_config = geo_downloads.resolve()
     except geo_downloads.DownloadConfigError as exc:
         raise GeoUpdateError(str(exc)) from None
-    credential = base64.b64encode(f"{account}:{key}".encode()).decode("ascii")
     if download_config["proxy_mode"] == "custom":
         return _fetch_via_proxy(url, method=method, deadline=deadline, on_progress=on_progress,
-                                proxy=download_config["proxy_url"], credential=credential, metadata=metadata)
-    request = urllib.request.Request(url, method=method, headers={
-        "User-Agent": _USER_AGENT, "Accept": "*/*",
-        "Authorization": "Basic " + credential,
-    })
+                                proxy=download_config["proxy_url"], credential=credential, metadata=metadata, max_bytes=max_bytes)
+    headers = {"User-Agent": _USER_AGENT, "Accept": "*/*", "Accept-Encoding": "identity"}
+    if credential:
+        headers["Authorization"] = "Basic " + credential
+    request = urllib.request.Request(url, method=method, headers=headers)
     chunks, total = [], 0
     reported_at = 0.0
     try:
@@ -476,7 +513,7 @@ def _fetch(
         opener = urllib.request.build_opener(proxy_handler, _SafeRedirect(deadline))
         with opener.open(request, timeout=min(30.0, remaining)) as response:
             if response.status != 200:
-                raise _http_failure(response.status, response.url, method)
+                raise _http_failure(response.status, response.url, method, response.headers)
             version = str(response.headers.get("Last-Modified", ""))[:128]
             info = _response_metadata(response.headers)
             if metadata is not None:
@@ -487,7 +524,7 @@ def _fetch(
                 expected = max(0, int(response.headers.get("Content-Length") or 0))
             except (TypeError, ValueError):
                 expected = 0
-            if expected > MAX_DOWNLOAD_BYTES:
+            if expected > max_bytes:
                 raise GeoUpdateError("download_too_large")
             if expected:
                 # 长度已知就先报一次 0%，界面立刻从「检查凭据」切到下载阶段。
@@ -502,7 +539,7 @@ def _fetch(
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > MAX_DOWNLOAD_BYTES:
+                if total > max_bytes:
                     raise GeoUpdateError("download_too_large")
                 chunks.append(chunk)
                 now = time.monotonic()
@@ -510,7 +547,7 @@ def _fetch(
                     reported_at = now
                     on_progress(total, expected)
     except urllib.error.HTTPError as error:
-        raise _http_failure(error.code, error.url, method) from None
+        raise _http_failure(error.code, error.url, method, error.headers) from None
     except (TimeoutError, urllib.error.URLError, OSError) as error:
         raise GeoUpdateError(_network_error_code(error)) from None
     if not chunks:
@@ -521,14 +558,16 @@ def _fetch(
 
 
 def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, proxy: str, credential: str,
-                     metadata: dict | None = None) -> tuple[bytes, str]:
+                     metadata: dict | None = None, max_bytes: int = MAX_DOWNLOAD_BYTES) -> tuple[bytes, str]:
     # HTTPX supports both HTTP CONNECT and TLS-to-proxy with verified target TLS.
     import httpx
 
     # Do not let library debug logs expose signed redirect URLs or proxy auth.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    headers = {"User-Agent": _USER_AGENT, "Accept": "*/*", "Authorization": "Basic " + credential}
+    headers = {"User-Agent": _USER_AGENT, "Accept": "*/*", "Accept-Encoding": "identity"}
+    if credential:
+        headers["Authorization"] = "Basic " + credential
     try:
         with httpx.Client(proxy=proxy, trust_env=False, follow_redirects=False) as client:
             for _ in range(6):
@@ -545,7 +584,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                         url = target
                         continue
                     if response.status_code != 200:
-                        raise _http_failure(response.status_code, url, method)
+                        raise _http_failure(response.status_code, url, method, response.headers)
                     version = response.headers.get("last-modified", "")[:128]
                     info = _response_metadata(response.headers)
                     if metadata is not None:
@@ -556,7 +595,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                         expected = max(0, int(response.headers.get("content-length", "0")))
                     except ValueError:
                         expected = 0
-                    if expected > MAX_DOWNLOAD_BYTES:
+                    if expected > max_bytes:
                         raise GeoUpdateError("download_too_large")
                     chunks, downloaded, reported = [], 0, 0.0
                     if on_progress:
@@ -566,7 +605,7 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
                         if now >= deadline or _stop_event.is_set():
                             raise GeoUpdateError("timeout")
                         downloaded += len(chunk)
-                        if downloaded > MAX_DOWNLOAD_BYTES:
+                        if downloaded > max_bytes:
                             raise GeoUpdateError("download_too_large")
                         chunks.append(chunk)
                         if on_progress and (now - reported >= .25 or downloaded == expected):
@@ -584,6 +623,32 @@ def _fetch_via_proxy(url: str, *, method: str, deadline: float, on_progress, pro
         raise GeoUpdateError("timeout") from None
     except (httpx.HTTPError, ValueError, OSError) as error:
         raise GeoUpdateError(_network_error_code(error)) from None
+
+
+def _github_asset(edition: str, *, deadline: float) -> tuple[str, str, dict]:
+    """Pin the asset URL, byte count and digest from one bounded release response."""
+    payload, _ = _fetch(GITHUB_RELEASE_API, deadline=deadline, max_bytes=1024 * 1024)
+    try:
+        release = json.loads(payload)
+        tag = release["tag_name"]
+        if (release.get("draft") or release.get("prerelease") or not isinstance(tag, str)
+                or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", tag)):
+            raise ValueError
+        assets = [asset for asset in release["assets"] if asset.get("name") == f"{edition}.mmdb"]
+        if len(assets) != 1:
+            raise ValueError
+        asset = assets[0]
+        url = asset["browser_download_url"]
+        size, digest, asset_id = asset["size"], asset["digest"], asset["id"]
+        if (url != f"{GITHUB_ASSET_PREFIX}{tag}/{edition}.mmdb"
+                or type(size) is not int or not 0 < size <= MAX_DATABASE_BYTES
+                or type(asset_id) is not int or asset_id <= 0
+                or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest)):
+            raise ValueError
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise GeoUpdateError("release_metadata_invalid") from None
+    return url, tag, {"source": "github", "asset_id": asset_id, "version": tag,
+                      "size": size, "sha256": digest[7:].lower()}
 
 
 def _extract_mmdb(payload: bytes, *, edition: str = EDITION) -> bytes:
@@ -722,13 +787,14 @@ def can_update_now(*, now: float | None = None) -> tuple[bool, str]:
     state = _load_state()
     if not enabled():
         return False, "updater_disabled"
-    credentials = geo_credentials.status()
-    if credentials["credentials_error"]:
-        return False, credentials["credentials_error"]
-    if not credentials["license_key_present"]:
-        return False, "license_key_missing"
-    if not credentials["account_id_present"]:
-        return False, "account_id_missing"
+    if config["source"] == "maxmind":
+        credentials = geo_credentials.status()
+        if credentials["credentials_error"]:
+            return False, credentials["credentials_error"]
+        if not credentials["license_key_present"]:
+            return False, "license_key_missing"
+        if not credentials["account_id_present"]:
+            return False, "account_id_missing"
     if retry_after_seconds(now=moment, state=state):
         return False, "too_soon"
     if state.get("day") == _today(moment) and int(state.get("attempts") or 0) >= MAX_DOWNLOADS_PER_DAY:
@@ -854,28 +920,34 @@ def _activate_database(temp_path: Path, target: Path, *, persist=None) -> int:
 def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "") -> str:
     temp_path = backup_temp = None
     head_verified = False
-    fingerprint = _credential_fingerprint()
-    if fingerprint != state.get("credential_fingerprint") or state.get("credential_edition") != ",".join(geo_downloads.resolve()["editions"]):
-        state.update(credential_verified_ts=0, credential_verification="unverified")
-    state.update(credential_fingerprint=fingerprint, credential_checked_ts=int(moment), credential_edition=",".join(geo_downloads.resolve()["editions"]))
+    config = geo_downloads.resolve()
+    github = config["source"] == "github"
+    if not github:
+        fingerprint = _credential_fingerprint()
+        if fingerprint != state.get("credential_fingerprint") or state.get("credential_edition") != ",".join(config["editions"]):
+            state.update(credential_verified_ts=0, credential_verification="unverified")
+        state.update(credential_fingerprint=fingerprint, credential_checked_ts=int(moment), credential_edition=",".join(config["editions"]))
     deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
     try:
         directory = _state_path()
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{edition}.mmdb"
-        _set_progress("credentials", 5)
+        _set_progress("release" if github else "credentials", 5)
         version = ""
         remote_info = {}
-        try:
-            _, version = _fetch(_download_url(edition=edition), method="HEAD", deadline=deadline, metadata=remote_info)
-            head_verified = True
-            state.update(credential_verification="verified", credential_verified_ts=int(moment))
-        except GeoUpdateError as exc:
-            # Some gateways reject HEAD while accepting GET. Retry only that case,
-            # under the same deadline and attempt budget; never bypass auth errors.
-            if exc.http.get("status") not in (405, 501):
-                raise
-            _event("head_unsupported", http=exc.http)
+        if github:
+            download_url, version, remote_info = _github_asset(edition, deadline=deadline)
+        else:
+            download_url = _download_url(edition=edition)
+            try:
+                _, version = _fetch(download_url, method="HEAD", deadline=deadline, metadata=remote_info)
+                head_verified = True
+                state.update(credential_verification="verified", credential_verified_ts=int(moment))
+            except GeoUpdateError as exc:
+                # Some gateways reject HEAD while accepting GET; keep the same budget.
+                if exc.http.get("status") not in (405, 501):
+                    raise
+                _event("head_unsupported", http=exc.http)
         receipt = state.get("edition_receipts", {}).get(edition, {})
         if _same_remote(remote_info, receipt.get("remote", {})) and target.is_file():
             try:
@@ -910,12 +982,19 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
 
         _set_progress("download", 5, downloaded=0, total=0)
         downloaded_info = {}
-        payload, downloaded_version = _fetch(_download_url(edition=edition), deadline=deadline, on_progress=on_download, metadata=downloaded_info)
+        payload, downloaded_version = _fetch(download_url, deadline=deadline, on_progress=on_download,
+                                             metadata=downloaded_info, max_bytes=remote_info["size"] if github else MAX_DOWNLOAD_BYTES)
         head_verified = True
-        state.update(credential_verification="verified", credential_verified_ts=int(moment))
+        if not github:
+            state.update(credential_verification="verified", credential_verified_ts=int(moment))
         state["downloads"] = int(state.get("downloads") or 0) + 1
         _set_progress("verify", 76, downloaded=len(payload), total=len(payload))
-        data = _extract_mmdb(payload, edition=edition)
+        if github:
+            _verify_transfer(payload, remote_info)
+            downloaded_info, downloaded_version = remote_info, version
+            data = payload
+        else:
+            data = _extract_mmdb(payload, edition=edition)
         with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{edition}-", suffix=".tmp", delete=False) as handle:
             temp_path = Path(handle.name)
             handle.write(data)
@@ -928,8 +1007,15 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
             raise GeoUpdateError("timeout")
         local_info = _file_digest(temp_path)
         identical = _matches_local(target, local_info)
+        if not identical and target.is_file():
+            try:
+                old_epoch = _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
+            except GeoUpdateError:
+                old_epoch = 0
+            if old_epoch > epoch:
+                raise GeoUpdateError("database_older")
         state.setdefault("edition_receipts", {})[edition] = {"remote": downloaded_info, "local": local_info}
-        state.setdefault("edition_sources", {})[edition] = {"source": "download", "installed_ts": int(moment), "epoch": epoch}
+        state.setdefault("edition_sources", {})[edition] = {"source": config["source"], "installed_ts": int(moment), "epoch": epoch}
         if identical:
             _validate_mmdb(target, accepted_types=geo_access.CITY_DATABASE_TYPES if edition == EDITION else geo_access.COUNTRY_DATABASE_TYPES)
             if edition == geo_downloads.resolve()["editions"][-1] or not geo_access.status()["database"]["available"]:
@@ -953,9 +1039,9 @@ def _perform_edition(state: dict, *, edition: str, moment: float, actor: str = "
         return "completed"
     except Exception as exc:
         code = exc.code if isinstance(exc, GeoUpdateError) else "update_io_failed"
-        if code == "license_rejected":
+        if not github and code == "license_rejected":
             state["credential_verification"] = "rejected"
-        elif not head_verified:
+        elif not github and not head_verified:
             state["credential_verification"] = "unavailable"
         http = exc.http if isinstance(exc, GeoUpdateError) else {}
         state.update(last_error=code, last_http_error=http, last_error_ts=int(moment), job_state="failed")
@@ -1123,7 +1209,7 @@ def status(*, now: float | None = None) -> dict:
     last_success = float(state.get("last_success_ts") or 0)
     credentials = geo_credentials.status()
     next_due = 0.0
-    if enabled() and credentials["account_id_present"] and credentials["license_key_present"] and geo_downloads.public_status()["editions"]:
+    if enabled() and _source_ready():
         next_due = _next_check_ts or (last_success + interval_seconds() if last_success else 0)
     return {
         "enabled": enabled(),
@@ -1172,7 +1258,7 @@ def status(*, now: float | None = None) -> dict:
     }
 
 
-def configure_downloads(editions: object, mode: object, proxy: object = "", *, clear_proxy: bool = False) -> dict:
+def configure_downloads(editions: object, mode: object, proxy: object = "", *, clear_proxy: bool = False, source: object = None) -> dict:
     global _next_check_ts
     if not _update_lock.acquire(blocking=False):
         raise GeoUpdateError("update_in_progress")
@@ -1181,7 +1267,7 @@ def configure_downloads(editions: object, mode: object, proxy: object = "", *, c
             previous = geo_downloads.resolve()
         except geo_downloads.DownloadConfigError:
             previous = None
-        geo_downloads.save(editions, mode, proxy, clear_proxy=clear_proxy)
+        geo_downloads.save(editions, mode, proxy, clear_proxy=clear_proxy, source=source)
         if previous != geo_downloads.resolve():
             state = _load_state()
             state.update(job_state="idle", last_error="", last_error_ts=0, last_http_error={}, retry_configuration_changed=True)
@@ -1238,11 +1324,11 @@ def next_delay_seconds(*, now: float | None = None) -> float:
 
 
 def maybe_update_once(*, now: float | None = None) -> dict | None:
-    """到点就更新一次；未到点/未启用/无密钥时返回 None。"""
+    """Update when due and the selected source is ready."""
     if not enabled():
         return None
     moment = now if now is not None else time.time()
-    if not license_key_present():
+    if not _source_ready():
         return None
     state = _load_state()
     last_success = float(state.get("last_success_ts") or 0)
@@ -1278,10 +1364,10 @@ def _loop() -> None:  # pragma: no cover - 线程体，靠集成验收覆盖
 
 
 def start() -> bool:
-    """启动后台更新线程（幂等）。未启用/无密钥时返回 False。"""
+    """Start one scheduler when updates are enabled and the source is ready."""
     global _task
-    if not enabled() or not license_key_present():
-        log.info("GEO_UPDATE_DISABLED enabled=%s key_present=%s", enabled(), license_key_present())
+    if not enabled() or not _source_ready():
+        log.info("GEO_UPDATE_DISABLED enabled=%s source_ready=%s", enabled(), _source_ready())
         return False
     with _lock:
         if _task is not None and _task.is_alive():

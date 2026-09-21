@@ -6186,7 +6186,7 @@
       ok: true,
       running: data.running === true,
       jobState: String(data.job_state || 'idle'),
-      downloadSettings: data.download_settings || { editions: ['GeoLite2-City'], proxy_mode: 'system' },
+      downloadSettings: data.download_settings || { source: 'github', editions: ['GeoLite2-City'], proxy_mode: 'system' },
       events: Array.isArray(data.events) ? data.events : [],
       credentialSource: String(data.credential_source || "none"),
       credentialsManaged: data.credentials_managed === true,

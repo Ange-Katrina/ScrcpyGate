@@ -51,6 +51,10 @@
     progressFill: document.getElementById('geo-progress-fill'),
     progressDetail: document.getElementById('geo-progress-detail'),
     downloadForm: document.getElementById('geo-download-form'),
+    downloadSource: document.getElementById('geo-download-source'),
+    sourceHint: document.getElementById('geo-source-hint'),
+    settingsGrid: document.getElementById('geo-settings-grid'),
+    credentialSection: document.getElementById('geo-credentials-section'),
     downloadCountry: document.getElementById('geo-download-country'),
     downloadCity: document.getElementById('geo-download-city'),
     downloadSave: document.getElementById('geo-download-save'),
@@ -114,7 +118,7 @@
   /* 更新进度：阶段名与后端 PROGRESS_STAGES 一一对应；百分比由服务端算好（下载阶段
      按真实字节数换算），前端只负责显示，避免两边各自估算出现不一致。 */
   var progressStages = {
-    queued: '排队中…', credentials: '正在验证下载凭据…', download: '正在下载地区库…',
+    queued: '排队中…', release: '正在检查 GitHub 发布版本…', credentials: '正在验证下载凭据…', download: '正在下载地区库…',
     verify: '正在校验地区库…', activate: '正在启用新地区库…', cleanup: '正在清理旧库…',
     done: '地区库已更新', failed: '本次更新失败'
   };
@@ -196,8 +200,9 @@
 
   function renderDownloadSettings(status) {
     if (!els.downloadForm) return;
-    var config = status.downloadSettings || { editions: ['GeoLite2-City'], proxy_mode: 'system' };
+    var config = status.downloadSettings || { source: 'github', editions: ['GeoLite2-City'], proxy_mode: 'system' };
     if (!state.downloadDirty) {
+      els.downloadSource.value = config.source || 'github';
       els.downloadCountry.checked = config.editions.indexOf('GeoLite2-Country') !== -1;
       els.downloadCity.checked = config.editions.indexOf('GeoLite2-City') !== -1;
       els.proxyMode.value = config.proxy_mode;
@@ -206,6 +211,20 @@
     Array.prototype.forEach.call(els.downloadForm.elements, function (field) { field.disabled = state.downloadBusy || status.running; });
     els.proxySaved.textContent = config.error ? errorText(config.error)
       : config.proxy_configured ? '代理地址已保存，可直接修改。' : '尚未保存自定义代理地址。';
+    renderSource();
+  }
+
+  function selectedSource() {
+    return state.downloadDirty ? els.downloadSource.value : ((state.status || {}).downloadSettings || {}).source || 'github';
+  }
+
+  function renderSource() {
+    var github = selectedSource() === 'github';
+    els.credentialSection.hidden = github;
+    els.settingsGrid.classList.toggle('is-github', github);
+    els.sourceHint.textContent = t(github
+      ? 'GitHub 源无需 ID / Key；下载前检查发布信息，下载后校验大小与 SHA-256。'
+      : 'MaxMind 官方源需要 Account ID 与 License Key；凭据只发送给 MaxMind。');
   }
 
   function modeLabel(mode) {
@@ -218,6 +237,8 @@
     downloads_disabled: '已暂停所有地区库下载，请先选择下载内容并保存。',
     download_editions_invalid: '请选择 Country 或 City。',
     download_settings_invalid: '下载选项格式不正确。',
+    download_source_invalid: '请选择 GitHub 或 MaxMind 更新源。',
+    release_metadata_invalid: 'GitHub 发布信息缺少有效文件、大小或 SHA-256，已停止更新并保留原库。',
     download_settings_unreadable: '无法读取下载配置，请重新保存或检查文件权限。',
     download_settings_permissions: '下载配置文件权限不安全，请设为仅服务账户可读写（0600）。',
     download_settings_write_failed: '保存下载配置失败，请检查数据目录权限与磁盘空间。',
@@ -242,13 +263,13 @@
     credentials_permissions: '凭据文件权限不安全，请设为仅服务账户可读写（0600）。',
     credentials_write_failed: '保存失败，请检查数据目录写入权限与剩余空间。',
     license_rejected: 'MaxMind 拒绝了凭据，请确认 Account ID、Key 和数据库下载权限。',
-    network_error: '无法连接 MaxMind，请检查服务器 HTTPS 出站网络和代理设置。',
+    network_error: '无法连接下载服务，请检查服务器 HTTPS 出站网络和代理设置。',
     timeout: '下载连接或传输超时，原有地区库保留；可检查代理后重试。', too_soon: '正在短暂冷却，请按倒计时重试。',
     dns_error: '无法解析下载服务器域名，请检查服务器 DNS。',
     tls_error: 'HTTPS 证书校验失败，请检查服务器时间、CA 证书和代理。',
     connection_refused: '下载连接被拒绝，请检查服务器出站规则和代理端口。',
     download_forbidden: '地区库文件下载被拒绝，请重试或检查代理；这不代表 Key 无效。',
-    upstream_rate_limited: 'MaxMind 暂时限制下载频率，请稍后重试。',
+    upstream_rate_limited: '下载服务暂时限制请求频率，请稍后重试。',
     upstream_unavailable: '下载服务暂时不可用，请稍后重试。',
     http_error: '下载服务返回异常状态，请查看运行记录后重试。',
     update_io_failed: '地区库文件操作失败，请检查数据目录权限和剩余磁盘空间。',
@@ -261,7 +282,7 @@
     var status = value && Number(value.status);
     if (!Number.isInteger(status) || status < 100 || status > 599) return '';
     var method = ['HEAD', 'GET'].indexOf(value.method) >= 0 ? value.method : '';
-    var endpoint = value.endpoint === 'maxmind' ? 'MaxMind' : value.endpoint === 'storage' ? t('文件存储服务') : '';
+    var endpoint = value.endpoint === 'maxmind' ? 'MaxMind' : value.endpoint === 'github' ? 'GitHub' : value.endpoint === 'storage' ? t('文件存储服务') : '';
     var hint = ({400:'下载请求被拒绝，请检查更新服务版本。', 404:'下载地址或数据库版本不存在，请检查更新服务版本和下载权限。',
       405:'下载服务不接受此请求方法。', 406:'下载服务不接受请求的内容格式，请更新应用后重试。',
       451:'下载服务因地区或法律限制拒绝请求。'})[status];
@@ -288,14 +309,16 @@
     if (!els.check) return;
     var status = state.status || {};
     var remaining = Math.max(0, Math.ceil(((state.retryDeadline || 0) - Date.now()) / 1000));
-    var canSaveFirst = state.downloadDirty && ['too_soon', 'downloads_disabled'].indexOf(status.blockedReason) >= 0;
+    var needsCredentials = selectedSource() === 'maxmind';
+    var canSaveFirst = state.downloadDirty && ['too_soon', 'downloads_disabled', 'license_key_missing', 'account_id_missing',
+      'credentials_unreadable', 'credentials_permissions', 'download_settings_unreadable', 'download_settings_permissions'].indexOf(status.blockedReason) >= 0;
     els.check.disabled = !!(state.checkBusy || state.credentialBusy || state.downloadBusy || status.running
-      || !status.licenseKeyPresent || !status.accountIdPresent || (!status.canUpdateNow && !canSaveFirst));
+      || (needsCredentials && (!status.licenseKeyPresent || !status.accountIdPresent)) || (!status.canUpdateNow && !canSaveFirst));
     els.check.textContent = t(status.running ? '正在更新…' : state.downloadDirty ? '保存选项并检查更新' : status.lastError ? '重试更新' : '立即检查更新');
     var hint = state.credentialBusy || state.downloadBusy || state.checkBusy ? t('保存或提交中…')
       : status.running ? t('地区库更新任务运行中…')
-      : !status.accountIdPresent ? t(errorText('account_id_missing'))
-      : !status.licenseKeyPresent ? t(errorText('license_key_missing'))
+      : needsCredentials && !status.accountIdPresent ? t(errorText('account_id_missing'))
+      : needsCredentials && !status.licenseKeyPresent ? t(errorText('license_key_missing'))
       : !status.canUpdateNow && status.blockedReason !== 'too_soon' && !canSaveFirst ? t(errorText(status.blockedReason || ''))
       : state.downloadDirty ? t('检查时会先保存当前下载选项。')
       : status.lastError ? t(errorText(status.lastError))
@@ -379,10 +402,10 @@
     var notes = [];
     if (status.databaseAvailable && !status.cityAvailable && (!status.downloadSettings || status.downloadSettings.editions.indexOf('GeoLite2-City') !== -1)) notes.push('当前仍使用国家库。点击「立即检查更新」下载城市库后，归属将显示可用的省市信息。');
     if (status.enabled === false) notes.push(errorText("updater_disabled"));
-    if (!status.licenseKeyPresent) {
+    if (((status.downloadSettings || {}).source || 'github') === 'maxmind' && !status.licenseKeyPresent) {
       notes.push('未配置 License Key：不会联网下载，也不会自动更新（已存在的地区库照常使用）。');
     }
-    if (!status.accountIdPresent) notes.push('未配置 Account ID：内置更新不会联网。');
+    if (((status.downloadSettings || {}).source || 'github') === 'maxmind' && !status.accountIdPresent) notes.push('未配置 Account ID：内置更新不会联网。');
     if (status.forcedOff) {
       notes.push('环境变量 GEO_ENFORCE_DISABLED=true 正在强制关闭地域限制（设置里的档位不生效）。');
     }
@@ -425,7 +448,8 @@
       var fields = item ? [
         ['库大小', fmtBytes(item.size_bytes)], ['构建时间', fmtTime(item.epoch)],
         ['更新时间', fmtTime(item.modified_ts)],
-        ['来源', t(item.source === 'upload' ? '手动上传' : item.source === 'download' ? '在线下载' : '服务器文件')],
+        ['来源', t(item.source === 'github' ? 'GitHub · P3TERX/GeoLite.mmdb' : item.source === 'maxmind' ? 'MaxMind 官方'
+          : item.source === 'upload' ? '手动上传' : item.source === 'download' ? '在线下载' : '服务器文件')],
         ['备份占用', item.backup_size_bytes ? fmtBytes(item.backup_size_bytes) : t('无备份')]
       ] : [['状态', t('可在线下载或手动上传')]];
       fields.forEach(function (pair) {
@@ -645,7 +669,7 @@
 
   async function checkNow() {
     if (!api() || state.checkBusy || state.downloadBusy || state.credentialBusy) return;
-    if (els.account.value.trim() || els.key.value.trim()) {
+    if (selectedSource() === 'maxmind' && (els.account.value.trim() || els.key.value.trim())) {
       els.credentialStatus.textContent = t('请先保存已填写的下载凭据，再检查更新。');
       els.credentialStatus.setAttribute('data-tone', 'warn');
       els.credentialSave.focus();
@@ -740,7 +764,7 @@
     var editions = [];
     if (els.downloadCountry.checked) editions.push('GeoLite2-Country');
     if (els.downloadCity.checked) editions.push('GeoLite2-City');
-    var body = { editions: editions, proxy_mode: els.proxyMode.value, proxy_url: els.proxyClear.checked ? '' : els.proxyUrl.value.trim(), clear_proxy: els.proxyClear.checked };
+    var body = { source: els.downloadSource.value, editions: editions, proxy_mode: els.proxyMode.value, proxy_url: els.proxyClear.checked ? '' : els.proxyUrl.value.trim(), clear_proxy: els.proxyClear.checked };
     state.downloadBusy = true;
     renderDownloadSettings(state.status || {});
     renderCheck();
@@ -764,7 +788,7 @@
     }
   }
   if (els.downloadForm) {
-    function downloadsChanged() { state.downloadDirty = true; els.downloadStatus.textContent = ''; renderCheck(); }
+    function downloadsChanged() { state.downloadDirty = true; els.downloadStatus.textContent = ''; renderSource(); renderCheck(); }
     els.downloadForm.addEventListener('input', downloadsChanged);
     els.downloadForm.addEventListener('change', downloadsChanged);
     els.downloadForm.addEventListener('submit', function (event) { event.preventDefault(); saveDownloadSettings(); });
