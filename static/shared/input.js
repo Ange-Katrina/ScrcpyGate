@@ -1,6 +1,24 @@
-/* 这些键在隐藏代理（textarea）上由 beforeinput 处理，普通打字不需要再走 keycode 通路；
-   带 Ctrl/Alt/Meta 的组合键不会触发 beforeinput，必须走 keycode 通路。 */
-const BEFORE_INPUT_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'NumpadEnter', 'Space']);
+/* 与 app/mirror_runtime.py 的 SCRCPY_CLIENT_CLIPBOARD_MAX_BYTES 保持一致：
+   单条剪贴板控制消息能携带的 UTF-8 文本上限。 */
+const CLIPBOARD_TEXT_MAX_BYTES = 4096;
+const KEYBOARD_SENTINEL = '\u200b';
+
+function editKeyForInputType(inputType) {
+    if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') return 66;
+    if (/^delete(Content|Word|HardLine|SoftLine)Backward$/.test(inputType)) return 67;
+    if (/^delete(Content|Word|HardLine|SoftLine)Forward$/.test(inputType)) return 112;
+    return null;
+}
+
+/* scrcpy server 用 KeyCharacterMap 把文本反解成按键事件，虚拟键盘布局里没有的字符
+   （中文、日文、表情等）只会打一条 "Could not inject char" 警告后被丢弃。
+   这类文本必须改走设备剪贴板 + 粘贴键（控制消息类型 9），不能走文本注入（类型 1）。 */
+function requiresClipboardText(text) {
+    for (const character of String(text || '')) {
+        if (character.codePointAt(0) > 0x7e || character.codePointAt(0) < 0x20) return true;
+    }
+    return false;
+}
 
 let macLikePlatform = null;
 
@@ -25,29 +43,30 @@ function isCharacterInputEvent(event) {
     return !event.ctrlKey && !event.altKey && !event.metaKey;
 }
 
-/* Ctrl/Alt/Meta 组合键不会产生文本，必须走 keycode 通路；AltGr 与 macOS Option 例外。 */
-function hasCommandModifier(event) {
-    if (!event || (!event.ctrlKey && !event.altKey && !event.metaKey)) return false;
-    return !isCharacterInputEvent(event);
+function isImeKey(event) {
+    return !!(event && (event.isComposing || event.keyCode === 229 || event.key === 'Process'));
 }
 
-/* 这些按键由 beforeinput 处理：普通字符、以及不会有文本输入的 Enter/Backspace/Delete/Space。 */
-function delegatesToBeforeInput(event) {
-    if (isCharacterInputEvent(event)) return true;
-    if (hasCommandModifier(event)) return false;
-    return BEFORE_INPUT_KEYS.has(event && event.key) || BEFORE_INPUT_KEYS.has(event && event.code);
+function isBrowserPaste(event) {
+    return !!event && (((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === 'v') ||
+        (event.shiftKey && event.key === 'Insert'));
 }
 
 class ScrcpyInput {
-    constructor(callback, videoElement, width, height, debug = false, onKeyboardStateChange = null) {
+    constructor(callback, videoElement, width, height, debug = false, onKeyboardStateChange = null, onInputError = null) {
         this.callback = callback
         this.width = width
         this.height = height
         this.debug = debug
         this.videoElement = videoElement
         this.keyboardActive = false
+        this.keyboardInputMode = 'local'
         this.onKeyboardStateChange = typeof onKeyboardStateChange === 'function' ? onKeyboardStateChange : null
         this._isComposingText = false
+        this._compositionCommit = null
+        this._compositionTimer = null
+        this._destroyed = false
+        this.onInputError = typeof onInputError === 'function' ? onInputError : null
         this._geometry = null
         this._geometryKey = ''
         this.viewportRotation = 0
@@ -58,9 +77,13 @@ class ScrcpyInput {
         }
         this._pendingMoveData = null
         this._moveFlushTimer = null
+        // 剪贴板控制消息的序号：scrcpy 只把它回显给客户端用来忽略自己写入的内容，
+        // 本客户端不读剪贴板，保持单调递增即可。
+        this._clipboardSequence = 0
         // 已经按下、还没抬起的 Android 键码：失焦/切标签时要把它们全部抬起，
         // 否则设备端会认为键一直按着（Android 会持续重复该键，修饰键会卡住）。
         this._pressedKeycodes = new Set()
+        this._keyRepeatCounts = new Map()
         this._keyboardProxy = this.createKeyboardProxy();
         this._onMobileBeforeInput = null;
         this._onMobileInput = null;
@@ -78,9 +101,12 @@ class ScrcpyInput {
         }
         // 窗口失焦（Alt+Tab、点到浏览器外）与切标签都不会再收到 keyup：
         // 先把按下的键全部抬起，再让设备端保持干净状态。
-        this._releasePressedKeys = () => this.releasePressedKeys();
+        this._releasePressedKeys = () => {
+            this.releasePointer();
+            this.closeKeyboard();
+        };
         this._onVisibilityChange = () => {
-            if (typeof document !== 'undefined' && document.hidden) this.releasePressedKeys();
+            if (typeof document !== 'undefined' && document.hidden) this._releasePressedKeys();
         };
         if (typeof window !== 'undefined' && window.addEventListener) {
             window.addEventListener('blur', this._releasePressedKeys);
@@ -95,6 +121,15 @@ class ScrcpyInput {
             window.visualViewport.addEventListener('scroll', this._onVisualViewportChange);
         }
         this._syncKeyboardProxyLayout();
+        // Editable focus must exist before the first physical key reaches the IME.
+        this._onVideoFocus = () => {
+            if (!this._suppressVideoFocus && this.hasPhysicalPointer()) this.openKeyboard(false);
+        };
+        videoElement.addEventListener('focus', this._onVideoFocus);
+        this._onVideoBlur = () => {
+            if (this.keyboardInputMode === 'device') this.closeKeyboard();
+        };
+        videoElement.addEventListener('blur', this._onVideoBlur);
         const isEditableTarget = (target) => {
             if (!target) return false;
             const tag = (target.tagName || '').toLowerCase();
@@ -116,9 +151,28 @@ class ScrcpyInput {
         let mouseY = null;
         let leftButtonIsPressed = false;
         let rightButtonIsPressed = false;
+        let middleButtonIsPressed = false;
         let touchIsPressed = false;
         let activeTouchIdentifier = null;
         let suppressMouseUntil = 0;
+        this._releasePointer = () => {
+            const wasTouching = leftButtonIsPressed || touchIsPressed;
+            leftButtonIsPressed = false;
+            touchIsPressed = false;
+            activeTouchIdentifier = null;
+            this._pendingMoveData = null;
+            if (wasTouching && mouseX !== null && mouseY !== null) {
+                this.sendControlData(this.createTouchProtocolData(1, mouseX, mouseY, this.width, this.height, 0, 0, 0));
+            }
+            if (rightButtonIsPressed) {
+                rightButtonIsPressed = false;
+                this.sendControlData(this.createScreenProtocolData(1));
+            }
+            if (middleButtonIsPressed) {
+                middleButtonIsPressed = false;
+                this.snedKeyCode(this.syntheticKeyEvent(), 1, 3);
+            }
+        };
         const findTouch = (touchList, identifier) => {
             if (!touchList) return null;
             for (let i = 0; i < touchList.length; i++) {
@@ -130,8 +184,10 @@ class ScrcpyInput {
             if (Date.now() < suppressMouseUntil) return;
             if (videoElement.contains(event.target)) {
                 if (this.keyboardActive) {
-                    try { this._keyboardProxy.focus({ preventScroll: true }); } catch (_) { try { this._keyboardProxy.focus(); } catch (__) {} }
-                } else this.closeKeyboard(true);
+                    if (this.keyboardInputMode === 'device') this.focusVideo();
+                    else try { this._keyboardProxy.focus({ preventScroll: true }); } catch (_) { try { this._keyboardProxy.focus(); } catch (__) {} }
+                } else if (this.hasPhysicalPointer()) this.openKeyboard(false);
+                else this.closeKeyboard(true);
                 if (event.button === 0) {
                     const point = this.mapClientToDevice(event.clientX, event.clientY, false);
                     if (!point) return;
@@ -145,7 +201,11 @@ class ScrcpyInput {
                 } else if (event.button === 2) {
                     rightButtonIsPressed = true;
 
-                    this.snedKeyCode(event, 0, 4);
+                    this.sendControlData(this.createScreenProtocolData(0));
+                    event.preventDefault();
+                } else if (event.button === 1) {
+                    middleButtonIsPressed = true;
+                    this.snedKeyCode(event, 0, 3);
                     event.preventDefault();
                 }
             }
@@ -171,7 +231,11 @@ class ScrcpyInput {
             } else if (event.button === 2 && rightButtonIsPressed) {
                 rightButtonIsPressed = false;
 
-                this.snedKeyCode(event, 1, 4);
+                this.sendControlData(this.createScreenProtocolData(1));
+                event.preventDefault();
+            } else if (event.button === 1 && middleButtonIsPressed) {
+                middleButtonIsPressed = false;
+                this.snedKeyCode(event, 1, 3);
                 event.preventDefault();
             }
         };
@@ -180,6 +244,10 @@ class ScrcpyInput {
         this._onMouseMove = (event) => {
             if (Date.now() < suppressMouseUntil) return;
             if (!leftButtonIsPressed) return;
+            if (!(event.buttons & 1)) {
+                this.releasePointer();
+                return;
+            }
 
             const point = this.mapClientToDevice(event.clientX, event.clientY, true);
             if (!point) return;
@@ -198,38 +266,23 @@ class ScrcpyInput {
         videoElement.addEventListener('contextmenu', this._onContextMenu);
 
         this._onWheel = (event) => {
-            if (!this.keyboardActive) this.closeKeyboard(true);
-            // 阻止默认滚动行为
-            event.preventDefault();
-            
-            const hScroll = event.deltaX;
-            const vScroll = event.deltaY;
-            const deltaMode = event.deltaMode;
-            const deltaZ = event.deltaZ;
-            const clientX = event.clientX;
-            const clientY = event.clientY;
-            const button = event.button;
-
-            const point = this.mapClientToDevice(clientX, clientY, false);
+            // Browser pinch-to-zoom is a local display action, not a device scroll.
+            if (event.ctrlKey) return;
+            const point = this.mapClientToDevice(event.clientX, event.clientY, false);
             if (!point) return;
-
-
-            // switch (deltaMode) {
-            //     case WheelEvent.DOM_DELTA_PIXEL:
-            //         deltaModeValue.textContent = 'pixel';
-            //         break;
-            //     case WheelEvent.DOM_DELTA_LINE:
-            //         deltaModeValue.textContent = 'row';
-            //         break;
-            //     case WheelEvent.DOM_DELTA_PAGE:
-            //         deltaModeValue.textContent = 'page';
-            //         break;
-            //     default:
-            //         deltaModeValue.textContent = 'unknown';
-            // }
-            this.sendControlData(this.createScrollProtocolData(point.x, point.y, this.width, this.height, hScroll, vScroll, button));
+            event.preventDefault();
+            // DOM deltas are pixels, lines, or pages; scrcpy 3.1 uses signed
+            // 16-bit fixed point in [-1, 1]. Keep fractional trackpad motion.
+            const unit = event.deltaMode === 1 ? 1 / 3 : (event.deltaMode === 2 ? 1 : 1 / 100);
+            let dx = event.deltaX * unit;
+            let dy = event.deltaY * unit;
+            if (this.viewportRotation === 90) [dx, dy] = [dy, -dx];
+            else if (this.viewportRotation === -90) [dx, dy] = [-dy, dx];
+            else if (this.viewportRotation === 180) [dx, dy] = [-dx, -dy];
+            if (!dx && !dy) return;
+            this.sendControlData(this.createScrollProtocolData(point.x, point.y, this.width, this.height, dx, -dy, event.buttons || 0));
         };
-        videoElement.addEventListener('wheel', this._onWheel);
+        videoElement.addEventListener('wheel', this._onWheel, { passive: false });
 
         this._onTouchStart = (event) => {
             if (!event.changedTouches || event.changedTouches.length < 1 || touchIsPressed) return;
@@ -266,6 +319,7 @@ class ScrcpyInput {
         this._onTouchEnd = (event) => {
             if (!touchIsPressed) return;
             const touch = findTouch(event.changedTouches, activeTouchIdentifier);
+            if (!touch && findTouch(event.touches, activeTouchIdentifier)) return;
             if (touch) {
                 const point = this.mapClientToDevice(touch.clientX, touch.clientY, true);
                 if (point) {
@@ -299,14 +353,15 @@ class ScrcpyInput {
         this._onKeyDown = (event) => {
             if (isEditableTarget(event.target)) return;
             if (document.activeElement !== videoElement && document.activeElement !== this._keyboardProxy) return;
-            if (event.isComposing) return;
+            if (this._isComposingText || isImeKey(event)) return;
 
-            if (event.ctrlKey && event.key && event.key.toLowerCase() === 'v') {
+            if (isBrowserPaste(event)) {
                 return;
             }
 
-            if (isCharacterInputEvent(event)) {
-                this.sendText(event.key);
+            if (this.keyboardInputMode === 'device' && !this.keyboardActive) return;
+            if (this.keyboardInputMode !== 'device' && isCharacterInputEvent(event)) {
+                this.sendKeyboardText(event.key);
                 event.preventDefault();
                 return;
             }
@@ -322,6 +377,7 @@ class ScrcpyInput {
         this._onKeyUp = (event) => {
             if (isEditableTarget(event.target)) return;
             if (document.activeElement !== videoElement && document.activeElement !== this._keyboardProxy) return;
+            if (this._isComposingText || isImeKey(event)) return;
             const androidKeyCode = this.keyUpKeycodeFor(event);
             if (androidKeyCode !== null) {
                 this.snedKeyCode(event, 1, androidKeyCode);
@@ -335,7 +391,7 @@ class ScrcpyInput {
             if (document.activeElement !== videoElement && document.activeElement !== this._keyboardProxy) return;
             const text = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
             if (text) {
-                this.sendText(text);
+                this.sendKeyboardText(text);
                 event.preventDefault();
             }
         };
@@ -345,57 +401,61 @@ class ScrcpyInput {
             this._onMobileBeforeInput = (event) => {
                 if (!this.keyboardActive) return;
                 const inputType = event.inputType || '';
+                if (this._compositionCommit && /^(insertText|insertFromComposition|insertCompositionText)$/.test(inputType)) {
+                    if (event.cancelable) event.preventDefault();
+                    return;
+                }
                 if (this._isComposingText || event.isComposing || inputType === 'insertCompositionText') return;
+                // Non-cancelable edits are handled once by the input event.
+                if (!event.cancelable) return;
 
                 if (inputType === 'insertText' || inputType === 'insertReplacementText' || inputType === 'insertFromPaste' || inputType === 'insertFromDrop') {
                     const text = event.data || '';
                     if (text) {
-                        this.sendText(text);
+                        this.sendKeyboardText(text);
                         event.preventDefault();
                         this.resetKeyboardProxy();
                     }
                     return;
                 }
 
-                if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') {
-                    this.sendKeyCodePress(66, event);
-                    event.preventDefault();
-                    this.resetKeyboardProxy();
-                    return;
-                }
-
-                if (inputType === 'deleteContentBackward' || inputType === 'deleteWordBackward' || inputType === 'deleteHardLineBackward' || inputType === 'deleteSoftLineBackward') {
-                    this.sendKeyCodePress(67, event);
-                    event.preventDefault();
-                    this.resetKeyboardProxy();
-                    return;
-                }
-
-                if (inputType === 'deleteContentForward' || inputType === 'deleteWordForward' || inputType === 'deleteHardLineForward' || inputType === 'deleteSoftLineForward') {
-                    this.sendKeyCodePress(112, event);
+                const editKey = editKeyForInputType(inputType);
+                if (editKey !== null) {
+                    this.sendKeyCodePress(editKey, event);
                     event.preventDefault();
                     this.resetKeyboardProxy();
                 }
             };
             this._keyboardProxy.addEventListener('beforeinput', this._onMobileBeforeInput);
 
-            this._onMobileInput = () => {
-                if (!this.keyboardActive || this._isComposingText) return;
-                const text = this._keyboardProxy.value || '';
+            this._onMobileInput = (event) => {
+                if (!this.keyboardActive || this._isComposingText || event.isComposing || this._compositionCommit) return;
+                const editKey = editKeyForInputType(event.inputType || '');
+                if (editKey !== null) {
+                    this.sendKeyCodePress(editKey, event);
+                    this.resetKeyboardProxy();
+                    return;
+                }
+                let text = this._keyboardProxy.value || '';
+                if (typeof event.data === 'string') text = event.data;
+                else {
+                    if (text.startsWith(KEYBOARD_SENTINEL)) text = text.slice(1);
+                    if (text.endsWith(KEYBOARD_SENTINEL)) text = text.slice(0, -1);
+                }
                 if (text) {
-                    this.sendText(text);
+                    this.sendKeyboardText(text);
                     this.resetKeyboardProxy();
                 }
             };
             this._keyboardProxy.addEventListener('input', this._onMobileInput);
 
             this._onMobileKeyDown = (event) => {
-                if (!this.keyboardActive || event.isComposing) return;
-                if (event.ctrlKey && event.key && event.key.toLowerCase() === 'v') return;
-                // 单独一个字符、以及 Enter/Backspace/Delete/Space 由 beforeinput 处理；
-                // 但 Ctrl/Alt/Meta + 键不会产生 beforeinput，必须走 keycode 通路，
-                // 否则 Ctrl+A / Ctrl+Z 这类组合键会整个丢掉（AltGr 与 macOS Option 例外）。
-                if (delegatesToBeforeInput(event)) return;
+                if (!this.keyboardActive || this._isComposingText || isImeKey(event)) return;
+                this.flushCompositionCommit();
+                if (isBrowserPaste(event)) return;
+                // Text belongs to the browser IME. Physical editing keys must be
+                // handled here: an empty textarea may not emit a deletion event.
+                if (isCharacterInputEvent(event)) return;
 
                 const androidKeyCode = this.mapToAndroidKeyCode(event);
                 if (androidKeyCode !== null) {
@@ -406,7 +466,8 @@ class ScrcpyInput {
             this._keyboardProxy.addEventListener('keydown', this._onMobileKeyDown);
 
             this._onMobileKeyUp = (event) => {
-                if (!this.keyboardActive || event.isComposing) return;
+                if (!this.keyboardActive || this._isComposingText || isImeKey(event)) return;
+                if (isBrowserPaste(event)) return;
                 const androidKeyCode = this.keyUpKeycodeFor(event);
                 if (androidKeyCode !== null) {
                     this.snedKeyCode(event, 1, androidKeyCode);
@@ -419,7 +480,8 @@ class ScrcpyInput {
                 if (!this.keyboardActive) return;
                 const text = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
                 if (text) {
-                    this.sendText(text);
+                    this.flushCompositionCommit();
+                    this.sendKeyboardText(text);
                     event.preventDefault();
                     this.resetKeyboardProxy();
                 }
@@ -428,52 +490,60 @@ class ScrcpyInput {
 
             this._onMobileCompositionStart = () => {
                 if (!this.keyboardActive) return;
+                this.flushCompositionCommit();
+                this.releasePressedKeys();
                 this._isComposingText = true;
             };
             this._keyboardProxy.addEventListener('compositionstart', this._onMobileCompositionStart);
 
             this._onMobileCompositionEnd = (event) => {
+                const wasComposing = this._isComposingText;
                 this._isComposingText = false;
-                if (!this.keyboardActive) {
+                if (!this.keyboardActive || !wasComposing) {
                     this.resetKeyboardProxy();
                     return;
                 }
-                const text = event.data || this._keyboardProxy.value || '';
-                if (text) {
-                    this.sendText(text);
-                }
-                this.resetKeyboardProxy();
+                // Empty data means cancellation, not the uncommitted phonetic value.
+                // Browsers may emit the final input before or after compositionend.
+                this._compositionCommit = { text: typeof event.data === 'string' ? event.data : '' };
+                this._compositionTimer = setTimeout(() => this.flushCompositionCommit(), 0);
             };
             this._keyboardProxy.addEventListener('compositionend', this._onMobileCompositionEnd);
 
             this._onKeyboardProxyBlur = () => {
-                // Toolbar/video clicks legitimately move focus. Keep the
-                // proxy active until the user explicitly closes keyboard mode
-                // or the control lease is lost.
-                if (!this.keyboardActive || !this._keyboardProxy) return;
-                if (this.focusIsOnEditableField()) return;
-                const schedule = typeof window !== 'undefined' && typeof window.setTimeout === 'function'
-                    ? window.setTimeout.bind(window)
-                    : (typeof setTimeout === 'function' ? setTimeout : null);
-                if (!schedule) return;
-                schedule(() => {
-                    if (!this.keyboardActive || !this._keyboardProxy) return;
-                    // 用户在页面里点进了输入框：不要再把焦点抢回隐藏代理，
-                    // 否则 ALAS/画面面板里的任何文本框都没法输入。
-                    if (this.focusIsOnEditableField()) return;
-                    try { this._keyboardProxy.focus({ preventScroll: true }); } catch (_) { try { this._keyboardProxy.focus(); } catch (__) {} }
-                }, 0);
+                // Do not steal focus from menus, dialogs, or accessible controls.
+                this.flushCompositionCommit();
+                this.closeKeyboard();
             };
             this._keyboardProxy.addEventListener('blur', this._onKeyboardProxyBlur);
         }
     }
 
-    focusIsOnEditableField() {
-        if (typeof document === 'undefined') return false;
-        const active = document.activeElement;
-        if (!active || active === document.body || active === this._keyboardProxy) return false;
-        const tag = (active.tagName || '').toLowerCase();
-        return !!(active.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select');
+    hasPhysicalPointer() {
+        return typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+            window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    }
+
+    releasePointer() {
+        if (this._releasePointer) this._releasePointer();
+    }
+
+    flushCompositionCommit() {
+        if (this._compositionTimer !== null) clearTimeout(this._compositionTimer);
+        this._compositionTimer = null;
+        const pending = this._compositionCommit;
+        this._compositionCommit = null;
+        if (!pending) return;
+        this.resetKeyboardProxy();
+        if (this.keyboardActive && !this._destroyed && pending.text) this.sendKeyboardText(pending.text);
+    }
+
+    sendKeyboardText(text) {
+        try {
+            if (this.sendText(text) === false) throw new Error('控制通道不可用，文本未发送');
+        } catch (error) {
+            if (this.onInputError) this.onInputError(error.message);
+        }
     }
 
     keyUpKeycodeFor(event) {
@@ -482,8 +552,7 @@ class ScrcpyInput {
         // 组合键按下时走 keycode 通路，keyup 必须补齐 —— 即使此刻修饰键已经松开
         // 或者这个键本身是单字符（单字符的 keyup 平时由文本注入省略）。
         if (this._pressedKeycodes && this._pressedKeycodes.has(androidKeyCode)) return androidKeyCode;
-        if (delegatesToBeforeInput(event)) return null;
-        return androidKeyCode;
+        return null;
     }
 
     releasePressedKeys() {
@@ -508,18 +577,26 @@ class ScrcpyInput {
 
     focusVideo() {
         if (!this.videoElement) return false;
+        this._suppressVideoFocus = true;
         try {
             this.videoElement.focus({ preventScroll: true });
         } catch (e) {
             try { this.videoElement.focus(); } catch (_) { return false; }
+        } finally {
+            this._suppressVideoFocus = false;
         }
         return typeof document === 'undefined' || document.activeElement === this.videoElement;
     }
 
-    openKeyboard() {
-        if (!this._keyboardProxy) return false;
+    openKeyboard(showVirtualKeyboard = true) {
+        if (!this._keyboardProxy || this._destroyed) return false;
         this.closeKeyboard();
         this._setKeyboardActive(true);
+        if (this.keyboardInputMode === 'device') {
+            if (this.focusVideo()) return true;
+            this.closeKeyboard();
+            return false;
+        }
         try {
             this._keyboardProxy.focus({ preventScroll: true });
         } catch (e) {
@@ -532,15 +609,26 @@ class ScrcpyInput {
         // Chromium exposes an explicit VirtualKeyboard API on some Android
         // browsers. Focus remains the portable path; show() is only a best
         // effort enhancement and is intentionally ignored when unsupported.
-        if (this._virtualKeyboard && typeof this._virtualKeyboard.show === 'function') {
+        if (showVirtualKeyboard && this._virtualKeyboard && typeof this._virtualKeyboard.show === 'function') {
             try { this._virtualKeyboard.show() } catch (_) { }
         }
         return true;
     }
 
+    setKeyboardInputMode(mode) {
+        if (mode !== 'local' && mode !== 'device') throw new Error('无效的键盘输入方式');
+        if (mode === 'device' && !this.hasPhysicalPointer()) throw new Error('设备输入法模式需要电脑实体键盘');
+        if (this.keyboardInputMode === mode) return;
+        this.closeKeyboard();
+        this.keyboardInputMode = mode;
+    }
+
     closeKeyboard(focusVideo = false) {
         this._setKeyboardActive(false);
         this._isComposingText = false;
+        if (this._compositionTimer !== null) clearTimeout(this._compositionTimer);
+        this._compositionTimer = null;
+        this._compositionCommit = null;
         // 离开键盘模式时把按下的键抬起，避免设备端留下卡住的修饰键/长按键。
         this.releasePressedKeys();
         this.resetKeyboardProxy();
@@ -584,9 +672,11 @@ class ScrcpyInput {
 
     resetKeyboardProxy() {
         if (!this._keyboardProxy) return;
-        this._keyboardProxy.value = '';
+        // Mobile keyboards need editable content on both sides to emit delete
+        // events. Sentinels never enter a control message or composition commit.
+        this._keyboardProxy.value = KEYBOARD_SENTINEL + KEYBOARD_SENTINEL;
         try {
-            this._keyboardProxy.setSelectionRange(0, 0);
+            this._keyboardProxy.setSelectionRange(1, 1);
         } catch (_) { }
     }
 
@@ -611,11 +701,21 @@ class ScrcpyInput {
 
     sendKeyCodePress(keycode, sourceEvent) {
         const keyEvent = this.syntheticKeyEvent(sourceEvent);
-        this.snedKeyCode(keyEvent, 0, keycode);
-        this.snedKeyCode(keyEvent, 1, keycode);
+        if (!this.snedKeyCode(keyEvent, 0, keycode)) return false;
+        return this.snedKeyCode(keyEvent, 1, keycode);
+    }
+
+    sendDeviceAction(action) {
+        const keys = { back: 4, home: 3, tasks: 187, volume_up: 24, volume_down: 25, power: 26 };
+        if (Object.prototype.hasOwnProperty.call(keys, action)) return this.sendKeyCodePress(keys[action]);
+        if (action === 'screen_off' || action === 'screen_on') {
+            return this.sendControlData(this.createPowerProtocolData(action === 'screen_on' ? 1 : 0));
+        }
+        return false;
     }
 
     sendControlData(data) {
+        if (this._destroyed) return false;
         if (this._moveFlushTimer) {
             // A pending move is scheduled as a microtask when available. It
             // cannot be cancelled, but clearing the marker makes the queued
@@ -626,12 +726,21 @@ class ScrcpyInput {
             this._moveFlushTimer = null;
         }
         this.flushPendingMove();
-        this.callback(data);
+        return this.callback(data) !== false;
     }
 
     sendText(text) {
         const value = String(text || '');
-        if (!value) return;
+        if (!value) return true;
+        if (this._destroyed) return false;
+        if (new TextEncoder().encode(value).length > CLIPBOARD_TEXT_MAX_BYTES) {
+            throw new RangeError('文本过长，请分次发送（每次最多 4096 UTF-8 字节）');
+        }
+
+        // 中文、日文、表情等设备键盘布局反解不出来的字符改走剪贴板 + 粘贴键。
+        if (requiresClipboardText(value)) {
+            return this.sendClipboardText(value);
+        }
 
         const maxTextBytes = 300; // scrcpy inject-text protocol limit
         const encoder = new TextEncoder();
@@ -640,7 +749,7 @@ class ScrcpyInput {
         for (const character of value) {
             const characterBytes = encoder.encode(character).length;
             if (chunk && chunkBytes + characterBytes > maxTextBytes) {
-                this.sendControlData(this.createTextProtocolData(chunk));
+                if (!this.sendControlData(this.createTextProtocolData(chunk))) return false;
                 chunk = '';
                 chunkBytes = 0;
             }
@@ -648,8 +757,25 @@ class ScrcpyInput {
             chunkBytes += characterBytes;
         }
         if (chunk) {
-            this.sendControlData(this.createTextProtocolData(chunk));
+            if (!this.sendControlData(this.createTextProtocolData(chunk))) return false;
         }
+        return true;
+    }
+
+    // One paste per text operation: a timer cannot prove Android consumed a chunk.
+    sendClipboardText(text) {
+        const value = String(text || '');
+        if (!value) return true;
+        if (new TextEncoder().encode(value).length > CLIPBOARD_TEXT_MAX_BYTES) {
+            throw new RangeError('文本过长，请分次发送（每次最多 4096 UTF-8 字节）');
+        }
+        return this.sendControlData(this.createSetClipboardProtocolData(value));
+    }
+
+    nextClipboardSequence() {
+        this._clipboardSequence = (this._clipboardSequence || 0) + 1;
+        if (this._clipboardSequence > 0x7fffffff) this._clipboardSequence = 1;
+        return this._clipboardSequence;
     }
 
     sendMoveData(data) {
@@ -784,6 +910,7 @@ class ScrcpyInput {
     }
 
     resizeScreen(width, height) {
+        if (width !== this.width || height !== this.height) this.releasePointer();
         this.width = width;
         this.height = height;
         this.invalidateGeometry();
@@ -797,6 +924,7 @@ class ScrcpyInput {
         else if (value === -90 || value === 270 || value === -270) normalized = -90;
         else if (value === 180 || value === -180) normalized = 180;
         if (this.viewportRotation === normalized) return;
+        this.releasePointer();
         this.viewportRotation = normalized;
         this.invalidateGeometry();
     }
@@ -938,6 +1066,11 @@ class ScrcpyInput {
     }
 
     snedKeyCode(keyevent, action, keycode) {
+        let repeat = 0;
+        if (action === 0) {
+            repeat = keyevent.repeat ? (this._keyRepeatCounts.get(keycode) || 0) + 1 : 0;
+            this._keyRepeatCounts.set(keycode, repeat);
+        } else this._keyRepeatCounts.delete(keycode);
         if (this._pressedKeycodes) {
             if (action === 0) this._pressedKeycodes.add(keycode);
             else this._pressedKeycodes.delete(keycode);
@@ -946,31 +1079,27 @@ class ScrcpyInput {
         const numLockState = keyevent.getModifierState('NumLock');
         const scrollLockState = keyevent.getModifierState('ScrollLock');
 
-        let metakey = 0;
-        if (keyevent.shiftKey) {
-            metakey |= 0x40;
-        }
-        if (keyevent.ctrlKey) {
-            metakey |= 0x2000;
-        }
-        if (keyevent.altKey) {
-            metakey |= 0x10;
-        }
-        if (keyevent.metaKey) {
-            metakey |= 0x20000;
-        }
+        // Android expects the general modifier flag as well as its side flag.
+        const modifier = (active, general, leftCode, leftFlag, rightCode, rightFlag) => {
+            if (!active) return 0;
+            let side = 0;
+            if (this._pressedKeycodes.has(leftCode)) side |= leftFlag;
+            if (this._pressedKeycodes.has(rightCode)) side |= rightFlag;
+            return general | side;
+        };
+        let metakey = modifier(keyevent.shiftKey, 0x1, 59, 0x40, 60, 0x80) |
+            modifier(keyevent.ctrlKey, 0x1000, 113, 0x2000, 114, 0x4000) |
+            modifier(keyevent.altKey, 0x2, 57, 0x10, 58, 0x20) |
+            modifier(keyevent.metaKey, 0x10000, 117, 0x20000, 118, 0x40000);
         if (capsLockState) {
             metakey |= 0x100000;
         }
         if (numLockState) {
             metakey |= 0x200000;
         }
-        // if(scrollLockState)
-        // {
-        //     metakey |= 0x400000;
-        // }
-        let data = this.createKeyProtocolData(action, keycode, keyevent.repeat, metakey);
-        this.sendControlData(data);
+        if (scrollLockState) metakey |= 0x400000;
+        let data = this.createKeyProtocolData(action, keycode, repeat, metakey);
+        return this.sendControlData(data);
     }
 
     createTouchProtocolData(action, x, y, width, height, actionButton, buttons, pressure) {
@@ -1001,7 +1130,7 @@ class ScrcpyInput {
         offset += 1;
         view.setUint8(offset, 0xff);
         offset += 1;
-        view.setUint8(offset, 0xfd);
+        view.setUint8(offset, 0xfe);
         offset += 1;
 
         view.setInt32(offset, x, false);
@@ -1013,7 +1142,7 @@ class ScrcpyInput {
         view.setUint16(offset, height, false);
         offset += 2;
 
-        view.setInt16(offset, pressure, false);
+        view.setUint16(offset, pressure, false);
         offset += 2;
 
         view.setInt32(offset, actionButton, false);
@@ -1032,6 +1161,21 @@ class ScrcpyInput {
         view.setUint8(0, type);
         view.setUint32(1, encoded.length, false);
         new Uint8Array(buffer, 5).set(encoded);
+        return buffer;
+    }
+    createSetClipboardProtocolData(text) {
+        // scrcpy set-clipboard: type + u64 sequence + paste flag + u32 length + UTF-8 text
+        const type = 9; // set clipboard event
+        const encoded = new TextEncoder().encode(text);
+        const buffer = new ArrayBuffer(14 + encoded.length);
+        const view = new DataView(buffer);
+        view.setUint8(0, type);
+        // 序号写成两个大端 32 位字，避免依赖 setBigUint64/BigInt。
+        view.setUint32(1, 0, false);
+        view.setUint32(5, this.nextClipboardSequence(), false);
+        view.setUint8(9, 1); // ask the device to paste right after setting the clipboard
+        view.setUint32(10, encoded.length, false);
+        new Uint8Array(buffer, 14).set(encoded);
         return buffer;
     }
     createKeyProtocolData(action, keycode, repeat, metaState) {
@@ -1076,9 +1220,10 @@ class ScrcpyInput {
         view.setUint16(offset, height, false);
         offset += 2;
 
-        view.setInt16(offset, hScroll, false);
+        const fixedPoint = value => Math.max(-32768, Math.min(32767, Math.trunc((Number(value) || 0) * 32768)));
+        view.setInt16(offset, fixedPoint(hScroll), false);
         offset += 2;
-        view.setInt16(offset, vScroll, false);
+        view.setInt16(offset, fixedPoint(vScroll), false);
         offset += 2;
 
         view.setInt32(offset, button, false);
@@ -1087,7 +1232,7 @@ class ScrcpyInput {
     }
 
     createScreenProtocolData(action) {
-        const type = 4; // Screen off/on event
+        const type = 4; // Back, or wake the screen when it is off.
 
         const buffer = new ArrayBuffer(1 + 1);
         const view = new DataView(buffer);
@@ -1102,7 +1247,7 @@ class ScrcpyInput {
     }
 
     createPowerProtocolData(action) {
-        const type = 7; // Screen Power off/on event
+        const type = 10; // scrcpy 3.1 SET_DISPLAY_POWER, boolean on/off.
 
         const buffer = new ArrayBuffer(1 + 1);
         const view = new DataView(buffer);
@@ -1134,6 +1279,7 @@ class ScrcpyInput {
 
     destroy() {
         try {
+            this.releasePointer();
             this.closeKeyboard();
             if (this._pressedKeycodes) this._pressedKeycodes.clear();
             if (this._moveFlushTimer) {
@@ -1142,12 +1288,15 @@ class ScrcpyInput {
                 }
                 this._moveFlushTimer = null;
             }
+            this._destroyed = true;
             this._pendingMoveData = null;
             this.invalidateGeometry();
             document.removeEventListener('mousedown', this._onMouseDown);
             document.removeEventListener('mouseup', this._onMouseUp);
             document.removeEventListener('mousemove', this._onMouseMove);
             if (this.videoElement) {
+                this.videoElement.removeEventListener('focus', this._onVideoFocus);
+                this.videoElement.removeEventListener('blur', this._onVideoBlur);
                 this.videoElement.removeEventListener('contextmenu', this._onContextMenu);
                 this.videoElement.removeEventListener('wheel', this._onWheel);
                 this.videoElement.removeEventListener('touchstart', this._onTouchStart);

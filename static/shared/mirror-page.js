@@ -24,6 +24,10 @@ document.addEventListener('DOMContentLoaded',function(){
           inset=Math.max(0,Math.round(Number(window.innerHeight||0)-bottom));
         }
         app.style.setProperty('--sg-keyboard-inset',inset+'px');
+        // Do not resize the layout while the user is pinch-zooming.
+        if(vv&&Math.abs(Number(vv.scale||1)-1)<0.01){
+          app.style.setProperty('--mirror-viewport-height',Math.floor(vv.height)+'px');
+        }else app.style.removeProperty('--mirror-viewport-height');
       }
       if(window.visualViewport&&window.visualViewport.addEventListener){
         window.visualViewport.addEventListener('resize',syncKeyboardViewport);
@@ -162,8 +166,9 @@ document.addEventListener('DOMContentLoaded',function(){
         if(nb) nb.setAttribute('aria-expanded','false');
       }
       document.addEventListener('keydown',function(e){
+        if(e.isComposing||e.keyCode===229||textSendComposing) return;
         if(e.key==='Escape'){
-          closeFixedPops(); vpClose(); apClose(); upClose(); takeoverClose(); alasFloatClose();
+          closeFixedPops(); vpClose(); apClose(); upClose(); takeoverClose(); alasFloatClose(); textSendClose();
           if(fullscreenActive){
             e.preventDefault();
             exitFullscreen();
@@ -227,6 +232,8 @@ document.addEventListener('DOMContentLoaded',function(){
       var fullscreenBtn=document.getElementById('cb-fullscreen');
       var rotateBtn=document.getElementById('cb-rotate');
       var rotateState=document.getElementById('cb-rotate-state');
+      var resetViewBtn=document.getElementById('cb-pop-reset-view');
+      var deviceActionBtns=Array.prototype.slice.call(document.querySelectorAll('[data-device-action]'));
       var popShot=document.getElementById('cb-pop-shot');
       var popKeyboard=document.getElementById('cb-pop-keyboard');
       var popAutoControl=document.getElementById('cb-pop-auto-control');
@@ -243,6 +250,21 @@ document.addEventListener('DOMContentLoaded',function(){
       var takeoverStatus=document.getElementById('control-takeover-status');
       var takeoverReturnFocus=null;
       var takeoverBusy=false;
+      /* 「文本输入」对话框：中文等非 ASCII 文本经设备剪贴板 + 粘贴键送达
+         （ScrcpyInput.sendText 自动分流），这里只负责取文本与提示状态。 */
+      var popText=document.getElementById('cb-pop-text');
+      var textSendLayer=document.getElementById('text-send-layer');
+      var textSendDialog=document.getElementById('text-send-dialog');
+      var textSendScrim=document.getElementById('text-send-scrim');
+      var textSendCloseBtn=document.getElementById('text-send-close');
+      var textSendCancelBtn=document.getElementById('text-send-cancel');
+      var textSendConfirmBtn=document.getElementById('text-send-confirm');
+      var textSendField=document.getElementById('text-send-field');
+      var keyboardInputMode=document.getElementById('keyboard-input-mode');
+      var keyboardInputHint=document.getElementById('keyboard-input-hint');
+      var textSendStatus=document.getElementById('text-send-status');
+      var textSendReturnFocus=null;
+      var textSendBusy=false;
       var controlBusy=false;
       var navBusy=false;
       var moreActionBusy=false;
@@ -345,7 +367,9 @@ document.addEventListener('DOMContentLoaded',function(){
          所以只有在本地控制通道确实持有（controlOwnership）时才认 'self'；
          同账号的另一端也按 'other' 处理，接管前同样需要确认。 */
       function selfHoldsControl(){
-        return !!(window.ScrcpyGateV2&&window.ScrcpyGateV2.state&&window.ScrcpyGateV2.state.controlOwnership===true);
+        var state=window.ScrcpyGateV2&&window.ScrcpyGateV2.state;
+        return !!(selectedDevice&&state&&state.controlOwnership===true&&
+          String(state.controlSocketDevice||state.deviceId||'')===String(selectedDevice.id));
       }
       function snapshotControlState(owner){
         if(selfHoldsControl()) return 'self';
@@ -437,6 +461,7 @@ document.addEventListener('DOMContentLoaded',function(){
         });
         persistViewMode(viewMode);
         renderControl();
+        scheduleAdaptiveFrameRefresh();
         if(window.lucide) lucide.createIcons();
         return stopped;
       }
@@ -522,17 +547,10 @@ document.addEventListener('DOMContentLoaded',function(){
         if(viewMode==='grid'&&gridView) gridView.render(deviceItems);
       }
       /* ---------- 顶部 ALAS 状态项（有绑定才显示） ---------- */
-      var alasPillSeq=0;
-      var alasPillConfig='';
-      var alasPillState='';
       /* ALAS「异常」家族：运行出错、已断开、不可达、连接超时。顶部状态点、面板状态胶囊
          与底部工具栏按钮共用这一份判定，避免再次出现「上面点红、下面按钮灰」的不一致。 */
-      var ALAS_FAULT_STATES=['error','disconnected','unreachable','timeout'];
+      var ALAS_FAULT_STATES=['error','disconnected','unreachable','timeout','unknown','invalid_config'];
       function alasStateIsFault(state){ return ALAS_FAULT_STATES.indexOf(String(state==null?'':state))>=0; }
-      function alasPillLabel(state){
-        var labels={ running:'运行中', error:'异常', stopped:'已停止', idle:'已停止', loading:'检查中', disabled:'已禁用', disconnected:'已断开', unreachable:'不可达', timeout:'连接超时', unconfigured:'未配置', unbound:'未绑定' };
-        return labels[state]||'检查中';
-      }
       function renderAlasPill(configName,state){
         var block=document.getElementById('mirror-alas-status-block');
         var sep=document.getElementById('mirror-alas-sep');
@@ -543,7 +561,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!show) return;
         var raw=String(state||'');
         var text=document.getElementById('mirror-alas-status');
-        if(text) text.textContent=alasPillLabel(raw);
+        if(text) text.textContent=tr(apStateText(raw));
         var dot=document.getElementById('mirror-alas-dot');
         if(dot){
           dot.classList.remove('off','err');
@@ -554,84 +572,49 @@ document.addEventListener('DOMContentLoaded',function(){
         if(blockEl) blockEl.title=configName?('ALAS · '+configName):'';
         normalizeStatusPill();
       }
-      function loadAlasPill(device){
-        var seq=++alasPillSeq;
-        alasPillConfig='';
-        alasPillState='';
-        renderAlasPill('','');
-        if(!device||!device.id||workbenchAlasVisible===false) return;
-        var api=window.ScrcpyGateApi;
-        if(!api||!api.isConfigured||!api.isConfigured('alas.configs')) return;
-        api.configured('alas.configs',{ query:{ device_id:device.id } }).then(function(payload){
-          if(seq!==alasPillSeq) return;
-          var raw=((payload&&payload.configs)||[]);
-          // 管理员没有单独绑定该设备时，后端会回退到 Runtime 配置目录并标 admin_fallback
-          // （只有管理员会拿到这种条目）。同一份数据在下面「ALAS 面板」里本来就直接取用，
-          // 顶部状态条以前把它过滤掉了，于是「面板能看、状态条不见」。
-          // 现在管理员与面板一致地使用回退配置；普通用户仍然只有真正绑定才显示。
-          var configs=raw.filter(function(c){ return !c||c.admin_fallback!==true||mirrorIsAdmin(); });
-          if(!configs.length) return;
-          var defaultName=String(payload&&payload.default_config||'');
-          var chosen=null;
-          for(var i=0;i<configs.length;i++){ if(configs[i].config_name===defaultName){ chosen=configs[i]; break; } }
-          if(!chosen) chosen=configs[0];
-          var configName=String(chosen.config_name||'');
-          if(!configName) return;
-          alasPillConfig=configName;
-          alasPillState='loading';
-          renderAlasPill(configName,'loading');
-          // 回退配置不是绑定：状态条上标明来源，避免误以为这台设备已绑定 ALAS。
-          if(chosen.admin_fallback===true){
-            var pillBlock=document.getElementById('mirror-alas-status-block');
-            if(pillBlock) pillBlock.title='ALAS · '+configName+'（运行时默认配置，未单独绑定该设备）';
-          }
-          if(!api.isConfigured('alas.status')) return;
-          return api.configured('alas.status',{ query:{ config:configName, device_id:device.id } }).then(function(statusPayload){
-            if(seq!==alasPillSeq) return;
-            var d=statusPayload&&(statusPayload.data&&typeof statusPayload.data==='object'?statusPayload.data:statusPayload)||{};
-            alasPillState=String(d.state||d.status||'');
-            renderAlasPill(configName,alasPillState);
-          });
-        }).catch(function(){ if(seq===alasPillSeq){ alasPillConfig=''; renderAlasPill('',''); } });
-      }
-      function refreshAlasPill(){
-        if(!selectedDevice||!alasPillConfig) return;
-        var api=window.ScrcpyGateApi;
-        if(!api||!api.isConfigured||!api.isConfigured('alas.status')) return;
-        var seq=alasPillSeq;
-        var configName=alasPillConfig;
-        var deviceId=selectedDevice.id;
-        api.configured('alas.status',{ query:{ config:configName, device_id:deviceId } }).then(function(statusPayload){
-          if(seq!==alasPillSeq||configName!==alasPillConfig) return;
-          var d=statusPayload&&(statusPayload.data&&typeof statusPayload.data==='object'?statusPayload.data:statusPayload)||{};
-          alasPillState=String(d.state||d.status||'');
-          renderAlasPill(configName,alasPillState);
-        }).catch(function(){});
-      }
       function selectDevice(id,options){
         options=options||{};
         var previousId=selectedDevice&&selectedDevice.id;
         var sameDevice=previousId!=null&&String(previousId)===String(id);
         if(!sameDevice) clearControlNotice();
-        var preserveSession=options.preserveSession!==false&&sameDevice&&!!currentSession&&
-          (watchState==='connecting'||watchState==='playing'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming');
+        var preserveSession=options.preserveSession!==false&&sameDevice&&streamLive();
+        if(!sameDevice&&previousId!=null) cancelCurrentWatch();
         selectedDevice=deviceById(id); renderDeviceList();
         var d=selectedDevice; if(!d) return;
         document.getElementById('mirror-device-name').textContent=d.name; document.getElementById('mirror-device-status').textContent=mirrorStatusText(d);
         var ddot=document.getElementById('mirror-device-dot');
         if(ddot){ ddot.classList.remove('off','err','unknown'); if(d.online===false) ddot.classList.add('off'); else if(d.online==null) ddot.classList.add('unknown'); }
         document.getElementById('start-watch').disabled=d.online!==true || !d.permission;
-        document.getElementById('mirror-viewers').textContent=d.viewers == null ? '—' : d.viewers;
-        loadAlasPill(d);
-        document.getElementById('mirror-quality-name').textContent=d.quality && d.quality.name || '未加载'; qualityMetaBase=d.quality && d.quality.meta || '—'; renderQualityMeta();
-        controlState=deviceControlState(d);
+        // Catalog refreshes must not overwrite newer live session events.
+        if(!preserveSession){
+          document.getElementById('mirror-viewers').textContent=d.viewers == null ? '—' : d.viewers;
+          document.getElementById('mirror-quality-name').textContent=d.quality && d.quality.name || '未加载';
+          qualityMetaBase=d.quality && d.quality.meta || '—';
+          renderQualityMeta();
+          controlState=deviceControlState(d);
+          controlOwner=controlState==='self'?currentMirrorUsername():String(d.controller||'');
+        }
         if(preserveSession){
           renderControl();
         }else{
           setWatchState(d.online === true && d.permission ? 'idle' : (d.permission ? (d.online === false ? 'offline' : 'idle') : 'noperm'));
         }
-        if(typeof vpUpdatePill==='function' && vpLoaded) vpUpdatePill();
-        if(typeof apOnDeviceChange==='function') apOnDeviceChange();
+        if(sameDevice) apRefreshStatus(); else apOnDeviceChange();
+      }
+      function clearSelectedDevice(){
+        if(selectedDevice) cancelCurrentWatch();
+        selectedDevice=null;
+        controlState='unknown';
+        controlOwner='';
+        document.getElementById('mirror-device-name').textContent=tr('未选择设备');
+        document.getElementById('mirror-device-status').textContent=tr('未加载');
+        document.getElementById('mirror-device-dot').className='dot off';
+        document.getElementById('mirror-viewers').textContent='—';
+        document.getElementById('mirror-quality-name').textContent=tr('未加载');
+        qualityMetaBase='—';
+        setWatchState('idle');
+        renderQualityMeta();
+        apOnDeviceChange();
       }
       function loadMirrorDevices(options){
         options=options || {};
@@ -662,7 +645,7 @@ document.addEventListener('DOMContentLoaded',function(){
               clearRequestedDeviceRef();
             }
           }else{
-            selectedDevice=null;
+            clearSelectedDevice();
             if(shouldRender) renderDeviceList();
             if(requestedDeviceRef){
               showToast('未找到该设备，可能已被删除或你没有访问权限');
@@ -682,7 +665,7 @@ document.addEventListener('DOMContentLoaded',function(){
           var nextSignature=deviceListSignature([],true);
           var shouldRender=nextSignature!==deviceRenderSignature;
           deviceItems=[];
-          selectedDevice=null;
+          clearSelectedDevice();
           deviceRenderSignature=nextSignature;
           if(shouldRender) renderDeviceList();
           if(!options.silent || shouldRender) showToast(apiErrorText(error));
@@ -690,8 +673,11 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function sessionAction(action, successText, extra){
         if(!currentSession){ showToast('请先开始观看会话'); return Promise.reject(new Error('no active session')); }
+        var generation=watchRequestGeneration;
+        var deviceId=selectedDevice&&selectedDevice.id;
         var body=Object.assign({action:action, deviceId:selectedDevice && selectedDevice.id}, extra || {});
         return window.ScrcpyGateApi.configured('sessions.action',{params:{id:currentSession.id},method:'POST',body:body}).then(function(payload){
+          if(generation!==watchRequestGeneration||!selectedDevice||deviceId!==selectedDevice.id) return payload;
           currentSession=payload && (payload.session || payload.data && payload.data.session || currentSession) || currentSession;
           if(successText) showToast(successText);
           return payload;
@@ -713,6 +699,7 @@ document.addEventListener('DOMContentLoaded',function(){
         // 方向状态对外可见（CSS/测试/排障都读它）：画面方向完全自动，这里只报当前角度。
         if(app) app.setAttribute('data-view-rotation',String(displayRotation()));
         var canStart=!!(selectedDevice&&selectedDevice.online===true&&selectedDevice.permission);
+        document.getElementById('start-watch').disabled=!canStart||pending||watching;
         var watchLabel=pending?'取消连接':(watching?'停止观看':'开始投屏');
         var watchIcon=pending?'x':(watching?'circle-stop':'play');
         watchBtn.disabled=!(pending||watching||canStart);
@@ -741,6 +728,12 @@ document.addEventListener('DOMContentLoaded',function(){
         occupiedChip.classList.toggle('show',controlState==='other'&&watching);
         if(!menuAllowed) closeMoreMenu(true);
         navBtns.forEach(function(b){ b.disabled=!controlMenuAllowed || navBusy; b.setAttribute('aria-busy',navBusy?'true':'false'); });
+        deviceActionBtns.forEach(function(b){
+          b.style.display=workbenchFeatureEnabled('nav')?'':'none';
+          b.disabled=!controlMenuAllowed;
+          b.setAttribute('aria-busy',moreActionBusy?'true':'false');
+        });
+        if(resetViewBtn) resetViewBtn.disabled=!menuAllowed;
         moreBtn.disabled=!menuAllowed || moreActionBusy;
         moreBtn.setAttribute('aria-busy',moreActionBusy?'true':'false');
         // 全屏是纯显示层操作，不依赖投屏会话，始终可用。
@@ -755,7 +748,16 @@ document.addEventListener('DOMContentLoaded',function(){
         if(popShot) popShot.disabled=!menuAllowed;
         // 「全屏后默认获取控制」是本浏览器偏好，只要有菜单权限就能改。
         if(popAutoControl) popAutoControl.disabled=!menuAllowed;
-        if(popKeyboard) popKeyboard.disabled=!controlMenuAllowed || moreActionBusy;
+        if(popKeyboard){
+          popKeyboard.disabled=!controlMenuAllowed || moreActionBusy;
+          popKeyboard.classList.toggle('held',keyboardOn);
+          popKeyboard.setAttribute('aria-checked',String(keyboardOn));
+          popKeyboard.setAttribute('aria-label',tr(keyboardOn?'重新打开备用键盘':'开启备用键盘'));
+        }
+        var keyboardState=document.getElementById('cb-pop-keyboard-state');
+        if(keyboardState) keyboardState.textContent=tr(keyboardOn?'已开启':'备用');
+        // 「文本输入」与键盘同类：发送文本同样需要控制权。
+        if(popText) popText.disabled=!controlMenuAllowed || moreActionBusy;
         var ctext=self?'我 · 控制中':(controlState==='other'?(controlOwner?(controlOwner+' 控制中'):'其他用户占用中'):(controlState==='free'?'空闲（可获取）':'未加载'));
         // 控制权胶囊（用户要求恢复，老项目里就有）：必须显示**谁**在控制，
         // 只写"其他用户占用中"没法判断是不是自己被别的端顶掉了。
@@ -837,7 +839,11 @@ document.addEventListener('DOMContentLoaded',function(){
         videoSurface.classList.toggle('show',watching);
         // 实测码率：投屏中（含连接/重连）一直占着这一格，停止投屏才收起并清零。
         var live=LIVE_WATCH_STATES.indexOf(s)>=0;
-        if(!live) clearControlNotice();
+        if(!live){
+          clearControlNotice();
+          keyboardOn=false;
+          if(controlState==='self'){ controlState='unknown'; controlOwner=''; }
+        }
         if(live!==rateShown){
           rateShown=live;
           if(!live){ measuredMbps=0; measuredFps=0; }
@@ -853,6 +859,7 @@ document.addEventListener('DOMContentLoaded',function(){
           stopCountdown();
         }
         renderControl();
+        scheduleAdaptiveFrameRefresh();
       }
       function startWatchFlow(){
         if(!selectedDevice) { showToast('请先选择设备'); return; }
@@ -894,6 +901,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var hadSession=!!currentSession;
         currentSession=null;
         controlState='free';
+        controlOwner='';
         setWatchState('idle');
         if(!deviceId||!hadSession) return;
         window.ScrcpyGateApi.configured('sessions.stop',{params:{deviceId:deviceId},method:'POST'}).catch(function(error){
@@ -1180,6 +1188,7 @@ document.addEventListener('DOMContentLoaded',function(){
       });
       document.addEventListener('scrcpygate:quality',function(event){
         var detail=event&&event.detail||{};
+        if(!selectedDevice||String(detail.deviceId||'')!==String(selectedDevice.id)||!streamLive()) return;
         if(detail.meta) qualityMetaBase=String(detail.meta);
         var nameEl=document.getElementById('mirror-quality-name');
         if(nameEl&&detail.name) nameEl.textContent=String(detail.name);
@@ -1268,10 +1277,14 @@ document.addEventListener('DOMContentLoaded',function(){
         showToast(detail.message||'控制指令发送失败');
       });
       document.addEventListener('scrcpygate:controlstate',function(event){
+        var detail=event&&event.detail||{};
+        // A delayed event from the previous control socket must never change
+        // control ownership for the newly selected device.
+        if(!selectedDevice||!detail.deviceId||String(detail.deviceId)!==String(selectedDevice.id)) return;
         var active=!!(event&&event.detail&&event.detail.active);
         var owner=event&&event.detail&&event.detail.owner?String(event.detail.owner):'';
         if(active){ controlState='self'; controlOwner=currentMirrorUsername()||'我'; clearControlNotice(); }
-        else if(controlState==='self') controlState=owner?'other':'free';
+        else controlState=owner?'other':'free';
         if(owner) noteControlOwner(owner);
         else if(controlState==='free') controlOwner='';
         rawState('control_state',{active:active,owner:owner,state:controlState});
@@ -1370,6 +1383,147 @@ document.addEventListener('DOMContentLoaded',function(){
         });
       }
 
+      /* ---------- 文本输入（中文 / 表情走设备剪贴板粘贴） ---------- */
+      var textSendComposing=false;
+      var textSendCompositionTimer=null;
+      function textSendSetStatus(message,isError){
+        if(!textSendStatus) return;
+        textSendStatus.textContent=message ? tr(message) : '';
+        textSendStatus.hidden=!message;
+        textSendStatus.classList.toggle('error',!!isError);
+      }
+      function textSendFocusables(){
+        if(!textSendDialog) return [];
+        return Array.prototype.slice.call(textSendDialog.querySelectorAll('button:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter(function(el){ return !el.hidden && el.offsetParent!==null; });
+      }
+      function textSendRestoreFocus(){
+        var candidates=[textSendReturnFocus,document.getElementById('cb-more-btn'),document.getElementById('sg-raw-v2-video'),document.getElementById('raw-v2-surface')];
+        textSendReturnFocus=null;
+        for(var i=0;i<candidates.length;i++){
+          var node=candidates[i];
+          if(!node||!document.contains(node)||typeof node.focus!=='function'||node.disabled||node.hidden) continue;
+          try{ node.focus({preventScroll:true}); }catch(e){ try{ node.focus(); }catch(_){} }
+          if(document.activeElement===node) return;
+        }
+      }
+      function textSendOpen(){
+        if(!textSendLayer||!textSendDialog) return;
+        if(textSendDialog.classList.contains('open')) return;
+        textSendReturnFocus=document.activeElement;
+        closeFixedPops();
+        vpClose();
+        apClose();
+        upClose();
+        textSendSetStatus('',false);
+        syncKeyboardInputMode();
+        textSendLayer.classList.add('open');
+        textSendDialog.classList.add('open');
+        textSendLayer.setAttribute('aria-hidden','false');
+        textSendDialog.setAttribute('aria-hidden','false');
+        textSendDialog.removeAttribute('inert');
+        if(window.lucide) lucide.createIcons();
+        if(textSendField) textSendField.focus();
+      }
+      function textSendClose(){
+        if(!textSendLayer||!textSendDialog||textSendBusy) return;
+        if(!textSendDialog.classList.contains('open')) return;
+        textSendLayer.classList.remove('open');
+        textSendDialog.classList.remove('open');
+        textSendLayer.setAttribute('aria-hidden','true');
+        textSendDialog.setAttribute('aria-hidden','true');
+        textSendDialog.setAttribute('inert','');
+        textSendSetStatus('',false);
+        if(textSendField) textSendField.value='';
+        if(textSendCompositionTimer!==null) window.clearTimeout(textSendCompositionTimer);
+        textSendCompositionTimer=null;
+        textSendComposing=false;
+        textSendRestoreFocus();
+      }
+      function textSendSubmit(){
+        if(textSendBusy||textSendComposing) return;
+        if(watchState!=='playing'||controlState!=='self'||!currentSession){ showToast('请先获取控制权'); return; }
+        var text=textSendField ? String(textSendField.value||'') : '';
+        if(!text){ textSendSetStatus('请输入要发送的文本',true); if(textSendField) textSendField.focus(); return; }
+        textSendBusy=true;
+        if(textSendConfirmBtn){ textSendConfirmBtn.disabled=true; textSendConfirmBtn.setAttribute('aria-busy','true'); }
+        textSendSetStatus('正在发送…',false);
+        sessionAction('send_text','文本已发送到控制通道，请确认设备输入结果',{text:text}).then(function(){
+          textSendBusy=false;
+          if(textSendConfirmBtn){ textSendConfirmBtn.disabled=false; textSendConfirmBtn.removeAttribute('aria-busy'); }
+          textSendSetStatus('',false);
+          if(textSendField) textSendField.value='';
+          textSendClose();
+        },function(error){
+          textSendBusy=false;
+          if(textSendConfirmBtn){ textSendConfirmBtn.disabled=false; textSendConfirmBtn.removeAttribute('aria-busy'); }
+          textSendSetStatus(apiErrorText(error),true);
+          if(textSendField) textSendField.focus();
+        });
+      }
+      if(popText) popText.addEventListener('click',function(){ closeMoreMenu(false); textSendOpen(); });
+      if(textSendCloseBtn) textSendCloseBtn.addEventListener('click',textSendClose);
+      if(textSendCancelBtn) textSendCancelBtn.addEventListener('click',textSendClose);
+      if(textSendScrim) textSendScrim.addEventListener('click',textSendClose);
+      if(textSendConfirmBtn) textSendConfirmBtn.addEventListener('click',textSendSubmit);
+      if(textSendField){
+        textSendField.addEventListener('compositionstart',function(){
+          if(textSendCompositionTimer!==null) window.clearTimeout(textSendCompositionTimer);
+          textSendCompositionTimer=null;
+          textSendComposing=true;
+        });
+        textSendField.addEventListener('compositionend',function(){
+          // Keep the candidate-confirming Enter out of the submit path.
+          textSendCompositionTimer=window.setTimeout(function(){
+            textSendCompositionTimer=null;
+            textSendComposing=false;
+          },0);
+        });
+      }
+      if(textSendField) textSendField.addEventListener('keydown',function(e){
+        if(e.key!=='Enter'||e.shiftKey||e.isComposing||e.keyCode===229||textSendComposing) return;
+        e.preventDefault();
+        textSendSubmit();
+      });
+      if(textSendDialog) textSendDialog.addEventListener('keydown',function(e){
+        if(e.key!=='Tab') return;
+        var items=textSendFocusables();
+        if(!items.length){ e.preventDefault(); return; }
+        var first=items[0];
+        var last=items[items.length-1];
+        if(e.shiftKey&&document.activeElement===first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey&&document.activeElement===last){ e.preventDefault(); first.focus(); }
+      });
+      /* i18n 引擎整体跳过 TEXTAREA（保护用户输入），所以文本框自己的 placeholder 与
+         aria-label 必须由页面按当前语言写入，并在切换语言时重写。 */
+      var TEXT_SEND_PLACEHOLDER='用系统输入法打字或粘贴，回车发送';
+      var TEXT_SEND_FIELD_LABEL='要发送到设备的文本';
+      function syncKeyboardInputMode(){
+        if(!keyboardInputMode) return;
+        var mode=window.ScrcpyGateV2&&ScrcpyGateV2.state.keyboardInputMode==='device'?'device':'local';
+        keyboardInputMode.value=mode;
+        keyboardInputMode.querySelector('option[value="device"]').disabled=!window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        if(keyboardInputHint) keyboardInputHint.textContent=tr(mode==='device'
+          ?'关闭此窗口后点击投屏，用电脑英文键盘输入拼音，在手机端选词。手机需启用兼容的输入法；下方文本框仍按整段文本发送。'
+          :'本机选好中文后发送；手机输入框需支持粘贴。');
+      }
+      if(keyboardInputMode) keyboardInputMode.addEventListener('change',function(){
+        keyboardInputMode.disabled=true;
+        sessionAction('keyboard_input_mode','键盘输入方式已切换',{mode:keyboardInputMode.value}).then(function(){
+          textSendSetStatus('',false);
+        },function(error){ textSendSetStatus(apiErrorText(error),true); }).finally(function(){
+          keyboardInputMode.disabled=false;
+          syncKeyboardInputMode();
+        });
+      });
+      function applyTextSendI18n(){
+        if(!textSendField) return;
+        textSendField.setAttribute('placeholder',tr(TEXT_SEND_PLACEHOLDER));
+        textSendField.setAttribute('aria-label',tr(TEXT_SEND_FIELD_LABEL));
+        syncKeyboardInputMode();
+      }
+      applyTextSendI18n();
+      if(window.ScrcpyGateI18n&&typeof window.ScrcpyGateI18n.on==='function') window.ScrcpyGateI18n.on(applyTextSendI18n);
+
       /* ---------- 控制权 ---------- */
       function applyControlResult(endpoint,payload){
         var d=payload && (payload.session || payload.data || payload) || {};
@@ -1377,19 +1531,28 @@ document.addEventListener('DOMContentLoaded',function(){
           controlState='free';
         }else{
           var controller=String(d.controller||'');
-          controlState=controller==='self'?'self':(controller==='other'?'other':'free');
+          controlState=selfHoldsControl()?'self':(controller==='other'?'other':'free');
         }
+        if(controlState==='self') controlOwner=currentMirrorUsername();
+        else if(controlState==='free') controlOwner='';
         renderControl();
         return payload;
       }
       function controlRequest(endpoint){
         if(controlBusy) return Promise.resolve(null);
         if(!currentSession || watchState!=='playing') return Promise.reject(new Error('请先开始观看会话'));
+        var generation=watchRequestGeneration;
+        var deviceId=selectedDevice&&selectedDevice.id;
+        var sessionId=currentSession.id;
         controlBusy=true;
         renderControl();
         return Promise.resolve().then(function(){
-          return window.ScrcpyGateApi.configured(endpoint,{params:{id:currentSession && currentSession.id,deviceId:selectedDevice && selectedDevice.id},method:'POST'});
-        }).then(function(payload){ return applyControlResult(endpoint,payload); }).then(function(payload){
+          if(generation!==watchRequestGeneration) return null;
+          return window.ScrcpyGateApi.configured(endpoint,{params:{id:sessionId,deviceId:deviceId},method:'POST'});
+        }).then(function(payload){
+          if(generation!==watchRequestGeneration||!selectedDevice||deviceId!==selectedDevice.id) return payload;
+          return applyControlResult(endpoint,payload);
+        }).then(function(payload){
           controlBusy=false;
           renderControl();
           return payload;
@@ -1426,32 +1589,25 @@ document.addEventListener('DOMContentLoaded',function(){
 
       /* ---------- 安卓导航键 ---------- */
       document.addEventListener('scrcpygate:keyboard',function(event){
-        var active=!!(event&&event.detail&&event.detail.active);
-        keyboardOn=active;
-        if(keyboardBtn){
-          keyboardBtn.classList.toggle('held',active);
-          setDockTogglePressed(keyboardBtn,active);
-          keyboardBtn.setAttribute('aria-label',active?'关闭键盘':'开启键盘输入');
-          keyboardBtn.title=active?'关闭键盘':'开启键盘输入';
-          keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+(active?'关闭键盘':'键盘')+'</span>';
-        }
-        if(popKeyboard){
-          popKeyboard.classList.toggle('held',active);
-          popKeyboard.setAttribute('aria-checked',String(active));
-          popKeyboard.setAttribute('aria-label',active?'重新打开备用键盘':'开启备用键盘');
-        }
-        var keyboardState=document.getElementById('cb-pop-keyboard-state');
-        if(keyboardState) keyboardState.textContent=active?'已开启':'备用';
+        var detail=event&&event.detail||{};
+        // Keyboard state is device-scoped. Missing IDs are stale/legacy
+        // notifications and must not overwrite the current device state.
+        if(!selectedDevice||!detail.deviceId||String(detail.deviceId)!==String(selectedDevice.id)) return;
+        keyboardOn=detail.active===true;
+        renderControl();
         syncKeyboardViewport();
-        if(window.lucide) lucide.createIcons();
       });
       function sendNavigationAction(action){
         if(navBusy || !currentSession || watchState!=='playing' || controlState!=='self') return Promise.resolve(null);
+        var deviceId=selectedDevice&&selectedDevice.id;
+        var sessionId=currentSession.id;
+        var generation=watchRequestGeneration;
         if(mirrorControlTools) mirrorControlTools.action('navigation',{action:action});
         navBusy=true;
         renderControl();
         return Promise.resolve().then(function(){
-          return window.ScrcpyGateApi.configured('sessions.action',{params:{id:currentSession.id},method:'POST',body:{action:action}});
+          if(generation!==watchRequestGeneration||!selectedDevice||selectedDevice.id!==deviceId) throw new Error('控制设备已变化，请重新获取控制权');
+          return window.ScrcpyGateApi.configured('sessions.action',{params:{id:sessionId},method:'POST',body:{action:action,deviceId:deviceId}});
         }).then(function(payload){
           showToast('操作已发送');
           return payload;
@@ -1515,79 +1671,87 @@ document.addEventListener('DOMContentLoaded',function(){
         }catch(e){}
         return (Number(window.innerWidth)||0)<=640;
       }
-      function adaptiveVideoFrameBounds(){
-        if(!mirrorPanel) return {width:0,height:0};
-        // Measure the normal 16:9 layout as the available envelope before
-        // applying a device-specific aspect ratio.
-        clearAdaptiveVideoFrame();
-        var rect=mirrorPanel.getBoundingClientRect ? mirrorPanel.getBoundingClientRect() : null;
-        var width=Number(rect&&rect.width)||Number(mirrorPanel.clientWidth)||0;
-        var height=Number(rect&&rect.height)||Number(mirrorPanel.clientHeight)||0;
-        if((width<=0||height<=0)&&workspace){
-          width=Number(workspace.clientWidth)||0;
-          height=Number(workspace.clientHeight)||0;
-        }
-        // 竖向空间取「面板顶部 → 控制栏顶部」的真实距离，而不是面板自身的 16:9
-        // 自然高度：后者会让竖屏画面在窗口变矮（例如打开开发者工具）时底部留出大块空白。
-        if(workspace&&rect&&window.getComputedStyle){
-          var wsRect=workspace.getBoundingClientRect ? workspace.getBoundingClientRect() : null;
-          var wsStyle=window.getComputedStyle(workspace);
-          var padLeft=parseFloat(wsStyle.paddingLeft)||0;
-          var padRight=parseFloat(wsStyle.paddingRight)||0;
-          var padBottom=parseFloat(wsStyle.paddingBottom)||0;
-          var contentWidth=(Number(wsRect&&wsRect.width)||Number(workspace.clientWidth)||0)-padLeft-padRight;
-          if(contentWidth>0) width=contentWidth;
-          var contentBottom=(Number(wsRect&&wsRect.bottom)||0)-padBottom;
-          // 控制栏预留量按「控制栏自身高度 + 固定间距」计算，**不读它的当前位置**：
-          // 视口高度 ≤700px 时控制栏不再贴底（.ctrl-dock 的 margin-top 变成 8px），
-          // 它紧跟在画面下方；若用它的 top 反推可用高度，画面一变矮控制栏就上移，
-          // 可用高度随之更小 —— 自反馈会把画面越算越小（实测同一个 900×620 窗口
-          // 会在 114px 与 352px 之间漂移）。用高度预留则与画面尺寸无关。
-          var dockHeight=0;
-          if(ctrlDock&&ctrlDock.getBoundingClientRect){
-            dockHeight=Math.round(ctrlDock.getBoundingClientRect().height)||Number(ctrlDock.offsetHeight)||0;
+      var layoutPressure=false;
+      var layoutChromeRevealed=false;
+      function adaptiveVideoFrameBounds(expanded){
+        if(!workspace) return {width:0,height:0};
+        // Measure only the parent and fixed chrome, never the fitted frame.
+        // This keeps repeated resize/rotation passes idempotent.
+        var style=window.getComputedStyle(workspace);
+        var width=workspace.clientWidth-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0);
+        var height=workspace.clientHeight-(parseFloat(style.paddingTop)||0)-(parseFloat(style.paddingBottom)||0);
+        if(!fullscreenActive){
+          var pill=document.getElementById('status-pill');
+          var statusEnabled=pill&&!pill.hasAttribute('data-feature-off');
+          if(statusEnabled&&(expanded||!layoutPressure||layoutChromeRevealed)){
+            height-=(parseFloat(window.getComputedStyle(pill).height)||38)+8;
           }
-          var dockReserve=dockHeight>0?dockHeight+10:0;
-          var bottom=contentBottom-dockReserve;
-          var availHeight=bottom-(Number(rect.top)||0);
-          if(availHeight>0) height=availHeight;
+          if(expanded?!windowDockHidden:!dockHidden){
+            height-=Math.max(52,ctrlDock?ctrlDock.offsetHeight:0)+8;
+          }
         }
         return {width:Math.max(0,width),height:Math.max(0,height)};
       }
+      function syncLayoutPressure(size){
+        var next=false;
+        if(!fullscreenActive&&viewMode!=='grid'&&streamLive()&&size.width>0&&size.height>0){
+          var bounds=adaptiveVideoFrameBounds(true);
+          var rotated=viewRotationTransposed();
+          var width=rotated?size.height:size.width;
+          var height=rotated?size.width:size.height;
+          var shortSide=Math.min(width,height)*Math.min(Math.max(0,bounds.width-10)/width,Math.max(0,bounds.height-10)/height);
+          // Width-limited content cannot benefit from hiding vertical chrome.
+          var heightLimited=bounds.height/height<bounds.width/width;
+          next=heightLimited&&shortSide<(layoutPressure?224:200);
+        }
+        if(next!==layoutPressure){
+          layoutPressure=next;
+          layoutChromeRevealed=false;
+          if(!fullscreenActive) setFullscreenDockHidden(next?true:windowDockHidden,true);
+        }
+        var collapsed=layoutPressure&&!layoutChromeRevealed;
+        app.classList.toggle('layout-pressure',layoutPressure);
+        app.classList.toggle('layout-chrome-collapsed',collapsed);
+        var pill=document.getElementById('status-pill');
+        if(pill){
+          if(collapsed&&pill.contains(document.activeElement)&&fullscreenDockToggle) fullscreenDockToggle.focus({preventScroll:true});
+          pill.inert=collapsed;
+          if(collapsed) pill.setAttribute('aria-hidden','true'); else pill.removeAttribute('aria-hidden');
+        }
+        updateFullscreenDockToggle();
+      }
       function applyAdaptiveVideoFrame(detail){
-        if(!mirrorPanel) return;
+        if(!mirrorPanel||viewMode==='grid') return;
         if(fullscreenActive){
+          syncLayoutPressure({width:0,height:0});
           clearAdaptiveVideoFrame();
           return;
         }
-        var size=fullscreenSourceSize(detail);
+        var size=streamLive()?fullscreenSourceSize(detail):{width:16,height:9};
         if(!(size.width>0&&size.height>0)){
           // 还没拿到真实尺寸：投屏中（刚点开始/重连）用 16:9 兜底先按投屏布局落位，
           // 否则会退回 CSS 的整宽 16:9 大框，等第一帧到了再缩回去 —— 用户看到的就是
           // 「开始投屏的一瞬间边框变得很大再缩回画面大小」。
-          if(mirrorPanel.classList.contains('video-frame-adaptive')) return; // 已有画框：保持不动
-          if(!streamLive()){ clearAdaptiveVideoFrame(); return; }
           size={width:16,height:9};
         }
-        var v2=window.ScrcpyGateV2;
-        var rotated=viewRotationTransposed();
+        syncLayoutPressure(size);
+        var rotated=streamLive()&&viewRotationTransposed();
         var sourceWidth=rotated?size.height:size.width;
         var sourceHeight=rotated?size.width:size.height;
         var sourceAspect=sourceWidth/sourceHeight;
         if(!(sourceAspect>0&&isFinite(sourceAspect))) return;
         var bounds=adaptiveVideoFrameBounds();
-        if(!(bounds.width>0&&bounds.height>0)) return;
         // 手机上把画框内边距收到 4px：边框每少 1px，旋转后的横屏画面就多 2px 宽
         // （390 宽的手机上 8px→4px 等于画面宽 354→362），视觉上就是「边框没那么大」。
-        var gutter=narrowViewport()?4:8;
-        var maxContentWidth=Math.max(1,bounds.width-gutter*2);
-        var maxContentHeight=Math.max(1,bounds.height-gutter*2);
+        var gutter=Math.max(0,Math.min(narrowViewport()||layoutPressure?4:8,(Math.min(bounds.width,bounds.height)-4)/2));
+        var maxContentWidth=Math.max(1,bounds.width-gutter*2-2);
+        var maxContentHeight=Math.max(1,bounds.height-gutter*2-2);
         var scale=Math.min(maxContentWidth/sourceWidth,maxContentHeight/sourceHeight);
         if(!(scale>0&&isFinite(scale))) return;
-        var contentWidth=Math.max(1,Math.round(sourceWidth*scale));
-        var contentHeight=Math.max(1,Math.round(sourceHeight*scale));
-        var frameWidth=contentWidth+gutter*2;
-        var frameHeight=contentHeight+gutter*2;
+        var contentWidth=Math.max(1,Math.floor(sourceWidth*scale));
+        var contentHeight=Math.max(1,Math.floor(sourceHeight*scale));
+        var frameWidth=contentWidth+gutter*2+2;
+        var frameHeight=contentHeight+gutter*2+2;
         mirrorPanel.classList.add('video-frame-adaptive');
         mirrorPanel.style.setProperty('--mirror-frame-gutter',gutter+'px');
         mirrorPanel.style.width=frameWidth+'px';
@@ -1676,14 +1840,12 @@ document.addEventListener('DOMContentLoaded',function(){
          方向本身由 display-control.js 的纯状态层算。 */
       function autoFitRotationDegrees(){
         if(!displayController) return null;
-        // 把 DOM 里的实测值喂给状态层：源尺寸（解码后的流）与可用空间（工作区）。
-        // 用「当前可用空间」而不是已经适配过的画框，否则会自反馈 —— 横屏画面已经把画框
-        // 压成一条横带，于是永远觉得不用转。adaptiveVideoFrameBounds() 会先清掉自适应画框
-        // 再量工作区，所以调用方拿到结果后要重新 applyAdaptiveVideoFrame()。
+        // Use the expanded envelope for orientation so auto-collapsing chrome
+        // cannot reverse the rotation decision and cause a layout loop.
         var size=fullscreenSourceSize(lastVideoSizeDetail);
         if(!(size.width>0&&size.height>0)) return null;
         displayController.setSource(size.width,size.height);
-        var bounds=adaptiveVideoFrameBounds();
+        var bounds=adaptiveVideoFrameBounds(true);
         displayController.setViewport(Number(bounds.width)||0,Number(bounds.height)||0);
         // 全屏和窗口用同一套判断，**不做特例**：
         //  - 手机真的横过来了（screen.orientation.lock 生效，可用空间变横）→ 这里返回 0，
@@ -1733,6 +1895,15 @@ document.addEventListener('DOMContentLoaded',function(){
         showToast('画面已顺时针旋转 90°（当前 '+viewRotationDegrees()+'°）');
         renderControl();
       }
+      function resetViewOrientation(){
+        manualRotationOffset=0;
+        manualBaseRotation=null;
+        setViewRotation(autoFitRotationDegrees()||0);
+        syncVideoOrientation(lastVideoSizeDetail);
+        applyFullscreenOrientationLock();
+        renderControl();
+        showToast('已恢复自动方向');
+      }
       /**
        * 设备自己转了方向（横竖互换）= 重新按新方向自动摆正（不一定是正向）。
        */
@@ -1764,8 +1935,7 @@ document.addEventListener('DOMContentLoaded',function(){
           // 屏幕方向变化（手机横竖切换、进出全屏）也重新算一次自动方向。
           rotationChanged=applyAutoFitRotation();
         }
-        // autoFitRotationDegrees() 会清掉自适应画框来量「可用空间」，所以这里统一按（可能
-        // 已经更新的）画面方向重算一次画框 —— 方向变了时这一步本来也是必须的。
+        // Refit once more after resolving the final display orientation.
         applyAdaptiveVideoFrame(lastVideoSizeDetail);
         // 屏幕方向锁按「画面内容方向」算，不按摆正后的视图算：横屏设备在竖屏手机上
         // 宁可让手机真的横过来（画面自然铺满），也不能算成 portrait 把手机锁在竖屏 ——
@@ -1787,15 +1957,13 @@ document.addEventListener('DOMContentLoaded',function(){
       var adaptiveFrameRaf=0;
       var adaptiveFrameTimer=0;
       function adaptiveFrameWanted(){
-        if(fullscreenActive) return false;
-        if(lastVideoSizeDetail) return true;
-        return !!(mirrorPanel&&mirrorPanel.classList.contains('video-frame-adaptive'));
+        return !!(workspace&&mirrorPanel&&viewMode!=='grid');
       }
       function runAdaptiveFrameRefresh(){
         if(!adaptiveFrameWanted()) return;
-        // detail 为空时 applyAdaptiveVideoFrame 会回退到适配器里的真实画面尺寸。
-        applyAdaptiveVideoFrame(lastVideoSizeDetail);
+        syncVideoOrientation();
         refreshVideoLayout();
+        applyDockAnchor();
       }
       function scheduleAdaptiveFrameRefresh(){
         if(!adaptiveFrameWanted()) return;
@@ -1816,8 +1984,14 @@ document.addEventListener('DOMContentLoaded',function(){
       window.addEventListener('orientationchange',scheduleAdaptiveFrameRefresh,{passive:true});
       if(window.visualViewport&&window.visualViewport.addEventListener){
         window.visualViewport.addEventListener('resize',scheduleAdaptiveFrameRefresh,{passive:true});
+        window.visualViewport.addEventListener('scroll',scheduleAdaptiveFrameRefresh,{passive:true});
       }
       document.addEventListener('fullscreenchange',scheduleAdaptiveFrameRefresh);
+      if(window.ResizeObserver){
+        // Observe inputs, not the fitted panel, to avoid resize feedback loops.
+        var frameObserver=new ResizeObserver(scheduleAdaptiveFrameRefresh);
+        [workspace,ctrlDock,document.getElementById('status-pill')].forEach(function(el){ if(el) frameObserver.observe(el); });
+      }
       function updateFullscreenButton(){
         if(!fullscreenBtn) return;
         var label=fullscreenActive?'退出全屏':'全屏显示';
@@ -1894,7 +2068,7 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         // 全屏是沉浸式播放：控制栏默认收进边缘，只留一条细把手，点一下才展开
         // （需要手动点「获取控制」的情况由 autoAcquireControlOnFullscreen 兜底摊开）。
-        if(next&&!wasActive){ windowDockHidden=dockHidden; dockHidden=true; }
+        if(next&&!wasActive){ if(!layoutPressure) windowDockHidden=dockHidden; dockHidden=true; }
         app.classList.toggle('is-fullscreen',next);
         app.classList.toggle('dock-menu-collapsed',dockHidden);
         app.setAttribute('data-fullscreen',String(next));
@@ -1937,6 +2111,8 @@ document.addEventListener('DOMContentLoaded',function(){
         // 可读名称与提示走 aria-label / title，状态用 .is-attention 点亮。
         var label=attention?'展开控制栏并获取控制':'展开控制栏';
         if(!dockHidden) label='收起控制栏';
+        if(layoutPressure) label=dockHidden?'展开状态栏与控制栏':'收起状态栏与控制栏';
+        fullscreenDockToggle.setAttribute('aria-controls',layoutPressure?'status-pill ctrl-dock':'ctrl-dock');
         var hint=fullscreenActive?label+'（拖动可沿屏幕左右侧移动，双击或按 0 回到右侧中间）':label;
         fullscreenDockToggle.setAttribute('aria-label',tr(hint));
         fullscreenDockToggle.title=tr(hint);
@@ -2046,13 +2222,18 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('keydown',noteDockActivity,true);
       document.addEventListener('wheel',noteDockActivity,{capture:true,passive:true});
 
-      function setFullscreenDockHidden(hidden){
+      function setFullscreenDockHidden(hidden,automatic){
         if(hidden){
           closeMoreMenu(false);
           if(ctrlDock&&ctrlDock.contains(document.activeElement)&&fullscreenDockToggle) fullscreenDockToggle.focus({preventScroll:true});
         }
         if(mirrorControlTools) mirrorControlTools.setDockHidden(!!hidden); else dockHidden=!!hidden;
-        if(!fullscreenActive) windowDockHidden=dockHidden;
+        if(!fullscreenActive&&!automatic){
+          if(layoutPressure){
+            layoutChromeRevealed=!dockHidden;
+            app.classList.toggle('layout-chrome-collapsed',dockHidden);
+          }else windowDockHidden=dockHidden;
+        }
         if(ctrlDock){ ctrlDock.classList.toggle('dock-hidden',dockHidden); ctrlDock.inert=dockHidden; }
         app.classList.toggle('dock-menu-collapsed',dockHidden);
         updateFullscreenDockToggle();
@@ -2247,6 +2428,11 @@ document.addEventListener('DOMContentLoaded',function(){
       function dockMetrics(){
         var vw=window.innerWidth||document.documentElement.clientWidth||0;
         var vh=window.innerHeight||document.documentElement.clientHeight||0;
+        var viewport=window.visualViewport;
+        if(viewport&&Math.abs(Number(viewport.scale||1)-1)<0.01){
+          vw=Math.min(vw,viewport.width);
+          vh=Math.min(vh,viewport.height);
+        }
         var dockRect=ctrlDock&&ctrlDock.getBoundingClientRect?ctrlDock.getBoundingClientRect():null;
         var toggleRect=fullscreenDockToggle&&fullscreenDockToggle.getBoundingClientRect?fullscreenDockToggle.getBoundingClientRect():null;
         return {
@@ -2503,9 +2689,10 @@ document.addEventListener('DOMContentLoaded',function(){
         moreBtn.setAttribute('aria-expanded','true');
         var r=moreBtn.getBoundingClientRect();
         var w=cbPop.offsetWidth||172;
-        var h=cbPop.offsetHeight||104;
         var viewportBottom=window.innerHeight;
         if(window.visualViewport){ viewportBottom=Math.min(viewportBottom,(Number(window.visualViewport.offsetTop)||0)+(Number(window.visualViewport.height)||viewportBottom)); }
+        cbPop.style.maxHeight=Math.max(80,viewportBottom-16)+'px';
+        var h=cbPop.offsetHeight||104;
         cbPop.style.left=Math.max(8,Math.min(r.right-w,window.innerWidth-w-8))+'px';
         var top=r.bottom+6;
         if(top+h>viewportBottom-8){ top=Math.max(8,r.top-h-6); }
@@ -2553,6 +2740,23 @@ document.addEventListener('DOMContentLoaded',function(){
         if(rotateBtn.disabled) return;
         rotateViewClockwise();
       });
+      if(resetViewBtn) resetViewBtn.addEventListener('click',function(){
+        if(resetViewBtn.disabled) return;
+        closeMoreMenu(true);
+        resetViewOrientation();
+      });
+      deviceActionBtns.forEach(function(button){
+        button.addEventListener('click',function(){
+          if(button.disabled||moreActionBusy) return;
+          var action=button.getAttribute('data-device-action');
+          closeMoreMenu(true);
+          moreActionBusy=true;
+          renderControl();
+          sessionAction(action,'控制指令已发送，请确认设备响应').catch(function(){
+            // sessionAction already shows the transport failure.
+          }).finally(function(){ moreActionBusy=false; renderControl(); });
+        });
+      });
       if(fullscreenDockToggle) fullscreenDockToggle.addEventListener('click',function(event){        // 刚拖过 / 双击复位：都不要当成「展开-收起」。
         if(Date.now()-dockDragEndedAt<250) return;
         if(event&&event.detail>1) return;
@@ -2570,9 +2774,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var successText=source==='menu'
           ? (keyboardOn?'备用键盘已重新打开':'备用键盘已开启')
           : (next?'键盘已开启':'键盘已关闭');
-        sessionAction('keyboard',successText,{enabled:next}).then(function(){
-          if(mirrorControlTools) mirrorControlTools.setKeyboard(next); else keyboardOn=next;
-        }).then(function(){ moreActionBusy=false; renderControl(); },function(error){
+        sessionAction('keyboard',successText,{enabled:next}).then(function(){ moreActionBusy=false; renderControl(); },function(error){
           moreActionBusy=false;
           renderControl();
           if(source==='direct') showToast('键盘未响应，请在更多菜单中重试');
@@ -2588,9 +2790,6 @@ document.addEventListener('DOMContentLoaded',function(){
         showToast(fullscreenAutoControl?'全屏后默认获取控制已开启':'全屏后默认获取控制已关闭');
         if(fullscreenAutoControl) autoAcquireControlOnFullscreen();
       });
-      /* 手动旋转按钮已按用户要求撤掉（ISSUE-156）：画面方向只由「设备方向 + 可用空间」
-         自动决定，见 syncVideoOrientation()/applyAutoFitRotation()。 */
-
       /* ---------- 截图：复制到剪贴板，不支持时回退下载 ---------- */
       function screenshotCanvas(){
         var v2=window.ScrcpyGateV2;
@@ -2608,9 +2807,16 @@ document.addEventListener('DOMContentLoaded',function(){
           }
         }
         if(!source||!(width>0&&height>0)) return null;
-        // 截图跟随当前显示方向：90/270 转置，180 只翻转。
+        // Keep the current display orientation first, then normalize the
+        // exported image to landscape. A portrait phone screenshot is rotated
+        // clockwise once in the PNG only; the live view and touch mapping stay
+        // unchanged.
         var rotation=viewRotationDegrees();
         var transposed=rotation===90||rotation===270;
+        var displayWidth=transposed?height:width;
+        var displayHeight=transposed?width:height;
+        if(displayHeight>displayWidth) rotation=(rotation+90)%360;
+        transposed=rotation===90||rotation===270;
         var canvas=document.createElement('canvas');
         canvas.width=transposed?height:width;
         canvas.height=transposed?width:height;
@@ -2876,13 +3082,16 @@ document.addEventListener('DOMContentLoaded',function(){
       function vpPayload(){
         return { deviceId:selectedDevice&&selectedDevice.id||'', presetId:vpSelectedPresetId||null, resMode:vpParams.resMode, customW:vpParams.customW, customH:vpParams.customH, fps:vpParams.fps, bitrate:vpParams.bitrate, defaultMode:vpMode, fullscreenQuality:vpFullscreenValue };
       }
-      function vpUpdatePill(){
+      function vpUpdatePill(confirmed){
         var preset=vpPresetById(vpSelectedPresetId);
         var name=preset?preset.name:tr('手动微调');
         var el=document.getElementById('mirror-quality-name');
-        if(el) el.textContent=name;
-        qualityMetaBase=vpParamsSpec();
-        renderQualityMeta();
+        // Keep unsaved preferences out of the live stream status.
+        if(confirmed&&!streamLive()){
+          if(el) el.textContent=name;
+          qualityMetaBase=vpParamsSpec();
+          renderQualityMeta();
+        }
         var summary=document.getElementById('vp-summary-text');
         if(summary) summary.textContent=name+' · '+vpParamsSpec();
       }
@@ -2907,7 +3116,7 @@ document.addEventListener('DOMContentLoaded',function(){
         else if(effective && effective.profile==='custom') vpSelectedPresetId='';
         vpSyncParamsFields();
         vpRenderPresets();
-        vpUpdatePill();
+        vpUpdatePill(true);
       }
       function vpApply(){
         if(vpBusy) return;
@@ -2984,7 +3193,7 @@ document.addEventListener('DOMContentLoaded',function(){
           vpRenderModes();
           vpRenderFullscreen();
           vpSyncSegs();
-          vpUpdatePill();
+          vpUpdatePill(true);
           vpSetStatus(d?'画质设置已同步':'画质服务未连接,使用内置默认值');
         }).catch(function(){
           vpRenderPresets();
@@ -3112,11 +3321,16 @@ document.addEventListener('DOMContentLoaded',function(){
       var alasFloatGeometryReady=false;
       var alasFloatDrag=null;
       var alasFloatRestoreGeometry=null;
-      var apLoaded=false;
       var apBusy=false;
       var apConfig=null;
       var apStateData={ state:'idle', label:'未运行', detail:'选择配置后查看运行状态', stopReason:null };
       var apSyncSeq=0;
+      var apStatusSeq=0;
+      var apStatusPending=null;
+      var apOperationSeq=0;
+      var apPollTimer=null;
+      var apPageHidden=false;
+      var AP_POLL_MS=5000;
       var apCache=Object.create(null);
       var AP_CACHE_TTL=120000;
       var workbenchAlasVisible=true;
@@ -3140,7 +3354,9 @@ document.addEventListener('DOMContentLoaded',function(){
           alasFloatClose();
         }
         normalizeDockSeparators();
-        renderAlasPill(alasPillConfig,alasPillState);
+        renderAlasPill(apConfig&&apConfig.name,apStateData.state);
+        if(workbenchAlasVisible) apRefreshStatus();
+        else apStopPolling();
       }
       window.addEventListener('scrcpygate:workbench-alas-visibility',function(e){
         syncWorkbenchAlasVisibility(e.detail&&e.detail.visible);
@@ -4639,9 +4855,10 @@ document.addEventListener('DOMContentLoaded',function(){
             if(el) pop.appendChild(el);
           });
         });
-        // 4) 「更多」按钮：菜单里有可见项时才出现。除了可编排的二级项，还有两个固定
-        //    项（全屏后默认获取控制、逆时针旋转 90°），它们永远在菜单里，所以只要
-        //    「更多」功能没被关掉，按钮就保留 —— 否则用户把二级项全拖走后这两个也进不去。
+        // 4) 「更多」按钮：菜单里有可见项时才出现。除了可编排的二级项，还有固定项
+        //    （data-static：全屏后默认获取控制、文本输入），它们永远在菜单里，所以
+        //    只要「更多」功能没被关掉，按钮就保留 —— 否则用户把二级项全拖走后
+        //    「文本输入」这个中文入口也跟着消失了。
         var moreWrap=document.getElementById('cb-more');
         var staticPopupItems=pop.querySelectorAll ? pop.querySelectorAll('.cb-item[data-static]').length : 0;
         var hasPopupItems=level2.length>0||staticPopupItems>0;
@@ -4721,35 +4938,31 @@ document.addEventListener('DOMContentLoaded',function(){
         var dev=selectedDevice;
         if(dev){
           apDeviceName.textContent=dev.name;
-          apDeviceMeta.textContent=mirrorStatusText(dev)+' · ALAS '+(dev.alas||'未加载');
+          apDeviceMeta.textContent=mirrorStatusText(dev)+' · ALAS '+tr(apStateText(apStateData.state));
         }else{
           apDeviceName.textContent='未选择设备';
           apDeviceMeta.textContent='请先在左侧选择设备';
         }
       }
       function apStateText(state){
-        var labels={ running:'运行中', error:'异常', unbound:'未绑定', stopped:'已停止', idle:'已停止', loading:'检查中', disabled:'已禁用', unconfigured:'未配置', disconnected:'已断开', unreachable:'不可达', timeout:'连接超时', unknown:'未检查' };
+        var labels={ running:'运行中', error:'异常', unbound:'未绑定', stopped:'已停止', idle:'已停止', loading:'检查中', disabled:'已禁用', unconfigured:'未配置', disconnected:'已断开', unreachable:'不可达', timeout:'连接超时', invalid_config:'配置无效', unknown:'未检查' };
         return labels[state]||'未检查';
       }
       function apSyncBottomToggle(){
         if(!apBottomToggle) return;
-        var cfg=apSelectedConfig();
-        var state=String(apStateData&&apStateData.state||'idle');
-        var blocked=['disabled','unconfigured','unbound','unreachable','timeout','disconnected'].indexOf(state)>=0;
+        var state=String(apStateData&&apStateData.state||'unknown');
         var failed=alasStateIsFault(state);
-        var available=!!cfg && apDevice() && cfg.can_run!==false && !blocked;
-        apBottomToggle.disabled=!available || apBusy;
+        apBottomToggle.disabled=!apCanToggle();
+        apBottomToggle.setAttribute('aria-busy',String(apBusy||state==='loading'));
         setDockTogglePressed(apBottomToggle,state==='running');
         apBottomToggle.classList.toggle('is-active',state==='running');
         // 异常状态用红色标出来：以前这里只有「运行中」有颜色，error/unreachable 落到默认灰。
         apBottomToggle.classList.toggle('is-error',failed);
-        var label=state==='running'?'停止 ALAS':(state==='error'?'重启 ALAS':'启动 ALAS');
-        if(!cfg) label='ALAS 未绑定';
-        else if(blocked) label='ALAS '+apStateText(state);
-        apBottomToggle.title=label;
-        apBottomToggle.setAttribute('aria-label',label);
+        var label=apToggleText();
+        apBottomToggle.title=tr(label);
+        apBottomToggle.setAttribute('aria-label',tr(label));
         if(apBottomLabel) apBottomLabel.textContent='ALAS';
-        if(apBottomState) apBottomState.textContent=cfg ? apStateText(state) : '未绑定';
+        if(apBottomState) apBottomState.textContent=tr(apStateText(state));
       }
       function apRenderConfig(){
         var c=apConfig;
@@ -4764,31 +4977,31 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         apConfigName.textContent=c.name;
         apConfigTask.textContent=c.task||'自动化任务';
-        var stateCls=c.state==='running'?'running':(alasStateIsFault(c.state)?'error':'stopped');
-        var stateTxt=apStateText(c.state);
-        apConfigChip.textContent=stateTxt;
+        var stateCls=apStateData.state==='running'?'running':(alasStateIsFault(apStateData.state)?'error':'stopped');
+        var stateTxt=apStateText(apStateData.state);
+        apConfigChip.textContent=tr(stateTxt);
         apConfigChip.className='ap-config-state '+stateCls;
       }
       function apRenderState(){
         var s=apStateData;
         var cfg=apSelectedConfig();
         apState.setAttribute('data-state',s.state);
-        apStateLabel.textContent=s.label||'未运行';
-        var detailFallback={ running:'配置正在运行', stopped:'当前未运行', idle:'当前未运行', loading:'正在获取当前设备状态', disabled:'ALAS 服务已禁用', unconfigured:'ALAS Runtime 未配置', disconnected:'ALAS Runtime 已断开', unreachable:'ALAS Runtime 不可达', timeout:'ALAS Runtime 连接超时', unbound:'该设备未绑定 ALAS 配置' };
+        apStateLabel.textContent=tr(apStateText(s.state));
+        var detailFallback={ running:'配置正在运行', stopped:'当前未运行', idle:'当前未运行', loading:'正在获取当前设备状态', disabled:'ALAS 服务已禁用', unconfigured:'ALAS Runtime 未配置', disconnected:'ALAS Runtime 已断开', unreachable:'ALAS Runtime 不可达', timeout:'ALAS Runtime 连接超时', invalid_config:'ALAS 配置无效', unknown:'ALAS 状态未检查', unbound:'该设备未绑定 ALAS 配置' };
         var stateDetail=s.detail||detailFallback[s.state]||'ALAS 状态已加载';
         apStateDetail.textContent=stateDetail+(s.stopReason?(' · '+s.stopReason):'');
-        var blocked=['disabled','unconfigured'].indexOf(s.state)>=0;
-        var disabled=!cfg||apBusy||!apDevice()||cfg.can_run===false||blocked;
-        apToggle.disabled=disabled;
+        apRefresh.disabled=apBusy;
+        apToggle.disabled=!apCanToggle();
+        apToggle.setAttribute('aria-busy',String(apBusy||s.state==='loading'));
         apToggle.classList.toggle('ap-btn-danger',!!(cfg&&s.state==='running'));
-        apToggleLabel.textContent=!cfg?'未绑定配置':(s.state==='disabled'?'ALAS 已禁用':(s.state==='unconfigured'?'ALAS 未配置':(s.state==='running'?'停止 ALAS':(s.state==='error'?'重启 ALAS':'启动 ALAS'))));
+        apToggleLabel.textContent=tr(apToggleText());
         var icon=apToggle.querySelector('[data-lucide]');
         if(icon){
           icon.setAttribute('data-lucide',s.state==='running'?'square':(s.state==='error'?'rotate-cw':'play'));
         }
         if(window.lucide) lucide.createIcons();
         if(cfg){
-          apConfigChip.textContent=apStateText(s.state);
+          apConfigChip.textContent=tr(apStateText(s.state));
           apConfigChip.className='ap-config-state '+(s.state==='running'?'running':(alasStateIsFault(s.state)?'error':'stopped'));
         }
         apOpenLink.classList.toggle('disabled',!cfg);
@@ -4800,148 +5013,204 @@ document.addEventListener('DOMContentLoaded',function(){
           apOpenLink.setAttribute('aria-disabled','true');
         }
         apSyncBottomToggle();
-        var pill=document.getElementById('mirror-alas-status');
-        if(pill&&selectedDevice&&apDevice()===selectedDevice.id){
-          pill.textContent=!cfg?'未绑定':apStateText(s.state);
-          var adot=document.getElementById('mirror-alas-dot');
-          if(adot){
-            adot.classList.remove('off','err');
-            if(!cfg||['unbound','stopped','idle','loading','disabled','unconfigured'].indexOf(s.state)>=0) adot.classList.add('off');
-            else if(alasStateIsFault(s.state)) adot.classList.add('err');
-          }
+        renderAlasPill(cfg&&cfg.name,s.state);
+        if(cfg&&cfg.admin_fallback){
+          var block=document.getElementById('mirror-alas-status-block');
+          if(block) block.title='ALAS · '+cfg.name+tr('（运行时默认配置，未单独绑定该设备）');
         }
+        apRenderDevice();
       }
-      function apApplyCache(deviceId, cached){
-        if(deviceId!==apDevice() || !cached) return false;
-        apConfig=cached.config||null;
-        apStateData=cached.state||{ state:'unbound', label:'未绑定', detail:'该设备未绑定 ALAS 配置', stopReason:null };
-        apRenderConfig();
-        apRenderState();
-        return true;
+      function apCanToggle(){
+        return !!(apConfig&&apDevice()&&apConfig.can_run!==false&&!apBusy&&
+          ['running','stopped','idle','error'].indexOf(apStateData.state)>=0);
+      }
+      function apToggleText(){
+        var state=apStateData.state;
+        if(apBusy) return '正在执行…';
+        if(state==='loading') return '检查中';
+        if(!apConfig) return state==='unbound'?'ALAS 未绑定':'ALAS '+apStateText(state);
+        if(state==='running') return '停止 ALAS';
+        if(state==='error') return '重启 ALAS';
+        if(state==='stopped'||state==='idle') return '启动 ALAS';
+        return 'ALAS '+apStateText(state);
+      }
+      function apStopPolling(){
+        window.clearTimeout(apPollTimer);
+        apPollTimer=null;
+      }
+      function apSchedulePolling(){
+        apStopPolling();
+        if(apPageHidden||document.hidden||workbenchAlasVisible===false||!apDevice()) return;
+        apPollTimer=window.setTimeout(apRefreshStatus,AP_POLL_MS);
+      }
+      function apRefreshStatus(){
+        apStopPolling();
+        if(apPageHidden||document.hidden||workbenchAlasVisible===false||!apDevice()) return Promise.resolve(null);
+        if(apBusy){ apSchedulePolling(); return Promise.resolve(null); }
+        return apLoadConfigs(false);
       }
       function apLoadConfigs(force){
         var deviceId=apDevice();
-        if(!deviceId){
-          apConfig=null;
-          apRenderConfig();
-          apStateData={ state:'idle', label:'未运行', detail:'请先在左侧选择设备', stopReason:null };
-          apRenderState();
-          return Promise.resolve();
-        }
+        if(!deviceId||workbenchAlasVisible===false) return Promise.resolve(null);
         var cached=apCache[deviceId];
-        if(!force && cached && cached.promise) return cached.promise;
-        if(!force && cached && Date.now()-cached.at<AP_CACHE_TTL){
-          apApplyCache(deviceId,cached);
-          return Promise.resolve(cached);
+        if(!force&&cached&&cached.promise&&cached.seq===apSyncSeq) return cached.promise;
+        if(!force&&cached&&!cached.promise&&Date.now()-cached.at<AP_CACHE_TTL){
+          // Cache configuration discovery, never a runtime status snapshot.
+          apConfig=cached.config;
+          apRenderConfig();
+          apRenderState();
+          return apLoadStatus();
         }
         var seq=++apSyncSeq;
-        apStateData={ state:'loading', label:'检查中', detail:'正在获取当前设备 ALAS 状态', stopReason:null };
+        ++apStatusSeq;
+        apStatusPending=null;
+        apStopPolling();
+        apStateData={ state:'loading', detail:'正在获取当前设备 ALAS 状态', stopReason:null };
         apRenderState();
         var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.configs'))
           ? window.ScrcpyGateApi.configured('alas.configs',{ query:{ device_id:deviceId } })
-          : Promise.resolve(null);
+          : Promise.reject(new Error('ALAS 服务未连接'));
         var request=p.then(function(payload){
-          if(seq!==apSyncSeq || deviceId!==apDevice()) return null;
-          var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||null;
-          var raw=d&&(d.configs||d.configurations||d.items||d.list)||(Array.isArray(d)?d:[]);
-          var c=(Array.isArray(raw)&&raw[0])||null;
+          if(seq!==apSyncSeq||deviceId!==apDevice()) return null;
+          var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||{};
+          var raw=d.configs||d.configurations||d.items||d.list||(Array.isArray(d)?d:[]);
+          var configs=(Array.isArray(raw)?raw:[]).filter(function(c){ return c&&(c.admin_fallback!==true||mirrorIsAdmin()); });
+          var defaultName=String(d.default_config||'');
+          var c=configs.find(function(item){ return defaultName&&String(item.config_name||item.name||item.id)===defaultName; })||
+            configs.find(function(item){ return item.is_default===true; })||configs[0];
           apConfig=c?{
-            id:String(c.id||c.config_id||c.configId||''),
+            id:String(c.id||c.config_id||c.configId||c.config_name||c.name||''),
             name:String(c.name||c.config_name||c.displayName||'未命名配置'),
             task:String(c.task||c.taskName||'自动化任务'),
             can_run:c.can_run!==false,
-            state:String(c.state||c.status||(c.running?'running':'stopped')),
+            admin_fallback:c.admin_fallback===true,
             openUrl:String(c.openUrl||c.url||'/alas/embed/')
           }:null;
+          apCache[deviceId]={ at:Date.now(), config:apConfig };
           apRenderConfig();
-          return apLoadStatus({deviceId:deviceId,seq:seq});
-        }).then(function(){
-          if(seq!==apSyncSeq || deviceId!==apDevice()) return null;
-          apCache[deviceId]={ at:Date.now(), config:apConfig, state:apStateData };
-          return apCache[deviceId];
+          apRenderState();
+          return apLoadStatus({force:true});
         }).catch(function(error){
-          if(seq===apSyncSeq && deviceId===apDevice()){
+          if(seq===apSyncSeq&&deviceId===apDevice()){
+            delete apCache[deviceId];
             apConfig=null;
-            apStateData={ state:'unreachable', label:'不可达', detail:apiErrorText(error), stopReason:null };
+            apStateData={ state:'unreachable', detail:apiErrorText(error), stopReason:null };
             apRenderConfig();
             apRenderState();
             apSetStatus('ALAS 配置不可用 · '+apiErrorText(error),'error');
           }
           return null;
+        }).then(function(result){
+          if(seq===apSyncSeq&&deviceId===apDevice()) apSchedulePolling();
+          return result;
         });
-        apCache[deviceId]={ at:0, config:null, state:apStateData, promise:request };
-        request.then(function(result){
-          var current=apCache[deviceId];
-          if(current && current.promise===request){
-            if(result) apCache[deviceId]=result;
-            else delete apCache[deviceId];
-          }
-        });
+        apCache[deviceId]={ at:0, config:null, promise:request, seq:seq };
         return request;
       }
       function apLoadStatus(options){
         options=options||{};
-        var deviceId=options.deviceId||apDevice();
-        var seq=options.seq||apSyncSeq;
-        var cfg=options.config||apSelectedConfig();
+        var silent=options.silent===true;
+        var deviceId=apDevice();
+        var seq=apSyncSeq;
+        var cfg=apSelectedConfig();
         if(!cfg){
-          if(deviceId===apDevice()){
-            apStateData={ state:'unbound', label:'未绑定', detail:'该设备未绑定 ALAS 配置,请联系管理员在后台绑定', stopReason:null };
-            apRenderState();
-            apSetStatus('该设备未绑定 ALAS 配置');
-          }
-          return Promise.resolve();
-        }
-        var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.status'))
-          ? window.ScrcpyGateApi.configured('alas.status',{ query:{ config:cfg.id, config_name:cfg.name, device_id:deviceId } })
-          : Promise.resolve(null);
-        return p.then(function(payload){
-          if(deviceId!==apDevice() || seq!==apSyncSeq) return payload;
-          var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||null;
-          if(d){
-            apStateData={ state:String(d.state||d.status||'stopped'), label:String(d.label||''), detail:String(d.detail||d.message||''), stopReason:d.stopReason||d.stop_reason||null };
-            if(!apStateData.label) apStateData.label=apStateData.state==='running'?'运行中':(apStateData.state==='error'?'异常':(apStateData.state==='unbound'?'未绑定':'已停止'));
-          }else{
-            apStateData={ state:cfg.state==='running'?'running':'stopped', label:cfg.state==='running'?'运行中':'已停止', detail:'ALAS 服务未连接,显示本地状态', stopReason:null };
-          }
+          apStateData={ state:'unbound', detail:'该设备未绑定 ALAS 配置,请联系管理员在后台绑定', stopReason:null };
           apRenderState();
-          apSetStatus(d?'ALAS 状态已同步':'ALAS 服务未连接');
-          return payload;
+          apSetStatus('该设备未绑定 ALAS 配置');
+          apSchedulePolling();
+          return Promise.resolve(null);
+        }
+        if(!options.force&&apStatusPending) return apStatusPending;
+        var statusSeq=++apStatusSeq;
+        apStopPolling();
+        function current(){ return seq===apSyncSeq&&statusSeq===apStatusSeq&&deviceId===apDevice()&&cfg===apConfig; }
+        var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.status'))
+          ? window.ScrcpyGateApi.configured('alas.status',{ query:{ config:cfg.id||cfg.name, device_id:deviceId } })
+          : Promise.reject(new Error('ALAS 服务未连接'));
+        var request=p.then(function(payload){
+          if(!current()) return null;
+          var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||{};
+          var state=String(d.state||d.status||'unknown').toLowerCase();
+          apStateData={ state:state, detail:String(d.detail||d.message||''), stopReason:d.stopReason||d.stop_reason||null };
+          if(typeof d.can_run==='boolean') cfg.can_run=d.can_run;
+          apRenderState();
+          var failed=alasStateIsFault(state)||state==='unknown';
+          if(!silent) apSetStatus(failed?'状态获取失败':'ALAS 状态已同步',failed?'error':'');
+          return failed?null:payload;
         }).catch(function(error){
-          if(deviceId===apDevice() && seq===apSyncSeq){
-            apStateData={ state:'unreachable', label:'不可达', detail:apiErrorText(error), stopReason:null };
+          if(current()){
+            apStateData={ state:error&&error.code==='TIMEOUT'?'timeout':'unreachable', detail:apiErrorText(error), stopReason:null };
             apRenderState();
-            apSetStatus('状态获取失败 · '+apiErrorText(error),'error');
+            if(!silent) apSetStatus('状态获取失败 · '+apiErrorText(error),'error');
           }
           return null;
+        }).then(function(result){
+          if(current()){
+            apStatusPending=null;
+            apSchedulePolling();
+          }
+          return result;
         });
+        apStatusPending=request;
+        return request;
       }
       function apToggleRun(){
+        if(!apCanToggle()) return;
         var cfg=apSelectedConfig();
-        if(!cfg||apBusy) return;
-        if(cfg.can_run===false){
-          apSetStatus('该配置仅可查看状态,无运行权限','error');
-          return;
-        }
-        apBusy=true;
-        apToggle.disabled=true;
-        apSyncBottomToggle();
-        apSetStatus('正在执行…','busy');
+        var deviceId=apDevice();
+        var operation=++apOperationSeq;
         var action=apStateData.state==='running'?'stop':(apStateData.state==='error'?'restart':'start');
+        apBusy=true;
+        // Invalidate reads started before the command; they may finish after it.
+        ++apStatusSeq;
+        apStatusPending=null;
+        apStopPolling();
+        apRenderState();
+        apSetStatus('正在执行…','busy');
+        function current(){ return operation===apOperationSeq&&deviceId===apDevice()&&cfg===apConfig; }
+        var expected=action==='stop'?'stopped':'running';
+        function verify(attempt){
+          return apLoadStatus({force:true,silent:true}).then(function(){
+            if(!current()||apStateData.state===expected||attempt>=3) return apStateData.state;
+            return new Promise(function(resolve){ window.setTimeout(resolve,300*Math.pow(2,attempt)); })
+              .then(function(){ return verify(attempt+1); });
+          });
+        }
         var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.toggle'))
-          ? window.ScrcpyGateApi.configured('alas.toggle',{ method:'POST', body:{ config_name:cfg.name, config_id:cfg.id, device_id:apDevice(), action:action } })
+          ? window.ScrcpyGateApi.configured('alas.toggle',{ method:'POST', body:{ config_name:cfg.name, config_id:cfg.id, device_id:deviceId, action:action } })
           : Promise.reject(new Error('ALAS 服务未连接'));
-        p.then(function(){ apBusy=false; return apLoadStatus({force:true}); })
-         .then(function(){ apSetStatus('操作已提交 · ALAS 状态已刷新'); refreshAlasPill(); })
-         .catch(function(error){ apBusy=false; apSetStatus('操作失败 · '+apiErrorText(error),'error'); apRenderState(); });
+        p.then(function(){
+          if(!current()) return null;
+          return verify(0);
+        }).then(function(result){
+          if(!current()) return;
+          apBusy=false;
+          apRenderState();
+          apSetStatus(result===expected?'操作已提交 · ALAS 状态已刷新':'操作已提交 · 运行时仍在同步',result===expected?'':'busy');
+        }).catch(function(error){
+          if(!current()) return;
+          apBusy=false;
+          // A timed-out command may still have reached the runtime.
+          apLoadStatus({force:true,silent:true}).then(function(){
+            if(current()){
+              apRenderState();
+              apSetStatus('操作失败 · '+apiErrorText(error),'error');
+            }
+          });
+        });
       }
       function apOnDeviceChange(){
-        apRenderDevice();
+        ++apSyncSeq;
+        ++apStatusSeq;
+        ++apOperationSeq;
+        apStatusPending=null;
+        apBusy=false;
+        apStopPolling();
         apConfig=null;
-        apStateData={ state:'loading', label:'检查中', detail:'正在获取当前设备 ALAS 状态', stopReason:null };
+        apStateData={ state:apDevice()?'loading':'unbound', detail:apDevice()?'正在获取当前设备 ALAS 状态':'请先在左侧选择设备', stopReason:null };
         apRenderConfig();
         apRenderState();
-        apLoadConfigs(false).catch(function(){});
+        apLoadConfigs(false);
       }
       function apRenderExitGuard(enabled){
         if(!apExitGuard) return;
@@ -4982,8 +5251,8 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function apOpen(){
         if(!workbenchAlasVisible) return;
-        if(!apLoaded){ apLoaded=true; apLoadConfigs().catch(function(){}); apLoadExitGuard(); }
-        else apLoadExitGuard();
+        apRefreshStatus();
+        apLoadExitGuard();
         vpClose();
         upClose();
         tlClose();
@@ -5000,12 +5269,14 @@ document.addEventListener('DOMContentLoaded',function(){
         if(closeBtn) closeBtn.focus();
       }
       function apClose(){
+        var wasOpen=apPanel.classList.contains('open');
         apPanel.classList.remove('open');
         apBackdrop.classList.remove('open');
         releasePanelFocus(apPanel);
         apPanel.setAttribute('aria-hidden','true');
         apPanel.setAttribute('inert','');
         apBackdrop.setAttribute('aria-hidden','true');
+        if(wasOpen) apRefreshStatus();
       }
       function alasIsMobileViewport(){
         if(!window.matchMedia) return window.innerWidth<=640;
@@ -5082,6 +5353,7 @@ document.addEventListener('DOMContentLoaded',function(){
         alasFloatWindow.setAttribute('inert','');
         if(alasFloatFrame) alasFloatFrame.removeAttribute('src');
         alasFloatDrag=null;
+        apRefreshStatus();
         var target=alasFloatReturnFocus;
         alasFloatReturnFocus=null;
         if(target&&target.isConnected&&!target.closest('[inert]')&&target.getAttribute('aria-hidden')!=='true'){
@@ -5162,6 +5434,12 @@ document.addEventListener('DOMContentLoaded',function(){
         alasFloatOpen(url,apOpenLink);
       });
       window.addEventListener('resize',alasFloatClamp);
+      window.addEventListener('focus',apRefreshStatus);
+      window.addEventListener('pagehide',function(){ apPageHidden=true; apStopPolling(); });
+      window.addEventListener('pageshow',function(){ apPageHidden=false; apRefreshStatus(); });
+      document.addEventListener('visibilitychange',function(){
+        if(document.hidden) apStopPolling(); else apRefreshStatus();
+      });
       document.getElementById('alas-item').addEventListener('click',function(e){
         e.preventDefault();
         if(!workbenchAlasVisible) return;
@@ -5171,7 +5449,7 @@ document.addEventListener('DOMContentLoaded',function(){
       apBackdrop.addEventListener('click',apClose);
       apToggle.addEventListener('click',apToggleRun);
       if(apBottomToggle) apBottomToggle.addEventListener('click',function(){ apToggleRun(); });
-      apRefresh.addEventListener('click',function(){ apLoadConfigs(true); });
+      apRefresh.addEventListener('click',function(){ if(!apBusy) apLoadConfigs(true); });
       if(apExitGuard) apExitGuard.addEventListener('click',apToggleExitGuard);
 
       /* ---------- 账户菜单（资料、偏好与安全 · Apple 风格） ---------- */

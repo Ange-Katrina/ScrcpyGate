@@ -40,6 +40,7 @@
     controlCurrentUser: '',
     scrcpyInput: null,
     keyboardOn: false,
+    keyboardInputMode: 'local',
     jmuxer: null,
     videoEl: null,
     videoRotation: 0,
@@ -3007,7 +3008,9 @@
     var quality = adaptQuality(s.video);
     if (quality) {
       try {
-        document.dispatchEvent(new CustomEvent('scrcpygate:quality', { detail: quality }));
+        document.dispatchEvent(new CustomEvent('scrcpygate:quality', {
+          detail: Object.assign({}, quality, { deviceId: deviceId || state.deviceId || '' })
+        }));
       } catch (e) {}
     }
     try {
@@ -3826,7 +3829,7 @@
     }
     try {
       document.dispatchEvent(new CustomEvent('scrcpygate:controlstate', {
-        detail: { active: state.controlOwnership, owner: owner ? String(owner) : '' }
+        detail: { active: state.controlOwnership, owner: owner ? String(owner) : '', deviceId: state.controlSocketDevice || state.deviceId || '' }
       }));
     } catch (e) {}
     if (!ok) {
@@ -3876,7 +3879,7 @@
     state.keyboardOn = !!active;
     try {
       document.dispatchEvent(new CustomEvent('scrcpygate:keyboard', {
-        detail: { active: state.keyboardOn }
+        detail: { active: state.keyboardOn, deviceId: state.controlSocketDevice || state.deviceId || '' }
       }));
     } catch (e) {}
   }
@@ -4146,27 +4149,30 @@
     try {
       state.scrcpyInput = new ScrcpyInputClass(function (data) {
         var socket = state.controlSocket;
-        if (!state.controlOwnership || !socket || socket.readyState !== 1) return;
+        if (!state.controlOwnership || !socket || socket.readyState !== 1) return false;
         var bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
         var isTouchMove = bytes && bytes[0] === 2 && bytes[1] === 2;
         var bufferedAmount = Number(socket.bufferedAmount || 0);
         if (isTouchMove) {
           state.pendingControlMove = data;
           flushPendingControlMove(bufferedAmount);
-          return;
+          return true;
         }
         // Give a pending move a chance before the next important event, but
         // never delay the key, text, touch-down, or touch-up packet itself.
         flushPendingControlMove();
         try {
           socket.send(data);
+          return true;
         } catch (e) {
           setControlOwnership(false);
           emitControlFailure(e && e.message ? e.message : '控制通道发送失败');
+          return false;
         }
       }, target, size.width, size.height, false, function (active) {
         emitKeyboardState(active);
-      });
+      }, emitControlFailure);
+      state.scrcpyInput.setKeyboardInputMode(state.keyboardInputMode);
       if (state.scrcpyInput.setViewportRotation) state.scrcpyInput.setViewportRotation(state.videoRotation);
       if (state.scrcpyInput.setFullscreenMode) state.scrcpyInput.setFullscreenMode(state.fullscreenMode);
     } catch (e) {
@@ -4651,7 +4657,7 @@
         id: deviceId,
         deviceId: deviceId,
         controller: sess && sess.control_lock && sess.control_lock.username
-          ? (String(sess.control_lock.username) === String(currentUsername()) ? 'self' : 'other')
+          ? (state.controlOwnership && String(state.controlSocketDevice) === String(deviceId) ? 'self' : 'other')
           : 'free',
         running: !!(sess && sess.running),
         remainingSeconds: payload && payload.remaining_seconds != null ? payload.remaining_seconds : undefined
@@ -4670,6 +4676,17 @@
     var body = (opts && opts.body) || {};
     var action = body.action;
     var deviceId = body.deviceId || params.deviceId || params.id || state.deviceId;
+    var inputActions = ['keyboard', 'keyboard_input_mode', 'send_text', 'back', 'home', 'tasks',
+      'volume_up', 'volume_down', 'power', 'screen_off', 'screen_on'];
+    if (inputActions.indexOf(action) >= 0) {
+      if (!state.controlOwnership) return Promise.reject(new Error('请先获取控制权'));
+      if (!deviceId || String(deviceId) !== String(state.controlSocketDevice || '')) {
+        return Promise.reject(new Error('控制设备已变化，请重新获取控制权'));
+      }
+      if (!state.controlSocket || state.controlSocket.readyState !== 1) {
+        return Promise.reject(new Error('控制通道不可用，请重新获取控制权'));
+      }
+    }
     if (action === 'stop-device-stream') {
       var current = window.ScrcpyGateSession && window.ScrcpyGateSession.current && window.ScrcpyGateSession.current();
       var isAdmin = !!current && (current.roleKey === 'admin' || current.role === '管理员' || current.isAdmin === true);
@@ -4695,12 +4712,35 @@
       emitKeyboardState(!!body.enabled);
       return Promise.resolve({ ok: true, session: state.session });
     }
-    if (action === 'back' || action === 'home' || action === 'tasks') {
-      var keycode = action === 'back' ? 4 : (action === 'home' ? 3 : 187);
-      if (!state.controlOwnership || !state.scrcpyInput || !state.scrcpyInput.sendKeyCodePress) {
-        return Promise.reject(new Error('请先获取控制权'));
+    if (action === 'keyboard_input_mode') {
+      if (!state.controlOwnership) return Promise.reject(new Error('请先获取控制权'));
+      var modeInput = bindScrcpyInput(deviceId);
+      if (!modeInput) return Promise.reject(new Error('控制输入不可用'));
+      modeInput.setKeyboardInputMode(body.mode);
+      state.keyboardInputMode = body.mode;
+      return Promise.resolve({ ok: true, session: state.session });
+    }
+    if (action === 'send_text') {
+      // 工作台「文本输入」：中文等非 ASCII 文本无法经 scrcpy 文本注入送达设备，
+      // 由输入层分流到设备剪贴板 + 粘贴键（见 ScrcpyInput.sendText）。
+      if (!state.controlOwnership) return Promise.reject(new Error('请先获取控制权'));
+      var sendInput = bindScrcpyInput(deviceId);
+      var sendValue = body.text == null ? '' : String(body.text);
+      if (!sendValue) return Promise.reject(new Error('请输入要发送的文本'));
+      if (!sendInput || !sendInput.sendText) return Promise.reject(new Error('控制输入不可用'));
+      try {
+        if (sendInput.sendText(sendValue) === false) throw new Error('控制通道不可用，文本未发送');
+      } catch (e) { return Promise.reject(e); }
+      return Promise.resolve({ ok: true, session: state.session });
+    }
+    if (['back', 'home', 'tasks', 'volume_up', 'volume_down', 'power', 'screen_off', 'screen_on'].indexOf(action) >= 0) {
+      var actionInput = bindScrcpyInput(deviceId);
+      if (!actionInput || !actionInput.sendDeviceAction) {
+        return Promise.reject(new Error('控制输入不可用'));
       }
-      try { state.scrcpyInput.sendKeyCodePress(keycode); } catch (e) { return Promise.reject(e); }
+      try {
+        if (!actionInput.sendDeviceAction(action)) throw new Error('控制指令未发送，请检查控制连接');
+      } catch (e) { return Promise.reject(e); }
       return Promise.resolve({ ok: true, session: state.session });
     }
     return Promise.resolve({ ok: true, session: state.session });
@@ -5570,7 +5610,7 @@
     if (query.config) serverQuery.config = query.config;
     if (query.device_id) serverQuery.device_id = query.device_id;
     return apiGet('/api/alas/status', serverQuery).then(function (payload) {
-      var status = payload.status || 'stopped';
+      var status = payload.status || 'unknown';
       var labels = { running: '运行中', error: '异常', unbound: '未绑定', stopped: '已停止', disabled: '已禁用', disconnected: '已断开' };
       return {
         state: status,
@@ -5579,6 +5619,7 @@
         detail: payload.error || '',
         message: payload.error || '',
         stopReason: null,
+        can_run: payload.can_run,
         ok: payload.ok !== false,
         configured: payload.configured !== false
       };

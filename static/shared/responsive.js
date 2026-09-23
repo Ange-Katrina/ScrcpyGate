@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var MOBILE_QUERY = '(max-width: 767px)';
+  var MOBILE_QUERY = '(max-width: 767px), (max-height: 500px) and (pointer: coarse)';
 
   function isMobile() {
     try { return window.matchMedia(MOBILE_QUERY).matches; } catch (e) { return false; }

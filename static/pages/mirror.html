@@ -254,8 +254,18 @@
               <!-- 本浏览器偏好（localStorage）：全屏后是否自动获取控制。刻意不参与后台菜单编排，
                    始终保持在同一位置，避免把「用户偏好」和「角色可见性」混在一起。 -->
               <button class="cb-item" id="cb-pop-auto-control" type="button" role="menuitemcheckbox" aria-checked="true" aria-label="全屏后默认获取控制（已开启）" data-static disabled><i data-lucide="shield-check"></i><span>全屏后默认获取控制</span><small id="cb-pop-auto-control-state">开</small></button>
+              <!-- 固定项（data-static）：中文、日文、表情等无法经文本注入送达设备，
+                   必须走设备剪贴板粘贴（见 ScrcpyInput.sendText）。它不参与后台菜单
+                   编排，否则管理员拖走二级项后这个入口就会消失。 -->
+              <button class="cb-item" id="cb-pop-text" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="text-send-dialog" aria-label="文本输入（中文与表情）" data-static disabled><i data-lucide="type"></i><span>文本输入</span><small id="cb-pop-text-state">中文</small></button>
               <button class="cb-item" id="cb-pop-shot" type="button" role="menuitem" disabled><i data-lucide="camera"></i><span>截图</span><small id="cb-pop-shot-state">复制</small></button>
               <button class="cb-item" id="cb-pop-keyboard" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="开启备用键盘" disabled><i data-lucide="keyboard"></i><span>键盘输入</span><small id="cb-pop-keyboard-state">备用</small></button>
+              <button class="cb-item" id="cb-pop-reset-view" type="button" role="menuitem" data-static disabled><i data-lucide="scan"></i><span>恢复自动方向</span></button>
+              <button class="cb-item" type="button" role="menuitem" data-device-action="volume_up" data-static disabled><i data-lucide="volume-2"></i><span>音量增加</span></button>
+              <button class="cb-item" type="button" role="menuitem" data-device-action="volume_down" data-static disabled><i data-lucide="volume-1"></i><span>音量降低</span></button>
+              <button class="cb-item" type="button" role="menuitem" data-device-action="power" data-static disabled><i data-lucide="power"></i><span>电源键</span></button>
+              <button class="cb-item" type="button" role="menuitem" data-device-action="screen_off" data-static disabled><i data-lucide="monitor-off"></i><span>关闭设备屏幕</span><small>继续投屏</small></button>
+              <button class="cb-item" type="button" role="menuitem" data-device-action="screen_on" data-static disabled><i data-lucide="monitor"></i><span>点亮设备屏幕</span></button>
             </div>
           </div>
       </div>
@@ -278,6 +288,37 @@
           <footer class="control-takeover-actions">
             <button class="control-takeover-btn" id="control-takeover-cancel" type="button">取消</button>
             <button class="control-takeover-btn primary" id="control-takeover-confirm" type="button"><i data-lucide="mouse-pointer-click"></i>确认接管</button>
+          </footer>
+        </section>
+      </div>
+      <!-- 文本输入：中文、日文、表情无法经 scrcpy 文本注入送达设备，改走设备剪贴板 +
+           粘贴键（见 ScrcpyInput.sendText）。复用接管对话框的样式类，保持同一套视觉
+           与焦点行为，只给文本框补样式。 -->
+      <div class="control-takeover-layer" id="text-send-layer" aria-hidden="true">
+        <div class="control-takeover-scrim" id="text-send-scrim"></div>
+        <section class="control-takeover-dialog" id="text-send-dialog" role="dialog" aria-modal="true" aria-labelledby="text-send-title" aria-describedby="text-send-copy" aria-hidden="true" inert>
+          <header class="control-takeover-head">
+            <span class="control-takeover-icon" aria-hidden="true"><i data-lucide="type"></i></span>
+            <div class="control-takeover-heading">
+              <h2 id="text-send-title">文本输入</h2>
+              <p id="text-send-copy">中文与表情经设备剪贴板粘贴到光标处</p>
+            </div>
+            <button class="control-takeover-close" id="text-send-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+          </header>
+          <div class="control-takeover-body">
+            <label class="keyboard-input-label" for="keyboard-input-mode">实体键盘输入方式</label>
+            <select class="control-takeover-field keyboard-input-mode" id="keyboard-input-mode" aria-describedby="keyboard-input-hint">
+              <option value="local">本机输入法（推荐）</option>
+              <option value="device">设备输入法（类似 QtScrcpy）</option>
+            </select>
+            <p class="control-takeover-hint" id="keyboard-input-hint">本机选好中文后发送；手机输入框需支持粘贴。</p>
+            <textarea class="control-takeover-field" id="text-send-field" rows="3" placeholder="用系统输入法打字或粘贴，回车发送" aria-label="要发送到设备的文本"></textarea>
+            <p class="control-takeover-hint" id="text-send-hint">中文、表情及多行文本会覆盖设备剪贴板，输入框需支持粘贴。每次最多 4096 UTF-8 字节（约 1365 个常用汉字）；Shift+Enter 换行。</p>
+          </div>
+          <p class="control-takeover-status" id="text-send-status" role="status" aria-live="polite" hidden></p>
+          <footer class="control-takeover-actions">
+            <button class="control-takeover-btn" id="text-send-cancel" type="button">取消</button>
+            <button class="control-takeover-btn primary" id="text-send-confirm" type="button"><i data-lucide="send"></i>发送文本</button>
           </footer>
         </section>
       </div>

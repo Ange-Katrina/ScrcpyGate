@@ -54,9 +54,20 @@ CONTROL_PERMISSION_RECHECK_INTERVAL = max(
 )
 SCRCPY_RESET_VIDEO_MESSAGE = b"\x11"
 SCRCPY_CLIENT_TEXT_MAX_BYTES = 300
-SCRCPY_CLIENT_CONTROL_MAX_BYTES = 5 + SCRCPY_CLIENT_TEXT_MAX_BYTES
+# The scrcpy server injects text events through KeyCharacterMap, which only
+# resolves characters present in the virtual keyboard layout: CJK and emoji are
+# dropped with "Could not inject char".  The clipboard control message is the
+# supported carrier for arbitrary UTF-8 text, so the gateway also accepts it.
+# Keep this cap well below the upstream limit (256 KiB) and the WebSocket frame
+# limit so one text submission always fits a single frame.
+SCRCPY_CLIENT_CLIPBOARD_MAX_BYTES = 4096
+SCRCPY_CLIENT_CONTROL_MAX_BYTES = max(
+    5 + SCRCPY_CLIENT_TEXT_MAX_BYTES,
+    14 + SCRCPY_CLIENT_CLIPBOARD_MAX_BYTES,
+)
 SCRCPY_CLIENT_CONTROL_MAX_BASE64_CHARS = ((SCRCPY_CLIENT_CONTROL_MAX_BYTES + 2) // 3) * 4
-SCRCPY_ALLOWED_CLIENT_CONTROL_TYPES = frozenset({0, 1, 2, 3, 4})
+# type 9 = set clipboard (sequence + paste flag + UTF-8 text), see ScrcpyInput.
+SCRCPY_ALLOWED_CLIENT_CONTROL_TYPES = frozenset({0, 1, 2, 3, 4, 9, 10})
 SCRCPY_STREAM_MODE = os.environ.get("SCRCPY_STREAM_MODE", "raw").strip().lower() or "raw"
 STREAM_HEALTH_TIMEOUT = float(os.environ.get("SCRCPY_STREAM_HEALTH_TIMEOUT", "5") or "5")
 # Do not hold the HTTP start request until a video keyframe arrives.  ADB and

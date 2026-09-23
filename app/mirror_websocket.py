@@ -23,6 +23,7 @@ from .mirror_runtime import (
     CONTROL_PERMISSION_RECHECK_INTERVAL,
     MAX_VIDEO_CONNECTIONS_PER_USER,
     SCRCPY_ALLOWED_CLIENT_CONTROL_TYPES,
+    SCRCPY_CLIENT_CLIPBOARD_MAX_BYTES,
     SCRCPY_CLIENT_CONTROL_MAX_BASE64_CHARS,
     SCRCPY_CLIENT_CONTROL_MAX_BYTES,
     SCRCPY_CLIENT_TEXT_MAX_BYTES,
@@ -137,11 +138,31 @@ def _validate_scroll_payload(payload: bytes) -> tuple[bool, str]:
 
 
 def _validate_action_payload(payload: bytes) -> tuple[bool, str]:
-    # back or screen-on: type + action
+    # Back/wake action or display power: type + one byte in {0, 1}.
     if len(payload) != 2:
         return False, "invalid_length"
     if payload[1] not in (0, 1):
         return False, "invalid_action"
+    return True, ""
+
+
+def _validate_set_clipboard_payload(payload: bytes) -> tuple[bool, str]:
+    # set clipboard: type + u64 sequence + paste flag + u32 length + UTF-8 text.
+    # The text carrier for CJK and emoji: the device-side inject-text message
+    # cannot resolve them through its key character map.
+    if len(payload) < 14:
+        return False, "invalid_length"
+    if payload[9] not in (0, 1):
+        return False, "invalid_paste_flag"
+    text_length = _u32(payload, 10)
+    if text_length > SCRCPY_CLIENT_CLIPBOARD_MAX_BYTES:
+        return False, "text_too_large"
+    if len(payload) != 14 + text_length:
+        return False, "invalid_length"
+    try:
+        payload[14:].decode("utf-8")
+    except UnicodeDecodeError:
+        return False, "invalid_text"
     return True, ""
 
 
@@ -151,6 +172,8 @@ _CONTROL_PAYLOAD_VALIDATORS = {
     2: _validate_touch_payload,
     3: _validate_scroll_payload,
     4: _validate_action_payload,
+    9: _validate_set_clipboard_payload,
+    10: _validate_action_payload,
 }
 
 

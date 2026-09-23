@@ -765,8 +765,17 @@
     .control-takeover-btn.primary:hover:not(:disabled) { color:#fff; background:#0064d6; }
     .control-takeover-btn:disabled { opacity:.5; cursor:not-allowed; }
     .control-takeover-btn [data-lucide] { width:15px; height:15px; }
+    /* 文本输入对话框：复用接管对话框的骨架，只补文本框与说明文字的样式。 */
+    .control-takeover-field { width:100%; min-height:78px; max-height:38vh; margin-top:12px; padding:10px 12px; border:1px solid var(--c-border); border-radius:12px; color:var(--c-text-strong); background:var(--c-surface); font:inherit; font-size:13px; line-height:1.5; resize:vertical; }
+    .control-takeover-field:focus-visible { outline:2px solid var(--brand-blue); outline-offset:-1px; }
+    .control-takeover-field::placeholder { color:var(--c-text-faint); }
+    .keyboard-input-label { display:block; margin-top:12px; color:var(--c-text); font-size:13px; }
+    .keyboard-input-mode { min-height:40px; max-height:none; margin-top:6px; resize:none; color-scheme:light; }
+    .dark .keyboard-input-mode { color-scheme:dark; }
+    .control-takeover-hint { margin:8px 0 0; color:var(--c-text-sub); font-size:11.5px; line-height:1.5; }
     .cb-pop { position:fixed; left:-9999px; top:-9999px; z-index:70; min-width:172px; padding:5px; border:1px solid var(--c-border); border-radius:10px; background:var(--c-pop); box-shadow:0 16px 40px var(--c-shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-6px); transition:opacity var(--motion-base) var(--ease-fade),transform var(--motion-base) var(--ease-standard),visibility 0s linear var(--motion-base); }
     .cb-pop.open { opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0); transition-delay:0s; }
+    .cb-pop { max-height:calc(100dvh - 16px); overflow-y:auto; overscroll-behavior:contain; }
     .cb-item { display:flex; align-items:center; gap:8px; width:100%; height:30px; padding:0 10px; border:0; border-radius:7px; color:var(--c-text); background:transparent; font-size:12px; cursor:pointer; text-align:left; text-decoration:none; }
     .cb-item:hover { background:var(--c-hover); color:var(--c-text-strong); }
     .cb-item.held, .cb-item[aria-checked="true"] { color:#1d9b4a; background:rgba(48,209,88,.1); }
@@ -962,6 +971,29 @@
       .control-takeover-btn { flex:1 1 0; min-height:44px; }
     }
     @media (max-height:700px) { .mirror-panel { margin-top:12px; } .ctrl-dock { margin-top:8px; } .workspace { padding-bottom:10px; } }
+    /* Fit against a stable workspace; chrome never shrinks or wraps vertically. */
+    .app { height:var(--mirror-viewport-height,100dvh); }
+    .app:not(.is-grid):not(.is-fullscreen) .workspace { gap:8px; overflow:hidden; }
+    .app:not(.is-grid):not(.is-fullscreen) .status-pill { flex:0 0 auto; min-width:0; max-width:100%; flex-wrap:nowrap; overflow-x:auto; margin:0; }
+    .app:not(.is-grid) .status-pill > .pill-block { flex-shrink:0; }
+    .app:not(.is-grid):not(.is-fullscreen) .mirror-panel.video-frame-adaptive { box-sizing:border-box; margin:auto 0; min-width:0; min-height:0; }
+    .app:not(.is-grid):not(.is-fullscreen) .ctrl-dock { margin:0 auto; }
+    .app.layout-chrome-collapsed:not(.is-fullscreen) .status-pill { display:none; }
+    .app.layout-pressure:not(.is-fullscreen) .fullscreen-dock-toggle { right:0; bottom:50%; width:28px; min-width:28px; height:64px; transform:translateY(50%); border-radius:12px 0 0 12px; }
+    .app.is-fullscreen .workspace { max-height:var(--mirror-viewport-height,100%); width:100%; }
+    .app.is-fullscreen .mirror-panel { width:100%; height:100%; }
+    .app:not(.is-grid) .conn-overlay { overflow-y:auto; justify-content:safe center; }
+    .app:not(.is-grid) .conn-overlay > * { flex-shrink:0; }
+    /* A landscape phone still needs a drawer, not the desktop sidebar. */
+    @media (min-width:768px) and (max-height:500px) and (pointer:coarse) {
+      .app { grid-template-columns:minmax(0,1fr); }
+      .app .workspace { grid-column:1/-1; }
+      .app .sidebar { position:fixed; top:48px; left:0; bottom:0; z-index:60; width:min(272px,84vw) !important; transform:translateX(-105%); transition:transform var(--motion-layout) var(--ease-standard); background:var(--c-glass-strong); }
+      body.sg-mobile-nav .app .sidebar { transform:translateX(0); }
+      .app .mobile-menu-btn { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; border:0; border-radius:10px; color:var(--c-text); background:transparent; }
+      .app .mobile-scrim { display:block; position:fixed; inset:48px 0 0; z-index:55; background:rgba(0,0,0,.32); opacity:0; visibility:hidden; }
+      body.sg-mobile-nav .app .mobile-scrim { opacity:1; visibility:visible; }
+    }
     /* ---------- 画面菜单（显示与画质 · Apple 风格） ---------- */
     .vp-backdrop { position:fixed; inset:0; z-index:68; background:rgba(0,0,0,.32); opacity:0; visibility:hidden; transition:opacity var(--motion-base) var(--ease-fade),visibility 0s linear var(--motion-base); }
     .vp-backdrop.open { opacity:1; visibility:visible; transition-delay:0s; }

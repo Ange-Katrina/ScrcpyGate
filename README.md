@@ -236,6 +236,19 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 > `deploy.sh` (which looks values up by name). Running `uvicorn` directly means exporting the
 > variables yourself.
 
+## Workbench controls
+
+Acquire control of the device before sending keys, text, or touch input. **More → Text input → Physical keyboard input mode** offers two modes:
+
+- **Local input method (default):** select Chinese characters with your computer's input method. Chinese text and emoji use the device clipboard and paste, so the focused Android field must support paste. A single text submission supports up to 4096 UTF-8 bytes; oversized text is rejected rather than truncated.
+- **Device input method:** send physical keyboard keys to Android, as in QtScrcpy's normal keyboard path. Use an English input layout on the computer and a compatible input method on the phone to select Chinese characters there. This mode requires a desktop physical keyboard.
+
+Right-click the picture to go back or wake the device; middle-click to go home. **More** also contains volume, power-key, and explicit screen-off/screen-on commands. **Turn device screen off** requests mirroring with the physical display off; device support varies. A sent-command message confirms transmission, not the device's response.
+
+The rotate button changes the local picture. **More → Restore automatic orientation** returns to automatic fitting without changing Android's rotation setting. Scroll and touch coordinates follow the displayed orientation; changing orientation or leaving the browser releases active gestures when the control channel is available.
+
+The protocol follows the bundled scrcpy **3.1** server. See the upstream [keyboard guide](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/keyboard.md), [shortcuts](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/shortcuts.md), and [QtScrcpy FAQ](https://github.com/barry-ran/QtScrcpy/blob/dev/docs/FAQ.md). ScrcpyGate does not expose scrcpy's UHID/AOA keyboard modes.
+
 ## Operations
 
 CI/CD publishes verified amd64 and arm64 images to GHCR; servers are deployed
