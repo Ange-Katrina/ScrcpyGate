@@ -11,10 +11,16 @@ such as `-rc.1`, without a leading `v`. The initial release version is `1.0.0`.
 | Breaking API, configuration or deployment change | `1.0.0` → `2.0.0` |
 | Release candidate | `1.1.0-rc.1` → `1.1.0` |
 
-Do not increment the release number for every commit. Update `VERSION` in
-the release PR, include English release notes and upgrade instructions, and
-merge only after verification. A version in the source tree is not evidence
-that its image or GitHub Release has been published.
+Increment `VERSION` for every delivered update, including updates delivered on
+`dev` and source deployment bundles. Choose the increment from the table above.
+One delivery may contain several commits; intermediate edits, CI retries, and
+repackaging the same source do not require another increment. Never decrease
+or reuse a version for a later delivery.
+
+Before committing or pushing a delivery, update `VERSION`, include English
+change notes and any upgrade instructions, and refresh `ScrcpyGate-deploy`
+from the verified commit. A version in the source tree is not evidence that
+its image or GitHub Release has been published.
 
 ## Runtime and builds
 
