@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Query, Request
 
@@ -25,11 +26,12 @@ router = APIRouter()
 async def admin_update_check(
     request: Request,
     refresh: int = Query(default=0, ge=0, le=1),
+    channel: Literal["auto", "stable", "dev", "edge"] = "auto",
 ):
     """Report the current version and the newest published release (read-only)."""
     admin = security.require_admin(request)
     # Run bounded registry requests outside the event loop.
-    payload = await asyncio.to_thread(update_check.check_for_update, force=bool(refresh))
+    payload = await asyncio.to_thread(update_check.check_for_update, force=bool(refresh), channel=channel)
     if refresh:
         log_event(
             log,

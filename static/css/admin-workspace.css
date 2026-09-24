@@ -66,11 +66,7 @@
 /* Overview: keep maintenance compact and the device list close to the summary. */
 .page-admin #update-panel { margin-bottom:16px; }
 .page-admin .panel-health[data-state="warning"] { color:var(--admin-muted); }
-.page-admin #update-panel > summary { flex-wrap:nowrap; }
-.page-admin .update-tools { margin-left:auto; }
-.page-admin .update-check-row { display:flex; justify-content:flex-end; margin-bottom:8px; }
-.page-admin #update-check-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:8px 12px; min-height:36px; border:1px solid var(--admin-border); border-radius:8px; }
-.page-admin #update-check-btn svg { width:16px; height:16px; }
+.page-admin #update-panel > summary { flex-wrap:wrap; }
 .page-admin #devices .search-box { width:clamp(140px,18vw,240px); }
 
 /* Users: the list is the primary task, account policy is a secondary disclosure. */
@@ -147,7 +143,6 @@
   .workspace-refined .stat-note { margin-top:4px; line-height:1.5; }
   .page-admin #devices .panel-tools { width:100%; }
   .page-admin #devices .search-box { flex:1; min-width:0; width:auto; }
-  .page-admin .update-tools { max-width:65%; font-size:11px; }
   .page-users .users-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .page-users .toolbar-search { grid-column:1/-1; width:100%; }
   .page-users .toolbar-spacer { display:none; }

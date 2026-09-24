@@ -120,23 +120,39 @@
             </a>
           </section>
 
-          <details class="admin-disclosure panel" id="update-panel" aria-labelledby="update-title">
+          <details class="admin-disclosure panel update-panel" id="update-panel" aria-labelledby="update-title" open>
             <summary class="panel-header">
-              <h2 class="panel-title" id="update-title">系统更新<span class="panel-subtitle" id="update-subtitle">检查是否有已发布的新版本</span></h2>
-              <div class="update-tools">
-                <span class="update-state" id="update-state" role="status" aria-live="polite">等待检查</span>
-
-              </div>
+              <h2 class="panel-title" id="update-title">系统更新<span class="panel-subtitle">版本状态与更新指引</span></h2>
+              <span class="update-state" id="update-state" role="status" aria-live="polite">等待检查</span>
             </summary>
             <div class="update-body">
-              <div class="update-check-row"><button class="tool-btn" id="update-check-btn" type="button" title="重新检查更新"><i data-lucide="refresh-cw"></i><span>检查更新</span></button></div>
-              <div class="update-row"><span class="update-k">当前版本</span><span class="update-v" id="update-current">—</span></div>
-              <div class="update-row"><span class="update-k">最新版本</span><span class="update-v" id="update-latest">—</span></div>
-              <p class="update-hint" id="update-hint">这里只显示是否有更新。应用更新在服务器上执行下面的命令（会先备份数据与 .env，只换镜像，失败自动回滚）。</p>
-              <div class="update-cmd">
-                <code id="update-command">—</code>
-                <button class="update-copy" id="update-copy" type="button" title="复制更新命令" disabled><i data-lucide="copy"></i><span>复制</span></button>
+              <div class="update-toolbar">
+                <label class="update-channel" for="update-channel"><span>更新通道</span><select id="update-channel"><option value="auto">跟随当前部署</option><option value="stable">稳定版</option><option value="dev">开发版 · dev</option><option value="edge">主分支预览 · edge</option></select></label>
+                <button class="update-action primary" id="update-check-btn" type="button"><i data-lucide="refresh-cw"></i><span>检查更新</span></button>
               </div>
+              <div class="update-versions">
+                <div><span class="update-k">当前运行版本</span><strong class="update-v" id="update-current">—</strong><span class="update-meta" id="update-current-image">等待检查</span></div>
+                <div><span class="update-k">可用版本 / 标签</span><strong class="update-v" id="update-latest">—</strong><span class="update-meta" id="update-channel-label">跟随当前部署</span></div>
+              </div>
+              <p class="update-hint" id="update-hint" aria-live="polite">正在读取版本信息…</p>
+              <div class="update-links"><span class="update-meta" id="update-checked">尚未检查</span><a id="update-release-link" href="https://github.com/Ange-Katrina/ScrcpyGate/releases" target="_blank" rel="noopener noreferrer">查看发布记录<i data-lucide="arrow-up-right"></i></a></div>
+              <section class="update-guide" id="update-guide" aria-labelledby="update-guide-title" hidden>
+                <h3 id="update-guide-title">在服务器上更新</h3>
+                <p class="update-hint">适用于 deploy.sh 管理的 bridge 部署。进入原部署目录执行；脚本会先备份并保留回滚镜像，健康检查失败时尝试回滚。数据库迁移不会自动撤销。</p>
+                <div class="update-cmd"><code id="update-command" tabindex="0">—</code><button class="update-action" id="update-copy" type="button" disabled><i data-lucide="copy"></i><span>复制命令</span></button></div>
+                <p class="update-meta">完成后刷新本页并检查当前版本。host 网络或手动 Docker 部署请按部署文档更新。</p>
+                <a id="update-docs-link" href="https://github.com/Ange-Katrina/ScrcpyGate/blob/main/README.zh.md" target="_blank" rel="noopener noreferrer">查看部署文档</a>
+              </section>
+              <details class="update-alas">
+                <summary><span>ALAS 自动更新</span><span class="update-meta">由 ALAS 自身管理</span></summary>
+                <div class="update-alas-body">
+                  <p class="update-hint">官方 ALAS 支持定期检查和定时安装更新。ScrcpyGate 尚未读取这项配置，因此不能确认你的 ALAS 是否已启用。</p>
+                  <dl class="update-settings"><div><dt>AutoUpdate</dt><dd>启用启动时更新</dd></div><div><dt>CheckUpdateInterval</dt><dd>检查间隔（分钟），0 表示关闭</dd></div><div><dt>AutoRestartTime</dt><dd>每日更新时刻，null 表示关闭</dd></div><div><dt>EnableReload</dt><dd>允许更新后自动重启</dd></div></dl>
+                  <p class="update-hint">在 ALAS 的 config/deploy.yaml 中配置；定时更新需要可写的源码目录、Git 和依赖安装权限，时间以 ALAS 所在环境为准。更新时会停止并恢复正在运行的实例。</p>
+                  <div class="update-links"><a href="/alas/embed/" target="_blank" rel="noopener noreferrer">打开 ALAS 管理界面<i data-lucide="arrow-up-right"></i></a><a href="https://github.com/LmeSzinc/AzurLaneAutoScript/blob/master/deploy/template" target="_blank" rel="noopener noreferrer">官方配置说明<i data-lucide="arrow-up-right"></i></a></div>
+                </div>
+              </details>
+              <p class="update-meta update-feedback" id="update-feedback" role="status" aria-live="polite"></p>
             </div>
           </details>
 

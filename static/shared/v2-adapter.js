@@ -6016,6 +6016,8 @@
       noRelease: data.noRelease === true || data.no_release === true,
       checkedAt: data.checkedAt == null ? (data.checked_at == null ? null : Number(data.checked_at)) : Number(data.checkedAt),
       cached: data.cached === true,
+      channel: String(data.channel || 'stable'),
+      status: String(data.status || ''),
       currentVersion: String(((data.current || {}).version) || 'dev'),
       currentImage: String(((data.current || {}).image) || ''),
       image: String(data.image || ''),
@@ -6033,6 +6035,7 @@
 
   function handlerSystemUpdate(opts) {
     var query = {};
+    if (opts && opts.channel) query.channel = String(opts.channel);
     if (opts && (opts.refresh || (opts.query && opts.query.refresh))) query.refresh = 1;
     return apiGet('/api/admin/update-check', query).then(function (payload) { return updateCheckPayload(payload); });
   }

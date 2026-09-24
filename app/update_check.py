@@ -30,7 +30,7 @@ _DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 _request_context = threading.local()
 
 _cache_lock = threading.Lock()
-_cache: dict[str, object] = {"payload": None, "expires_at": 0.0}
+_cache: dict[str, object] = {"payload": None, "expires_at": 0.0, "key": None}
 
 
 def _env(name: str, default: str = "") -> str:
@@ -60,6 +60,22 @@ def image_reference() -> str:
 def current_version() -> dict[str, str]:
     image = _env("SCRCPYGATE_IMAGE") or "scrcpygate:local"
     return {"version": get_version(), "image": image}
+
+
+def resolve_channel(channel: str, current: dict[str, str]) -> str:
+    """Follow development deployments without silently switching them to stable."""
+    if channel not in {"auto", "stable", "dev", "edge"}:
+        raise ValueError("Unsupported update channel")
+    if channel != "auto":
+        return channel
+    image_tag = current["image"].rsplit(":", 1)[-1]
+    if image_tag in {"dev", "edge"}:
+        return image_tag
+    if "-dev.dev." in current["version"]:
+        return "dev"
+    if "-dev.main." in current["version"]:
+        return "edge"
+    return "stable"
 
 
 def _semver_key(value: str) -> tuple[int, int, int] | None:
@@ -100,7 +116,7 @@ def _http_get_json(url: str, headers: dict[str, str] | None = None) -> object:
     return json.loads(raw.decode("utf-8", errors="replace"))
 
 
-def _ghcr_latest_tag(image: str) -> tuple[dict[str, object] | None, str]:
+def _ghcr_latest_tag(image: str, channel: str = "stable") -> tuple[dict[str, object] | None, str]:
     """List GHCR tags with an anonymous pull token (public packages only)."""
     if not image.startswith("ghcr.io/"):
         return None, "ghcr-not-applicable"
@@ -122,22 +138,23 @@ def _ghcr_latest_tag(image: str) -> tuple[dict[str, object] | None, str]:
         return None, "ghcr-tags-empty"
     best: tuple[tuple[int, int, int], str] | None = None
     has_latest = False
-    has_edge = False
     for name in tags:
         text = str(name)
         if text == "latest":
             has_latest = True
-        if text == "edge":
-            has_edge = True
         key = _semver_key(text) if _STABLE_TAG_RE.fullmatch(text) else None
         if key is None:
             continue
         if best is None or key > best[0]:
             best = (key, text)
-    if best is None:
-        if not has_latest and not has_edge:
+    if channel in {"dev", "edge"}:
+        if channel not in tags:
             return None, "ghcr-no-release-tag"
-        selected = "latest" if has_latest else "edge"
+        selected = channel
+    elif best is None:
+        if not has_latest:
+            return None, "ghcr-no-release-tag"
+        selected = "latest"
     else:
         selected = best[1]
     # A Git tag is not a published image. Confirm the registry manifest before
@@ -157,7 +174,7 @@ def _ghcr_latest_tag(image: str) -> tuple[dict[str, object] | None, str]:
         return None, "ghcr-manifest-unreachable"
     if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
         return None, "ghcr-invalid-manifest"
-    if best is None:
+    if best is None or channel in {"dev", "edge"}:
         return (
             {
                 "version": selected,
@@ -184,23 +201,25 @@ def _ghcr_latest_tag(image: str) -> tuple[dict[str, object] | None, str]:
     )
 
 
-def check_for_update(*, force: bool = False, now: float | None = None) -> dict[str, object]:
-    """Return the read-only update status; never raises, never writes anything."""
+def check_for_update(*, force: bool = False, now: float | None = None, channel: str = "auto") -> dict[str, object]:
+    """Return read-only status for a validated channel; network failures become data."""
     current_time = time.time() if now is None else float(now)
+    repo = update_repo()
+    image = image_reference()
+    current = current_version()
+    selected_channel = resolve_channel(channel, current)
+    cache_key = (repo, image, selected_channel, current["version"], current["image"])
     with _cache_lock:
         cached = _cache.get("payload")
-        if not force and isinstance(cached, dict) and float(_cache.get("expires_at") or 0) > current_time:
+        if (not force and _cache.get("key") == cache_key and isinstance(cached, dict)
+                and float(_cache.get("expires_at") or 0) > current_time):
             payload = dict(cached)
             payload["cached"] = True
             return payload
 
-    repo = update_repo()
-    image = image_reference()
-    current = current_version()
-
     _request_context.deadline = time.monotonic() + TOTAL_BUDGET_SECONDS
     try:
-        latest, reason = _ghcr_latest_tag(image)
+        latest, reason = _ghcr_latest_tag(image, selected_channel)
     finally:
         del _request_context.deadline
     # 上游 404「还没有发布版本」与「连不上」是两回事：前者可达、只是没有版本可更新。
@@ -211,11 +230,13 @@ def check_for_update(*, force: bool = False, now: float | None = None) -> dict[s
         "no_release": bool(reachable and latest is None),
         "checked_at": int(current_time),
         "cached": False,
+        "channel": selected_channel,
         "current": current,
         "image": image,
         "repository": repo,
         "latest": latest,
         "update_available": None,
+        "status": "no_release" if reachable else "unavailable",
         "host_command": "",
         "release_url": f"https://github.com/{repo}/releases",
         "error": "" if latest is not None else reason,
@@ -223,11 +244,21 @@ def check_for_update(*, force: bool = False, now: float | None = None) -> dict[s
     if latest is not None:
         comparison = _is_newer(str(latest.get("version") or ""), str(current.get("version") or ""))
         payload["update_available"] = comparison
+        if comparison is None:
+            payload["status"] = "floating"
+        elif comparison:
+            payload["status"] = "update_available"
+        elif _semver_key(str(current["version"])) > _semver_key(str(latest["version"])):
+            payload["status"] = "current_newer"
+        else:
+            payload["status"] = "up_to_date"
         tag = str(latest.get("tag") or latest.get("version") or "")
         reference = f"{image}:{tag}" if tag and tag != "latest" else f"{image}:latest"
-        payload["host_command"] = f"sudo sh ./deploy.sh --update --image {shlex.quote(reference)}"
+        if payload["status"] != "current_newer":
+            payload["host_command"] = f"sh ./deploy.sh --update --image {shlex.quote(reference)}"
 
     with _cache_lock:
         _cache["payload"] = payload
+        _cache["key"] = cache_key
         _cache["expires_at"] = current_time + CACHE_TTL_SECONDS
     return payload

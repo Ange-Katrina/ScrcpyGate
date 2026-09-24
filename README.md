@@ -251,6 +251,26 @@ The protocol follows the bundled scrcpy **3.1** server. See the upstream [keyboa
 
 The **Mirror management** page covers text input, automatic control on fullscreen, orientation reset, volume, power, and device screen on/off as well as the existing toolbar controls. Each role can place these actions in the toolbar, move them into **More**, or disable them. Existing layouts retain their ordering and disabled actions when upgraded. Disabling automatic control also stops its automatic acquisition behavior without changing the browser preference. These settings configure the workbench UI; device permissions and control ownership are still enforced separately.
 
+### Updates and ALAS scheduling
+
+The dashboard’s **System update** panel shows the running version, the selected release channel, the last check time, and a copyable command for bridge deployments managed by `deploy.sh`. Automatic channel selection follows `dev`/`edge` image tags or matching build versions; local builds default to stable. Floating tags require pulling and comparing images on the host. Checking never installs an update or grants the application Docker access. A failed check clears the old command, and a newer local version does not offer a downgrade.
+
+ALAS updates separately. The [official configuration template](https://github.com/LmeSzinc/AzurLaneAutoScript/blob/master/deploy/template) supports these settings in **ALAS’s** `config/deploy.yaml` (merge into the existing sections):
+
+```yaml
+Deploy:
+  Git:
+    AutoUpdate: true
+  Update:
+    EnableReload: true
+    CheckUpdateInterval: 5
+    AutoRestartTime: '03:50'
+```
+
+`AutoUpdate` enables startup updates; `CheckUpdateInterval` only schedules checks (minutes; `0` disables them). `AutoRestartTime` schedules daily installation when an update exists (`null` disables it), using the ALAS environment’s time. `EnableReload` and a reload-capable launcher such as the official `gui.py` are required for scheduled restarts. ALAS stops and resumes running instances during updates; its updater may force-stop tasks after a ten-minute wait. Writable Git source files, reachable upstreams, and dependency installation permissions are required. A read-only or image-only ALAS deployment needs its own image update process. ScrcpyGate does not currently read or change these settings, so the dashboard does not claim they are enabled.
+
+The ALAS web update button invokes the official updater through a PyWebIO callback. The current Alas-Gyre `/api/gyre` API does not expose ALAS application updates. Its separate `/runtime/update` service only updates Gyre overlay, launcher, and updater files. Use the ALAS management link to open its native page.
+
 ### Quality and activity records
 
 Preset cards show familiar resolution tiers such as 720p and 1080p. These are size limits, not a guarantee of encoded dimensions; the device aspect ratio is preserved.

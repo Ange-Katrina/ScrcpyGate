@@ -297,6 +297,26 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 
 **投屏管理**现已覆盖文本输入、全屏自动获取控制、恢复自动方向、音量、电源、设备熄屏/亮屏等功能。管理员和普通用户可分别编排到一级控制栏、二级「更多」或停用；升级保留已有排序与停用设置。停用全屏自动获取控制后，不再自动申请控制权，但保留浏览器原来的偏好值。菜单配置控制工作台界面，不替代设备权限和控制权校验。
 
+### 系统更新与 ALAS 定时更新
+
+仪表盘的 **系统更新** 显示当前运行版本、更新通道、检查时间，并提供适用于 `deploy.sh` 管理的 bridge 部署的可复制命令。自动通道跟随镜像的 `dev`/`edge` 标签或对应构建版本；本地构建默认检查稳定版。浮动标签需在服务器拉取后比较镜像。检查不会安装更新，也不向应用授予 Docker 权限；检查失败清除旧命令，当前版本领先时不提供降级命令。
+
+ALAS 独立更新。[官方配置模板](https://github.com/LmeSzinc/AzurLaneAutoScript/blob/master/deploy/template)支持在 **ALAS 自己的** `config/deploy.yaml` 中配置（合并到已有分组，不要覆盖整个文件）：
+
+```yaml
+Deploy:
+  Git:
+    AutoUpdate: true
+  Update:
+    EnableReload: true
+    CheckUpdateInterval: 5
+    AutoRestartTime: '03:50'
+```
+
+`AutoUpdate` 表示启动时更新；`CheckUpdateInterval` 只控制检查间隔（分钟，`0` 关闭）。`AutoRestartTime` 表示每天在该时刻有更新才安装，`null` 关闭，以 ALAS 运行环境时间为准。定时重启需要 `EnableReload` 以及官方 `gui.py` 这类支持重载的启动方式。更新会停止并恢复运行中的实例，等待任务退出超过十分钟时，上游更新器可能强制停止任务。需要可写的 Git 源码目录、能连接上游及安装依赖的权限；只读或仅镜像部署的 ALAS 需采用其镜像更新流程。ScrcpyGate 目前不读取或修改这些设置，因此页面不会声称你的 ALAS 已启用自动更新。
+
+ALAS 网页的更新按钮通过 PyWebIO 回调执行官方更新器。当前 Alas-Gyre `/api/gyre` 未提供 ALAS 主程序更新接口；其独立 `/runtime/update` 仅更新 Gyre Overlay、启动器与更新器文件，不能用来升级 ALAS 主程序。ScrcpyGate 中的 ALAS 管理入口可打开原生页面。
+
 ### 画质与活动记录
 
 预设卡片使用 720p、1080p 等直观档位名称。这些是尺寸上限档位，实际编码尺寸仍保持设备比例，并不固定为标准宽高。
