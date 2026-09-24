@@ -251,21 +251,17 @@
           <div class="cb-more" id="cb-more">
             <button class="cb-btn" id="cb-more-btn" type="button" title="更多" aria-label="更多" aria-haspopup="true" aria-expanded="false" aria-controls="cb-pop" disabled><i data-lucide="ellipsis"></i><span>更多</span></button>
             <div class="cb-pop" id="cb-pop" role="menu" aria-label="更多操作">
-              <!-- 本浏览器偏好（localStorage）：全屏后是否自动获取控制。刻意不参与后台菜单编排，
-                   始终保持在同一位置，避免把「用户偏好」和「角色可见性」混在一起。 -->
-              <button class="cb-item" id="cb-pop-auto-control" type="button" role="menuitemcheckbox" aria-checked="true" aria-label="全屏后默认获取控制（已开启）" data-static disabled><i data-lucide="shield-check"></i><span>全屏后默认获取控制</span><small id="cb-pop-auto-control-state">开</small></button>
-              <!-- 固定项（data-static）：中文、日文、表情等无法经文本注入送达设备，
-                   必须走设备剪贴板粘贴（见 ScrcpyInput.sendText）。它不参与后台菜单
-                   编排，否则管理员拖走二级项后这个入口就会消失。 -->
-              <button class="cb-item" id="cb-pop-text" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="text-send-dialog" aria-label="文本输入（中文与表情）" data-static disabled><i data-lucide="type"></i><span>文本输入</span><small id="cb-pop-text-state">中文</small></button>
+              <!-- All actions participate in the role-specific workbench catalog. -->
+              <button class="cb-item" id="cb-pop-auto-control" type="button" role="menuitemcheckbox" aria-checked="true" aria-label="全屏后默认获取控制（已开启）" disabled><i data-lucide="shield-check"></i><span>全屏后默认获取控制</span><small id="cb-pop-auto-control-state">开</small></button>
+              <button class="cb-item" id="cb-pop-text" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="text-send-dialog" aria-label="文本输入（中文与表情）" disabled><i data-lucide="type"></i><span>文本输入</span><small id="cb-pop-text-state">中文</small></button>
               <button class="cb-item" id="cb-pop-shot" type="button" role="menuitem" disabled><i data-lucide="camera"></i><span>截图</span><small id="cb-pop-shot-state">复制</small></button>
               <button class="cb-item" id="cb-pop-keyboard" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="开启备用键盘" disabled><i data-lucide="keyboard"></i><span>键盘输入</span><small id="cb-pop-keyboard-state">备用</small></button>
-              <button class="cb-item" id="cb-pop-reset-view" type="button" role="menuitem" data-static disabled><i data-lucide="scan"></i><span>恢复自动方向</span></button>
-              <button class="cb-item" type="button" role="menuitem" data-device-action="volume_up" data-static disabled><i data-lucide="volume-2"></i><span>音量增加</span></button>
-              <button class="cb-item" type="button" role="menuitem" data-device-action="volume_down" data-static disabled><i data-lucide="volume-1"></i><span>音量降低</span></button>
-              <button class="cb-item" type="button" role="menuitem" data-device-action="power" data-static disabled><i data-lucide="power"></i><span>电源键</span></button>
-              <button class="cb-item" type="button" role="menuitem" data-device-action="screen_off" data-static disabled><i data-lucide="monitor-off"></i><span>关闭设备屏幕</span><small>继续投屏</small></button>
-              <button class="cb-item" type="button" role="menuitem" data-device-action="screen_on" data-static disabled><i data-lucide="monitor"></i><span>点亮设备屏幕</span></button>
+              <button class="cb-item" id="cb-pop-reset-view" type="button" role="menuitem" disabled><i data-lucide="scan"></i><span>恢复自动方向</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-volume-up" data-device-action="volume_up" disabled><i data-lucide="volume-2"></i><span>音量增加</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-volume-down" data-device-action="volume_down" disabled><i data-lucide="volume-1"></i><span>音量降低</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-power" data-device-action="power" disabled><i data-lucide="power"></i><span>电源键</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-screen-off" data-device-action="screen_off" disabled><i data-lucide="monitor-off"></i><span>关闭设备屏幕</span><small>继续投屏</small></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-screen-on" data-device-action="screen_on" disabled><i data-lucide="monitor"></i><span>点亮设备屏幕</span></button>
             </div>
           </div>
       </div>

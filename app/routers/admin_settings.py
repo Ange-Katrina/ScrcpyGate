@@ -388,11 +388,12 @@ def _validate_imported_workbench(section: dict) -> dict[str, str]:
         )
         if raw_layout is None and isinstance(raw_features, dict) and "level1" in raw_features:
             raw_layout = raw_features
-        layout = (
+        if raw_layout is not None:
+            # Validate before applying the same catalog migration used by normal reads.
             workbench_features.normalize_layout(raw_layout, strict=True)
-            if raw_layout is not None
-            else workbench_features.default_layout()
-        )
+            layout = workbench_features.layout_from(raw_layout, stored_switches=switches)
+        else:
+            layout = workbench_features.default_layout()
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -595,7 +596,8 @@ def _admin_ui_settings_export_payload() -> dict:
                 storage.get_setting(workbench_features.SETTING_KEY, "")
             ),
             "layout": workbench_features.layout_from(
-                storage.get_setting(workbench_features.LAYOUT_KEY, "")
+                storage.get_setting(workbench_features.LAYOUT_KEY, ""),
+                stored_switches=storage.get_setting(workbench_features.SETTING_KEY, ""),
             ),
         },
         "exportedAt": int(time.time()),

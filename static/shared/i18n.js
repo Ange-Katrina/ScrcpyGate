@@ -20,6 +20,15 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "控制此入口及自动获取行为；开关偏好仍由各浏览器保存": "Controls this entry and automatic acquisition; each browser keeps its own preference.",
+    "中文、表情及多行文本通过设备剪贴板粘贴；也可选择实体键盘输入方式": "Paste CJK, emoji, and multiline text through the device clipboard, or choose the physical keyboard input mode.",
+    "清除本地旋转偏移，恢复自动横竖屏，不旋转真实设备": "Clear the local rotation offset and restore automatic orientation without rotating the device.",
+    "发送设备音量增加按键，需要持有控制权": "Send the device volume-up key. Requires control ownership.",
+    "发送设备音量降低按键，需要持有控制权": "Send the device volume-down key. Requires control ownership.",
+    "发送设备电源按键，需要持有控制权": "Send the device power key. Requires control ownership.",
+    "关闭真实设备屏幕并继续投屏，需要持有控制权": "Turn off the physical device screen while mirroring continues. Requires control ownership.",
+    "点亮真实设备屏幕，需要持有控制权": "Turn on the physical device screen. Requires control ownership.",
+    "「更多」显示二级功能；窄屏时也会收纳放不下的一级按钮。": "More contains secondary actions and temporarily holds toolbar buttons that do not fit on narrow screens.",
     "参数预览": "Parameter preview",
     "长边上限": "Long-edge limit",
     "长边 ≤": "Long edge ≤",

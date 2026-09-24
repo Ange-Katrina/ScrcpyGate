@@ -493,6 +493,7 @@ async def workbench_snapshot(request: Request):
         "workbench_layout": workbench_features.layout_for_role(
             await asyncio.to_thread(storage.get_setting, workbench_features.LAYOUT_KEY, ""),
             user.get("role"),
+            stored_switches=await asyncio.to_thread(storage.get_setting, workbench_features.SETTING_KEY, ""),
         ),
         "admin_devices": admin_devices,
         "admin_sessions": admin_sessions,

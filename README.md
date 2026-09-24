@@ -249,6 +249,8 @@ The rotate button changes the local picture. **More → Restore automatic orient
 
 The protocol follows the bundled scrcpy **3.1** server. See the upstream [keyboard guide](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/keyboard.md), [shortcuts](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/shortcuts.md), and [QtScrcpy FAQ](https://github.com/barry-ran/QtScrcpy/blob/dev/docs/FAQ.md). ScrcpyGate does not expose scrcpy's UHID/AOA keyboard modes.
 
+The **Mirror management** page covers text input, automatic control on fullscreen, orientation reset, volume, power, and device screen on/off as well as the existing toolbar controls. Each role can place these actions in the toolbar, move them into **More**, or disable them. Existing layouts retain their ordering and disabled actions when upgraded. Disabling automatic control also stops its automatic acquisition behavior without changing the browser preference. These settings configure the workbench UI; device permissions and control ownership are still enforced separately.
+
 ### Quality and activity records
 
 Quality presets apply immediately. Manual resolution, FPS and bit-rate edits are staged until **Apply quality** is clicked, so typing does not repeatedly restart the stream. Encoding changes may briefly restart the shared device stream; with other viewers connected, the server may save the preference and defer the restart.

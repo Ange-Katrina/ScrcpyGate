@@ -22,7 +22,9 @@ def _current_switches() -> dict[str, dict[str, bool]]:
 
 
 def _current_layout() -> dict[str, dict[str, list[str]]]:
-    return workbench_features.layout_from(_stored(workbench_features.LAYOUT_KEY))
+    return workbench_features.layout_from(
+        _stored(workbench_features.LAYOUT_KEY), stored_switches=_stored(workbench_features.SETTING_KEY)
+    )
 
 
 def _payload() -> dict[str, object]:
@@ -35,13 +37,15 @@ def _payload() -> dict[str, object]:
 def _apply_layout_to_switches(
     switches: dict[str, dict[str, bool]],
     layout: dict[str, dict[str, list[str]]],
+    *,
+    roles: tuple[str, ...] = workbench_features.WORKBENCH_ROLES,
 ) -> dict[str, dict[str, bool]]:
     """编排即开关：放进某一级的功能视为启用，两块都没放视为停用。
 
     这样「拖到未启用区」不必再单独点开关，前端也就不会出现
     「开关开着但哪一级都没放」的隐形状态。
     """
-    for role in workbench_features.WORKBENCH_ROLES:
+    for role in roles:
         placed = set(layout[role]["level1"]) | set(layout[role]["level2"])
         for feature_id in workbench_features.DOCK_FEATURE_IDS:
             # 锚点（@alas / 旋转按钮）没有开关，也不参与「拖出去即停用」。
@@ -95,11 +99,14 @@ async def admin_save_workbench(request: Request):
                 status_code=400,
                 detail=i18n.translate("server.error.invalid_setting_value"),
             ) from exc
+    current_switches = await asyncio.to_thread(_current_switches)
+    current_layout = await asyncio.to_thread(_current_layout)
     layout: dict[str, dict[str, list[str]]] | None = None
     if raw_layout is not None:
         try:
             layout = await asyncio.to_thread(
-                workbench_features.normalize_layout, raw_layout, strict=True
+                workbench_features.normalize_layout,
+                {**current_layout, **raw_layout} if isinstance(raw_layout, dict) else raw_layout, strict=True
             )
         except ValueError as exc:
             raise HTTPException(
@@ -107,16 +114,18 @@ async def admin_save_workbench(request: Request):
                 detail=i18n.translate("server.error.invalid_setting_value"),
             ) from exc
 
-    current_switches = await asyncio.to_thread(_current_switches)
-    current_layout = await asyncio.to_thread(_current_layout)
-    features = {
-        role: {**current_switches[role], **(submitted.get(role) or {})}
-        for role in workbench_features.WORKBENCH_ROLES
-    }
+    features = {role: dict(values) for role, values in current_switches.items()}
+    for raw_role, values in (raw_features or {}).items():
+        role = str(raw_role or "").strip()
+        for raw_key in values:
+            key = str(raw_key or "").strip()
+            features[role][key] = submitted[role][key]
     if layout is None:
         layout = current_layout
     else:
-        features = _apply_layout_to_switches(features, layout)
+        features = _apply_layout_to_switches(
+            features, layout, roles=tuple(role for role in workbench_features.WORKBENCH_ROLES if role in raw_layout)
+        )
 
     await asyncio.to_thread(
         storage.set_settings,

@@ -389,6 +389,7 @@
 /* ---------- 编排条目 ---------- */
 .wb-chip {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   /* 列窄时让操作区换到第二行，绝不把按钮挤出条目（否则看起来像"内容缺失"）。 */
   flex-wrap: wrap;

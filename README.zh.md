@@ -295,6 +295,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 
 控制协议对应项目自带的 scrcpy **3.1** 服务端。参考上游[键盘说明](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/keyboard.md)、[快捷操作](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/shortcuts.md)与 [QtScrcpy FAQ](https://github.com/barry-ran/QtScrcpy/blob/dev/docs/FAQ.md)。ScrcpyGate 尚未提供 scrcpy 的 UHID/AOA 键盘模式。
 
+**投屏管理**现已覆盖文本输入、全屏自动获取控制、恢复自动方向、音量、电源、设备熄屏/亮屏等功能。管理员和普通用户可分别编排到一级控制栏、二级「更多」或停用；升级保留已有排序与停用设置。停用全屏自动获取控制后，不再自动申请控制权，但保留浏览器原来的偏好值。菜单配置控制工作台界面，不替代设备权限和控制权校验。
+
 ### 画质与活动记录
 
 预设一键应用；手动修改分辨率、帧率和码率后，点击 **应用画质** 统一生效，避免输入过程中反复重启视频流。编码参数变化可能短暂重启共享视频流；有其他观看端时，服务端可能先保存偏好、延后重启。

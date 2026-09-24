@@ -305,7 +305,6 @@
   }
 
   function dockCardHtml(role) {
-    var current = levels(role);
     return '<section class="panel wb-card" data-group="dock" aria-labelledby="wb-card-dock">'
       + '<div class="panel-header"><h2 class="panel-title" id="wb-card-dock">'
       + escapeText(tr(GROUP_TEXT.dock.label))
@@ -319,9 +318,7 @@
       + levelShellHtml(role, 'level2') + '</div>'
       + '</div>'
       + '<div class="wb-card-foot"><span>' + escapeText(
-        current.level2.length
-          ? tr('二级菜单为空时，工作台不会显示「更多」按钮。')
-          : tr('当前二级菜单为空，工作台不会显示「更多」按钮。')
+        tr('「更多」显示二级功能；窄屏时也会收纳放不下的一级按钮。')
       ) + '</span>'
       + '<button class="wb-btn ghost" type="button" id="wb-layout-open">'
       + escapeText(tr('编排菜单')) + '</button></div>'

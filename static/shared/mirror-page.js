@@ -729,7 +729,6 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!menuAllowed) closeMoreMenu(true);
         navBtns.forEach(function(b){ b.disabled=!controlMenuAllowed || navBusy; b.setAttribute('aria-busy',navBusy?'true':'false'); });
         deviceActionBtns.forEach(function(b){
-          b.style.display=workbenchFeatureEnabled('nav')?'':'none';
           b.disabled=!controlMenuAllowed;
           b.setAttribute('aria-busy',moreActionBusy?'true':'false');
         });
@@ -751,7 +750,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(popKeyboard){
           popKeyboard.disabled=!controlMenuAllowed || moreActionBusy;
           popKeyboard.classList.toggle('held',keyboardOn);
-          popKeyboard.setAttribute('aria-checked',String(keyboardOn));
+          setDockTogglePressed(popKeyboard,keyboardOn);
           popKeyboard.setAttribute('aria-label',tr(keyboardOn?'重新打开备用键盘':'开启备用键盘'));
         }
         var keyboardState=document.getElementById('cb-pop-keyboard-state');
@@ -1407,7 +1406,7 @@ document.addEventListener('DOMContentLoaded',function(){
         }
       }
       function textSendOpen(){
-        if(!textSendLayer||!textSendDialog) return;
+        if(!textSendLayer||!textSendDialog||!workbenchFeatureEnabled('text_input')) return;
         if(textSendDialog.classList.contains('open')) return;
         textSendReturnFocus=document.activeElement;
         closeFixedPops();
@@ -1440,7 +1439,7 @@ document.addEventListener('DOMContentLoaded',function(){
         textSendRestoreFocus();
       }
       function textSendSubmit(){
-        if(textSendBusy||textSendComposing) return;
+        if(textSendBusy||textSendComposing||!workbenchFeatureEnabled('text_input')) return;
         if(watchState!=='playing'||controlState!=='self'||!currentSession){ showToast('请先获取控制权'); return; }
         var text=textSendField ? String(textSendField.value||'') : '';
         if(!text){ textSendSetStatus('请输入要发送的文本',true); if(textSendField) textSendField.focus(); return; }
@@ -2144,7 +2143,7 @@ document.addEventListener('DOMContentLoaded',function(){
       function renderAutoControlToggle(){
         if(!popAutoControl) return;
         var label=fullscreenAutoControl?'全屏后默认获取控制（已开启）':'全屏后默认获取控制（已关闭）';
-        popAutoControl.setAttribute('aria-checked',String(fullscreenAutoControl));
+        setDockTogglePressed(popAutoControl,fullscreenAutoControl);
         popAutoControl.classList.toggle('held',fullscreenAutoControl);
         popAutoControl.setAttribute('aria-label',label);
         popAutoControl.title=label;
@@ -2160,7 +2159,7 @@ document.addEventListener('DOMContentLoaded',function(){
          只有观看权限时没有待办动作，仍然走沉浸式自动收起。 */
       function controlAttentionNeeded(){ return watchingNow()&&controlState!=='self'&&canControlNow(); }
       function autoAcquireControlOnFullscreen(){
-        if(!fullscreenAutoControl||!fullscreenActive) return;
+        if(!fullscreenAutoControl||!fullscreenActive||!workbenchFeatureEnabled('auto_control')) return;
         if(!canControlNow()) return;
         if(!controlAttentionNeeded()) return;
         if(controlState==='other'){
@@ -2171,7 +2170,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(controlBusy||!acquireBtn||acquireBtn.disabled) return;
         // 等全屏切换稳定后再点，避免和布局/尺寸重算抢同一帧。
         window.setTimeout(function(){
-          if(!fullscreenActive||!fullscreenAutoControl||!controlAttentionNeeded()) return;
+          if(!fullscreenActive||!fullscreenAutoControl||!workbenchFeatureEnabled('auto_control')||!controlAttentionNeeded()) return;
           if(controlBusy||acquireBtn.disabled) return;
           try{ acquireBtn.click(); }catch(e){}
           // 自动获取失败（权限/占用/超时）时把控制栏摊开：全屏收起状态下
@@ -4791,6 +4790,14 @@ document.addEventListener('DOMContentLoaded',function(){
         rotate:['cb-rotate'],
         shot:['cb-pop-shot'],
         alt_keyboard:['cb-pop-keyboard'],
+        auto_control:['cb-pop-auto-control'],
+        text_input:['cb-pop-text'],
+        reset_view:['cb-pop-reset-view'],
+        volume_up:['cb-pop-volume-up'],
+        volume_down:['cb-pop-volume-down'],
+        power:['cb-pop-power'],
+        screen_off:['cb-pop-screen-off'],
+        screen_on:['cb-pop-screen-on'],
         more:['cb-more'],
         '@alas':['mirror-alas-dock-sep-before','cb-alas','mirror-alas-dock-sep-after']
       };
@@ -4803,6 +4810,14 @@ document.addEventListener('DOMContentLoaded',function(){
         rotate:'view',
         shot:'more',
         alt_keyboard:'more',
+        auto_control:'control',
+        text_input:'control',
+        reset_view:'view',
+        volume_up:'device',
+        volume_down:'device',
+        power:'device',
+        screen_off:'device',
+        screen_on:'device',
         more:'more',
         '@alas':'alas'
       };
@@ -4811,7 +4826,7 @@ document.addEventListener('DOMContentLoaded',function(){
       // 点满四次回到自动角度（offset 归零）。
       var DOCK_MENU_DEFAULT={
         level1:['watch','acquire','keyboard','@alas','nav','fullscreen','rotate','more'],
-        level2:['shot','alt_keyboard']
+        level2:['shot','alt_keyboard','auto_control','text_input','reset_view','volume_up','volume_down','power','screen_off','screen_on']
       };
       var dockLayout=null;
       function dockMenuLayout(){
@@ -4830,8 +4845,8 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!dock||!pop) return;
         restoreDockOverflow();
         var layout=dockMenuLayout();
-        var level1=dockLayout?layout.level1.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level1.slice();
-        var level2=dockLayout?layout.level2.filter(dockFeatureEnabled):DOCK_MENU_DEFAULT.level2.slice();
+        var level1=layout.level1.filter(dockFeatureEnabled);
+        var level2=layout.level2.filter(dockFeatureEnabled);
         // 1) 没被编排到任何一级的功能一律隐藏（拖出到"未启用"区即停用）。
         Object.keys(DOCK_MENU_IDS).forEach(function(id){
           var level=level1.indexOf(id)>=0?1:(level2.indexOf(id)>=0?2:0);
@@ -4841,6 +4856,17 @@ document.addEventListener('DOMContentLoaded',function(){
             if(level) el.removeAttribute('data-feature-off');
             else el.setAttribute('data-feature-off','');
             el.hidden=false;
+            if(el.tagName==='BUTTON'){
+              var toggle=el.hasAttribute('aria-pressed')||el.hasAttribute('aria-checked');
+              var pressed=el.getAttribute('aria-checked')||el.getAttribute('aria-pressed')||'false';
+              if(level===2){
+                el.setAttribute('role',toggle?'menuitemcheckbox':'menuitem');
+                if(toggle){ el.setAttribute('aria-checked',pressed); el.removeAttribute('aria-pressed'); }
+              }else{
+                el.removeAttribute('role');
+                if(toggle){ el.setAttribute('aria-pressed',pressed); el.removeAttribute('aria-checked'); }
+              }
+            }
           });
         });
         // 2) 一级：按顺序搬进控制栏，并在分组变化处插入分隔线。
@@ -4872,13 +4898,9 @@ document.addEventListener('DOMContentLoaded',function(){
             if(el) pop.appendChild(el);
           });
         });
-        // 4) 「更多」按钮：菜单里有可见项时才出现。除了可编排的二级项，还有固定项
-        //    （data-static：全屏后默认获取控制、文本输入），它们永远在菜单里，所以
-        //    只要「更多」功能没被关掉，按钮就保留 —— 否则用户把二级项全拖走后
-        //    「文本输入」这个中文入口也跟着消失了。
+        // Every popup action is catalogued; an empty secondary menu has no trigger.
         var moreWrap=document.getElementById('cb-more');
-        var staticPopupItems=pop.querySelectorAll ? pop.querySelectorAll('.cb-item[data-static]').length : 0;
-        var hasPopupItems=level2.length>0||staticPopupItems>0;
+        var hasPopupItems=level2.length>0;
         if(moreWrap){
           if(!dockFeatureEnabled('more')||!hasPopupItems) moreWrap.setAttribute('data-feature-off','');
           else moreWrap.removeAttribute('data-feature-off');
@@ -4917,6 +4939,7 @@ document.addEventListener('DOMContentLoaded',function(){
           var notifyBtn=document.getElementById('notify-btn');
           if(notifyBtn) notifyBtn.setAttribute('aria-expanded','false');
         }
+        if(!workbenchFeatureEnabled('text_input')) textSendClose();
         if(!workbenchFeatureEnabled('fullscreen')&&fullscreenActive) exitFullscreen();
         // 「全屏打开控制栏时画面上移」开关可能刚被改过：立刻按新值收/放位移。
         syncFullscreenDockLift();

@@ -43,6 +43,11 @@ ALAS_ANCHOR = "@alas"
 # 旋转按钮：新加的功能 id。老布局里没有它时会被补回默认位置（见 normalize_layout），
 # 否则升级后用户会觉得「少了一个按钮」；仍然可以用它自己的开关真正关掉。
 ROTATE_FEATURE_ID = "rotate"
+# Stored catalogs distinguish newly configurable controls from explicitly omitted ones.
+LEGACY_DOCK_FEATURE_IDS = (
+    "watch", "acquire", "keyboard", "@alas", "nav", "fullscreen", "rotate", "shot", "alt_keyboard", "more"
+)
+DEVICE_ACTION_FEATURE_IDS = ("volume_up", "volume_down", "power", "screen_off", "screen_on")
 
 WORKBENCH_FEATURE_GROUPS: tuple[dict[str, str], ...] = (
     {
@@ -246,6 +251,86 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "small_sample": "备用",
     },
     {
+        "id": "auto_control",
+        "group": "dock",
+        "label": "全屏后默认获取控制",
+        "hint": "控制此入口及自动获取行为；开关偏好仍由各浏览器保存",
+        "icon": "shield-check",
+        "dock_group": "control",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "text_input",
+        "group": "dock",
+        "label": "文本输入",
+        "hint": "中文、表情及多行文本通过设备剪贴板粘贴；也可选择实体键盘输入方式",
+        "icon": "type",
+        "dock_group": "control",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "reset_view",
+        "group": "dock",
+        "label": "恢复自动方向",
+        "hint": "清除本地旋转偏移，恢复自动横竖屏，不旋转真实设备",
+        "icon": "scan",
+        "dock_group": "view",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "volume_up",
+        "group": "dock",
+        "label": "音量增加",
+        "hint": "发送设备音量增加按键，需要持有控制权",
+        "icon": "volume-2",
+        "dock_group": "device",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "volume_down",
+        "group": "dock",
+        "label": "音量降低",
+        "hint": "发送设备音量降低按键，需要持有控制权",
+        "icon": "volume-1",
+        "dock_group": "device",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "power",
+        "group": "dock",
+        "label": "电源键",
+        "hint": "发送设备电源按键，需要持有控制权",
+        "icon": "power",
+        "dock_group": "device",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "screen_off",
+        "group": "dock",
+        "label": "关闭设备屏幕",
+        "hint": "关闭真实设备屏幕并继续投屏，需要持有控制权",
+        "icon": "monitor-off",
+        "dock_group": "device",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
+        "id": "screen_on",
+        "group": "dock",
+        "label": "点亮设备屏幕",
+        "hint": "点亮真实设备屏幕，需要持有控制权",
+        "icon": "monitor",
+        "dock_group": "device",
+        "levels": [1, 2],
+        "level": 2,
+    },
+    {
         "id": "more",
         "group": "dock",
         "label": "更多菜单",
@@ -358,6 +443,11 @@ def normalize_switches(raw: object, *, strict: bool = False) -> dict[str, dict[s
                     raise ValueError("workbench_feature_unknown")
                 continue
             switches[role_key][feature_key] = _coerce_flag(value)
+        # These controls used to share the navigation visibility switch.
+        submitted_keys = {str(key or "").strip() for key in values}
+        for feature_id in DEVICE_ACTION_FEATURE_IDS:
+            if feature_id not in submitted_keys and not switches[role_key]["nav"]:
+                switches[role_key][feature_id] = False
     return switches
 
 
@@ -489,21 +579,35 @@ def normalize_layout(raw: object, *, strict: bool = False) -> dict[str, dict[str
     return layout
 
 
-def layout_from(stored: object) -> dict[str, dict[str, list[str]]]:
+def layout_from(stored: object, *, stored_switches: object = None) -> dict[str, dict[str, list[str]]]:
     if isinstance(stored, (dict, list)):
-        return normalize_layout(stored)
-    text = str(stored or "").strip()
-    if not text:
-        return default_layout()
-    try:
-        parsed = json.loads(text)
-    except (TypeError, ValueError):
-        return default_layout()
-    return normalize_layout(parsed)
+        parsed = stored
+    else:
+        text = str(stored or "").strip()
+        if not text:
+            return default_layout()
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return default_layout()
+    layout = normalize_layout(parsed)
+    if not isinstance(parsed, dict):
+        return layout
+    known = parsed.get("_known_dock_features")
+    if not isinstance(known, list) or not all(isinstance(item, str) for item in known):
+        known = LEGACY_DOCK_FEATURE_IDS
+    switches = switches_from(stored_switches)
+    for role in WORKBENCH_ROLES:
+        placed = set(layout[role]["level1"] + layout[role]["level2"])
+        for item in WORKBENCH_DOCK_FEATURES:
+            feature_id = str(item["id"])
+            if feature_id not in known and feature_id not in placed and switches[role].get(feature_id, True):
+                layout[role][f"level{item.get('level', 1)}"].append(feature_id)
+    return layout
 
 
-def layout_for_role(stored: object, role: object) -> dict[str, list[str]]:
-    layout = layout_from(stored)
+def layout_for_role(stored: object, role: object, *, stored_switches: object = None) -> dict[str, list[str]]:
+    layout = layout_from(stored, stored_switches=stored_switches)
     role_key = str(role or "").strip()
     if role_key not in layout:
         role_key = "user"
@@ -515,7 +619,10 @@ def serialize_switches(switches: dict[str, dict[str, bool]]) -> str:
 
 
 def serialize_layout(layout: dict[str, dict[str, list[str]]]) -> str:
-    return json.dumps(layout, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        {**layout, "_known_dock_features": list(DOCK_FEATURE_IDS)},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
 
 
 def catalog_payload() -> list[dict[str, object]]:
@@ -532,7 +639,7 @@ def snapshot_payload(stored_switches: object, stored_layout: object = None) -> d
     return {
         "ok": True,
         "features": switches_from(stored_switches),
-        "layout": layout_from(stored_layout),
+        "layout": layout_from(stored_layout, stored_switches=stored_switches),
         "defaults": default_switches(),
         "default_layout": default_layout(),
         "roles": [{"id": role, "label": ROLE_LABELS[role]} for role in WORKBENCH_ROLES],
