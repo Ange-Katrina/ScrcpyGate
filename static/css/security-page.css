@@ -535,7 +535,18 @@ html.dark .security-content { --geo-ok: #67d492; --geo-warn: #ffb258; --geo-erro
 .geo-schedule-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 20px; }
 .geo-schedule-form .vis-filter { flex: 1 1 180px; max-width: 280px; }
 .geo-schedule-form .guard-status { flex-basis: 100%; margin: 0; }
-[data-field="geo_countries"] .geo-wide { display: grid; gap: 8px; }
+.geo-country-fields { display:grid; gap:8px; flex:1 1 320px; min-width:0; }
+.geo-country-fields label { color:var(--admin-muted); font-size:12px; font-weight:600; }
+.geo-country-fields input, .geo-country-fields select { width:100%; min-width:0; min-height:40px; padding:8px 12px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-field); color:var(--admin-text); font:inherit; font-size:13px; }
+.geo-country-fields input { font-family:ui-monospace,Consolas,monospace; }
+.geo-country-fields input:focus-visible, .geo-country-fields select:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.geo-country-fields small { color:var(--admin-muted); font-size:12px; line-height:1.6; }
+.geo-inventory-row .geo-delete-button { margin-left:auto; color:var(--admin-danger); font-size:12px; }
+#geo-delete-status:not(:empty) { margin:0 16px 16px; }
+@media (max-width:767px) {
+  .geo-country-fields { width:100%; flex-basis:auto; }
+  .geo-country-fields input, .geo-country-fields select { min-height:44px; font-size:16px; }
+}
 [data-field="geo_countries"] small { color: var(--admin-muted); line-height: 1.5; }
 
 /* Installed data and offline recovery use one aligned, compact information list. */

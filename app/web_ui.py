@@ -127,6 +127,7 @@ ENDPOINTS_MAP = {
     "ban.lift": {"path": "/api/admin/ip-bans/:ip", "method": "DELETE"},
     "ban.events": {"path": "/api/admin/ip-bans/:ip/events", "method": "GET"},
     "geo.status": {"path": "/api/admin/geo/status", "method": "GET"},
+    "geo.database.delete": {"path": "/api/admin/geo/databases/:edition", "method": "DELETE"},
     "geo.check": {"path": "/api/admin/geo/check", "method": "POST"},
     "geo.simulate": {"path": "/api/admin/geo/simulate", "method": "GET"},
     "geo.preview": {"path": "/api/admin/geo/preview", "method": "POST"},

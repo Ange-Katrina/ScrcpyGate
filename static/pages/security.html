@@ -653,15 +653,17 @@
        两位 ISO 码，逗号分隔；HK、MO、TW 与 CN 彼此独立（只写 CN 不会放行港澳台）
       </span>
      </div>
-     <div class="guard-field geo-wide">
-      <select id="geo-country-preset" aria-label="国家或地区预设">
+     <div class="geo-country-fields">
+      <label for="geo-country-preset">快速选择</label>
+      <select id="geo-country-preset" aria-describedby="geo-country-help">
        <option value="custom">自定义国家/地区</option>
        <option value="CN">中国大陆（CN）</option>
        <option value="CN,HK,MO,TW">中国大陆、香港、澳门、台湾</option>
        <option value="CN,HK,MO,TW,JP,KR,SG">中国及日本、韩国、新加坡</option>
       </select>
-      <input aria-label="允许的国家或地区代码" id="geo-countries" placeholder="CN" type="text"/>
-      <small>预设仅填入代码，点击「保存地域设置」后生效。</small>
+      <label for="geo-countries">允许的国家或地区代码</label>
+      <input id="geo-countries" placeholder="CN,JP,SG" type="text" aria-describedby="geo-country-help" spellcheck="false" autocomplete="off"/>
+      <small id="geo-country-help">预设仅填入代码，点击「保存地域设置」后生效。</small>
      </div>
     </div>
     <div class="guard-row" data-field="geo_unknown">
@@ -748,6 +750,7 @@
      <ul aria-label="地区库状态" class="vis-stats" id="geo-db-stats"></ul>
      <p class="sec-hint" id="geo-database-note"></p>
      <div id="geo-database-inventory" class="geo-inventory" aria-label="已安装地区库" data-i18n-skip></div>
+     <p id="geo-delete-status" class="guard-status" role="status"></p>
      <section class="geo-import-section" aria-labelledby="geo-import-title">
       <h4 id="geo-import-title">手动上传地区库</h4>
       <p class="sec-hint" id="geo-upload-help">服务器无法下载时，可从 GitHub 或 MaxMind 下载后上传。支持 .mmdb（最大 256 MiB）或官方 .tar.gz（最大 128 MiB）；无需配置下载凭据。</p>

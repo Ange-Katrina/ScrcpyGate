@@ -9,9 +9,9 @@
       var ALAS_POOL = [];
       var USERS = [];
       var usersLoading = false;
-      var PAGE_SIZE = 5;
+      var PAGE_SIZE = 12;
       var state = { q: '', role: 'all', status: 'all', page: 1 };
-      var EMPTY_ROW_HTML = '<tr id="users-empty"><td colspan="10"><div class="table-empty"><i data-lucide="user-x"></i><span>未找到匹配的用户</span><button class="empty-btn" type="button" id="clear-filters"><i data-lucide="rotate-ccw"></i>清除筛选</button></div></td></tr>';
+      var EMPTY_ROW_HTML = '<div id="users-empty" class="table-empty"><i data-lucide="user-x"></i><span>未找到匹配的用户</span><button class="empty-btn" type="button" id="clear-filters"><i data-lucide="rotate-ccw"></i>清除筛选</button></div>';
 
       /* ---------- 工具 ---------- */
       function esc(s) {
@@ -192,14 +192,6 @@
       function formatWatchAt(value) {
         return value ? formatLoginAt(value) : '暂无记录';
       }
-      function watchSummaryHtml(u) {
-        var stats = u.watchStats || {};
-        var count = Number(stats.sessionCount || 0);
-        var active = Number(stats.activeSessions || 0);
-        return '<span class="watch-summary"><strong>' + esc(formatWatchDuration(stats.totalDurationMs)) + '</strong>'
-          + '<small>' + count + ' 次' + (active ? ' · ' + active + ' 进行中' : '') + '</small>'
-          + '<em>最近开始 ' + esc(formatWatchAt(stats.lastStartedAtMs)) + '</em></span>';
-      }
       function watchReasonLabel(reason, active) {
         if (active) return '进行中';
         return ({
@@ -251,27 +243,36 @@
         });
       }
       function rowHtml(u) {
-        var st = u.status;
-        var expiryCls = st === 'expired' || st === 'disabled' ? 'overdue' : (st === 'expiring' ? 'warned' : '');
-        var delBtn = u.role === 'admin'
-          ? '<button class="row-btn danger" type="button" data-act="del" disabled title="管理员账号不可删除"><i data-lucide="trash-2"></i>删除</button>'
-          : '<button class="row-btn danger" type="button" data-act="del" title="删除用户"><i data-lucide="trash-2"></i>删除</button>';
-        return '<tr class="user-row" data-id="' + esc(u.id) + '">' +
-          '<td><div class="user-cell"><span class="user-avatar">' + esc(avatarLetter(u.name)) + '</span><div style="min-width:0"><div class="user-name">' + esc(u.name) + '</div><div class="user-handle">@' + esc(u.username) + '</div></div></div></td>' +
-          '<td><span class="role-chip ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? '管理员' : '普通用户') + '</span></td>' +
-          '<td><span class="status-chip ' + st + '"><span class="mini-dot"></span>' + statusLabel(st) + '</span></td>' +
-          '<td><span class="expiry-cell"><span class="expiry-date ' + expiryCls + '">' + esc(u.expiry || '长期有效') + '</span>' + remainingChip(u) + '</span></td>' +
-          '<td><span class="count-cell">' + deviceCountText(u) + '</span></td>' +
-          '<td><span class="count-cell">' + configCountText(u) + '</span></td>' +
-          '<td>' + watchSummaryHtml(u) + '</td>' +
-          '<td><span class="last-login">' + esc(formatLoginAt(u.lastLoginAt)) + '</span></td>' +
-          '<td><span class="login-ip">' + esc(u.lastLoginIp || '—') + '</span></td>' +
-          '<td><div class="row-actions">' +
+        return '<article class="user-row user-card" role="listitem" data-id="' + esc(u.id) + '">' +
+          '<button class="user-card-main" type="button" data-act="details" aria-haspopup="dialog">' +
+          '<span class="user-cell"><span class="user-avatar">' + esc(avatarLetter(u.name)) + '</span><span class="user-card-identity"><strong class="user-name">' + esc(u.name) + '</strong><span class="user-handle">@' + esc(u.username) + '</span></span><i data-lucide="chevron-right"></i></span>' +
+          '<span class="user-card-badges"><span class="role-chip ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? '管理员' : '普通用户') + '</span><span class="status-chip ' + esc(u.status) + '"><span class="mini-dot"></span>' + esc(statusLabel(u.status)) + '</span></span>' +
+          '<span class="user-card-access">' + esc(deviceCountText(u)) + ' · ' + esc(configCountText(u)) + '</span>' +
+          '</button><div class="user-card-footer"><span class="expiry-cell">' + (u.expiry ? '<span class="expiry-date">' + esc(u.expiry) + '</span>' : '') + remainingChip(u) + '</span><div class="row-actions">' +
           '<button class="row-btn neutral" type="button" data-act="edit" title="编辑用户"><i data-lucide="pencil"></i>编辑</button>' +
-          '<button class="row-btn neutral" type="button" data-act="reset" title="重置密码"><i data-lucide="key"></i>重置密码</button>' +
-          '<button class="row-btn open" type="button" data-act="perm" title="权限管理"><i data-lucide="shield"></i>权限</button>' +
-          delBtn +
-          '</div></td></tr>';
+          '<button class="row-btn open" type="button" data-act="perm" title="权限管理"><i data-lucide="shield"></i>权限</button></div></div></article>';
+      }
+      var detailUserId = null;
+      function openUserDetails(u) {
+        detailUserId = u.id;
+        var stats = u.watchStats || {};
+        var fields = [
+          ['用户名', u.username], ['账户状态', statusLabel(u.status)],
+          ['登录 IP', u.lastLoginIp || '—'], ['上次登录', formatLoginAt(u.lastLoginAt)],
+          ['累计投屏时长', formatWatchDuration(stats.totalDurationMs)], ['投屏次数', stats.sessionCount || 0],
+          ['最近投屏开始', formatWatchAt(stats.lastStartedAtMs)], ['最近投屏结束', formatWatchAt(stats.lastEndedAtMs)],
+          ['当前投屏连接', stats.activeSessions || 0], ['到期时间', u.expiry || '长期有效']
+        ];
+        document.getElementById('user-details-title').textContent = '用户详情 · ' + u.name;
+        document.getElementById('user-details-body').innerHTML = '<dl class="user-detail-grid">' + fields.map(function (pair) {
+          return '<div><dt>' + esc(pair[0]) + '</dt><dd>' + esc(pair[1]) + '</dd></div>';
+        }).join('') + '</dl><h4 class="user-history-title">最近投屏记录</h4><div class="user-detail-history">' + watchHistoryHtml(u) + '</div>' +
+          '<p class="activity-scope-note">时间按浏览器本地时区显示。上次登录仅记录账号认证成功，不是打开页面的时间；观看时长按视频连接累计，多端同时观看分别计时，刷新或重连会新增次数。</p>';
+        var remove = document.getElementById('user-details-delete');
+        remove.disabled = u.role === 'admin';
+        remove.title = u.role === 'admin' ? '管理员账号不可删除' : '删除用户';
+        if (window.lucide) lucide.createIcons();
+        openModal('modal-user-details');
       }
       function renderPager(pages) {
         var pager = document.getElementById('users-pager');
@@ -300,6 +301,7 @@
         var html = '';
         pageUsers.forEach(function (u) { html += rowHtml(u); });
         tbody.innerHTML = html;
+        tbody.setAttribute('aria-busy', 'false');
         if (pageUsers.length === 0) { tbody.insertAdjacentHTML('beforeend', EMPTY_ROW_HTML); }
         var count = document.getElementById('users-count');
         if (count) { count.textContent = '共 ' + list.length + ' 条 · 每页 ' + PAGE_SIZE + ' 条'; }
@@ -991,13 +993,13 @@
         if (!count || !total || !list) return;
         count.textContent = Number(stats.sessionCount || 0);
         total.textContent = '总时长 ' + formatWatchDuration(stats.totalDurationMs);
+        list.innerHTML = watchHistoryHtml(u);
+        if (window.lucide) lucide.createIcons();
+      }
+      function watchHistoryHtml(u) {
         var history = (u && Array.isArray(u.watchHistory)) ? u.watchHistory : [];
-        if (!history.length) {
-          list.innerHTML = '<div class="watch-empty"><i data-lucide="clock-3"></i><span>暂无观看记录</span></div>';
-          if (window.lucide) { lucide.createIcons(); }
-          return;
-        }
-        list.innerHTML = history.map(function (item) {
+        if (!history.length) return '<div class="watch-empty"><i data-lucide="clock-3"></i><span>暂无观看记录</span></div>';
+        return history.map(function (item) {
           var range = formatWatchAt(item.startedAtMs) + ' - ' + (item.active ? '现在' : formatWatchAt(item.endedAtMs));
           return '<div class="watch-history-item">'
             + '<div class="watch-history-main"><strong>' + esc(item.deviceName || '未知设备') + '</strong><span>' + esc(range) + '</span></div>'
@@ -1325,6 +1327,15 @@
         else { state.page = parseInt(p, 10); }
         render();
       });
+      ['reset', 'delete'].forEach(function (action) {
+        document.getElementById('user-details-' + action).addEventListener('click', function () {
+          var u = userById(detailUserId);
+          if (!u || (action === 'delete' && u.role === 'admin')) return;
+          closeModal('modal-user-details');
+          if (action === 'reset') openResetModal(u);
+          else openDeleteModal(u);
+        });
+      });
       document.getElementById('users-tbody').addEventListener('click', function (e) {
         var cf = e.target.closest('#clear-filters');
         if (cf) { clearFilters(); return; }
@@ -1335,7 +1346,8 @@
         var u = userById(row.getAttribute('data-id'));
         if (!u) return;
         var act = btn.getAttribute('data-act');
-        if (act === 'edit') { openEditModal(u); }
+        if (act === 'details') { openUserDetails(u); }
+        else if (act === 'edit') { openEditModal(u); }
         else if (act === 'reset') { openResetModal(u); }
         else if (act === 'perm') { openPermDrawer(u); }
         else if (act === 'del') { openDeleteModal(u); }

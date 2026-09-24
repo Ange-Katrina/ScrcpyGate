@@ -33,6 +33,11 @@ router = APIRouter()
 # 缺密钥与限频是「你现在的状态不允许」→ 409；网络类问题 → 502；其余 → 400。
 _UPDATE_STATUS_BY_CODE = {
     "update_in_progress": 409,
+    "database_in_use": 409,
+    "database_not_found": 404,
+    "database_path_unsafe": 409,
+    "database_restore_failed": 503,
+    "update_io_failed": 503,
     "credentials_managed": 409,
     "credentials_write_failed": 503,
     "download_settings_write_failed": 503,
@@ -190,6 +195,21 @@ async def admin_geo_check(request: Request):
         },
     )
     return JSONResponse({"ok": True, "status": result}, status_code=202, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/api/admin/geo/databases/{edition}")
+async def admin_geo_database_delete(request: Request, edition: str):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    try:
+        result = await asyncio.to_thread(geo_updater.delete_database, edition)
+    except geo_updater.GeoUpdateError as exc:
+        audit_request(request, admin, "geo_database_delete", target_type="geo_database", target_id=edition[:32],
+                      outcome="failure", reason=exc.code)
+        raise _update_error_response(exc) from None
+    audit_request(request, admin, "geo_database_delete", target_type="geo_database", target_id=edition,
+                  metadata={"removed_bytes": result["removed_bytes"], "cleanup_pending": result["cleanup_pending"]})
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/admin/geo/upload")

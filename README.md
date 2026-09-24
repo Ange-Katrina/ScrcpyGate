@@ -291,6 +291,8 @@ Resolution is scrcpy's **long-edge limit**, preserving the device aspect ratio; 
 
 Administrator ALAS status distinguishes stopped (`idle`) from unchecked and reports the server's check time. Manual refresh bypasses the short status cache.
 
+The **Users and permissions** page uses searchable, filterable user cards. Select a card for login IP, last login, total mirroring time, session count, latest start/end, active connections, and recent device sessions. Edit and permission controls remain on the card; password reset and deletion are in the details dialog.
+
 User times use the browser's local time zone. Last login means successful authentication, not a page visit. Watch duration sums retained video connections, including simultaneous viewers separately; refreshes and reconnects create new sessions. New `viewer_watch_start` / `viewer_watch_end` audit events include the watch-session ID and matching timestamps. Historical events are not rewritten. Audit records can be filtered by actor and device before pagination, with the same filters applied to export. Runtime-log filtering covers a bounded recent tail; use audit records or the complete log export for historical investigations.
 
 ## Operations
@@ -543,6 +545,10 @@ The database panel lists size, build date, update time, source, active status, a
 Online updates compare Last-Modified, archive size, and a strong ETag or Content-MD5, then revalidate the local edition, freshness, size, and SHA-256 before skipping a download. An ETag is a version identifier, not an MD5 checksum. Downloads verify Content-MD5 when supplied, declared size, and the MMDB itself. Missing local receipts or incomplete remote evidence require a confirmation download; identical content is not installed again. Temporary upload and extraction files are cleaned up afterward.
 
 Lookups use the local MMDB only; visitor IP addresses are not sent to a third party. Coordinates and street addresses are not displayed. City databases need more download time and memory than Country. VPNs, proxies and mobile networks may affect accuracy; results do not identify a person's actual location. See the [MaxMind City / Country database documentation](https://dev.maxmind.com/geoip/docs/databases/city-and-country/).
+
+**Delete database** removes the selected managed Country or City file and its backup after confirmation, including backup-only remnants. Administrators and CSRF verification are required; deletion shares the update/upload lock. Enforce mode prevents deletion of the active database. Switch to Observe or Off and save first when removal is intended. Download selections are unchanged, so a selected edition can be downloaded again by a later update. Failed state persistence restores the files; a recovery or cleanup failure is reported and `.recovery` files are retained for manual recovery. Deletion does not remove credentials or change the access policy.
+
+Country presets, editable ISO codes, and help text have separate labeled controls; changes take effect only after saving.
 
 Set an automatic check interval of 1–168 hours (12 recommended) in the panel. The persisted setting overrides the `GEO_UPDATE_INTERVAL_HOURS` default and reschedules checks without a restart; the environment disable switch still applies. Country presets only fill the form and require Save geo settings to apply. Access summaries resolve attribution with the current local database; country filters, historical details and exports retain recorded values. Private addresses cannot be geolocated.
 

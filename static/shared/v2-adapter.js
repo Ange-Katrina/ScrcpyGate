@@ -6453,6 +6453,7 @@
     'geo.credentials.clear': function () { return apiDelete('/api/admin/geo/credentials'); },
     'geo.schedule.save': function (opts) { return apiPut('/api/admin/geo/schedule', (opts && opts.body) || {}); },
     'geo.downloads.save': function (opts) { return apiPut('/api/admin/geo/downloads', (opts && opts.body) || {}); },
+    'geo.database.delete': function (opts) { return apiDelete('/api/admin/geo/databases/' + encodeURIComponent((opts && opts.params && opts.params.edition) || '')); },
     'geo.status': handlerGeoStatus,
     'geo.check': handlerGeoCheck,
     'geo.upload': function (opts) {

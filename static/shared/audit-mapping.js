@@ -7,6 +7,7 @@
 
   var ACTION_TITLES = {
     geo_database_import: '手动上传地区库',
+    geo_database_delete: '删除地区库',
     login: '登录', login_success: '登录成功', login_failed: '登录失败', login_rate_limited: '登录请求被限流', logout: '退出登录',
     user_created: '创建用户', user_updated: '更新用户', user_deleted: '删除用户', user_upsert: '保存用户', user_create: '创建用户', user_update: '更新用户', user_delete: '删除用户',
     password_changed: '修改密码', password_change: '修改密码', permission_set: '更新设备权限', permission_granted: '授予设备权限', permission_revoked: '撤销设备权限', permission_updated: '更新设备权限',
@@ -27,6 +28,7 @@
   };
   var ACTION_TITLES_EN = {
     geo_database_import: 'Upload geolocation database',
+    geo_database_delete: 'Delete geolocation database',
     login: 'Sign in', login_success: 'Sign in', login_failed: 'Sign in failed', login_rate_limited: 'Sign-in rate limited', logout: 'Sign out',
     user_created: 'Create user', user_updated: 'Update user', user_deleted: 'Delete user', user_upsert: 'Save user', user_create: 'Create user', user_update: 'Update user', user_delete: 'Delete user',
     password_changed: 'Change password', password_change: 'Change password', permission_set: 'Update device access', permission_granted: 'Grant device access', permission_revoked: 'Revoke device access', permission_updated: 'Update device access',

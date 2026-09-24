@@ -312,7 +312,7 @@
     var needsCredentials = selectedSource() === 'maxmind';
     var canSaveFirst = state.downloadDirty && ['too_soon', 'downloads_disabled', 'license_key_missing', 'account_id_missing',
       'credentials_unreadable', 'credentials_permissions', 'download_settings_unreadable', 'download_settings_permissions'].indexOf(status.blockedReason) >= 0;
-    els.check.disabled = !!(state.checkBusy || state.credentialBusy || state.downloadBusy || status.running
+    els.check.disabled = !!(state.deleting || state.checkBusy || state.credentialBusy || state.downloadBusy || status.running
       || (needsCredentials && (!status.licenseKeyPresent || !status.accountIdPresent)) || (!status.canUpdateNow && !canSaveFirst));
     els.check.textContent = t(status.running ? '正在更新…' : state.downloadDirty ? '保存选项并检查更新' : status.lastError ? '重试更新' : '立即检查更新');
     var hint = state.credentialBusy || state.downloadBusy || state.checkBusy ? t('保存或提交中…')
@@ -440,9 +440,19 @@
       var heading = document.createElement('h5');
       heading.textContent = edition;
       var badge = document.createElement('span');
-      badge.textContent = t(!item ? '未安装' : item.error ? '需要更新' : item.active ? '正在使用' : '已安装');
+      badge.textContent = t(!item ? '未安装' : item.error === 'backup_only' ? '仅有备份' : item.error ? '需要更新' : item.active ? '正在使用' : '已安装');
       badge.dataset.tone = !item || item.error ? 'warn' : 'ok';
       heading.appendChild(badge);
+      if (item) {
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'guard-btn geo-delete-button';
+        remove.textContent = t('删除库');
+        remove.setAttribute('aria-label', t('删除库') + ' ' + edition);
+        remove.disabled = !!status.running || !!state.uploadBusy || !!state.deleting;
+        remove.addEventListener('click', function () { deleteDatabase(edition); });
+        heading.appendChild(remove);
+      }
       row.appendChild(heading);
       var info = document.createElement('dl');
       var fields = item ? [
@@ -460,7 +470,35 @@
       });
       row.appendChild(info); els.inventory.appendChild(row);
     });
-    els.uploadSubmit.disabled = !!state.uploadBusy || status.running;
+    els.uploadSubmit.disabled = !!state.deleting || !!state.uploadBusy || status.running;
+  }
+
+  async function deleteDatabase(edition) {
+    if (state.deleting) return;
+    state.deleting = edition;
+    var message = document.getElementById('geo-delete-status');
+    try {
+      var confirmed = await window.ScrcpyGateSecurity.confirm({
+        title: '删除地区库', message: t('将删除所选地区库及其备份：') + ' ' + edition,
+        detail: '删除无法撤销。强制执行时不能删除正在使用的库；下载选项保持不变，仍勾选此类型时后续更新会重新下载。', accept: '删除库'
+      });
+      if (!confirmed) return;
+      renderInventory(state.status || {});
+      renderCheck();
+      message.textContent = t('正在删除地区库…');
+      message.dataset.tone = '';
+      var result = await api().configured('geo.database.delete', { params: { edition: edition } });
+      message.textContent = result.cleanup_pending ? t('地区库已移除，部分恢复文件未能清理，请检查数据目录权限。') : t('地区库及其备份已删除。');
+      message.dataset.tone = result.cleanup_pending ? 'warn' : 'ok';
+    } catch (error) {
+      var code = error && error.detail && error.detail.headers && error.detail.headers['x-geo-update-error'];
+      message.textContent = deletionError(code) || requestError(error);
+      message.dataset.tone = 'error';
+    } finally {
+      state.deleting = '';
+      await load();
+      if (els.refresh && document.activeElement === document.body) els.refresh.focus();
+    }
   }
 
   async function uploadDatabase(event) {
@@ -491,6 +529,13 @@
       els.uploadSubmit.disabled = false;
       await load();
     }
+  }
+
+  function deletionError(code) {
+    return ({database_in_use:'正在强制执行地域限制，请先切换为观察或关闭模式并保存，再删除正在使用的库。',
+      database_not_found:'该地区库已不存在，请刷新列表。', database_path_unsafe:'地区库路径异常，未执行删除。',
+      update_io_failed:'文件操作失败，请检查数据目录权限后重试。', state_persist_failed:'状态保存失败，地区库未删除。',
+      database_restore_failed:'恢复原库失败，请检查数据目录中的 .recovery 文件并手动恢复。'})[code] || uploadError(code);
   }
 
   function uploadError(code) {

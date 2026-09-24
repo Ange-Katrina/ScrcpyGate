@@ -1151,3 +1151,36 @@ html, body { margin:0; height:100%; }
 .perm-drawer:not(.open) { visibility:hidden; }
 
     .activity-scope-note { margin:0; padding:10px 14px; color:var(--admin-muted); font-size:12px; line-height:1.6; }
+
+/* User overview and activity details share the existing admin palette. */
+.user-card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr)); gap:14px; padding:0 20px 20px; }
+.user-card-grid > .table-empty { grid-column:1 / -1; }
+.user-card { min-width:0; border:1px solid var(--admin-border); border-radius:14px; background:var(--admin-surface); overflow:hidden; }
+.user-card-main { display:flex; flex-direction:column; gap:14px; width:100%; padding:18px; border:0; background:transparent; color:var(--admin-text); font:inherit; text-align:start; cursor:pointer; }
+.user-card-main:hover { background:var(--admin-hover); }
+.user-card-main:focus-visible { outline:2px solid var(--admin-brand); outline-offset:-3px; }
+.user-card-main .user-cell { width:100%; }
+.user-card-identity { min-width:0; flex:1; }
+.user-card-identity > * { display:block; overflow-wrap:anywhere; }
+.user-card-main .user-name { white-space:normal; }
+.user-card-main .user-cell > svg { width:16px; height:16px; color:var(--admin-faint); flex-shrink:0; }
+.user-card-badges { display:flex; gap:8px; flex-wrap:wrap; }
+.user-card-access { color:var(--admin-muted); font-size:12px; overflow-wrap:anywhere; }
+.user-card-footer { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 14px; border-top:1px solid var(--admin-line); }
+.user-card-footer .expiry-cell { min-width:0; font-size:11px; }
+.user-card-footer .row-actions { flex-shrink:0; }
+.user-card .row-btn { min-height:36px; }
+.user-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 24px; margin:0; }
+.user-detail-grid dt { font-size:12px; color:var(--admin-muted); margin-bottom:5px; }
+.user-detail-grid dd { margin:0; color:var(--admin-text); font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.user-history-title { margin:24px 0 10px; font-size:14px; }
+.user-detail-history { border-top:1px solid var(--admin-line); }
+#user-details-body .activity-scope-note { padding:14px 0 0; margin:0; }
+.user-details-actions { flex-wrap:wrap; }
+.user-details-actions > button { min-height:44px; }
+@media (max-width:600px) {
+  .user-card-grid { grid-template-columns:minmax(0,1fr); padding:0 14px 14px; }
+  .user-card .row-btn { min-height:44px; }
+  .user-detail-grid { gap:16px 12px; }
+  .user-detail-history .watch-history-item { align-items:flex-start; flex-direction:column; gap:6px; }
+}

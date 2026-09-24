@@ -1128,6 +1128,76 @@ def import_database(path: Path, *, edition: str, archive: bool = False) -> dict:
             temp.unlink(missing_ok=True)
 
 
+def delete_database(edition: str) -> dict:
+    """Remove an exact managed edition and its backup, serialized with installation."""
+    if edition not in _MANAGED_EDITIONS:
+        raise GeoUpdateError("download_editions_invalid")
+    if not _update_lock.acquire(blocking=False):
+        raise GeoUpdateError("update_in_progress")
+    moved: list[tuple[Path, Path, int]] = []
+    try:
+        directory = _state_path()
+        if directory.is_symlink() or directory.is_junction():
+            raise GeoUpdateError("database_path_unsafe")
+        target = directory / f"{edition}.mmdb"
+        paths = (target, target.with_suffix(".mmdb.bak"))
+        with geo_access._lock:
+            if geo_access.policy(force=True).enforcing and geo_access.latest_database() == target:
+                raise GeoUpdateError("database_in_use")
+            for path in paths:
+                if path.is_symlink() or path.is_junction() or (path.exists() and not path.is_file()):
+                    raise GeoUpdateError("database_path_unsafe")
+            existing = [path for path in paths if path.exists()]
+            if not existing:
+                raise GeoUpdateError("database_not_found")
+            state = _load_state()
+            geo_access.close()
+            try:
+                for path in existing:
+                    size = path.stat().st_size
+                    with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{path.name}-delete-", suffix=".recovery", delete=False) as handle:
+                        staging = Path(handle.name)
+                    try:
+                        os.replace(path, staging)
+                    except OSError:
+                        staging.unlink(missing_ok=True)
+                        raise
+                    moved.append((path, staging, size))
+                for key in ("edition_receipts", "edition_sources"):
+                    if isinstance(state.get(key), dict):
+                        state[key].pop(edition, None)
+                state.update(job_state="idle", database_epoch=0, database_size_bytes=0)
+                _save_state(state)
+            except Exception:
+                restore_failed = False
+                for path, staging, _ in reversed(moved):
+                    try:
+                        os.replace(staging, path)
+                    except OSError:
+                        restore_failed = True
+                geo_access.close()
+                if restore_failed:
+                    # Recovery files are excluded from automatic temporary cleanup.
+                    raise GeoUpdateError("database_restore_failed") from None
+                raise
+        removed_bytes = 0
+        cleanup_pending = False
+        for _, staging, size in moved:
+            try:
+                staging.unlink()
+                removed_bytes += size
+            except OSError:
+                # The owned temporary file is no longer an active database.
+                cleanup_pending = True
+                log.warning("GEO_DELETE_CLEANUP_PENDING edition=%s", edition)
+        reset_progress()
+        return {"ok": True, "edition": edition, "removed_bytes": removed_bytes, "cleanup_pending": cleanup_pending}
+    except OSError:
+        raise GeoUpdateError("update_io_failed") from None
+    finally:
+        _update_lock.release()
+
+
 def database_inventory(state: dict) -> list[dict]:
     """Metadata only; never return server paths or hash a large file while polling."""
     result = []
@@ -1135,6 +1205,13 @@ def database_inventory(state: dict) -> list[dict]:
     for edition in _MANAGED_EDITIONS:
         target = _state_path() / f"{edition}.mmdb"
         try:
+            backup = target.with_suffix(".mmdb.bak")
+            if not target.exists() and backup.is_file() and not backup.is_symlink() and not backup.is_junction():
+                stats = backup.stat()
+                result.append({"edition": edition, "size_bytes": 0, "epoch": 0, "error": "backup_only",
+                               "active": False, "modified_ts": int(stats.st_mtime), "source": "external",
+                               "backup_size_bytes": stats.st_size})
+                continue
             stats = target.stat()
             if not target.is_file():
                 continue
