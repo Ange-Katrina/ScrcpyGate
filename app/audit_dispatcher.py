@@ -56,6 +56,8 @@ class AuditDispatcher:
     @staticmethod
     def _clone_event(event: Mapping) -> dict:
         cloned = dict(event)
+        if cloned.get("ts") is None:
+            cloned["ts"] = int(time.time())
         metadata = cloned.get("metadata")
         if isinstance(metadata, dict):
             cloned["metadata"] = dict(metadata)

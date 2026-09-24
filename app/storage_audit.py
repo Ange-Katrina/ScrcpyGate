@@ -200,6 +200,9 @@ def query_audit_events(
     outcome: str = "",
     severity: str = "",
     request_id: str = "",
+    device_id: str = "",
+    source_ip: str = "",
+    target: str = "",
     from_ts: int | None = None,
     to_ts: int | None = None,
     limit: int = 100,
@@ -214,7 +217,9 @@ def query_audit_events(
     if before_id is not None:
         clauses.append("id < ?")
         params.append(sqlite_int(before_id))
-    if actor:
+    if actor == "none":
+        clauses.append("username IN ('', '?', 'anonymous')")
+    elif actor:
         clauses.append("username = ?")
         params.append(sanitize_text(actor, 128))
     if action:
@@ -229,6 +234,18 @@ def query_audit_events(
     if request_id:
         clauses.append("request_id = ?")
         params.append(sanitize_text(request_id, 96))
+    if device_id:
+        device = sanitize_text(device_id, 256)
+        clauses.append("((target_type = 'device' AND target_id = ?) "
+                       "OR (target_type = 'device_viewer' AND substr(target_id, 1, length(?) + 1) = ? || ':') "
+                       "OR json_extract(CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END, '$.device_id') = ?)")
+        params.extend([device, device, device, device])
+    if source_ip:
+        clauses.append("instr(source_ip, ?) > 0")
+        params.append(sanitize_text(source_ip, 64))
+    if target:
+        clauses.append("instr(target_id, ?) > 0")
+        params.append(sanitize_text(target, 256))
     if from_ts is not None:
         clauses.append("ts >= ?")
         params.append(sqlite_int(from_ts))
@@ -246,6 +263,22 @@ def query_audit_events(
         "items": items,
         "has_more": has_more,
         "next_before_id": int(page[-1]["id"]) if has_more and page else None,
+    }
+
+
+def audit_facets(*, connect: ConnectionFactory) -> dict:
+    """Keep selectors independent of the current filtered page, including deleted actors."""
+    with connect() as conn:
+        actors = conn.execute(
+            "SELECT username FROM users UNION SELECT DISTINCT username FROM audit_log ORDER BY username LIMIT 500"
+        ).fetchall()
+        devices = conn.execute(
+            "SELECT id, name FROM devices UNION SELECT DISTINCT target_id, target_id FROM audit_log "
+            "WHERE target_type='device' AND target_id NOT IN (SELECT id FROM devices) ORDER BY name LIMIT 500"
+        ).fetchall()
+    return {
+        "actors": [{"id": row["username"], "username": row["username"]} for row in actors],
+        "devices": [{"id": row["id"], "name": row["name"]} for row in devices],
     }
 
 

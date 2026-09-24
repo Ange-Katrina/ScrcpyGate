@@ -459,7 +459,7 @@
         </header>
         <div class="vp-body">
           <div class="vp-summary" id="vp-summary">
-            <span class="vp-summary-label"><i data-lucide="sparkles"></i>当前画质</span>
+            <span class="vp-summary-label"><i data-lucide="sparkles"></i>参数预览</span>
             <span class="vp-summary-value" id="vp-summary-text">—</span>
           </div>
           <section class="vp-group">
@@ -481,7 +481,7 @@
             <p class="vp-note" id="vp-custom-hint" hidden>当前使用手动微调参数，可在「微调」页签修改。</p>
           </section>
           <section class="vp-group" id="vp-panel-tuning" data-vp-panel="tuning" role="tabpanel" aria-labelledby="vp-tab-tuning" hidden>
-            <div class="vp-group-title" id="vp-custom-title"><h3>参数微调</h3><span class="vp-hint vp-hint-warn">修改后按自定义应用</span></div>
+            <div class="vp-group-title" id="vp-custom-title"><h3>参数微调</h3><span class="vp-hint vp-hint-warn">修改后点击应用画质</span></div>
             <div class="vp-custom" id="vp-custom">
               <label class="vp-field">输出尺寸
                 <span class="vp-input-wrap"><select id="vp-res" aria-label="输出尺寸">
@@ -499,13 +499,15 @@
                   <span class="vp-input-wrap"><input id="vp-resh" type="number" min="240" max="1920" step="1" inputmode="numeric"><span class="vp-unit">px</span></span>
                 </label>
               </div>
-              <label class="vp-field">帧率
+              <label class="vp-field">帧率上限
                 <span class="vp-input-wrap"><input id="vp-fps" type="number" min="15" max="240" step="1" inputmode="numeric"><span class="vp-unit">fps</span></span>
               </label>
-              <label class="vp-field">码率
+              <label class="vp-field">目标码率
                 <span class="vp-input-wrap"><input id="vp-bitrate" type="number" min="0.5" max="10" step="0.5" inputmode="decimal"><span class="vp-unit">Mbps</span></span>
               </label>
             </div>
+            <button class="vp-apply" id="vp-apply" type="button">应用画质</button>
+            <p class="vp-note">尺寸按长边上限缩放，保持设备比例；帧率为上限，静止画面会降低帧率。建议先选 30 fps，游戏可尝试 60 fps；卡顿时先降低分辨率或码率。</p>
           </section>
           <div class="vp-group-title vp-group-title-extra" id="vp-fullscreen-title"><h3>全屏默认画质</h3></div>
           <label class="vp-field vp-field-select" id="vp-fullscreen-field">
@@ -515,7 +517,7 @@
             <span class="vp-status-dot" id="vp-status-dot"><i data-lucide="check"></i></span>
             <span id="vp-status-text">画质设置已同步</span>
           </div>
-          <p class="vp-note">预设来自后台"画质与传输"管理页,修改参数会自动切换到自定义并保存。</p>
+          <p class="vp-note">预设一键应用；手动参数需点击应用画质。修改编码参数可能短暂重启共享视频流。</p>
         </div>
       </aside>
       <div class="vp-backdrop" id="ap-backdrop" aria-hidden="true"></div>

@@ -64,6 +64,9 @@ async def ws_video(websocket: WebSocket, device_id: str):
         device_id=real_device_id,
     ):
         return
+    async def watch_audit(action: str, **fields):
+        await audit_websocket_event(websocket, user, action, target_type="device", target_id=real_device_id, **fields)
+
     try:
         await video_socket(
             websocket,
@@ -71,6 +74,7 @@ async def ws_video(websocket: WebSocket, device_id: str):
             real_device_id,
             exposed_device_id=device_id,
             session_check=session_check,
+            audit_callback=watch_audit,
         )
     finally:
         await account_connections.unregister(username, websocket, session_id)

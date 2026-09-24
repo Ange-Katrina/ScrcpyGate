@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from fastapi import HTTPException, Request, WebSocket
 
 from .. import security, storage
@@ -30,6 +31,7 @@ def audit_request(
     target_id: str = "",
     metadata: dict | None = None,
     dedupe_key: str = "",
+    ts: int | None = None,
 ) -> bool:
     if isinstance(user, dict):
         username = str(user.get("username") or "")
@@ -50,6 +52,7 @@ def audit_request(
         target_id=target_id,
         metadata=metadata,
         dedupe_key=dedupe_key,
+        ts=ts,
     )
 
 
@@ -64,6 +67,7 @@ async def audit_websocket_event(
     target_type: str = "websocket",
     target_id: str = "",
     metadata: dict | None = None,
+    ts: int | None = None,
 ) -> None:
     path = str(getattr(getattr(websocket, "url", None), "path", "") or "")
     if path.startswith("/alas/embed/proxy"):
@@ -79,6 +83,7 @@ async def audit_websocket_event(
     event_metadata = {"channel": "websocket", "socket": socket_name}
     event_metadata.update(metadata or {})
     event = {
+        "ts": int(time.time()) if ts is None else ts,
         "username": str((user or {}).get("username") or "anonymous"),
         "action": action,
         "actor_role": str((user or {}).get("role") or "anonymous"),
@@ -179,6 +184,9 @@ def audit_filters(values: dict) -> dict:
         "outcome": str(values.get("outcome") or "").strip(),
         "severity": str(values.get("severity") or "").strip(),
         "request_id": str(values.get("request_id") or "").strip(),
+        "device_id": str(values.get("device_id") or "").strip(),
+        "source_ip": str(values.get("source_ip") or "").strip(),
+        "target": str(values.get("target") or "").strip(),
         "from_ts": audit_filter_int(values.get("from_ts"), "from_ts"),
         "to_ts": audit_filter_int(values.get("to_ts"), "to_ts"),
     }

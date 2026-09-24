@@ -273,6 +273,7 @@ def queue_audit_event(
     detail: str = "",
     metadata: dict | None = None,
     dedupe_key: str = "",
+    ts: int | None = None,
 ) -> bool:
     """Queue one bounded audit event for the HTTP middleware to persist safely."""
     try:
@@ -295,6 +296,7 @@ def queue_audit_event(
             actor_role = actor_role or str(user.get("role") or "")
     events.append(
         {
+            "ts": int(time.time()) if ts is None else ts,
             "username": username or "anonymous",
             "actor_role": actor_role or "unknown",
             "action": action,

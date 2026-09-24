@@ -306,7 +306,7 @@
            dataState = 'loading'; syncState = 'loading'; renderAll();
          }
          alasLastRefreshAt = Date.now();
-         overviewRequest = window.ScrcpyGateApi.configured('alas.overview', { query: { include: 'users,devices,configs,relations' }, background: !!(autoRefresh && background) }).then(function (payload) {
+         overviewRequest = window.ScrcpyGateApi.configured('alas.overview', { query: { include: 'users,devices,configs,relations', refresh: !autoRefresh }, background: !!(autoRefresh && background) }).then(function (payload) {
            applyOverview(payload);
            maybeAutoBind();
            if (showMessage) { toast('ALAS 数据已刷新', 'success'); }
@@ -477,7 +477,7 @@
         var state = String(value || '').toLowerCase();
         if (state === 'running') { return statusText('running'); }
         if (state === 'connected' || state === 'online') { return statusText('connected'); }
-        if (state === 'stopped') { return statusText('stopped'); }
+        if (state === 'stopped' || state === 'idle') { return statusText('stopped'); }
         if (state === 'error') { return statusText('error'); }
         if (state === 'unreachable' || state === 'disconnected') { return statusText('unreachable'); }
         if (state === 'disabled' || state === 'unconfigured') { return statusText(state); }
@@ -629,11 +629,11 @@
         refreshIcons();
       }
       function stopReasonText(cfg) {
-        if (cfg.runtime !== 'error' && cfg.runtime !== 'stopped') { return ''; }
+        if (!cfg.stopReason) { return ''; }
         if (cfg.stopReason === 'expired') { return '停止原因：账户到期，ALAS 自动停止'; }
         if (cfg.stopReason === 'permission') { return '停止原因：权限不足'; }
         if (cfg.stopReason === 'device') { return '停止原因：绑定设备失效'; }
-        return '';
+        return String(cfg.stopReason);
       }
        function renderCfgDetail() {
          if (!selectedCfgId || !cfgById(selectedCfgId)) { $('alasCfgDetailName').textContent = tr('请选择配置'); $('alasCfgDetailChips').innerHTML = ''; ['alasCfgOwner','alasCfgDevice','alasCfgDefault','alasCfgRun','alasCfgEdit','alasCfgError','alasCfgRunTask'].forEach(function (id) { $(id).textContent = '—'; }); $('alasCfgOpenAlas').href = '#'; $('alasCfgPrimaryBtn').disabled = true; return; }
@@ -1252,10 +1252,12 @@
       $('alasCfgRefreshState').addEventListener('click', function () {
         if (!selectedCfgId) { return; }
          if (!guardService('alas.config.status')) { return; }
-        var cfg = cfgById(selectedCfgId);
         var btn = this;
         setLoading(btn, true, '刷新中…');
-         window.ScrcpyGateApi.configured('alas.config.status', { method: 'GET', params: { id: selectedCfgId } }).then(function () { return loadOverview(false); }).then(function () { toast('状态已刷新', 'success'); }).catch(function (error) { toast(apiError(error), 'error'); }).finally(function () { setLoading(btn, false); });
+         loadOverview(false).then(function () {
+           var cfg = cfgById(selectedCfgId);
+           toast(cfg && cfg.stopReason ? cfg.stopReason : '状态已刷新', cfg && cfg.stopReason ? 'error' : 'success');
+         }).catch(function (error) { toast(apiError(error), 'error'); }).finally(function () { setLoading(btn, false); });
       });
       $('alasCfgOpenAlas').addEventListener('click', function (e) {
          if (!this.href || this.getAttribute('aria-disabled') === 'true' || this.getAttribute('href') === '#') { e.preventDefault(); toast('ALAS 页面地址尚未配置', 'error'); }

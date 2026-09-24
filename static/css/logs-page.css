@@ -1124,3 +1124,5 @@ html, body { margin:0; height:100%; }
   .log-retention-grid .field-input { width:100%; }
   .log-retention-grid .btn-primary { margin-left:0; width:100%; }
 }
+
+    .activity-scope-note { margin:0; padding:10px 14px; color:var(--admin-muted); font-size:12px; line-height:1.6; }

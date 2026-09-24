@@ -47,7 +47,11 @@ async def admin_alas(request: Request):
     security.require_admin(request)
     config_name = request.query_params.get("config")
     # 传入 runtime：Runtime 状态与配置目录走短 TTL 缓存 + 并发查询（管理页最慢的一条路径）。
-    return await asyncio.to_thread(admin_alas_payload, config_name, runtime_for(request))
+    runtime = runtime_for(request)
+    if request.query_params.get("refresh") == "1":
+        clear_alas_status_cache(runtime)
+        return await asyncio.to_thread(admin_alas_payload, config_name, None)
+    return await asyncio.to_thread(admin_alas_payload, config_name, runtime)
 
 
 @router.put("/api/admin/alas")

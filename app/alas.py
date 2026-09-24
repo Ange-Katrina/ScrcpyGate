@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -614,6 +615,7 @@ def status_for_config(config_name: str, include_configs: bool = False) -> dict:
     config_name = sanitize_config_name(config_name or settings.get("current_config") or "alas")
     result = {
         "ok": True,
+        "checked_at": int(time.time()),
         "settings": public_settings(),
         "configured": bool(settings.get("enabled") and settings.get("token_set")),
         "status": "disabled" if not settings.get("enabled") else "disconnected",

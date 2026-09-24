@@ -177,7 +177,7 @@
           date = new Date(raw.replace(' ', 'T'));
         }
         if (isNaN(date.getTime())) return String(value);
-        return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0') + ' ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0') + ' ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') + ':' + String(date.getSeconds()).padStart(2, '0');
       }
       function formatWatchDuration(value) {
         var seconds = Math.max(0, Math.floor(Number(value || 0) / 1000));
@@ -198,7 +198,7 @@
         var active = Number(stats.activeSessions || 0);
         return '<span class="watch-summary"><strong>' + esc(formatWatchDuration(stats.totalDurationMs)) + '</strong>'
           + '<small>' + count + ' 次' + (active ? ' · ' + active + ' 进行中' : '') + '</small>'
-          + '<em>最近 ' + esc(formatWatchAt(stats.lastWatchedAtMs)) + '</em></span>';
+          + '<em>最近开始 ' + esc(formatWatchAt(stats.lastStartedAtMs)) + '</em></span>';
       }
       function watchReasonLabel(reason, active) {
         if (active) return '进行中';

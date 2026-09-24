@@ -249,6 +249,16 @@ The rotate button changes the local picture. **More → Restore automatic orient
 
 The protocol follows the bundled scrcpy **3.1** server. See the upstream [keyboard guide](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/keyboard.md), [shortcuts](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/shortcuts.md), and [QtScrcpy FAQ](https://github.com/barry-ran/QtScrcpy/blob/dev/docs/FAQ.md). ScrcpyGate does not expose scrcpy's UHID/AOA keyboard modes.
 
+### Quality and activity records
+
+Quality presets apply immediately. Manual resolution, FPS and bit-rate edits are staged until **Apply quality** is clicked, so typing does not repeatedly restart the stream. Encoding changes may briefly restart the shared device stream; with other viewers connected, the server may save the preference and defer the restart.
+
+Resolution is scrcpy's **long-edge limit**, preserving the device aspect ratio; reference width/height values are not a fixed output size. FPS is a maximum, and static content naturally produces fewer frames. Start with 30 fps for general use or try 60 fps for games; lower the resolution or target bit rate when bandwidth or decoding is constrained. Each viewer consumes upload bandwidth. Existing administrator presets are preserved. These semantics follow [scrcpy 3.1](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/video.md); [QtScrcpy](https://github.com/barry-ran/QtScrcpy) also distinguishes frame limits and dropping expired frames for latency.
+
+Administrator ALAS status distinguishes stopped (`idle`) from unchecked and reports the server's check time. Manual refresh bypasses the short status cache.
+
+User times use the browser's local time zone. Last login means successful authentication, not a page visit. Watch duration sums retained video connections, including simultaneous viewers separately; refreshes and reconnects create new sessions. New `viewer_watch_start` / `viewer_watch_end` audit events include the watch-session ID and matching timestamps. Historical events are not rewritten. Audit records can be filtered by actor and device before pagination, with the same filters applied to export. Runtime-log filtering covers a bounded recent tail; use audit records or the complete log export for historical investigations.
+
 ## Operations
 
 CI/CD publishes verified amd64 and arm64 images to GHCR; servers are deployed

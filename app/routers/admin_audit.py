@@ -50,6 +50,9 @@ async def admin_logs(
     outcome: str = "",
     severity: str = "",
     request_id: str = "",
+    device_id: str = "",
+    source_ip: str = "",
+    target: str = "",
     from_ts: int | None = Query(default=None, ge=0, le=SQLITE_INT_MAX),
     to_ts: int | None = Query(default=None, ge=0, le=SQLITE_INT_MAX),
 ):
@@ -61,6 +64,9 @@ async def admin_logs(
         "outcome": outcome,
         "severity": severity,
         "request_id": request_id,
+        "device_id": device_id,
+        "source_ip": source_ip,
+        "target": target,
         "from_ts": from_ts,
         "to_ts": to_ts,
     }
@@ -235,6 +241,12 @@ async def admin_verify_audit_integrity(request: Request):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Audit-Consistent"] = "true" if audit_consistent else "false"
     return response
+
+
+@router.get("/api/admin/logs/facets")
+async def admin_audit_facets(request: Request):
+    security.require_admin(request)
+    return JSONResponse(await asyncio.to_thread(storage.audit_facets), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/admin/logs/{event_id}")

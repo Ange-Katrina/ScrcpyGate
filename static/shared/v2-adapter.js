@@ -665,8 +665,8 @@
   function bpsToMbps(bps) { return Math.round((Number(bps) || 0) / 100000) / 10; }
   function profileWidth(maxSize) { return Number(maxSize) || 1280; }
   function profileHeight(maxSize) { return Math.round(profileWidth(maxSize) * 9 / 16); }
-  // max_size 限制的是最长边,画质标签按短边命名(1280 -> 720p),与画质设置页的档位名称一致。
-  function profileLabel(maxSize) { var height = profileHeight(maxSize); return height > 0 ? height + 'p' : ''; }
+  // Report the configured long-edge cap without assuming a 16:9 device.
+  function profileLabel(maxSize) { return '长边上限 ' + profileWidth(maxSize) + 'px'; }
   // 预设帧率由服务端限制在 15..240(与画质页三个输入框的 min/max 一致),所以 0 只可能
   // 来自字段缺失或早期数据。这里只在"没有帧率"时兜底为 24,不再把 0 显示成一个帧率。
   function presetFps(value) { var fps = Number(value); return isFinite(fps) && fps > 0 ? fps : 24; }
@@ -1303,7 +1303,8 @@
         if (query.q && !hasText(a.operator + ' ' + a.action + ' ' + a.message + ' ' + a.target + ' ' + a.ip, query.q)) return false;
         if (query.eventType && query.eventType !== 'all' && a.eventType !== query.eventType) return false;
         if (query.result && query.result !== 'all' && a.result !== query.result) return false;
-        if (query.actor && a.operator !== query.actor) return false;
+        if (query.actor === 'none' && ['', '?', 'anonymous', 'none'].indexOf(a.operator) < 0) return false;
+        if (query.actor && query.actor !== 'all' && query.actor !== 'none' && a.operator !== query.actor) return false;
         if (query.ip && a.ip.indexOf(query.ip) < 0) return false;
         if (query.target && a.target.indexOf(query.target) < 0) return false;
         return true;
@@ -1324,7 +1325,7 @@
       bySeverity: summary.by_severity || {},
       hasMore: !!pageInfo.has_more,
       nextCursor: pageInfo.next_cursor,
-      facets: { actors: Object.keys(actors).map(function (k) { return actors[k]; }) },
+      facets: payload.facets || { actors: Object.keys(actors).map(function (k) { return actors[k]; }) },
       updatedAt: new Date().toLocaleString()
     };
   }
@@ -1445,10 +1446,11 @@
     return 'unchecked';
   }
 
-  function adaptAlasOverview() {
+  function adaptAlasOverview(opts) {
+    opts = opts || {};
     return Promise.all([
       apiGet('/api/admin/alas/permissions'),
-      apiGet('/api/admin/alas'),
+      apiRequest('/api/admin/alas', { query: opts.refresh ? { refresh: '1' } : {}, force: !!opts.refresh }),
       apiGet('/api/admin/permissions')
     ]).then(function (results) {
       var perm = results[0];
@@ -1496,8 +1498,9 @@
       });
       function configStatusOf(name) {
         var own = statusByConfig[name];
-        if (own) return { status: own.status || 'unknown', task: own.task || '' };
-        return { status: status.status || 'unknown', task: '' };
+        if (!own && status.config === name) own = status;
+        if (!own) return { status: 'unknown', task: '', error: '' };
+        return { status: dashboardAlasEntry(own, null, null).code, task: own.task || '', error: own.error || '' };
       }
       var configSeen = {};
       var configs = [];
@@ -1517,6 +1520,7 @@
           bound: true,
           runtime: own.status,
           status: own.status,
+          stopReason: own.error,
           openUrl: openUrl(a.config_name, a.device_id || '')
         });
       });
@@ -1538,6 +1542,7 @@
           deviceId: '',
           runtime: own.status,
           status: own.status,
+          stopReason: own.error,
           openUrl: openUrl(name, '')
         });
       });
@@ -1591,8 +1596,8 @@
         // 服务端 ALAS Token 加密密钥状态（仅布尔与来源）：缺失时页面提前提示，
         // 而不是等保存 Token 时收到 400。旧服务端没有该字段时为 null，页面不提示。
         tokenKey: settings.token_key || settings.tokenKey || null,
-        lastCheckText: new Date().toLocaleString(),
-        syncTimeText: new Date().toLocaleString(),
+        lastCheckText: status.checked_at ? fmtTs(status.checked_at) : '—',
+        syncedAt: status.checked_at ? fmtTs(status.checked_at) : '—',
         statusLabel: statusLabel,
         status: statusLabel,
         summary: summary
@@ -4894,7 +4899,9 @@
     return apiPut('/api/devices/' + encodeURIComponent(deviceId) + '/mirror/settings', videoBody)
       .then(function (payload) { return requireSuccessful(payload, '画质应用失败'); })
       .then(function (applied) {
+        if (String(deviceId) !== String(state.deviceId || '')) return { stale: true };
         return handlerQualityConfig().then(function (config) {
+          if (String(deviceId) !== String(state.deviceId || '')) return { stale: true };
           adoptEffectiveQuality(config, applied.effective || applied.preferences);
           config.applyResult = applied;
           config.applied = applied;
@@ -5027,6 +5034,9 @@
     // 列表视图默认只取 600 行, 按请求量自适应(导出等大批量场景仍取服务端上限),
     // 降低服务端逐行解析成本, 提升日志页与自动刷新时的响应速度。
     var serverQuery = { lines: Math.min(2000, Math.max(300, limit * 4)) };
+    if (offset || query.q || query.device || query.user || query.source || query.from || query.to || query.timeRange !== '24h') {
+      serverQuery.lines = 2000;
+    }
     if (query.severity && query.severity !== 'all') {
       var sev = query.severity === 'warn' ? 'warning' : query.severity;
       if (['debug', 'info', 'warning', 'error', 'critical'].indexOf(sev) >= 0) serverQuery.min_severity = sev;
@@ -5036,18 +5046,41 @@
     });
   }
 
+  function auditServerFilters(query) {
+    var bounds = timeRangeBounds(query.timeRange, query.from, query.to);
+    var filters = {};
+    if (bounds.fromTs !== null) filters.from_ts = bounds.fromTs;
+    if (bounds.toTs !== null) filters.to_ts = bounds.toTs;
+    if (query.actor && query.actor !== 'all') filters.actor = query.actor;
+    if (query.device && query.device !== 'all') filters.device_id = query.device;
+    if (query.ip) filters.source_ip = query.ip;
+    if (query.target) filters.target = query.target;
+    if (query.result && query.result !== 'all') filters.outcome = query.result === 'fail' ? 'failure' : query.result;
+    return filters;
+  }
+
+  var auditFacetsRequest = null;
+  var auditFacetsAt = 0;
+  function fetchAuditFacets() {
+    if (!auditFacetsRequest || Date.now() - auditFacetsAt > 60000) {
+      auditFacetsAt = Date.now();
+      auditFacetsRequest = apiGet('/api/admin/logs/facets').catch(function () {
+        auditFacetsRequest = null;
+        return null;
+      });
+    }
+    return auditFacetsRequest;
+  }
+
   function handlerLogsAudit(opts) {
     var query = (opts && opts.query) || {};
     var limit = Number(query.limit) || 40;
-    var bounds = timeRangeBounds(query.timeRange, query.from, query.to);
-    var needsLocalFiltering = !!(query.q || query.target || (query.eventType && query.eventType !== 'all'));
-    var serverQuery = { limit: needsLocalFiltering ? 200 : Math.min(200, Math.max(1, limit)) };
+    var needsLocalFiltering = !!(query.q || (query.eventType && query.eventType !== 'all'));
+    var serverQuery = Object.assign(auditServerFilters(query), { limit: needsLocalFiltering ? 200 : Math.min(200, Math.max(1, limit)) });
     if (query.before !== undefined && query.before !== null && query.before !== '') serverQuery.before = query.before;
-    if (bounds.fromTs !== null) serverQuery.from_ts = bounds.fromTs;
-    if (bounds.toTs !== null) serverQuery.to_ts = bounds.toTs;
-    if (query.actor && query.actor !== 'all' && query.actor !== 'none') serverQuery.actor = query.actor;
-    if (query.result && query.result !== 'all') serverQuery.outcome = query.result === 'fail' ? 'failure' : query.result;
-    return apiGet('/api/admin/logs', serverQuery).then(function (payload) {
+    return Promise.all([apiGet('/api/admin/logs', serverQuery), fetchAuditFacets()]).then(function (results) {
+      var payload = results[0];
+      if (results[1]) payload.facets = results[1];
       return adaptAuditList(payload, query);
     });
   }
@@ -5118,16 +5151,14 @@
     var body = (opts && opts.body) || {};
     var filters = body.filters || {};
     if (body.type === 'audit') {
-      var bounds = timeRangeBounds(filters.timeRange, filters.from, filters.to);
       // 统一走 JSON 分支取回完整事件,再由客户端合成目标格式:
       // 避免 text/csv 附件响应在个别浏览器(headless Chrome)被吞成 204 空响应。
-      var reqBody = { format: 'json' };
-      if (filters.actor) reqBody.actor = filters.actor;
-      if (filters.result && filters.result !== 'all') reqBody.outcome = filters.result === 'fail' ? 'failure' : filters.result;
-      if (bounds.fromTs !== null) reqBody.from_ts = bounds.fromTs;
-      if (bounds.toTs !== null) reqBody.to_ts = bounds.toTs;
+      var reqBody = Object.assign({ format: 'json' }, auditServerFilters(filters));
       return apiPost('/api/admin/logs/export', reqBody).then(function (payload) {
         var events = payload && Array.isArray(payload.events) ? payload.events : [];
+        if (payload && payload.truncated) throw unsupportedError('结果过多，请缩小时间范围后导出');
+        var selected = new Set(adaptAuditList({ logs: events }, filters).audits.map(function (row) { return row.eventId; }));
+        events = events.filter(function (event) { return selected.has(adaptAuditRecord(event).eventId); });
         if (body.format === 'csv') {
           return { content: auditToCsv(events), filename: 'scrcpygate-audit.csv' };
         }
@@ -5442,8 +5473,8 @@
     });
   }
 
-  function handlerAlasOverview() {
-    return adaptAlasOverview();
+  function handlerAlasOverview(opts) {
+    return adaptAlasOverview({ refresh: !!(opts && opts.query && opts.query.refresh) });
   }
 
   function handlerAlasSettingsUpdate(opts) {
@@ -5570,8 +5601,9 @@
     });
   }
 
-  function handlerAlasConfigStatus() {
-    return apiGet('/api/admin/alas').then(function (admin) {
+  function handlerAlasConfigStatus(opts) {
+    var config = opts && opts.params && opts.params.id || '';
+    return apiRequest('/api/admin/alas', { query: { config: config, refresh: '1' }, force: true }).then(function (admin) {
       return admin.status || { ok: false, status: 'unknown' };
     });
   }

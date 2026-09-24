@@ -48,6 +48,7 @@
   // Runtime events are also shown in the dashboard. Keep the producer's
   // machine code out of the visible title while retaining it on the record.
   Object.assign(ACTION_TITLES, {
+    viewer_watch_start: '观看连接建立', viewer_watch_end: '观看连接结束',
     client_join: '观看端加入', disconnect: '连接断开', error: '发生错误',
     player_reset: '重置播放器', control_player_reset: '重置控制播放器',
     process_restart: '重启服务进程', quality_changed: '画质已切换',
@@ -55,6 +56,7 @@
     video_client_terminate: '终止观看端'
   });
   Object.assign(ACTION_TITLES_EN, {
+    viewer_watch_start: 'Viewer connected', viewer_watch_end: 'Viewer disconnected',
     client_join: 'Viewer joined', disconnect: 'Connection closed', error: 'Error occurred',
     player_reset: 'Reset player', control_player_reset: 'Reset control player',
     process_restart: 'Restart service process', quality_changed: 'Quality changed',
@@ -353,6 +355,7 @@
     if (CATEGORY_LABELS[explicit]) return explicit;
     if (CATEGORY_ALIASES[explicit]) return CATEGORY_ALIASES[explicit];
     var event = action(a);
+    if (event.indexOf('viewer_watch_') === 0) return 'dev';
     if (event === 'login' || event === 'login_success' || event === 'logout' || event === 'page_index' || event === 'page_admin') return 'login';
     if (event === 'login_failed' || event === 'login_rate_limited' || event === 'authentication' || event === 'csrf_validation') return 'authfail';
     if (event.indexOf('user_') === 0 || event.indexOf('account_') === 0 || event.indexOf('password') === 0 || event === 'account_expired') return 'acct';

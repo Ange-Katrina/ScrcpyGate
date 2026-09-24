@@ -20,7 +20,7 @@
     kw: '', time: '24h', dateFrom: '', dateTo: '',
     severity: 'all', source: 'all', device: 'all', user: 'all',
     auditKw: '', auditTime: '24h', auditDateFrom: '', auditDateTo: '',
-    eventType: 'all', result: 'all', actor: 'all', ip: '', target: '',
+    eventType: 'all', result: 'all', actor: 'all', auditDevice: 'all', ip: '', target: '',
     rawWrap: true, autoOn: false
   };
   var page = {
@@ -359,6 +359,7 @@
     var sel = $(id);
     if (!sel) return;
     var current = sel.value || 'all';
+    var currentLabel = sel.selectedOptions.length ? sel.selectedOptions[0].textContent : current;
     var seen = {};
     var html = '<option value="all">' + esc(tr(allLabel)) + '</option>';
     if (noneText) html += '<option value="none">' + esc(tr(noneText)) + '</option>';
@@ -368,14 +369,21 @@
       seen[value] = true;
       html += '<option value="' + esc(value) + '">' + esc(opt.label || value) + '</option>';
     });
+    if (current !== 'all' && current !== 'none' && !seen[current]) {
+      html += '<option value="' + esc(current) + '">' + esc(currentLabel) + '</option>';
+    }
     sel.innerHTML = html;
     sel.value = Array.prototype.some.call(sel.options, function (o) { return o.value === current; }) ? current : 'all';
   }
   function updateFacets(d) {
     var facets = d.facets || d.filters || {};
+    if (facets.actors) {
+      setSelectOptions('logs-actor', '全部操作者', '未认证用户', optionList(facets.actors, 'id', 'username').concat(uniqueOptions(AUDITS, 'operator', 'operatorLabel')));
+      setSelectOptions('audit-device', '全部设备', '', optionList(facets.devices, 'id', 'name'));
+      return;
+    }
     setSelectOptions('logs-device', '全部设备', '无设备', optionList(facets.devices || d.devices, 'id', 'name').concat(uniqueOptions(LOGS, 'device', 'deviceLabel')));
     setSelectOptions('logs-user', '全部用户', '无用户', optionList(facets.users || d.users, 'id', 'username').concat(uniqueOptions(LOGS, 'user', 'userLabel')));
-    setSelectOptions('logs-actor', '全部操作者', '未认证用户', optionList(facets.actors || d.actors || facets.operators, 'id', 'username').concat(uniqueOptions(AUDITS, 'operator', 'operatorLabel')));
   }
 
   function putIf(query, key, value) {
@@ -403,6 +411,7 @@
     putIf(query, 'eventType', state.eventType);
     putIf(query, 'result', state.result);
     putIf(query, 'actor', state.actor);
+    putIf(query, 'device', state.auditDevice);
     putIf(query, 'ip', state.ip.trim());
     putIf(query, 'target', state.target.trim());
     return query;
@@ -737,6 +746,7 @@
     state.eventType = 'all'; $('logs-event-type').value = 'all';
     state.result = 'all'; $('logs-result').value = 'all';
     state.actor = 'all'; $('logs-actor').value = 'all';
+    state.auditDevice = 'all'; $('audit-device').value = 'all';
     state.target = ''; $('logs-target').value = '';
     toggleCustomRange(); toggleAuditRange();
     syncExtraFilterCounts();
@@ -918,6 +928,7 @@
     $('logs-event-type').addEventListener('change', function () { state.eventType = this.value; loadAudits({ show:false }).catch(function () {}); });
     $('logs-result').addEventListener('change', function () { state.result = this.value; loadAudits({ show:false }).catch(function () {}); });
     $('logs-actor').addEventListener('change', function () { state.actor = this.value; loadAudits({ show:false }).catch(function () {}); });
+    $('audit-device').addEventListener('change', function () { state.auditDevice = this.value; loadAudits({ show:false }).catch(function () {}); });
     $('logs-target').addEventListener('input', function () { state.target = this.value; debounceFilter('logs-target', function () { loadAudits({ silent:true }).catch(function () {}); }); });
   }
 

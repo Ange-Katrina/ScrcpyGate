@@ -2697,7 +2697,7 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
         return users
 
 
-def record_last_login(username: str, source_ip: str = "") -> None:
+def record_last_login(username: str, source_ip: str = "", *, ts: int | None = None) -> None:
     """Store the latest successful login context without retaining credentials."""
     username = str(username or "").strip()
     if not username:
@@ -2706,7 +2706,7 @@ def record_last_login(username: str, source_ip: str = "") -> None:
     with db_connect() as conn:
         conn.execute(
             "UPDATE users SET last_login_at=?, last_login_ip=? WHERE username=?",
-            (now_ts(), source_ip or None, username),
+            (now_ts() if ts is None else ts, source_ip or None, username),
         )
         conn.commit()
 
@@ -4236,6 +4236,9 @@ def query_audit_events(
     outcome: str = "",
     severity: str = "",
     request_id: str = "",
+    device_id: str = "",
+    source_ip: str = "",
+    target: str = "",
     from_ts: int | None = None,
     to_ts: int | None = None,
     limit: int = 100,
@@ -4247,6 +4250,9 @@ def query_audit_events(
         outcome=outcome,
         severity=severity,
         request_id=request_id,
+        device_id=device_id,
+        source_ip=source_ip,
+        target=target,
         from_ts=from_ts,
         to_ts=to_ts,
         limit=limit,
@@ -4255,6 +4261,10 @@ def query_audit_events(
         clean_name=_audit_clean_name,
         sqlite_int=_audit_sqlite_int,
     )
+
+
+def audit_facets() -> dict:
+    return storage_audit.audit_facets(connect=db_connect)
 
 
 def get_audit_event(audit_id: int | str) -> dict | None:

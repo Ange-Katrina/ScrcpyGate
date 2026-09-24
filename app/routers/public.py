@@ -280,13 +280,15 @@ async def api_auth_login(request: Request):
         )
     security.refund_login_attempt(request, username, reservation)
     security.record_login_success(request, username)
-    await asyncio.to_thread(storage.record_last_login, user["username"], security.client_ip(request))
-    user["last_login_at"] = storage.now_ts()
+    login_at = storage.now_ts()
+    await asyncio.to_thread(storage.record_last_login, user["username"], security.client_ip(request), ts=login_at)
+    user["last_login_at"] = login_at
     user["last_login_ip"] = security.client_ip(request)
     audit_request(
         request,
         user,
         "login_success",
+        ts=login_at,
         target_type="account",
         target_id=user["username"],
     )

@@ -721,6 +721,7 @@ def _admin_status_payload(statuses: dict[str, dict], names: list[str]) -> dict:
                 "config": name,
                 "status": str(statuses[name].get("status") or "disconnected"),
                 "task": str(statuses[name].get("task") or ""),
+                "checked_at": statuses[name].get("checked_at"),
                 "ok": bool(statuses[name].get("ok", not statuses[name].get("error"))),
                 "error": str(statuses[name].get("error") or ""),
             }
@@ -884,7 +885,7 @@ def admin_alas_status_for_config(
         catalog = None
     catalog_names = [str(item) for item in ((catalog or {}).get("configs") or []) if str(item)]
     names: list[str] = []
-    for name in bound_names + catalog_names:
+    for name in [selected] + bound_names + catalog_names:
         if name not in names:
             names.append(name)
     result, config_statuses = _alas_status_for_many(names, runtime)

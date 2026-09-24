@@ -295,6 +295,16 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000
 
 控制协议对应项目自带的 scrcpy **3.1** 服务端。参考上游[键盘说明](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/keyboard.md)、[快捷操作](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/shortcuts.md)与 [QtScrcpy FAQ](https://github.com/barry-ran/QtScrcpy/blob/dev/docs/FAQ.md)。ScrcpyGate 尚未提供 scrcpy 的 UHID/AOA 键盘模式。
 
+### 画质与活动记录
+
+预设一键应用；手动修改分辨率、帧率和码率后，点击 **应用画质** 统一生效，避免输入过程中反复重启视频流。编码参数变化可能短暂重启共享视频流；有其他观看端时，服务端可能先保存偏好、延后重启。
+
+分辨率是 scrcpy 的 **长边上限**，保持设备比例；参考宽高不代表固定输出尺寸。帧率是上限，静止画面自然会降低帧率。日常建议先用 30 fps，游戏可尝试 60 fps；带宽或解码能力不足时先降低分辨率或目标码率。每个观看端分别占用上行带宽。现有管理员预设不会被自动覆盖。这些语义参考 [scrcpy 3.1 官方文档](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/video.md)；[QtScrcpy](https://github.com/barry-ran/QtScrcpy) 同样区分帧率上限与跳过过期帧的低延迟策略。
+
+后台 ALAS 状态将 `idle` 显示为已停止，并显示服务端检查时间；手动刷新会绕过短时状态缓存。
+
+用户时间按浏览器本地时区显示。上次登录指认证成功，不是打开页面；观看时长累加仍保留的视频连接记录，多端同时观看分别计时，刷新或重连会新增次数。新增的 `viewer_watch_start` / `viewer_watch_end` 审计事件包含观看会话 ID 及对应时间戳；不改写历史事件。审计记录支持在分页前按用户和设备筛选，导出使用相同条件。运行日志只筛选有界的近期内容，历史排查请使用审计记录或导出完整日志。
+
 ## 运维
 
 CI/CD 验证 amd64 和 arm64 镜像后发布到 GHCR，服务器手动部署。

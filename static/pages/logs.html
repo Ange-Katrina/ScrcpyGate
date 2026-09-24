@@ -178,14 +178,16 @@
                 <span>至</span>
                 <input class="field-input" type="datetime-local" id="audit-date-to" aria-label="自定义结束时间">
               </span>
+              <span class="filter-field" id="f-actor"><span class="f-label">操作者</span><span class="select-wrap"><select id="logs-actor" aria-label="操作者"><option value="all">全部操作者</option><option value="none">未认证用户</option></select><i data-lucide="chevron-down"></i></span></span>
+              <span class="filter-field"><span class="f-label">设备</span><span class="select-wrap"><select id="audit-device" aria-label="审计设备"><option value="all">全部设备</option></select><i data-lucide="chevron-down"></i></span></span>
               <details class="admin-disclosure filter-disclosure" id="audit-more-filters"><summary><span>更多筛选</span><span class="filter-active-count" hidden></span></summary><div class="filter-extra"><span class="filter-field" id="f-event-type"><span class="f-label">事件类型</span><span class="select-wrap"><select id="logs-event-type" aria-label="事件类型"><option value="all">全部事件类型</option><option value="login">登录与退出审计</option><option value="authfail">认证失败</option><option value="acct">账户状态变更</option><option value="perm">用户权限调整</option><option value="dev">设备操作</option><option value="quality">画质与传输配置修改</option><option value="alas">ALAS 配置与运行操作</option><option value="admin">管理员操作</option></select><i data-lucide="chevron-down"></i></span></span>
               <span class="filter-field" id="f-result"><span class="f-label">执行结果</span><span class="select-wrap"><select id="logs-result" aria-label="执行结果"><option value="all">全部</option><option value="success">成功</option><option value="fail">失败</option><option value="denied">拒绝</option></select><i data-lucide="chevron-down"></i></span></span>
-              <span class="filter-field" id="f-actor"><span class="f-label">操作者</span><span class="select-wrap"><select id="logs-actor" aria-label="操作者"><option value="all">全部操作者</option><option value="none">未认证用户</option></select><i data-lucide="chevron-down"></i></span></span>
               <label class="search-box" id="f-target"><i data-lucide="crosshair"></i><input type="search" id="logs-target" placeholder="筛选操作对象" aria-label="筛选操作对象"></label>
             </div></details>
               <button class="tool-btn filter-reset" type="button" data-clear-log-filters><i data-lucide="filter-x"></i><span>清除筛选</span></button>
             </div>
 
+            <p class="activity-scope-note">运行日志仅筛选最近最多 2000 条；查找用户与设备操作请使用审计记录，或导出完整日志。</p>
             <div class="logs-banner banner-error is-hidden" id="logs-fail-banner" role="alert"><i data-lucide="alert-circle"></i><span class="banner-msg">刷新失败 · 无法获取最新日志，请重试</span><button class="banner-close" id="logs-fail-retry" type="button"><i data-lucide="rotate-cw"></i>重试</button></div>
             <div class="logs-banner banner-error is-hidden" id="logs-down-banner" role="alert"><i data-lucide="server-off"></i><span class="banner-msg">日志服务不可用 · 数据可能延迟，恢复后自动同步</span><button class="banner-close" id="logs-down-close" type="button" aria-label="关闭提示"><i data-lucide="x"></i></button></div>
             <div class="logs-banner banner-error is-hidden" id="logs-export-fail-banner" role="alert"><i data-lucide="download"></i><span class="banner-msg">导出失败 · 无法生成导出文件，请稍后重试</span><button class="banner-close" id="logs-export-fail-close" type="button" aria-label="关闭提示"><i data-lucide="x"></i></button></div>

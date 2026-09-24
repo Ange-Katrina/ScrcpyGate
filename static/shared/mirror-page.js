@@ -140,8 +140,8 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!fpsShown){ el.hidden=true; el.textContent='—'; el.classList.remove('is-low'); return; }
         el.hidden=false;
         el.textContent=Math.round(Number(measuredFps)||0)+' fps';
-        el.title=tr('实测帧率（客户端每秒收到的帧数）');
-        el.classList.toggle('is-low',Number(measuredFps)>0&&Number(measuredFps)<20);
+        el.title=tr('实测接收帧率；静止画面会自动降低帧率，不代表卡顿');
+        el.classList.remove('is-low');
       }
       function closeMoreMenu(restoreFocus){
         var pop=document.getElementById('cb-pop');
@@ -2931,7 +2931,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var vpFullscreenValue='';
       var vpAllowTuning=true;
       var vpFit='contain';
-      var vpApplyTimer=null;
+      var vpApplyPending=false;
       function vpPresetById(id){ for(var i=0;i<vpPresets.length;i++){ if(vpPresets[i].id===id) return vpPresets[i]; } return null; }
       /* 输出尺寸档位与后台同源（resolution_cap_options），只列出不超过分辨率上限的档位。 */
       function vpRenderResolutionOptions(payload){
@@ -2959,8 +2959,8 @@ document.addEventListener('DOMContentLoaded',function(){
         vpRes.innerHTML=html+'<option value="custom">自定义</option>';
       }
       function vpParamsSpec(){
-        var res=vpParams.resMode==='custom' ? (vpParams.customW+'×'+vpParams.customH) : String(vpParams.resMode).replace('x','×');
-        return res+' · '+vpParams.fps+'fps · '+vpParams.bitrate+'Mbps';
+        var dims=vpParams.resMode==='custom' ? [vpParams.customW,vpParams.customH] : String(vpParams.resMode).split('x');
+        return tr('长边上限')+' '+Math.max(Number(dims[0]),Number(dims[1]))+'px · ≤'+vpParams.fps+'fps · '+vpParams.bitrate+'Mbps';
       }
       function vpSyncSeg(seg){
         if(!seg) return;
@@ -3002,9 +3002,9 @@ document.addEventListener('DOMContentLoaded',function(){
         });
       });
       function vpSetStatus(text,state){
-        vpStatus.classList.remove('busy','error');
+        vpStatus.classList.remove('busy','error','draft');
         if(state) vpStatus.classList.add(state);
-        vpStatusDot.innerHTML=state==='busy' ? '<span class="vp-status-spinner" aria-hidden="true"></span>' : '<i data-lucide="check"></i>';
+        vpStatusDot.innerHTML=state==='busy' ? '<span class="vp-status-spinner" aria-hidden="true"></span>' : '<i data-lucide="'+(state==='draft'?'pencil':state==='error'?'alert-circle':'check')+'"></i>';
         vpStatusText.textContent=text;
         if(window.lucide) lucide.createIcons();
       }
@@ -3014,7 +3014,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var html=vpPresets.map(function(p){
           var on=p.id===vpSelectedPresetId;
           return '<button class="vp-profile-card'+(on?' active':'')+'" type="button" role="radio" aria-checked="'+(on?'true':'false')+'" data-preset-id="'+escHtml(p.id)+'">'
-            +'<span class="vp-p-main"><span class="vp-p-name">'+escHtml(p.name)+'</span><span class="vp-p-desc">'+(p.builtin?'内置预设':'自定义预设')+'</span></span>'
+            +'<span class="vp-p-main"><span class="vp-p-name">'+escHtml(p.name)+'</span><span class="vp-p-desc">'+escHtml(tr('长边上限')+' '+Math.max(p.width,p.height)+'px · ≤'+p.fps+'fps · '+p.bitrate+'Mbps')+'</span></span>'
             +'<span class="vp-p-check" aria-hidden="true"><i data-lucide="check"></i></span></button>';
         }).join('');
         vpPresetsBox.innerHTML=html||'<p class="vp-note">'+escHtml(tr('管理员尚未启用任何画质预设'))+'</p>';
@@ -3119,15 +3119,32 @@ document.addEventListener('DOMContentLoaded',function(){
         vpUpdatePill(true);
       }
       function vpApply(){
-        if(vpBusy) return;
+        if(vpBusy){ vpApplyPending=true; return; }
+        var fields=[vpFps,vpBitrate].concat(vpRes.value==='custom'?[vpResW,vpResH]:[]);
+        if(!vpSelectedPresetId&&fields.some(function(field){ return !field.value||!field.reportValidity(); })){
+          vpSetStatus('请填写有效的画质参数','error');
+          return;
+        }
         vpBusy=true;
+        vpApplyPending=false;
         vpSetStatus('正在应用…','busy');
         var payload=vpPayload();
+        var submitted=JSON.stringify(payload);
         var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('quality.update'))
           ? window.ScrcpyGateApi.configured('quality.update',{method:'PUT',body:payload})
           : Promise.reject(new Error('画质服务未连接'));
-        p.then(function(result){ vpBusy=false; vpAdoptQualityResult(result); vpSetStatus(result&&result.deferred?'已保存 · 当前有多个观看端，视频重启已延后':(result&&result.restarted?'已应用 · 视频流已重启':'已应用')); })
-         .catch(function(error){ vpBusy=false; vpSetStatus('应用失败 · '+apiErrorText(error),'error'); });
+        p.then(function(result){
+          if(result&&result.stale||payload.deviceId!==(selectedDevice&&selectedDevice.id||'')) return;
+          if(submitted!==JSON.stringify(vpPayload())){ vpSetStatus('参数已修改，点击应用画质','draft'); return; }
+          vpAdoptQualityResult(result);
+          vpSetStatus(result&&result.deferred?'已保存 · 当前有多个观看端，视频重启已延后':(result&&result.restarted?'已应用 · 视频流已重启':'已应用'));
+        }).catch(function(error){
+          if(payload.deviceId===(selectedDevice&&selectedDevice.id||'')) vpSetStatus('应用失败 · '+apiErrorText(error),'error');
+        }).finally(function(){
+          vpBusy=false;
+          if(vpApplyPending&&payload.deviceId===(selectedDevice&&selectedDevice.id||'')) vpApply();
+          else vpApplyPending=false;
+        });
       }
       function vpLoad(){
         vpLoaded=true;
@@ -3269,8 +3286,7 @@ document.addEventListener('DOMContentLoaded',function(){
         vpSelectedPresetId='';
         vpRenderPresets();
         vpUpdatePill();
-        clearTimeout(vpApplyTimer);
-        vpApplyTimer=setTimeout(vpApply,450);
+        vpSetStatus('参数已修改，点击应用画质','draft');
       }
       vpRes.addEventListener('change',function(){
         vpResCustom.hidden=vpRes.value!=='custom';
@@ -3280,6 +3296,7 @@ document.addEventListener('DOMContentLoaded',function(){
       vpResH.addEventListener('input',vpOnManualEdit);
       vpFps.addEventListener('input',vpOnManualEdit);
       vpBitrate.addEventListener('input',vpOnManualEdit);
+      document.getElementById('vp-apply').addEventListener('click',vpApply);
       vpFullscreen.addEventListener('change',function(){
         vpFullscreenValue=vpFullscreen.value;
         vpApply();

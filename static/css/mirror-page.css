@@ -1025,6 +1025,8 @@
     .vp-hint-warn { color:var(--brand-400); }
     .dark .vp-hint-warn { color:#2e8dff; }
     .vp-note { margin:10px 0 0; font-size:12px; line-height:1.55; color:var(--c-text-sub); }
+    .vp-apply { width:100%; margin-top:14px; padding:10px 14px; border:0; border-radius:var(--r-md,10px); background:#007aff; color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+    .vp-apply:focus-visible { outline:2px solid var(--c-text); outline-offset:3px; }
     .vp-seg { position:relative; display:flex; align-items:center; height:36px; padding:2px; gap:2px; border-radius:999px; background:var(--c-surface-hover); }
     .vp-seg .vp-seg-thumb { position:absolute; top:2px; left:2px; z-index:0; height:32px; border-radius:999px; background:var(--c-surface); box-shadow:0 1px 3px -1px var(--c-shadow); transition:transform var(--motion-base) var(--ease-standard),width var(--motion-base) var(--ease-standard); }
     .vp-seg button { position:relative; z-index:1; flex:1 1 0; display:inline-flex; align-items:center; justify-content:center; height:32px; min-width:0; padding:0 10px; border:0; border-radius:999px; background:transparent; color:var(--c-text-faint); font:inherit; font-size:13px; font-weight:500; cursor:pointer; white-space:nowrap; transition:color var(--motion-fast) var(--ease-fade); }
@@ -1053,6 +1055,7 @@
     .vp-status { display:flex; align-items:center; gap:8px; min-height:36px; margin-top:12px; padding:0 4px; font-size:12.5px; color:var(--c-text-sub); }
     .vp-status-dot { flex:0 0 auto; width:16px; height:16px; display:grid; place-items:center; border-radius:999px; background:rgba(52,199,89,.14); color:var(--success-text); }
     .vp-status-dot [data-lucide] { width:10px; height:10px; }
+    .vp-status.draft .vp-status-dot { background:var(--c-surface-hover); color:var(--c-text-sub); }
     .vp-status.busy .vp-status-dot { background:transparent; }
     .vp-status.busy .vp-status-spinner { width:14px; height:14px; border-radius:999px; border:2px solid var(--c-border); border-top-color:#007aff; animation:spin .8s linear infinite; }
     .dark .vp-status.busy .vp-status-spinner { border-top-color:#2e8dff; }

@@ -374,6 +374,7 @@ async def video_socket(
     device_id: str,
     exposed_device_id: str | None = None,
     session_check=None,
+    audit_callback=None,
 ):
     if not await _run_session_check(session_check):
         await websocket.close(code=4403, reason="session revoked")
@@ -424,12 +425,13 @@ async def video_socket(
             _release_video_connection(username)
     watch_session_id: str | None = None
     stream_state = _VideoStreamState()
+    watch_started_at_ms = time.time_ns() // 1_000_000
     try:
         watch_session_id = await asyncio.to_thread(
             storage.start_viewer_watch,
             username,
             device_id,
-            started_at_ms=time.time_ns() // 1_000_000,
+            started_at_ms=watch_started_at_ms,
         )
     except Exception as exc:
         # History is observability only; a storage hiccup must never tear down
@@ -444,6 +446,15 @@ async def video_socket(
         manager.cancel_reservation_expiry(device_id, reservation_token)
     manager.cancel_disconnect_stop(device_id)
     try:
+        if watch_session_id and audit_callback:
+            try:
+                await audit_callback(
+                    "viewer_watch_start", outcome="success", severity="info", ts=watch_started_at_ms // 1000,
+                    metadata={"watch_session_id": watch_session_id, "client_id": client.id,
+                              "started_at_ms": watch_started_at_ms},
+                )
+            except Exception as exc:
+                log.warning("VIDEO_WATCH_AUDIT_FAILED error=%s", type(exc).__name__)
         public_id = exposed_device_id or device_id
         await websocket.send_json(_video_hello_payload(session, client, public_id))
         # 多端投屏记录：晚一步接入的观看端在这里补一条邀请，发起端重连后在这里拿回主导权
@@ -502,11 +513,19 @@ async def video_socket(
     finally:
         if watch_session_id:
             try:
-                await asyncio.to_thread(
+                watch = await asyncio.to_thread(
                     storage.finish_viewer_watch,
                     watch_session_id,
                     end_reason=stream_state.end_reason,
                 )
+                if watch and audit_callback:
+                    await audit_callback(
+                        "viewer_watch_end", outcome="success", severity="info", ts=watch["ended_at_ms"] // 1000,
+                        reason=stream_state.end_reason,
+                        metadata={"watch_session_id": watch_session_id, "client_id": client.id,
+                                  "started_at_ms": watch["started_at_ms"], "ended_at_ms": watch["ended_at_ms"],
+                                  "duration_ms": watch["duration_ms"]},
+                    )
             except Exception as exc:
                 log.warning(
                     "VIDEO_WATCH_FINISH_FAILED device=%s user=%s error=%s",

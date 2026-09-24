@@ -320,8 +320,8 @@
 
       /* ---------- 预设渲染 ---------- */
       function presetMetaHtml(p) {
-        return '<span class="preset-meta-chip">' + p.width + '×' + p.height + '</span>' +
-          '<span class="preset-meta-chip">' + p.fps + ' fps</span>' +
+        return '<span class="preset-meta-chip">长边 ≤ ' + Math.max(Number(p.width), Number(p.height)) + 'px</span>' +
+          '<span class="preset-meta-chip">≤ ' + p.fps + ' fps</span>' +
           '<span class="preset-meta-chip">' + p.bitrate + ' Mbps</span>' +
           (p.fullscreenOnly ? '<span class="preset-flag">仅全屏</span>' : '') +
           (p.enabled === false ? '<span class="preset-flag off">已停用</span>' : '');

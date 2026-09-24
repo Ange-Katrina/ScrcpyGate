@@ -1149,3 +1149,5 @@ html, body { margin:0; height:100%; }
 
 /* Closed drawers must also hide shadows and remain hidden without motion. */
 .perm-drawer:not(.open) { visibility:hidden; }
+
+    .activity-scope-note { margin:0; padding:10px 14px; color:var(--admin-muted); font-size:12px; line-height:1.6; }
