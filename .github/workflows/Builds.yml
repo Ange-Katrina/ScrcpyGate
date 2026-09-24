@@ -146,7 +146,7 @@ jobs:
         if: needs.checks.outputs.publish == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: verified-image-${{ matrix.arch }}
+          name: ScrcpyGate-linux-${{ matrix.arch }}
           path: ${{ runner.temp }}/verified/
           retention-days: 1
           compression-level: 1
@@ -170,13 +170,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: verified-image-*
+          pattern: ScrcpyGate-linux-*
           path: ${{ runner.temp }}/images
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Load the images that passed verification
         run: |
           for arch in amd64 arm64; do
-            dir="$RUNNER_TEMP/images/verified-image-$arch"
+            dir="$RUNNER_TEMP/images/ScrcpyGate-linux-$arch"
             (cd "$dir" && sha256sum --check SHA256SUMS)
             docker load -i "$dir/image.tar"
             revision=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "scrcpygate-ci:$arch")
@@ -217,14 +217,14 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE_REPO }}
           subject-digest: ${{ steps.candidate.outputs.amd64 }}
-          sbom-path: ${{ runner.temp }}/images/verified-image-amd64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/images/ScrcpyGate-linux-amd64/sbom.spdx.json
           push-to-registry: true
       - name: Attest the arm64 SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_REPO }}
           subject-digest: ${{ steps.candidate.outputs.arm64 }}
-          sbom-path: ${{ runner.temp }}/images/verified-image-arm64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/images/ScrcpyGate-linux-arm64/sbom.spdx.json
           push-to-registry: true
       - name: Promote the verified index to public release tags
         id: promote
