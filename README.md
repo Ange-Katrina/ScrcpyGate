@@ -84,6 +84,16 @@ Whatever you choose runs the same image and the same `app.main:app`.
 | **Docker first** | Multi-arch image (amd64 + arm64), non-root, healthcheck, and sample compose files with `cap_drop: ALL` and `no-new-privileges`. |
 | **Release pipeline** | The image is smoke-run and scanned before it ships, published to GHCR with provenance/SBOM, and can be deployed by digest with automatic rollback. A weekly watcher also builds an untested **canary** image when upstream scrcpy releases a new server, so version bumps are validated before `latest` moves. |
 
+## Grid status and device resources
+
+The administrator grid includes a compact ALAS configuration list with each configuration's state, task, and last check time. It reuses the management status cache, refreshes every 30 seconds while the grid is visible, and pauses when the tab is hidden or the grid closes. Failed checks remain distinct from stopped configurations.
+
+Use the activity button on a device card to sample Android CPU and memory usage on demand. CPU is measured over a one-second interval across all cores; memory is `MemTotal - MemAvailable`, rather than an individual app's usage. Results, including unavailable metrics, are cached for ten seconds, with at most two concurrent samples per application process and a four-second ADB timeout. Android restrictions may prevent reading `/proc/stat` or `/proc/meminfo`; unavailable values are not reported as zero. Device sampling does not start mirroring or acquire control. No new deployment settings or dependencies are required.
+
+## City lookup coverage
+
+GeoLite2-City may return a country without a province or city. Missing fields remain unknown; an IP location is an estimate, not a device's GPS position. [ip2region](https://github.com/lionsoul2014/ip2region) is a possible supplementary offline source with separate IPv4 and IPv6 XDB databases and a Python client. Its bundled data is updated irregularly. It is not integrated in this release, and XDB files cannot be uploaded through the MMDB importer. Any future integration must identify the source, validate each database, and preserve the existing country access policy when sources disagree.
+
 ## How it works
 
 ```mermaid

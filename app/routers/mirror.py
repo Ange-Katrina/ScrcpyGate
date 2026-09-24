@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
-from .. import i18n, security, storage
+from .. import device_metrics, i18n, security, storage
 from ..adb_monitor import adb_monitor
 from ..booleans import InvalidBooleanValue, parse_bool_strict
 from ..mirror_manager import manager
@@ -18,6 +18,19 @@ from ..services.mirror_service import public_mirror_failure, public_sessions_for
 from ..video_options import VideoOptionError, public_video_options
 
 router = APIRouter()
+
+
+@router.get("/api/devices/{device_id}/metrics")
+async def api_device_metrics(device_id: str, request: Request, response: Response):
+    security.require_admin(request)
+    real_id = await asyncio.to_thread(resolve_device_or_404, device_id)
+    device = await asyncio.to_thread(storage.get_device, real_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
+    result = await asyncio.to_thread(device_metrics.snapshot, str(device.get("address") or real_id))
+    security.require_admin(request)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 def _optional_bool(payload: dict, key: str) -> bool:

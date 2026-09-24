@@ -1257,9 +1257,9 @@
     .mg-tile { container-type:inline-size; container-name:mirror-tile; }
     .mg-actions { overflow:visible; }
     .mg-actions-main, .mg-actions-end { flex-shrink:0; }
-    .mg-actions .mg-btn { min-width:44px; min-height:44px; flex-shrink:0; }
+    .mg-actions .mg-btn { min-width:30px; min-height:30px; height:30px; padding:0 8px; border-radius:8px; flex-shrink:0; }
     @container mirror-tile (max-width:280px) {
-      .mg-actions .mg-btn { width:44px; padding:0; }
+      .mg-actions .mg-btn { width:30px; padding:0; }
       .mg-actions .mg-btn-text { display:none; }
       .mg-slot .mg-actions-main { width:100%; }
       .mg-slot .mg-btn { width:100%; }
@@ -1287,6 +1287,27 @@
     .mg-slot .mg-placeholder { color:var(--c-text-faint); }
     .mg-slot:focus-visible { outline:none; border-color:#007aff; box-shadow:0 0 0 2px rgba(0,122,255,.28); }
     .mg-slot .mg-btn-primary { pointer-events:none; }
+    .mg-slot .mg-btn-primary { color:var(--c-text-sub); background:var(--c-hover); border:1px dashed var(--c-border); box-shadow:none; }
+    .mg-metrics { padding:4px; border-top:1px solid var(--c-border); color:var(--c-text-sub); font-size:11px; line-height:1.6; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+    .mg-alas { flex:0 0 auto; border:1px solid var(--c-border); border-radius:10px; padding:8px 10px; background:var(--c-surface); min-width:0; }
+    .mg-alas-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; font-size:12px; }
+    .mg-alas-head strong { color:var(--c-text-strong); }
+    .mg-alas-head > span { color:var(--c-text-sub); }
+    .mg-alas-head button { margin-left:auto; }
+    .mg-alas-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:6px; max-height:142px; overflow:auto; scrollbar-width:thin; font-size:12px; color:var(--c-text-sub); }
+    .mg-alas-list:not(:empty) { margin-top:6px; }
+    .mg-alas-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; min-width:0; padding:8px; border-radius:7px; background:var(--c-hover); }
+    .mg-alas-item strong { color:var(--c-text-strong); overflow-wrap:anywhere; }
+    .mg-alas-task { grid-column:1 / -1; overflow-wrap:anywhere; }
+    .mg-alas-item small { grid-column:1 / -1; font-variant-numeric:tabular-nums; }
+    .mg-alas-item[data-tone="running"] .mg-alas-state { color:var(--state-success); }
+    .mg-alas-item[data-tone="error"] .mg-alas-state { color:var(--state-danger,#dc3545); }
+    .mg-alas-item[data-tone="pending"] .mg-alas-state { color:var(--state-warning,#bf7900); }
+    @media (pointer:coarse) {
+      .mg-actions { flex-wrap:wrap; }
+      .mg-actions .mg-btn { min-width:44px; min-height:44px; height:44px; }
+      .mg-alas-head button { min-height:44px; }
+    }
     /* 宫格底部：添加 ADB 设备（空坑位之外的显式入口）。 */
     .mg-grid-foot { display:flex; align-items:center; gap:10px; flex:0 0 auto; flex-wrap:wrap; }
     .mg-add-device { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 14px; border:1px dashed var(--c-border); border-radius:999px; background:var(--c-surface); color:var(--c-text); font:inherit; font-size:12px; font-weight:600; cursor:pointer; transition:background-color var(--motion-fast) var(--ease-fade),border-color var(--motion-fast) var(--ease-fade),color var(--motion-fast) var(--ease-fade),transform var(--motion-fast) var(--ease-standard); }

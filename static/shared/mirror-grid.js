@@ -51,9 +51,100 @@
     var order = [];
     var slots = [];
     var controls = null;
+    var alasTimer = null;
+    var alasBusy = false;
+    var alasLastAttempt = 0;
+    var alasGeneration = 0;
+    var alasVisible = true;
     var lastTileWidth = 0;          // 最近一次实际生效的卡片宽度
     var lastTileRequestedWidth = 0; // 滑块请求的宽度
     var batchToken = 0;             // 批量操作令牌（一键全部投屏/停止/刷新）
+
+    function refreshAlas() {
+      var list = document.getElementById('mg-alas-list');
+      var summary = document.getElementById('mg-alas-summary');
+      var button = document.getElementById('mg-alas-refresh');
+      if (!list || !summary || !active || !alasVisible || document.hidden || alasBusy) return;
+      if (Date.now() - alasLastAttempt < 5000) return;
+      alasLastAttempt = Date.now();
+      alasBusy = true;
+      var generation = alasGeneration;
+      if (button) button.disabled = true;
+      summary.textContent = tr('检查中');
+      global.ScrcpyGateApi.configured('alas.config.status', { cache: false }).then(function (payload) {
+        if (generation !== alasGeneration || !active) return;
+        var data = payload.status || {};
+        var items = Array.isArray(data.config_statuses) ? data.config_statuses : [];
+        var labels = { running: '运行中', stopped: '已停止', idle: '空闲', waiting: '等待中',
+          error: '异常', disconnected: '连接中断', disabled: '已禁用', unknown: '未检查', starting: '启动中', stopping: '停止中' };
+        list.innerHTML = items.map(function (item) {
+          var state = item.status || 'unknown';
+          var checked = Number(item.checked_at);
+          var stale = state !== 'disabled' && state !== 'unknown' && (!(checked > 0) || Date.now() / 1000 - checked > 90);
+          var failed = state !== 'disabled' && (item.ok === false || !!item.error || state === 'error');
+          var tone = failed ? 'error' : stale ? 'pending' : state === 'running' ? 'running' : (state === 'unknown' || state === 'waiting' || state === 'starting' || state === 'stopping') ? 'pending' : 'muted';
+          var time = checked > 0 && isFinite(checked) ? new Date(checked * 1000).toLocaleTimeString() : '';
+          return '<article class="mg-alas-item" data-tone="' + tone + '">' +
+            '<strong>' + escHtml(item.config || '—') + '</strong>' +
+            '<span class="mg-alas-state">' + escHtml(tr(failed ? '检查失败' : stale ? '状态已过期' : labels[state] || '未检查')) + '</span>' +
+            '<span class="mg-alas-task">' + escHtml(item.error || item.task || '—') + '</span>' +
+            '<small>' + escHtml(time ? tr('上次检查：') + time : tr('未检查')) + '</small></article>';
+        }).join('');
+        var running = items.filter(function (item) { return item.status === 'running' && item.ok !== false && !item.error && Number(item.checked_at) > Date.now() / 1000 - 90; }).length;
+        var hasError = data.error || items.some(function (item) { return item.ok === false || !!item.error; });
+        summary.textContent = data.status === 'disabled' ? tr('ALAS 已禁用') : hasError ? tr('部分状态不可用，请重试') : items.length ? noticeText('{0} 个配置 · {1} 个运行中', [items.length, running]) : tr('暂无 ALAS 配置');
+        if (!items.length && data.error) list.textContent = data.error;
+      }).catch(function () {
+        if (generation !== alasGeneration || !active) return;
+        list.textContent = '';
+        summary.textContent = tr('状态获取失败，请重试');
+      }).finally(function () {
+        alasBusy = false;
+        if (button) button.disabled = false;
+      });
+    }
+    function updateAlasPolling() {
+      if (alasTimer) global.clearInterval(alasTimer);
+      alasTimer = null;
+      var panel = document.getElementById('mg-alas');
+      if (panel) panel.hidden = !alasVisible;
+      if (!active || !alasVisible || document.hidden) return;
+      refreshAlas();
+      alasTimer = global.setInterval(refreshAlas, 30000);
+    }
+    function onAlasVisibility(event) {
+      alasVisible = !event.detail || event.detail.visible !== false;
+      alasGeneration += 1;
+      updateAlasPolling();
+    }
+    function metricsText(data) {
+      var cpu = typeof data.cpu_percent === 'number' ? data.cpu_percent.toFixed(1) + '%' : tr('不可用');
+      var memory = typeof data.memory_used_bytes === 'number' && data.memory_total_bytes > 0
+        ? (data.memory_used_bytes / 1073741824).toFixed(1) + ' / ' + (data.memory_total_bytes / 1073741824).toFixed(1) + ' GiB' : tr('不可用');
+      return 'CPU ' + cpu + ' · ' + tr('内存') + ' ' + memory;
+    }
+    function refreshMetrics(tile) {
+      if (!active || tile.metricsBusy || tile.device.online === false || tile.device.permission === false) return;
+      var target = tile.element.querySelector('.mg-metrics');
+      var button = tile.element.querySelector('[data-action="metrics"]');
+      tile.metricsBusy = true;
+      var epoch = tile.metricsEpoch = (tile.metricsEpoch || 0) + 1;
+      button.disabled = true;
+      target.hidden = false;
+      target.textContent = tr('正在采样…');
+      global.ScrcpyGateApi.configured('devices.metrics', { params: { deviceId: tile.deviceId }, cache: false }).then(function (data) {
+        if (!active || tiles[tile.deviceId] !== tile || epoch !== tile.metricsEpoch || tile.device.online === false || tile.device.permission === false) return;
+        if (data.status === 'busy') { target.textContent = tr('采样繁忙，请稍后重试'); return; }
+        var sampled = Number(data.sampled_at);
+        target.textContent = metricsText(data) + (sampled > 0 ? ' · ' + tr('采样于') + ' ' + new Date(sampled * 1000).toLocaleTimeString() : '');
+        if (data.status === 'partial' || data.status === 'unavailable') target.textContent += ' · ' + tr('设备未提供部分指标');
+      }).catch(function () {
+        if (active && tiles[tile.deviceId] === tile && epoch === tile.metricsEpoch) target.textContent = tr('状态获取失败，请重试');
+      }).finally(function () {
+        tile.metricsBusy = false;
+        button.disabled = tile.device.online === false || tile.device.permission === false;
+      });
+    }
 
     /* ---------------- 基础工具 ---------------- */
 
@@ -138,10 +229,12 @@
               '<button class="mg-btn mg-btn-stop" type="button" data-action="stop" title="' + stopLabel + '" aria-label="' + stopLabel + '" hidden><i data-lucide="square" aria-hidden="true"></i><span class="mg-btn-text">' + stopLabel + '</span></button>' +
             '</span>' +
             '<span class="mg-actions-end">' +
+              '<button class="mg-btn mg-metrics-button" type="button" data-action="metrics" title="' + escHtml(tr('设备资源（按需刷新）')) + '" aria-label="' + escHtml(tr('设备资源（按需刷新）')) + '"><i data-lucide="activity" aria-hidden="true"></i></button>' +
               '<button class="mg-btn" type="button" data-action="open" title="' + openLabel + '" aria-label="' + openLabel + '"><i data-lucide="monitor-up" aria-hidden="true"></i><span class="mg-btn-text">' + openLabel + '</span></button>' +
               '<button class="mg-btn" type="button" data-action="control" title="' + controlLabel + '" aria-label="' + controlLabel + '" hidden><i data-lucide="mouse-pointer-click" aria-hidden="true"></i><span class="mg-btn-text">' + controlLabel + '</span></button>' +
             '</span>' +
           '</footer>' +
+          '<div class="mg-metrics" role="status" hidden></div>' +
         '</article>';
     }
 
@@ -257,6 +350,7 @@
       tile.buttons.stop.addEventListener('click', function () { stopTile(tile); });
       tile.buttons.open.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: false }); });
       tile.buttons.control.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: true }); });
+      element.querySelector('[data-action="metrics"]').addEventListener('click', function () { refreshMetrics(tile); });
       tiles[device.id] = tile;
       // 屏幕区按真实画面比例自适应：竖屏手机不再被塞进 16:9 的黑框里。
       tile.video.addEventListener('loadedmetadata', function () { syncStageAspect(tile, true); });
@@ -742,6 +836,14 @@
         var tile = ensureTile(device);
         if (!tile) return;
         tile.device = device;
+        var resources = tile.element.querySelector('[data-action="metrics"]');
+        resources.disabled = !!tile.metricsBusy || device.online === false || device.permission === false;
+        if (device.online === false || device.permission === false) {
+          tile.metricsEpoch = (tile.metricsEpoch || 0) + 1;
+          var metrics = tile.element.querySelector('.mg-metrics');
+          metrics.hidden = true;
+          metrics.textContent = '';
+        }
         if (!isLive(tile)) setState(tile, tile.state === 'error' ? 'error' : 'idle', tile.state === 'error' ? tile.error : '');
         else tile.meta.textContent = statusText(device);
       });
@@ -772,8 +874,18 @@
       var next = value === true;
       if (active === next) return Promise.resolve();
       active = next;
+      alasGeneration += 1;
+      updateAlasPolling();
       var stopped = Promise.resolve();
-      if (!active) stopped = stopAll();
+      if (!active) {
+        tileList().forEach(function (tile) {
+          tile.metricsEpoch = (tile.metricsEpoch || 0) + 1;
+          var metrics = tile.element.querySelector('.mg-metrics');
+          metrics.hidden = true;
+          metrics.textContent = '';
+        });
+        stopped = stopAll();
+      }
       syncToolbar();
       return stopped;
     }
@@ -849,6 +961,13 @@
     }
 
     function destroy() {
+      if (alasTimer) global.clearInterval(alasTimer);
+      alasGeneration += 1;
+      document.removeEventListener('visibilitychange', updateAlasPolling);
+      document.removeEventListener('scrcpygate:auth-invalid', destroy);
+      global.removeEventListener('scrcpygate:workbench-alas-visibility', onAlasVisibility);
+      var refreshButton = document.getElementById('mg-alas-refresh');
+      if (refreshButton) refreshButton.removeEventListener('click', refreshAlas);
       batchToken += 1;
       stopAll();
       if (host) host.innerHTML = '';
@@ -900,6 +1019,14 @@
       maxLive: maxLive,
       slotCount: slotCount
     };
+    var alasRefreshButton = document.getElementById('mg-alas-refresh');
+    if (alasRefreshButton) alasRefreshButton.addEventListener('click', refreshAlas);
+    document.addEventListener('visibilitychange', updateAlasPolling);
+    document.addEventListener('scrcpygate:auth-invalid', destroy);
+    global.addEventListener('scrcpygate:workbench-alas-visibility', onAlasVisibility);
+    if (global.ScrcpyGateV2 && typeof global.ScrcpyGateV2.getWorkbenchAlasVisible === 'function') {
+      alasVisible = global.ScrcpyGateV2.getWorkbenchAlasVisible() !== false;
+    }
     return api;
   }
 

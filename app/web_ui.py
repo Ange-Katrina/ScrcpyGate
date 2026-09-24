@@ -95,6 +95,7 @@ ENDPOINTS_MAP = {
     "workbench.features.reset": {"path": "/api/admin/workbench/reset", "method": "POST"},
     # ALAS(工作台)
     "alas.configs": {"path": "/api/alas/configs", "method": "GET"},
+    "devices.metrics": {"path": "/api/devices/:deviceId/metrics", "method": "GET"},
     "alas.status": {"path": "/api/alas/status", "method": "GET"},
     "alas.toggle": {"path": "/api/alas/toggle", "method": "POST"},
     "alas.exitGuard": {"path": "/api/alas/exit-guard", "method": "GET"},

@@ -81,6 +81,16 @@ cd ScrcpyGate
 | **Docker 优先** | 多架构镜像（amd64 + arm64）、非 root、健康检查，compose 样例带 `cap_drop: ALL` 与 `no-new-privileges`。 |
 | **发布链路** | 镜像出厂前先试跑并扫描，推 GHCR 时带 provenance/SBOM，支持按 digest 部署并自动回滚。每周还会盯着上游 scrcpy：它发了新版就先出一个**未验证的 canary 镜像**，验证通过前 `latest` 不动。 |
 
+## 宫格状态与设备资源
+
+管理员宫格上方提供紧凑的 ALAS 配置列表，显示每个配置的状态、任务和上次检查时间。复用管理端状态缓存，在宫格可见时每 30 秒刷新；隐藏标签页或离开宫格后暂停。检查失败与正常停止分别显示。
+
+点击设备卡片上的活动曲线按钮，可按需采样 Android CPU 和内存。CPU 为一秒间隔的全核利用率；内存按 `MemTotal - MemAvailable` 计算，不是单个应用的占用。结果（包括指标不可用）缓存十秒，每个应用进程最多两台设备并发采样，ADB 超时四秒。Android 可能禁止读取 `/proc/stat` 或 `/proc/meminfo`，此时显示不可用，不会写成 0。采样不启动投屏、不获取控制权，无需增加部署配置或依赖。
+
+## 省市归属的覆盖范围
+
+GeoLite2-City 可能只能返回国家，缺失的省市保持未知；IP 归属是估算，不是设备的 GPS 位置。[ip2region](https://github.com/lionsoul2014/ip2region) 可作为后续可选的离线补充来源，官方当前提供独立的 IPv4、IPv6 XDB 库及 Python 客户端，但随仓库提供的数据不定期更新。本版本尚未接入，XDB 不能上传到现有 MMDB 导入入口。后续接入需要标明来源、验证各库，并在来源冲突时保留现有国家访问控制策略。
+
 ## 工作原理
 
 ```mermaid

@@ -863,7 +863,7 @@ html, body { margin:0; height:100%; }
     .preset-add-btn:hover { background:var(--admin-brand-soft-hover); }
     .preset-add-btn [data-lucide] { width:12px; height:12px; }
     .preset-list { display:flex; flex-direction:column; gap:8px; }
-    .preset-item { display:flex; flex-direction:column; gap:2px; min-width:0; padding:10px 12px; border:1px solid var(--admin-line); border-radius:var(--page-radius-md); background:var(--admin-field); transition:border-color var(--motion-fast) var(--ease-fade),background-color var(--motion-fast) var(--ease-fade); }
+    .preset-item { display:flex; flex-direction:column; gap:2px; min-width:0; padding:8px 10px; border:1px solid var(--admin-line); border-radius:var(--page-radius-md); background:var(--admin-field); transition:border-color var(--motion-fast) var(--ease-fade),background-color var(--motion-fast) var(--ease-fade); }
     .preset-item:hover { background:var(--admin-hover); border-color:var(--admin-border); }
     .preset-item.selected { border-color:var(--brand-border-hover); background:var(--admin-brand-soft); }
     /* 已应用到表单的预设：左侧一道品牌色标记，和"仅选中预览"区分开。 */
@@ -877,8 +877,8 @@ html, body { margin:0; height:100%; }
     .preset-meta { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
     .preset-meta-chip { display:inline-flex; align-items:center; height:var(--page-h-badge); padding:0 7px; border-radius:var(--page-radius-pill); background:var(--glass-field); color:var(--admin-muted); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .preset-item.selected .preset-meta-chip { background:var(--glass-hover); }
-    .preset-ops { display:flex; flex-wrap:wrap; align-items:center; gap:6px 4px; margin-top:6px; }
-    .preset-ops > .preset-switch { flex:0 0 100%; }
+    .preset-ops { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:4px; }
+    .preset-ops > .preset-switch { flex:0 0 auto; margin-right:auto; }
     .preset-ops > .preset-op-btn,
     .preset-ops > .preset-op-state { flex:0 0 auto; white-space:nowrap; line-height:1.4; }
     .preset-switch-label { white-space:nowrap; line-height:1.4; }
@@ -1030,10 +1030,8 @@ html, body { margin:0; height:100%; }
     /* 「默认画质预设」那一条挪进底部 dock，作为待保存变更摘要上方的一行；
        dock 自身 gap:8px，这里去掉 overview 的独立下边距以免出现双份间距。 */
     .quality-dock .quality-overview { margin-bottom:0; }
-    /* 画质预设 / 参数配置两张卡片等高：同一行的卡片底边对齐，不留高低台阶。
-       原来 .quality-grid 用 align-items:start，两列各自缩到内容高度，左列
-       （3 组预设 + 可变高度 footer）总会比右列（2 组参数）高出一截。 */
-    #seg-panel-quality { align-items:stretch; }
+    /* Let each panel follow its content instead of stretching short presets. */
+    #seg-panel-quality { align-items:start; }
     #seg-panel-quality .preset-col > .panel,
     #seg-panel-quality .main-col > .panel { flex:1 1 auto; }
 
@@ -1177,6 +1175,7 @@ html, body { margin:0; height:100%; }
 
     @media (max-width:1023px){
       .quality-grid { grid-template-columns:minmax(0,1fr); }
+      .preset-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); align-items:start; }
       .transport-modes { grid-template-columns:repeat(3,minmax(0,1fr)); }
     }
     @media (max-width:767px){
