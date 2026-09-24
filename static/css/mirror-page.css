@@ -1220,7 +1220,7 @@
     .mg-refresh [data-lucide] { width:12px; height:12px; }
     .mg-grid { display:flex; flex:1 1 0; width:100%; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; justify-content:flex-start; gap:8px; min-height:0; overflow-y:auto; padding-bottom:8px; scrollbar-width:thin; }
     /* 卡片宽度跟随滑块与可用宽度，较高的卡片在宫格内滚动查看。 */
-    .mg-tile { flex:0 0 var(--mg-tile-w,var(--mg-tile-min,300px)); min-width:0; max-width:100%; display:flex; flex-direction:column; gap:5px; padding:4px; border:1px solid var(--c-border); border-radius:13px; background:var(--c-surface); transition:border-color var(--motion-fast) var(--ease-fade),box-shadow var(--motion-fast) var(--ease-fade),transform var(--motion-fast) var(--ease-standard); }
+    .mg-tile { flex:0 0 var(--mg-tile-w,var(--mg-tile-min,300px)); min-width:0; max-width:100%; display:flex; flex-direction:column; gap:5px; padding:4px; border:1px solid var(--c-border); border-radius:12px; background:var(--c-surface); transition:border-color var(--motion-fast) var(--ease-fade),box-shadow var(--motion-fast) var(--ease-fade),transform var(--motion-fast) var(--ease-standard); }
     .mg-tile:hover { border-color:var(--c-text-faint-hover); box-shadow:0 10px 28px -14px var(--c-shadow); }
     .mg-tile.is-playing { border-color:#007aff; box-shadow:0 10px 28px -14px rgba(0,122,255,.45); }
     .mg-head { display:flex; align-items:center; gap:7px; min-width:0; padding:1px 4px 0; }
@@ -1289,14 +1289,14 @@
     .mg-slot .mg-btn-primary { pointer-events:none; }
     .mg-slot .mg-btn-primary { color:var(--c-text-sub); background:var(--c-hover); border:1px dashed var(--c-border); box-shadow:none; }
     .mg-metrics { padding:4px; border-top:1px solid var(--c-border); color:var(--c-text-sub); font-size:11px; line-height:1.6; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
-    .mg-alas { flex:0 0 auto; border:1px solid var(--c-border); border-radius:10px; padding:8px 10px; background:var(--c-surface); min-width:0; }
+    .mg-alas { flex:0 0 auto; border:1px solid var(--c-border); border-radius:12px; padding:12px; background:var(--c-surface); min-width:0; }
     .mg-alas-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; font-size:12px; }
     .mg-alas-head strong { color:var(--c-text-strong); }
     .mg-alas-head > span { color:var(--c-text-sub); }
     .mg-alas-head button { margin-left:auto; }
-    .mg-alas-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:6px; max-height:142px; overflow:auto; scrollbar-width:thin; font-size:12px; color:var(--c-text-sub); }
+    .mg-alas-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr)); gap:8px; max-height:142px; overflow:auto; scrollbar-width:thin; font-size:12px; color:var(--c-text-sub); }
     .mg-alas-list:not(:empty) { margin-top:6px; }
-    .mg-alas-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; min-width:0; padding:8px; border-radius:7px; background:var(--c-hover); }
+    .mg-alas-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; min-width:0; padding:10px; border-radius:8px; background:var(--c-hover); }
     .mg-alas-item strong { color:var(--c-text-strong); overflow-wrap:anywhere; }
     .mg-alas-task { grid-column:1 / -1; overflow-wrap:anywhere; }
     .mg-alas-item small { grid-column:1 / -1; font-variant-numeric:tabular-nums; }
@@ -1307,6 +1307,29 @@
       .mg-actions { flex-wrap:wrap; }
       .mg-actions .mg-btn { min-width:44px; min-height:44px; height:44px; }
       .mg-alas-head button { min-height:44px; }
+    }
+    /* Match admin control geometry without changing video sizing. */
+    .mirror-grid { --grid-control-height:36px; }
+    .mirror-grid :is(.mg-btn,.mg-refresh,.mg-add-device) { box-sizing:border-box; height:var(--grid-control-height); min-height:var(--grid-control-height); border-radius:8px; font-size:12px; padding-inline:10px; }
+    .mirror-grid .mg-actions .mg-btn { min-width:var(--grid-control-height); }
+    .mirror-grid .mg-controls { height:auto; min-width:0; max-width:100%; flex:0 1 auto; flex-wrap:wrap; }
+    .mirror-grid .mg-control { min-height:36px; }
+    @container mirror-tile (max-width:280px) {
+      .mirror-grid .mg-actions .mg-btn { padding-inline:0; }
+    }
+    .mirror-grid :is(.mg-btn,.mg-refresh,.mg-add-device,.mg-menu-trigger):focus-visible { outline:2px solid var(--brand-400); outline-offset:2px; }
+    .mg-alas-scope { font-size:11px; }
+    @media (max-width:640px), (pointer:coarse) {
+      .mirror-grid { --grid-control-height:44px; }
+      .mirror-grid .mg-control { min-height:44px; height:auto; }
+      .mirror-grid .mg-menu-trigger { height:44px; }
+      .mirror-grid .mg-menu-item { height:auto; min-height:44px; }
+    }
+    @media (max-width:640px) {
+      .mirror-grid .mg-controls { width:100%; }
+      .mirror-grid #mg-zoom { width:100%; }
+      .mirror-grid #mg-zoom .mg-zoom-range { flex:1; }
+      .mirror-grid #mg-zoom + .mg-control-sep { display:none; }
     }
     /* 宫格底部：添加 ADB 设备（空坑位之外的显式入口）。 */
     .mg-grid-foot { display:flex; align-items:center; gap:10px; flex:0 0 auto; flex-wrap:wrap; }

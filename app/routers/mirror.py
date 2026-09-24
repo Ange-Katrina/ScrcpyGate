@@ -27,7 +27,7 @@ async def api_device_metrics(device_id: str, request: Request, response: Respons
     device = await asyncio.to_thread(storage.get_device, real_id)
     if not device:
         raise HTTPException(status_code=404, detail=i18n.translate("server.error.device_not_found"))
-    result = await asyncio.to_thread(device_metrics.snapshot, str(device.get("address") or real_id))
+    result = await asyncio.to_thread(device_metrics.snapshot, str(device["address"] or real_id))
     security.require_admin(request)
     response.headers["Cache-Control"] = "no-store"
     return result

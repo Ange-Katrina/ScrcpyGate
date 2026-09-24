@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import re
 import threading
 import time
 
@@ -17,7 +18,9 @@ _cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _COMMAND = (
     "head -n 1 /proc/stat 2>/dev/null; printf '\\nMEMORY\\n'; "
     "head -c 8192 /proc/meminfo 2>/dev/null; printf '\\nCPU_END\\n'; "
-    "sleep 1; head -n 1 /proc/stat 2>/dev/null; true"
+    "sleep 1; head -n 1 /proc/stat 2>/dev/null; printf '\\nCPU_FALLBACK\\n'; "
+    "if ! head -n 1 /proc/stat >/dev/null 2>&1; then "
+    "dumpsys -t 1 cpuinfo 2>/dev/null | grep ' TOTAL:' | head -c 1024; fi; true"
 )
 
 
@@ -36,18 +39,25 @@ def _cpu_ticks(raw: str) -> tuple[int, int] | None:
 
 
 def parse_snapshot(raw: str) -> dict:
-    result = {"cpu_percent": None, "memory_total_bytes": None, "memory_used_bytes": None}
-    if len(raw) > 16384:
+    result = {"cpu_percent": None, "cpu_source": None, "memory_total_bytes": None, "memory_used_bytes": None}
+    if len(raw) > 24576:
         return result
+    raw = raw.replace("\r\n", "\n")
     start, separator, rest = raw.partition("\nMEMORY\n")
     memory, end_separator, end = rest.partition("\nCPU_END\n")
     if not separator or not end_separator:
         return result
+    end, _, fallback = end.partition("\nCPU_FALLBACK\n")
     before, after = _cpu_ticks(start), _cpu_ticks(end)
     if before and after:
         total, idle = after[0] - before[0], after[1] - before[1]
         if total > 0 and 0 <= idle <= total:
             result["cpu_percent"] = round(100 * (total - idle) / total, 1)
+            result["cpu_source"] = "proc_stat"
+    if result["cpu_percent"] is None:
+        match = re.search(r"^\s*(\d+(?:\.\d+)?)%\s+TOTAL:", fallback, re.MULTILINE)
+        if match and 0 <= float(match[1]) <= 100:
+            result.update(cpu_percent=round(float(match[1]), 1), cpu_source="dumpsys_cpuinfo")
     values = {}
     for line in memory.splitlines():
         parts = line.split()
@@ -70,11 +80,15 @@ def snapshot(address: str) -> dict:
                     "memory_used_bytes": None, "sampled_at": None, "cached": False}
         _pending.add(address)
     try:
-        ok, output = ADBManager()._run_adb_command(["shell", _COMMAND], device_id=address, timeout=4)
+        adb = ADBManager()
+        ok, output = adb._run_adb_command(["shell", _COMMAND], device_id=address, timeout=4)
         result = parse_snapshot(output if ok else "")
         known = sum(result[key] is not None for key in ("cpu_percent", "memory_used_bytes"))
+        reason = "" if known == 2 else "metrics_unsupported"
+        if not ok:
+            reason = "adb_timeout" if (adb.last_error_info or {}).get("timed_out") else "adb_unavailable"
         result.update(status="ok" if known == 2 else "partial" if known else "unavailable",
-                      sampled_at=int(time.time()), cached=False)
+                      reason=reason, sampled_at=int(time.time()), cached=False)
         with _lock:
             _cache[address] = (time.monotonic(), result)
             _cache.move_to_end(address)

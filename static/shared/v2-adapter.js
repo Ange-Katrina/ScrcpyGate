@@ -6547,6 +6547,9 @@
     'alas.relations.bulkUpdate': handlerAlasRelationBulk,
     'alas.connection.check': handlerAlasConnectionCheck,
     'alas.config.status': handlerAlasConfigStatus,
+    'alas.grid.status': function () {
+      return apiRequest('/api/admin/overview/alas', { force: true, cache: false });
+    },
     // 打开 ALAS 管理页时扫一次：按 ALAS 配置里的模拟器 ADB 地址补齐缺失的管理员关联。
     'alas.autoBind': function () {
       return apiPost('/api/admin/alas/auto-bind', {}).then(function (payload) { return payload || { ok: true }; });

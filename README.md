@@ -86,9 +86,11 @@ Whatever you choose runs the same image and the same `app.main:app`.
 
 ## Grid status and device resources
 
-The administrator grid includes a compact ALAS configuration list with each configuration's state, task, and last check time. It reuses the management status cache, refreshes every 30 seconds while the grid is visible, and pauses when the tab is hidden or the grid closes. Failed checks remain distinct from stopped configurations.
+The administrator grid lists all discoverable ALAS configurations, including configurations without device bindings, with each configuration's state, task, and actual check time. It queries the administrator overview every 30 seconds while the grid is visible, bypasses browser read caching, and pauses when the tab is hidden or the grid closes. Failed checks remain distinct from stopped configurations.
 
-Use the activity button on a device card to sample Android CPU and memory usage on demand. CPU is measured over a one-second interval across all cores; memory is `MemTotal - MemAvailable`, rather than an individual app's usage. Results, including unavailable metrics, are cached for ten seconds, with at most two concurrent samples per application process and a four-second ADB timeout. Android restrictions may prevent reading `/proc/stat` or `/proc/meminfo`; unavailable values are not reported as zero. Device sampling does not start mirroring or acquire control. No new deployment settings or dependencies are required.
+Use the activity button on a device card to sample Android CPU and memory usage on demand. CPU is measured over a one-second interval across all cores; if Android denies `/proc/stat`, the sampler tries `dumpsys cpuinfo` and labels its latest system statistics separately. Memory is `MemTotal - MemAvailable`, rather than an individual app's usage. Results, including unavailable metrics, are cached for ten seconds, with at most two concurrent samples per application process and a four-second ADB timeout. Unsupported metrics remain unknown; ADB connection failures and timeouts are distinguished. Device sampling does not start mirroring or acquire control. No new deployment settings or dependencies are required.
+
+The grid, user cards, and security forms share compact control geometry and touch-friendly targets. GeoIP download settings group the source and database choices beside connection settings on desktop, with bounded field widths and a single column on phones. Saved proxy addresses remain visible. The native database file picker aligns with the other upload controls.
 
 ## City lookup coverage
 

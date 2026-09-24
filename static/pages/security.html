@@ -788,6 +788,8 @@
       <section class="geo-settings-section" aria-labelledby="geo-download-title">
        <h4 id="geo-download-title">下载配置</h4>
        <form class="geo-download-form" id="geo-download-form" autocomplete="off">
+      <div class="geo-download-columns">
+      <div class="geo-download-group">
       <label class="vis-filter" for="geo-download-source"><span>更新来源</span><select id="geo-download-source" aria-describedby="geo-source-hint"><option value="github">GitHub · P3TERX/GeoLite.mmdb（默认）</option><option value="maxmind">MaxMind 官方（需要 ID / Key）</option></select></label>
       <p class="sec-hint" id="geo-source-hint" role="status" data-i18n-skip>GitHub 源无需 ID / Key；下载前检查发布信息，下载后校验大小与 SHA-256。</p>
       <p class="sec-hint"><a href="https://github.com/P3TERX/GeoLite.mmdb/releases/latest" target="_blank" rel="noopener noreferrer">查看 GitHub 数据库发布</a></p>
@@ -797,6 +799,8 @@
        <label><input id="geo-download-city" type="checkbox" checked/><span><b>City</b><small>国家、省份与城市（推荐）</small></span></label>
       </fieldset>
       <p class="sec-hint">关闭某项不会删除已有数据库；全部关闭将暂停地区库下载，过期后仍按地域策略处理。</p>
+      </div>
+      <div class="geo-download-group">
       <div class="geo-proxy-fields">
        <label class="vis-filter" for="geo-proxy-mode"><span>下载连接</span><select id="geo-proxy-mode"><option value="system">跟随服务器代理</option><option value="direct">直接连接</option><option value="custom">自定义代理</option></select></label>
        <label class="vis-filter" for="geo-proxy-url" id="geo-proxy-field"><span>HTTP / HTTPS 代理地址</span><input id="geo-proxy-url" type="text" inputmode="url" maxlength="2048" placeholder="http://proxy.example:7890" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="geo-proxy-hint"/></label>
@@ -804,6 +808,8 @@
       <p class="sec-hint" id="geo-proxy-hint">地址须包含端口，可使用 http://用户名:密码@主机:端口；特殊字符需 URL 编码。保存后保持显示，仅在选择自定义代理时使用。</p>
       <label class="vis-check"><input id="geo-proxy-clear" type="checkbox"/>清除已保存的代理地址</label>
       <p class="sec-hint" id="geo-proxy-saved"></p>
+      </div>
+      </div>
       <div class="sec-inline-actions"><button class="guard-btn primary" type="submit" id="geo-download-save">保存下载选项</button></div>
       <p class="guard-status" id="geo-download-status" role="status" aria-live="polite"></p>
      </form>

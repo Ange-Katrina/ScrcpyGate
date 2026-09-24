@@ -155,6 +155,7 @@ ENDPOINTS_MAP = {
     "alas.visibility": {"path": "/api/admin/alas/visibility", "method": "GET"},
     "alas.visibility.update": {"path": "/api/admin/alas/visibility", "method": "PUT"},
     "alas.config.status": {"path": "/api/admin/alas", "method": "GET"},
+    "alas.grid.status": {"path": "/api/admin/overview/alas", "method": "GET"},
 }
 
 # 页面 -> (文件名, 是否仅管理员)

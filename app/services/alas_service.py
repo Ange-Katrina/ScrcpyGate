@@ -989,7 +989,8 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
 
     async def load_status(name: str) -> tuple[str, dict]:
         try:
-            return name, await _admin_alas_call(alas.status_for_config, name, False)
+            result = await _admin_alas_call(alas.status_for_config, name, False)
+            return name, {**result, "checked_at": int(time.time())}
         except Exception as exc:
             log.warning("ALAS_OVERVIEW_STATUS_FAILED config=%s error_type=%s", name, type(exc).__name__)
             return name, {
@@ -998,6 +999,7 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
                 "task": "",
                 "config": name,
                 "error": _alas_internal_error(exc),
+                "checked_at": int(time.time()),
             }
 
     def runtime_config_names(catalog: dict) -> list[str]:
@@ -1068,6 +1070,7 @@ async def admin_alas_overview(bindings: list[dict] | None = None) -> dict:
             "config": name,
             "username": owners.get(name, ""),
             "device_id": storage.public_device_id(str(binding.get("device_id"))) if binding else "",
+            "checked_at": result.get("checked_at"),
             "status": str(result.get("status") or "unknown"),
             "task": str(result.get("task") or ""),
             "ok": bool(result.get("ok", not result.get("error"))),

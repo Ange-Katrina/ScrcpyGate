@@ -71,9 +71,9 @@
       var generation = alasGeneration;
       if (button) button.disabled = true;
       summary.textContent = tr('检查中');
-      global.ScrcpyGateApi.configured('alas.config.status', { cache: false }).then(function (payload) {
+      global.ScrcpyGateApi.configured('alas.grid.status', { cache: false }).then(function (payload) {
         if (generation !== alasGeneration || !active) return;
-        var data = payload.status || {};
+        var data = payload || {};
         var items = Array.isArray(data.config_statuses) ? data.config_statuses : [];
         var labels = { running: '运行中', stopped: '已停止', idle: '空闲', waiting: '等待中',
           error: '异常', disconnected: '连接中断', disabled: '已禁用', unknown: '未检查', starting: '启动中', stopping: '停止中' };
@@ -99,6 +99,7 @@
         list.textContent = '';
         summary.textContent = tr('状态获取失败，请重试');
       }).finally(function () {
+        if (generation !== alasGeneration) return;
         alasBusy = false;
         if (button) button.disabled = false;
       });
@@ -108,6 +109,8 @@
       alasTimer = null;
       var panel = document.getElementById('mg-alas');
       if (panel) panel.hidden = !alasVisible;
+      var button = document.getElementById('mg-alas-refresh');
+      if (button) button.disabled = alasBusy;
       if (!active || !alasVisible || document.hidden) return;
       refreshAlas();
       alasTimer = global.setInterval(refreshAlas, 30000);
@@ -115,6 +118,7 @@
     function onAlasVisibility(event) {
       alasVisible = !event.detail || event.detail.visible !== false;
       alasGeneration += 1;
+      alasBusy = false;
       updateAlasPolling();
     }
     function metricsText(data) {
@@ -137,9 +141,14 @@
         if (data.status === 'busy') { target.textContent = tr('采样繁忙，请稍后重试'); return; }
         var sampled = Number(data.sampled_at);
         target.textContent = metricsText(data) + (sampled > 0 ? ' · ' + tr('采样于') + ' ' + new Date(sampled * 1000).toLocaleTimeString() : '');
-        if (data.status === 'partial' || data.status === 'unavailable') target.textContent += ' · ' + tr('设备未提供部分指标');
-      }).catch(function () {
-        if (active && tiles[tile.deviceId] === tile && epoch === tile.metricsEpoch) target.textContent = tr('状态获取失败，请重试');
+        if (data.cpu_source === 'dumpsys_cpuinfo') target.textContent += ' · ' + tr('CPU 为系统最近统计');
+        var reasons = { adb_timeout: 'ADB 采样超时，请重试', adb_unavailable: 'ADB 连接不可用，请检查设备连接', metrics_unsupported: '设备未提供部分指标' };
+        if (data.status === 'partial' || data.status === 'unavailable') target.textContent += ' · ' + tr(reasons[data.reason] || '设备未提供部分指标');
+      }).catch(function (error) {
+        if (active && tiles[tile.deviceId] === tile && epoch === tile.metricsEpoch) {
+          var status = error && error.detail && error.detail.status;
+          target.textContent = tr(status === 401 || status === 403 ? '登录或权限已失效，请刷新页面' : status === 404 ? '设备已不存在，请刷新列表' : '状态获取失败，请重试');
+        }
       }).finally(function () {
         tile.metricsBusy = false;
         button.disabled = tile.device.online === false || tile.device.permission === false;
@@ -875,6 +884,7 @@
       if (active === next) return Promise.resolve();
       active = next;
       alasGeneration += 1;
+      alasBusy = false;
       updateAlasPolling();
       var stopped = Promise.resolve();
       if (!active) {
@@ -964,6 +974,7 @@
       if (alasTimer) global.clearInterval(alasTimer);
       alasGeneration += 1;
       document.removeEventListener('visibilitychange', updateAlasPolling);
+      alasBusy = false;
       document.removeEventListener('scrcpygate:auth-invalid', destroy);
       global.removeEventListener('scrcpygate:workbench-alas-visibility', onAlasVisibility);
       var refreshButton = document.getElementById('mg-alas-refresh');
