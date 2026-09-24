@@ -253,6 +253,8 @@ The **Mirror management** page covers text input, automatic control on fullscree
 
 ### Quality and activity records
 
+Preset cards show familiar resolution tiers such as 720p and 1080p. These are size limits, not a guarantee of encoded dimensions; the device aspect ratio is preserved.
+
 Quality presets apply immediately. Manual resolution, FPS and bit-rate edits are staged until **Apply quality** is clicked, so typing does not repeatedly restart the stream. Encoding changes may briefly restart the shared device stream; with other viewers connected, the server may save the preference and defer the restart.
 
 Resolution is scrcpy's **long-edge limit**, preserving the device aspect ratio; reference width/height values are not a fixed output size. FPS is a maximum, and static content naturally produces fewer frames. Start with 30 fps for general use or try 60 fps for games; lower the resolution or target bit rate when bandwidth or decoding is constrained. Each viewer consumes upload bandwidth. Existing administrator presets are preserved. These semantics follow [scrcpy 3.1](https://github.com/Genymobile/scrcpy/blob/v3.1/doc/video.md); [QtScrcpy](https://github.com/barry-ran/QtScrcpy) also distinguishes frame limits and dropping expired frames for latency.

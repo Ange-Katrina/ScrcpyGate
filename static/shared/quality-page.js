@@ -319,8 +319,17 @@
       }
 
       /* ---------- 预设渲染 ---------- */
+      function presetResolutionLabel(p) {
+        var edge = Math.max(Number(p.width), Number(p.height));
+        // Use the server's resolution tiers; do not infer actual encoded dimensions.
+        for (var i = 0; i < resolutionCapOptions.length; i++) {
+          var option = resolutionCapOptions[i];
+          if (Number(option.value) === edge && option.label) return String(option.label);
+        }
+        return tr('自定义') + ' · ' + p.width + ' × ' + p.height;
+      }
       function presetMetaHtml(p) {
-        return '<span class="preset-meta-chip">长边 ≤ ' + Math.max(Number(p.width), Number(p.height)) + 'px</span>' +
+        return '<span class="preset-meta-chip" title="' + esc(tr('长边上限') + ': ' + Math.max(Number(p.width), Number(p.height)) + 'px') + '">' + esc(presetResolutionLabel(p)) + '</span>' +
           '<span class="preset-meta-chip">≤ ' + p.fps + ' fps</span>' +
           '<span class="preset-meta-chip">' + p.bitrate + ' Mbps</span>' +
           (p.fullscreenOnly ? '<span class="preset-flag">仅全屏</span>' : '') +
