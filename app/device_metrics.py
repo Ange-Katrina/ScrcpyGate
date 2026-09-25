@@ -20,7 +20,8 @@ _COMMAND = (
     "head -c 8192 /proc/meminfo 2>/dev/null; printf '\\nCPU_END\\n'; "
     "sleep 1; head -n 1 /proc/stat 2>/dev/null; printf '\\nCPU_FALLBACK\\n'; "
     "if ! head -n 1 /proc/stat >/dev/null 2>&1; then "
-    "dumpsys -t 1 cpuinfo 2>/dev/null | grep ' TOTAL:' | head -c 1024; fi; true"
+    "dumpsys -t 1 cpuinfo 2>/dev/null | grep ' TOTAL:' | head -c 1024; fi; "
+    "printf '\\nBATTERY\\n'; dumpsys -t 1 battery 2>/dev/null | head -c 4096; true"
 )
 
 
@@ -39,10 +40,17 @@ def _cpu_ticks(raw: str) -> tuple[int, int] | None:
 
 
 def parse_snapshot(raw: str) -> dict:
-    result = {"cpu_percent": None, "cpu_source": None, "memory_total_bytes": None, "memory_used_bytes": None}
+    result = {"cpu_percent": None, "cpu_source": None, "memory_total_bytes": None, "memory_used_bytes": None,
+              "temperature_celsius": None, "temperature_source": None}
     if len(raw) > 24576:
         return result
     raw = raw.replace("\r\n", "\n")
+    raw, _, battery = raw.partition("\nBATTERY\n")
+    # Android BatteryService reports tenths of a degree Celsius, not CPU temperature.
+    present = re.search(r"^\s*present:\s*true\s*$", battery, re.MULTILINE | re.IGNORECASE)
+    temperature = re.search(r"^\s*temperature:\s*(-?\d{1,4})\s*$", battery, re.MULTILINE)
+    if present and temperature and -200 <= int(temperature[1]) <= 1000:
+        result.update(temperature_celsius=int(temperature[1]) / 10, temperature_source="battery")
     start, separator, rest = raw.partition("\nMEMORY\n")
     memory, end_separator, end = rest.partition("\nCPU_END\n")
     if not separator or not end_separator:
