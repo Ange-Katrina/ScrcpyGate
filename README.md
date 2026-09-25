@@ -293,7 +293,7 @@ Resolution is scrcpy's **long-edge limit**, preserving the device aspect ratio; 
 
 Administrator ALAS status distinguishes stopped (`idle`) from unchecked and reports the server's check time. Manual refresh bypasses the short status cache.
 
-The **Users and permissions** page uses searchable, filterable user cards. Select a card for login IP, last login, total mirroring time, session count, latest start/end, active connections, and recent device sessions. Edit and permission controls remain on the card; password reset and deletion are in the details dialog.
+The **Users and permissions** page uses searchable, filterable user cards. Select a card for login IP, last login, total mirroring time, session count, latest start/end, and active connections. Recent device sessions and login history are collapsed by default; opening login history loads up to 20 successful sign-ins from retained audit records. Edit and permission controls remain on the card; password reset and deletion are in the details dialog.
 
 User times use the browser's local time zone. Last login means successful authentication, not a page visit. Watch duration sums retained video connections, including simultaneous viewers separately; refreshes and reconnects create new sessions. New `viewer_watch_start` / `viewer_watch_end` audit events include the watch-session ID and matching timestamps. Historical events are not rewritten. Audit records can be filtered by actor and device before pagination, with the same filters applied to export. Runtime-log filtering covers a bounded recent tail; use audit records or the complete log export for historical investigations.
 

@@ -266,13 +266,37 @@
         document.getElementById('user-details-title').textContent = '用户详情 · ' + u.name;
         document.getElementById('user-details-body').innerHTML = '<dl class="user-detail-grid">' + fields.map(function (pair) {
           return '<div><dt>' + esc(pair[0]) + '</dt><dd>' + esc(pair[1]) + '</dd></div>';
-        }).join('') + '</dl><h4 class="user-history-title">最近投屏记录</h4><div class="user-detail-history">' + watchHistoryHtml(u) + '</div>' +
+        }).join('') + '</dl>' +
+          '<details class="user-detail-section"><summary>最近投屏记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history">' + watchHistoryHtml(u) + '</div></details>' +
+          '<details class="user-detail-section" data-login-history><summary>登录记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history" data-login-history-list role="status">展开后加载最近登录记录</div></details>' +
           '<p class="activity-scope-note">时间按浏览器本地时区显示。上次登录仅记录账号认证成功，不是打开页面的时间；观看时长按视频连接累计，多端同时观看分别计时，刷新或重连会新增次数。</p>';
         var remove = document.getElementById('user-details-delete');
         remove.disabled = u.role === 'admin';
         remove.title = u.role === 'admin' ? '管理员账号不可删除' : '删除用户';
         if (window.lucide) lucide.createIcons();
         openModal('modal-user-details');
+      }
+      function loadLoginHistory(section) {
+        if (section.dataset.loaded || section.dataset.loading) return;
+        var user = userById(detailUserId);
+        if (!user) return;
+        section.dataset.loading = 'true';
+        var list = section.querySelector('[data-login-history-list]');
+        list.textContent = '正在加载登录记录…';
+        window.ScrcpyGateApi.request('/api/admin/logs', {
+          query: { actor: user.username, action: 'login_success', limit: 20 }, force: true
+        }).then(function (payload) {
+          if (!section.isConnected || detailUserId === null || !section.open) return;
+          var records = Array.isArray(payload.logs) ? payload.logs.slice().reverse() : [];
+          list.innerHTML = records.length ? records.map(function (event) {
+            return '<div class="user-login-item"><time>' + esc(formatLoginAt(event.ts)) + '</time><span>' + esc(event.source_ip || 'IP 未记录') + '</span></div>';
+          }).join('') + (payload.page && payload.page.has_more ? '<p class="user-history-more">仅显示最近 20 条登录记录</p>' : '')
+            : '<p class="user-history-empty">保留期内暂无登录记录</p>';
+          list.removeAttribute('role');
+          section.dataset.loaded = 'true';
+        }).catch(function () {
+          if (section.isConnected && detailUserId !== null) list.textContent = '登录记录加载失败，请收起后重试';
+        }).finally(function () { delete section.dataset.loading; });
       }
       function renderPager(pages) {
         var pager = document.getElementById('users-pager');
@@ -1336,6 +1360,9 @@
           else openDeleteModal(u);
         });
       });
+      document.getElementById('user-details-body').addEventListener('toggle', function (e) {
+        if (e.target.matches('[data-login-history]') && e.target.open) loadLoginHistory(e.target);
+      }, true);
       document.getElementById('users-tbody').addEventListener('click', function (e) {
         var cf = e.target.closest('#clear-filters');
         if (cf) { clearFilters(); return; }

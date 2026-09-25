@@ -176,3 +176,4 @@
 @media (max-height:600px) {
   .page-quality .quality-dock, .page-mirror-admin .wb-foot { position:static; }
 }
+.admin-rail .rail-bottom { position:sticky; bottom:0; z-index:1; background:var(--admin-surface); }

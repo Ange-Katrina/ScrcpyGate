@@ -1173,8 +1173,21 @@ html, body { margin:0; height:100%; }
 .user-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 24px; margin:0; }
 .user-detail-grid dt { font-size:12px; color:var(--admin-muted); margin-bottom:5px; }
 .user-detail-grid dd { margin:0; color:var(--admin-text); font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
-.user-history-title { margin:24px 0 10px; font-size:14px; }
-.user-detail-history { border-top:1px solid var(--admin-line); }
+.user-detail-section { margin-top:18px; border-top:1px solid var(--admin-line); }
+.user-detail-section + .user-detail-section { margin-top:0; }
+.user-detail-section summary { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:44px; color:var(--admin-text); font-size:13px; font-weight:600; cursor:pointer; list-style:none; }
+.user-detail-section summary::-webkit-details-marker { display:none; }
+.user-detail-section summary svg { width:16px; height:16px; flex:0 0 16px; color:var(--admin-muted); transition:transform var(--motion-fast) var(--ease-standard); }
+.user-detail-section[open] summary svg { transform:rotate(180deg); }
+.user-detail-section summary:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.user-detail-history { padding:0 0 8px; }
+.user-detail-history .watch-history-list { gap:0; }
+.user-detail-history .watch-history-item { padding:10px 0; border:0; border-bottom:1px solid var(--admin-line); border-radius:0; background:transparent; }
+.user-detail-history .watch-history-main span { white-space:normal; overflow:visible; }
+.user-login-item { display:flex; justify-content:space-between; gap:8px 14px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid var(--admin-line); font-size:12px; font-variant-numeric:tabular-nums; }
+.user-login-item time { color:var(--admin-text); }
+.user-login-item span { color:var(--admin-muted); overflow-wrap:anywhere; }
+.user-history-empty,.user-history-more { margin:0; padding:10px 0; color:var(--admin-muted); font-size:12px; }
 #user-details-body .activity-scope-note { padding:14px 0 0; margin:0; }
 .user-details-actions { flex-wrap:wrap; }
 .user-details-actions > button { min-height:44px; }
