@@ -21,8 +21,49 @@ _COMMAND = (
     "sleep 1; head -n 1 /proc/stat 2>/dev/null; printf '\\nCPU_FALLBACK\\n'; "
     "if ! head -n 1 /proc/stat >/dev/null 2>&1; then "
     "dumpsys -t 1 cpuinfo 2>/dev/null | grep ' TOTAL:' | head -c 1024; fi; "
-    "printf '\\nBATTERY\\n'; dumpsys -t 1 battery 2>/dev/null | head -c 4096; true"
+    "true"
 )
+_TEMPERATURE_COMMAND = (
+    "printf 'THERMAL_HAL\\n'; dumpsys -t 1 thermalservice 2>/dev/null | head -c 8192; "
+    "printf '\\nTHERMAL_SYSFS\\n'; sg_count=0; "
+    "for sg_zone in /sys/class/thermal/thermal_zone*; do "
+    "[ \"$sg_count\" -ge 64 ] && break; sg_count=$((sg_count + 1)); "
+    "[ -r \"$sg_zone/type\" ] && [ -r \"$sg_zone/temp\" ] || continue; "
+    "IFS= read -r sg_type < \"$sg_zone/type\"; "
+    "case \"$sg_type\" in *cpu*|*CPU*) "
+    "IFS= read -r sg_temp < \"$sg_zone/temp\"; printf '%s|%s\\n' \"$sg_type\" \"$sg_temp\";; esac; "
+    "done; true"
+)
+
+
+def parse_cpu_temperature(raw: str) -> dict:
+    """Use current CPU sensors only; never substitute battery, skin or thresholds."""
+    unknown = {"temperature_celsius": None, "temperature_source": None}
+    if len(raw) > 16384:
+        return unknown
+    hal, _, sysfs = raw.replace("\r\n", "\n").partition("\nTHERMAL_SYSFS\n")
+    current = re.search(
+        r"^Current temperatures from HAL:\s*\n(.*?)(?=^[^\s]|\Z)", hal, re.MULTILINE | re.DOTALL
+    )
+    values = []
+    if current:
+        for value, kind in re.findall(
+            r"Temperature\{mValue=(-?\d{1,3}(?:\.\d{1,6})?),\s*mType=(-?\d{1,2}),", current[1]
+        ):
+            if kind == "0" and -20 <= float(value) <= 150:
+                values.append(float(value))
+    if values:
+        return {"temperature_celsius": round(max(values), 1), "temperature_source": "cpu_thermal_hal"}
+    for line in sysfs.splitlines()[:64]:
+        name, separator, value = line.partition("|")
+        if not separator or not re.fullmatch(r"cpu(?:[0-9]+|[-_](?:thermal|big|little|cluster[0-9]*|[0-9]+))*", name, re.I):
+            continue
+        # Linux thermal sysfs uses millidegrees Celsius. Do not guess vendor units.
+        if re.fullmatch(r"-?\d{1,6}", value) and -20000 <= int(value) <= 150000:
+            values.append(int(value) / 1000)
+    if values:
+        return {"temperature_celsius": round(max(values), 1), "temperature_source": "cpu_thermal_sysfs"}
+    return unknown
 
 
 def _cpu_ticks(raw: str) -> tuple[int, int] | None:
@@ -45,12 +86,6 @@ def parse_snapshot(raw: str) -> dict:
     if len(raw) > 24576:
         return result
     raw = raw.replace("\r\n", "\n")
-    raw, _, battery = raw.partition("\nBATTERY\n")
-    # Android BatteryService reports tenths of a degree Celsius, not CPU temperature.
-    present = re.search(r"^\s*present:\s*true\s*$", battery, re.MULTILINE | re.IGNORECASE)
-    temperature = re.search(r"^\s*temperature:\s*(-?\d{1,4})\s*$", battery, re.MULTILINE)
-    if present and temperature and -200 <= int(temperature[1]) <= 1000:
-        result.update(temperature_celsius=int(temperature[1]) / 10, temperature_source="battery")
     start, separator, rest = raw.partition("\nMEMORY\n")
     memory, end_separator, end = rest.partition("\nCPU_END\n")
     if not separator or not end_separator:
@@ -95,6 +130,13 @@ def snapshot(address: str) -> dict:
         reason = "" if known == 2 else "metrics_unsupported"
         if not ok:
             reason = "adb_timeout" if (adb.last_error_info or {}).get("timed_out") else "adb_unavailable"
+        if ok:
+            # Optional temperature failure must not erase successful CPU/memory samples.
+            thermal_ok, thermal_output = adb._run_adb_command(
+                ["shell", _TEMPERATURE_COMMAND], device_id=address, timeout=2
+            )
+            if thermal_ok:
+                result.update(parse_cpu_temperature(thermal_output))
         result.update(status="ok" if known == 2 else "partial" if known else "unavailable",
                       reason=reason, sampled_at=int(time.time()), cached=False)
         with _lock:

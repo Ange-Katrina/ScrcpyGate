@@ -133,13 +133,13 @@
       var cpu = typeof data.cpu_percent === 'number' && isFinite(data.cpu_percent) ? Math.round(data.cpu_percent) + '%' : tr('不可用');
       var hasMemory = typeof data.memory_used_bytes === 'number' && isFinite(data.memory_used_bytes) && data.memory_total_bytes > 0;
       var memory = hasMemory ? (data.memory_used_bytes / 1073741824).toFixed(1) + '/' + (data.memory_total_bytes / 1073741824).toFixed(1) + ' GiB' : tr('不可用');
-      var temperature = data.temperature_source === 'battery' && typeof data.temperature_celsius === 'number' && isFinite(data.temperature_celsius) ? data.temperature_celsius : null;
+      var temperature = ['cpu_thermal_hal', 'cpu_thermal_sysfs'].indexOf(data.temperature_source) !== -1 && typeof data.temperature_celsius === 'number' && isFinite(data.temperature_celsius) ? data.temperature_celsius : null;
       function row(label, value, tone, hint) {
         return '<div class="mg-metric-row" title="' + escHtml(hint || '') + '"><span>' + escHtml(label) + ':</span><strong data-tone="' + tone + '">' + escHtml(value) + '</strong></div>';
       }
       return row('CPU', cpu, metricTone(data.cpu_percent, 60, 85), data.cpu_source === 'dumpsys_cpuinfo' ? tr('CPU 为系统最近统计') : '') +
         row(tr('内存'), memory, metricTone(hasMemory ? data.memory_used_bytes / data.memory_total_bytes * 100 : null, 70, 90)) +
-        row(tr('电池温度'), temperature === null ? tr('不可用') : temperature.toFixed(1) + '°C', metricTone(temperature, 40, 45), tr('设备未提供温度时显示不可用'));
+        row(tr('CPU 温度'), temperature === null ? tr('不可用') : temperature.toFixed(1) + '°C', metricTone(temperature, 70, 85), tr('设备未提供温度时显示不可用'));
     }
     function closeMetrics(tile) {
       tile.metricsEnabled = false;
