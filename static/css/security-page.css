@@ -1,25 +1,25 @@
 /* Security forms use the shared admin palette, compact controls and status tones. */
 
 /* Section navigation is scoped to this page; existing admin tokens own both themes. */
-.security-content { max-width: 1600px; margin-inline: auto; }
+.security-content { margin-inline: auto; }
 .security-content [hidden] { display: none !important; }
-.security-content .sec-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.security-content .sec-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 .sec-help-link { display: inline-flex; align-items: center; gap: 8px; color: var(--admin-muted); font-size: 13px; text-decoration: none; min-height: 36px; }
 .sec-help-link:hover { color: var(--admin-brand); }
 .sec-help-link svg { width: 16px; height: 16px; }
-.sec-tabs { display: inline-flex; max-width: 100%; gap: 3px; padding: 3px; border: 1px solid var(--admin-border); border-radius: 999px; background: var(--admin-field); margin-bottom: 16px; }
-.sec-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 16px; border: 0; border-radius: 999px; background: transparent; color: var(--admin-muted); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; transition: background-color 120ms, color 120ms; }
+.sec-tabs { display: inline-flex; max-width: 100%; gap: 4px; padding: 4px; border: 1px solid var(--sg-seg-border); border-radius: var(--sg-seg-radius); background: var(--sg-seg-bg); margin-bottom: 16px; }
+.sec-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--sg-seg-height); padding: 6px 14px; border: 0; border-radius: var(--sg-seg-radius-inner); background: transparent; color: var(--sg-seg-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background-color 120ms, color 120ms; }
 .sec-tab svg { width: 17px; height: 17px; }
 .sec-tab:hover { color: var(--admin-text); }
-.sec-tab[aria-selected="true"] { color: var(--admin-text); background: var(--admin-surface); box-shadow: 0 1px 3px var(--c-shadow); font-weight: 600; }
+.sec-tab[aria-selected="true"] { color: var(--sg-seg-text-active); background: var(--sg-seg-active-bg); box-shadow: var(--sg-seg-shadow); }
 .sec-tab-panel { min-width: 0; }
 .sec-tab:focus-visible, .sec-tab-panel:focus-visible, .security-content summary:focus-visible, .sec-help-link:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 3px; border-radius: 4px; }
 .security-content .sec-card { margin-top: 0; box-shadow: 0 1px 2px var(--c-shadow); }
 .security-content .sec-layout .sec-card { order: 0; }
-.security-content .panel-header { padding: 16px; gap: 12px; border-bottom: 0; }
-.security-content .panel-title { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 16px; line-height: 1.5; }
+.security-content .panel-header { padding: 10px 14px; gap: 12px; border-bottom: 1px solid var(--admin-border); }
+.security-content .panel-title { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 15px; line-height: 1.5; }
 .security-content .panel-subtitle { margin: 0; font-size: 12px; font-weight: 400; color: var(--admin-muted); }
-.security-content .guard-body { padding: 0 16px 16px; gap: 12px; }
+.security-content .guard-body { padding: 12px 14px 14px; gap: 12px; }
 .security-content .guard-body > .guard-status:empty { display: none; }
 .security-content .guard-body > .guard-status { overflow-wrap: anywhere; line-height: 1.6; }
 .security-content .sec-hint { font-size: 13px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
@@ -180,12 +180,12 @@
   .sec-help-link { flex: none; }
   .sec-help-link svg:last-child { display: none; }
   .sec-help-link { align-self: flex-start; min-height: 44px; }
-  .sec-tabs { display: flex; gap: 3px; margin-bottom: 16px; border-radius: 16px; }
-  .sec-tab { flex: 1; min-width: 0; padding: 8px 4px; gap: 4px; font-size: 13px; border-radius: 12px; }
+  .sec-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .sec-tab { flex: 1; min-width: 0; min-height: 44px; padding: 8px 4px; gap: 4px; }
   .sec-tab svg { display: none; }
   .sec-tab span { white-space: normal; text-align: center; line-height: 1.35; }
-  .security-content .panel-header { padding: 16px; align-items: flex-start; }
-  .security-content .guard-body { padding: 0 16px 16px; }
+  .security-content .panel-header { padding: 12px 14px; align-items: flex-start; }
+  .security-content .guard-body { padding: 12px 14px 14px; }
   .security-content .vis-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
   .security-content .guard-preset, .security-content .guard-btn, .security-content .guard-unlock { min-height: 44px; }
   .security-content .vis-table .guard-preset { min-height: 44px; }

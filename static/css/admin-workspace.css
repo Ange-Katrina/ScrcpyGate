@@ -39,7 +39,7 @@
 }
 .workspace-refined { --workspace-gap:16px; }
 .workspace-refined .page-heading { margin-bottom:20px; }
-.workspace-refined .page-heading h1 { letter-spacing:-.025em; }
+.workspace-refined .page-heading h1 { letter-spacing:0; }
 .workspace-refined .page-heading p { max-width:70ch; line-height:1.6; }
 .workspace-refined .panel-title { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
 .workspace-refined .panel-subtitle { margin-left:0; line-height:1.5; }
@@ -98,6 +98,8 @@
 .page-devices .dev-head-actions, .page-alas .alas-head-actions { gap:8px; }
 .page-devices .dev-head-actions > button, .page-alas .alas-head-actions > button { flex:0 0 auto; }
 .page-devices .dev-head-actions .btn-ghost, .page-alas .alas-head-actions .btn-ghost { min-width:44px; }
+.page-alas .alas-tabs { gap:4px; padding:4px; border-radius:var(--sg-seg-radius); background:var(--sg-seg-bg); border-color:var(--sg-seg-border); }
+.page-alas .alas-tab { min-height:36px; height:auto; padding:6px 14px; border-radius:var(--sg-seg-radius-inner); font-size:13px; }
 .page-devices .dev-maintenance { padding-top:12px; }
 .page-devices .dev-card.admin-disclosure > summary { padding:0; }
 .page-alas .alas-features-hint { max-width:80ch; line-height:1.7; }
@@ -161,8 +163,7 @@
   .page-devices .alas-status-item strong, .page-alas .alas-status-item strong { white-space:normal; overflow-wrap:anywhere; }
   .page-devices .alas-status-item:last-child, .page-alas .alas-status-item:last-child { grid-column:1/-1; border-top:1px solid var(--admin-border); }
   .page-devices .alas-status-item:last-child > div, .page-alas .alas-status-item:last-child > div { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; }
-  .page-alas .alas-tabs { border-radius:10px; }
-  .page-alas .alas-tab { gap:4px; padding:8px; font-size:12px; }
+  .page-alas .alas-tab { min-height:44px; gap:4px; padding:8px; font-size:13px; }
   .page-quality .quality-actions { flex-direction:column; align-items:stretch; gap:8px; }
   .page-quality .quality-actions .change-box { flex:none; width:100%; }
   .page-quality .quality-actions-btns { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
