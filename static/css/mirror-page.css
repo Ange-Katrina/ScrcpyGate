@@ -1293,9 +1293,9 @@
     .mg-alas { display:flex; align-items:center; gap:8px; flex:0 0 auto; min-width:0; padding:2px 0; }
     .mg-alas-head { flex:none; font-size:11px; color:var(--c-text-sub); }
     .mg-alas-head strong { font-weight:600; white-space:nowrap; }
-    .mg-alas-list { display:flex; align-items:center; gap:6px; min-width:0; flex:1; overflow-x:auto; scrollbar-width:thin; padding:3px; font-size:11px; }
+    .mg-alas-list { display:flex; flex-wrap:nowrap; align-items:center; gap:6px; min-width:0; flex:1; overflow-x:auto; scrollbar-width:thin; padding:3px; font-size:11px; }
     .mg-alas-list:empty { display:none; }
-    .mg-alas-item { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; max-width:260px; min-width:0; min-height:26px; padding:4px 10px; border:1px solid var(--c-border); border-radius:999px; line-height:16px; background:var(--c-hover); color:var(--c-text-sub); }
+    .mg-alas-item { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; box-sizing:border-box; max-width:min(260px,100%); min-width:0; min-height:26px; padding:4px 10px; border:1px solid var(--c-border); border-radius:999px; line-height:16px; background:var(--c-hover); color:var(--c-text-sub); }
     .mg-alas-item strong { flex:0 1 auto; min-width:0; max-width:150px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .mg-alas-task { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:6px; border-left:1px solid currentColor; }
     .mg-alas-item[data-tone="running"] { background:#d9f5e5; border-color:#a1dbb9; color:#176239; }
