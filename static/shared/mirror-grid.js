@@ -71,6 +71,7 @@
       var generation = alasGeneration;
       if (button) button.disabled = true;
       summary.textContent = tr('检查中');
+      summary.classList.toggle('is-visually-hidden', !!list.children.length);
       global.ScrcpyGateApi.configured('alas.grid.status', { cache: false }).then(function (payload) {
         if (generation !== alasGeneration || !active) return;
         var data = payload || {};
@@ -83,20 +84,22 @@
           var stale = state !== 'disabled' && state !== 'unknown' && (!(checked > 0) || Date.now() / 1000 - checked > 90);
           var failed = state !== 'disabled' && (item.ok === false || !!item.error || state === 'error');
           var tone = failed ? 'error' : stale ? 'pending' : state === 'running' ? 'running' : (state === 'unknown' || state === 'waiting' || state === 'starting' || state === 'stopping') ? 'pending' : 'muted';
-          var time = checked > 0 && isFinite(checked) ? new Date(checked * 1000).toLocaleTimeString() : '';
-          return '<article class="mg-alas-item" data-tone="' + tone + '">' +
-            '<strong>' + escHtml(item.config || '—') + '</strong>' +
-            '<span class="mg-alas-state">' + escHtml(tr(failed ? '检查失败' : stale ? '状态已过期' : labels[state] || '未检查')) + '</span>' +
-            '<span class="mg-alas-task">' + escHtml(item.error || item.task || '—') + '</span>' +
-            '<small>' + escHtml(time ? tr('上次检查：') + time : tr('未检查')) + '</small></article>';
+          var statusLabel = tr(failed ? '检查失败' : stale ? '状态已过期' : labels[state] || '未检查');
+          var name = String(item.config || '—');
+          var task = !failed && !stale ? String(item.task || '') : '';
+          var description = name + ' · ' + statusLabel + (task ? ' · ' + task : '') + (item.error ? ' · ' + String(item.error) : '');
+          return '<div class="mg-alas-item" role="listitem" tabindex="0" data-tone="' + tone + '" title="' + escHtml(description) + '" aria-label="' + escHtml(description) + '">' +
+            '<strong>' + escHtml(name) + '</strong>' +
+            (task ? '<span class="mg-alas-task">' + escHtml(task) + '</span>' : '') + '</div>';
         }).join('');
         var running = items.filter(function (item) { return item.status === 'running' && item.ok !== false && !item.error && Number(item.checked_at) > Date.now() / 1000 - 90; }).length;
         var hasError = data.error || items.some(function (item) { return item.ok === false || !!item.error; });
         summary.textContent = data.status === 'disabled' ? tr('ALAS 已禁用') : hasError ? tr('部分状态不可用，请重试') : items.length ? noticeText('{0} 个配置 · {1} 个运行中', [items.length, running]) : tr('暂无 ALAS 配置');
-        if (!items.length && data.error) list.textContent = data.error;
+        summary.classList.toggle('is-visually-hidden', items.length > 0);
       }).catch(function () {
         if (generation !== alasGeneration || !active) return;
         list.textContent = '';
+        summary.classList.remove('is-visually-hidden');
         summary.textContent = tr('状态获取失败，请重试');
       }).finally(function () {
         if (generation !== alasGeneration) return;

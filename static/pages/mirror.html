@@ -227,12 +227,13 @@
             <button class="mg-refresh" id="mg-refresh" type="button"><i data-lucide="refresh-cw"></i><span>刷新设备</span></button>
           </div>
         </div>
-        <section class="mg-alas" id="mg-alas" aria-label="ALAS 配置运行情况">
+        <section class="mg-alas" id="mg-alas" aria-label="ALAS 运行状态">
           <div class="mg-alas-head">
-            <strong>全部 ALAS 配置</strong><span class="mg-alas-scope">不受设备绑定影响</span><span id="mg-alas-summary" role="status">未检查</span>
-            <button class="mg-refresh" id="mg-alas-refresh" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新状态</span></button>
+            <strong>ALAS 运行状态</strong>
           </div>
-          <div class="mg-alas-list" id="mg-alas-list"></div>
+          <div class="mg-alas-list" id="mg-alas-list" role="list" aria-label="ALAS 运行状态"></div>
+          <span id="mg-alas-summary" role="status">未检查</span>
+          <button class="mg-refresh" id="mg-alas-refresh" type="button" title="刷新状态" aria-label="刷新状态"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
         </section>
         <div class="mg-grid" id="mg-grid"></div>
         <div class="mg-grid-foot">

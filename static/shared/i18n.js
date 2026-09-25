@@ -48,8 +48,6 @@
     "状态已过期": "Status is stale",
     "ALAS 已禁用": "ALAS is disabled",
     "ALAS 配置": "ALAS configs",
-    "全部 ALAS 配置": "All ALAS configs",
-    "不受设备绑定影响": "Independent of device bindings",
     "CPU 为系统最近统计": "CPU uses the latest system statistics",
     "ADB 采样超时，请重试": "ADB sampling timed out. Retry.",
     "ADB 连接不可用，请检查设备连接": "ADB is unavailable. Check the device connection.",
