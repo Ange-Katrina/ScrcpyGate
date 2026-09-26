@@ -276,7 +276,7 @@
           '<section class="user-detail-block"><h4>设备与配置</h4><dl class="user-detail-associations">' +
             '<div><dt>设备权限</dt><dd>' + devices + '</dd></div>' +
             '<div><dt>ALAS 配置</dt><dd>' + configs + '</dd></div></dl></section>' +
-          '<details class="user-detail-section"><summary>最近投屏记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history">' + watchHistoryHtml(u) + '</div></details>' +
+          '<details class="user-detail-section"><summary>最近投屏记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history">' + watchHistoryHtml(u, false) + '</div></details>' +
           '<details class="user-detail-section" data-login-history><summary>登录记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history" data-login-history-list role="status">展开后加载最近登录记录</div></details>' +
           '<p class="activity-scope-note">时间按浏览器本地时区显示；多端观看与重连分别计入投屏次数。</p>';
         var remove = document.getElementById('user-details-delete');
@@ -1027,13 +1027,13 @@
         list.innerHTML = watchHistoryHtml(u);
         if (window.lucide) lucide.createIcons();
       }
-      function watchHistoryHtml(u) {
+      function watchHistoryHtml(u, showDeviceName) {
         var history = (u && Array.isArray(u.watchHistory)) ? u.watchHistory : [];
         if (!history.length) return '<div class="watch-empty"><i data-lucide="clock-3"></i><span>暂无观看记录</span></div>';
         return history.map(function (item) {
           var range = formatWatchAt(item.startedAtMs) + ' - ' + (item.active ? '现在' : formatWatchAt(item.endedAtMs));
           return '<div class="watch-history-item">'
-            + '<div class="watch-history-main"><strong>' + esc(item.deviceName || '未知设备') + '</strong><span>' + esc(range) + '</span></div>'
+            + '<div class="watch-history-main">' + (showDeviceName === false ? '' : '<strong>' + esc(item.deviceName || '未知设备') + '</strong>') + '<span>' + esc(range) + '</span></div>'
             + '<div class="watch-history-meta"><b>' + esc(formatWatchDuration(item.durationMs)) + '</b><small>' + esc(watchReasonLabel(item.endReason, item.active)) + '</small></div>'
             + '</div>';
         }).join('');

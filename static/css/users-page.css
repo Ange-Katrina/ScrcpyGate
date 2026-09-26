@@ -1202,7 +1202,7 @@ html, body { margin:0; height:100%; }
 .user-detail-history { padding:0 0 8px; }
 .user-detail-history .watch-history-list { gap:0; }
 .user-detail-history .watch-history-item { padding:10px 0; border:0; border-bottom:1px solid var(--admin-line); border-radius:0; background:transparent; }
-.user-detail-history .watch-history-main span { white-space:normal; overflow:visible; }
+.user-detail-history .watch-history-main span { color:var(--admin-text); font-size:12px; white-space:normal; overflow:visible; }
 .user-login-item { display:flex; justify-content:space-between; gap:8px 14px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid var(--admin-line); font-size:12px; font-variant-numeric:tabular-nums; }
 .user-login-item time { color:var(--admin-text); }
 .user-login-item span { color:var(--admin-muted); overflow-wrap:anywhere; }
