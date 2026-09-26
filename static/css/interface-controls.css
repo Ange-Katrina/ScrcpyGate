@@ -1,5 +1,6 @@
 .admin-shell, .app, .login-card {
   --sg-control-radius: 8px;
+  --sg-card-radius: 16px;
   --sg-control-border: var(--admin-border, var(--c-border));
   --sg-control-surface: var(--admin-field, var(--c-surface));
   --sg-control-focus: var(--admin-brand, var(--brand-blue, #0064d6));
@@ -66,7 +67,13 @@
 .admin-shell :is(.field-input, .field-select, .select-control, .num-control, .alas-input, .alas-select):disabled,
 .app .control-takeover-field:disabled { opacity: .55; cursor: not-allowed; }
 
-.admin-shell :is(.btn-primary, .btn-ghost, .btn-primary-lg, .btn-danger-lg, .guard-btn, .q-btn, .wb-btn, .alas-row-action, .row-btn, .page-btn, .preset-op-btn) {
+.admin-shell :is(.btn-primary, .btn-ghost, .btn-primary-lg, .btn-danger-lg) {
+  box-sizing: border-box;
+  border-radius: 999px;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.admin-shell :is(.guard-btn, .q-btn, .wb-btn, .alas-row-action, .row-btn, .page-btn, .preset-op-btn) {
   box-sizing: border-box;
   border-radius: var(--sg-control-radius);
   line-height: 1.4;
@@ -80,7 +87,7 @@
 }
 .admin-shell :is(.role-chip, .status-chip, .panel-badge, .readonly-chip) { border-radius: 999px; }
 .admin-shell :is(.panel, .sec-card, .dev-card, .user-card, .geo-preview) {
-  border-radius: 8px;
+  border-radius: var(--sg-card-radius);
   box-shadow: none;
 }
 .admin-shell :is(.panel-header, .page-heading, .users-toolbar, .panel-tools) { min-width: 0; }
@@ -91,7 +98,7 @@
 .admin-shell :is(.vis-filter, .policy-field, .param-control, .geo-download-group) { min-width: 0; }
 
 .app .tool-btn { width: 32px; height: 32px; border-radius: var(--sg-control-radius); }
-.app .cb-btn { min-height: 32px; height: auto; border-radius: var(--sg-control-radius); }
+.app .ctrl-dock :is(.cb-btn, .cb-item) { min-height: 32px; height: auto; border-radius: 999px; }
 .app .vp-input-wrap { max-width: 100%; }
 .app .vp-input-wrap :is(input, select) { max-width: 100%; }
 .app .mirror-panel { min-width: 0; max-width: 100%; }
