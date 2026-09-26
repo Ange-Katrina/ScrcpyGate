@@ -24,20 +24,22 @@
     <header class="topnav">
       <div class="topnav-left">
         <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开菜单" title="菜单"><i data-lucide="menu"></i></button>
-        <span class="app-icon"><i data-lucide="monitor"></i></span>
-        <span class="app-name">ScrcpyGate</span>
-        <span class="topnav-sep"></span>
+        <span class="app-icon" aria-hidden="true"><i data-lucide="monitor"></i></span>
         <nav class="topnav-nav" aria-label="页面导航">
           <a class="topnav-link active" href="/mirror" aria-current="page">投屏工作台</a>
         </nav>
+        <div class="view-switch" id="view-switch" role="group" aria-label="视图模式" hidden>
+          <button class="view-switch-btn active" type="button" data-view="single" aria-pressed="true" aria-label="单画面视图" title="单画面"><i data-lucide="square"></i><span>单画面</span></button>
+          <button class="view-switch-btn" type="button" data-view="grid" aria-pressed="false" aria-label="宫格视图（全部设备）" title="宫格：一次显示全部设备"><i data-lucide="layout-grid"></i><span>宫格</span></button>
+        </div>
       </div>
       <div class="topnav-actions">
         <button class="tool-btn" id="themeToggle" aria-label="切换主题" title="切换主题"><i data-lucide="sun-moon"></i></button>
         <button class="tool-btn" id="notify-btn" aria-label="通知" title="通知" aria-haspopup="true" aria-expanded="false"><i data-lucide="bell"></i><span class="notify-dot" id="notify-dot" hidden></span></button>
-        <div class="topnav-user">
+        <button class="topnav-user" id="topnav-account" type="button" aria-label="账户设置" aria-haspopup="dialog" aria-controls="up-panel" title="账户设置">
           <span class="user-avatar">U</span>
           <span class="user-meta"><strong>用户名</strong><small>管理员</small></span>
-        </div>
+        </button>
       </div>
     </header>
     <div class="notify-pop" id="notify-pop" role="dialog" aria-label="通知中心">
@@ -75,10 +77,6 @@
         <button class="device-entry" type="button" title="设备管理" aria-label="设备管理"><i data-lucide="smartphone"></i></button>
         <div class="device-head">
           <div class="device-title"><b>设备</b><span id="device-count">—</span></div>
-          <div class="view-switch" id="view-switch" role="group" aria-label="视图模式" hidden>
-            <button class="view-switch-btn active" type="button" data-view="single" aria-pressed="true" aria-label="单画面视图" title="单画面"><i data-lucide="square"></i></button>
-            <button class="view-switch-btn" type="button" data-view="grid" aria-pressed="false" aria-label="宫格视图（全部设备）" title="宫格：一次显示全部设备"><i data-lucide="layout-grid"></i></button>
-          </div>
         </div>
         <div class="device-list" id="device-list" data-scroll-region="devices">
           <div class="device-empty" id="device-empty">

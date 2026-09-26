@@ -15,7 +15,7 @@ These rules cover all ten pages in `static/pages/`. They apply the hierarchy and
 | Page | Primary task | Page-level choice | Local choice |
 | --- | --- | --- | --- |
 | Login | Authenticate | None | Language, theme, and verification stay with the form |
-| Mirror | Prioritize the video viewport | Single/grid mode stays with devices | Sidebar navigation shows names only; quality, controls, recording, and account stay in their panels |
+| Mirror | Prioritize the video viewport | Single/grid mode sits beside the workspace title | Sidebar navigation shows names only; quality, controls, recording, and account stay in their panels |
 | Dashboard | Scan devices and attention items | None | Device filters and alert views stay in their panels |
 | Devices | Browse devices and details | None | Search and filters stay with the list |
 | Users | Browse and manage users | None | Filters stay inside the list; account policy is a separate disclosure |
@@ -29,8 +29,8 @@ These rules cover all ten pages in `static/pages/`. They apply the hierarchy and
 
 - Admin controls are compact at 36px, with 16px content spacing. Primary touch controls are at least 44px high, with 12px content spacing on narrow screens. `admin-workspace.css`, `interface-controls.css`, and existing tokens own the values.
 - The admin rail shows one clear label per destination. Dashboard and log summaries use a compact information band; device and ALAS summaries use smaller independent cards that wrap into two columns on narrow screens.
-- In the mirror workbench, align the device-view selector with the device cards. Keep its two choices equal in size. Treat the status line as information and the top and bottom bars as toolbars: quiet controls share a rounded-rectangle hit area; selected and error states remain distinct.
-- Peer cards share one radius token. Inputs, commands, and dialogs use smaller or larger radii according to purpose. Reserve pills for status and compact choices.
+- In the mirror workbench, keep the two device-view choices together beside the workspace title. The sidebar owns device selection; the status line leads with the current device and control ownership. The bottom toolbar keeps session and control actions visible, moving secondary actions into More when space is limited. Selected and error states remain distinct.
+- Use ScrcpyGate's own radius scale on all ten pages: 8px for fields, command buttons, and icon buttons; 12px outside and 9px inside segmented choices; 16px for peer cards and centered dialogs. These pixel values are project decisions, not Apple HIG specifications. Status badges, avatars, switch tracks, and genuinely circular indicators retain their semantic shapes. Keep each compound field's border on its outer wrapper only.
 - Every field has a visible label or a clear accessible name; a placeholder is not a label. Both locales must wrap naturally.
 - Reflow by available width on phones and tablets. Segmented controls may scroll without a visible scrollbar when space is scarce, while all choices remain keyboard focusable. Preserve video space in the mirror workbench and necessary controls in fullscreen.
 - Use existing semantic colors in both themes, with text or icons alongside color. Keep keyboard focus visible and honor reduced-motion preferences.

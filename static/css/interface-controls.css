@@ -1,6 +1,9 @@
-.admin-shell, .app, .login-card {
+:root {
   --sg-control-radius: 8px;
   --sg-card-radius: 16px;
+  --sg-dialog-radius: 16px;
+}
+.admin-shell, .app, .login-card {
   --sg-control-border: var(--admin-border, var(--c-border));
   --sg-control-surface: var(--admin-field, var(--c-surface));
   --sg-control-focus: var(--admin-brand, var(--brand-blue, #0064d6));
@@ -69,11 +72,13 @@
 
 .admin-shell :is(.btn-primary, .btn-ghost, .btn-primary-lg, .btn-danger-lg) {
   box-sizing: border-box;
-  border-radius: 999px;
+  border-radius: var(--sg-control-radius);
   line-height: 1.4;
   vertical-align: middle;
 }
-.admin-shell :is(.guard-btn, .q-btn, .wb-btn, .alas-row-action, .row-btn, .page-btn, .preset-op-btn) {
+.admin-shell :is(.guard-btn, .q-btn, .wb-btn, .alas-row-action, .row-btn, .page-btn, .preset-op-btn,
+  .preset-add-btn, .preset-toggle, .allow-chip, .bw-tier-btn, .dev-btn-sm, .alas-btn-sm,
+  .alas-btn-ghost-sm, .refresh-btn, .empty-btn, .mode-default-btn, .dash-log-btn, .dash-resolve-btn) {
   box-sizing: border-box;
   border-radius: var(--sg-control-radius);
   line-height: 1.4;
@@ -90,6 +95,29 @@
   border-radius: var(--sg-card-radius);
   box-shadow: none;
 }
+.admin-shell :is(.modal-card, .q-modal, .alas-modal, .sec-confirm, .ui-dialog) {
+  border-radius: var(--sg-dialog-radius);
+}
+:is(.modal-card, .q-modal, .alas-modal, .sec-confirm, .ui-dialog) {
+  border-radius: var(--sg-dialog-radius);
+}
+:is(.dev-access-tabs, .guard-presets, .alas-tabs) { border-radius: var(--sg-seg-radius); }
+:is(.dev-access-tab, .guard-preset, .alas-tab) { border-radius: var(--sg-seg-radius-inner); }
+:is(.btn-primary-lg, .btn-danger-lg, .control-takeover-btn) { border-radius: var(--sg-control-radius); }
+.admin-shell :is(.filter-tab, .guard-preset, .dev-access-tab, .alas-tab, .seg-btn, .view-tab) {
+  border-radius: var(--sg-seg-radius-inner);
+}
+.admin-shell :is(.guard-presets, .dev-access-tabs, .alas-tabs, .seg) {
+  border-radius: var(--sg-seg-radius);
+}
+.page-mirror-admin .wb-chip-seg { border-radius: var(--sg-seg-radius); }
+.page-mirror-admin .wb-chip-seg .sg-seg { border-radius: var(--sg-seg-radius-inner); }
+.admin-shell :is(.modal-close, .q-modal-close, .wb-chip-remove) {
+  border-radius: var(--sg-control-radius);
+}
+.admin-shell :is(.select-wrap select, .unit-select, .geo-upload-form select) {
+  border-radius: var(--sg-control-radius);
+}
 .admin-shell :is(.panel-header, .page-heading, .users-toolbar, .panel-tools) { min-width: 0; }
 .admin-shell :is(.panel-header, .users-toolbar, .panel-tools) > * { min-width: 0; }
 .admin-shell :is(.page-heading, .panel-header) { gap: 8px 12px; }
@@ -102,11 +130,22 @@
 .app .topnav-actions .sg-lang-wrap:focus-within { outline: 2px solid var(--sg-control-focus); outline-offset: 2px; }
 .app .tool-btn { width: 32px; height: 32px; border-radius: var(--sg-control-radius); }
 .app .ctrl-dock :is(.cb-btn, .cb-item) { min-height: 32px; height: auto; border-radius: var(--sg-control-radius); }
+.app .ctrl-dock :is(.cb-btn, .cb-item):disabled { opacity: .55; }
+.app :is(.dev-empty-btn, .start-button, .ghost-button, .vp-apply, .ap-btn, .mg-btn,
+  .control-takeover-btn, .tl-btn, .tl-arch-btn) { border-radius: var(--sg-control-radius); }
+.app :is(.vp-close, .view-switch-btn) { border-radius: var(--sg-control-radius); }
+.app :is(.vp-panel, .control-takeover-dialog, .tl-dialog) { border-radius: var(--sg-dialog-radius); }
+.app :is(.vp-tabs, .vp-seg) { border-radius: var(--sg-seg-radius); }
+.app :is(.vp-tab, .vp-seg .vp-seg-thumb, .vp-seg button) { border-radius: var(--sg-seg-radius-inner); }
 .app .vp-input-wrap { max-width: 100%; }
 .app .vp-input-wrap :is(input, select) { max-width: 100%; }
 .app .mirror-panel { min-width: 0; max-width: 100%; }
 .app .mirror-grid { min-width: 0; }
 .login-card #login-submit { border-radius: var(--sg-control-radius); }
+.login-card #login-form .login-field { border-radius: var(--sg-control-radius); }
+:is(.admin-shell, .app, .login-card) :is(.ui-button, .ui-icon-button, .ui-input, .ui-select, .ui-textarea) {
+  border-radius: var(--sg-control-radius);
+}
 
 .sg-help { position: relative; display: inline-flex; align-items: center; flex: 0 0 auto; vertical-align: middle; }
 .sg-heading-help { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }

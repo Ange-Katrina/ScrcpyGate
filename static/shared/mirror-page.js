@@ -438,6 +438,7 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!wrap) return;
         var admin=mirrorIsAdmin();
         wrap.hidden=!admin;
+        if(app) app.classList.toggle('has-view-switch',admin);
         if(!admin&&viewMode==='grid') setViewMode('single');
       }
       function setViewMode(mode){
@@ -2333,18 +2334,19 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!ctrlDock||dockHidden||!ctrlDock.offsetWidth||(cbPop&&cbPop.classList.contains('open'))) return;
         restoreDockOverflow();
         ctrlDock.classList.remove('dock-compact');
-        if(dockOverflow()<=0) return;
-        ctrlDock.classList.add('dock-compact');
-        // Keep one row with full touch targets. Move the actual buttons so
-        // handlers, permission flags and changing labels stay in sync.
+        // Compact view keeps the live controls visible; the existing button
+        // nodes move into More so their handlers and permission state persist.
+        var narrow=window.matchMedia('(max-width:767px)').matches;
+        var secondary=narrow?['cb-keyboard','cb-alas','cb-tasks','cb-rotate','cb-back']:['cb-alas','cb-tasks','cb-rotate'];
+        if(narrow||dockOverflow()>0) ctrlDock.classList.add('dock-compact');
         var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-tasks','cb-back','cb-home','cb-fullscreen','cb-watch','cb-acquire'];
         Array.prototype.forEach.call(ctrlDock.querySelectorAll(':scope > button'),function(el){
           if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
         });
-        candidates.some(function(id){
-          if(dockOverflow()<=0) return true;
+        secondary.concat(candidates).forEach(function(id){
+          if(secondary.indexOf(id)<0&&dockOverflow()<=0) return;
           var el=document.getElementById(id);
-          if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return false;
+          if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return;
           var anchor=document.createComment('dock action');
           el.before(anchor);
           var toggle=el.hasAttribute('aria-pressed');
@@ -2356,8 +2358,8 @@ document.addEventListener('DOMContentLoaded',function(){
           if(dockOverflowItems.length===1) dockMoreWasOff=moreWrap.hasAttribute('data-feature-off');
           moreWrap.removeAttribute('data-feature-off');
           moreBtn.disabled=false;
-          return false;
         });
+        normalizeDockSeparators();
       }
       var dockOverflowItems=[];
       var dockMoreWasOff=false;
@@ -2715,6 +2717,9 @@ document.addEventListener('DOMContentLoaded',function(){
         if(was) closeMoreMenu(true);
         else openMoreMenu();
       });
+      if(cbPop) cbPop.addEventListener('click',function(e){
+        if(e.target.closest('button')) closeMoreMenu(true);
+      },true);
       if(cbPop) cbPop.addEventListener('keydown',function(e){
         var items=moreMenuItems();
         if(e.key==='Escape'){
@@ -5757,6 +5762,7 @@ document.addEventListener('DOMContentLoaded',function(){
         e.preventDefault();
         upOpen();
       });
+      document.getElementById('topnav-account').addEventListener('click',upOpen);
       document.getElementById('up-close').addEventListener('click',upClose);
       upBackdrop.addEventListener('click',upClose);
       var upPasswordForm=document.getElementById('up-password-form');
