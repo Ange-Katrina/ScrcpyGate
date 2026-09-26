@@ -15,7 +15,7 @@ These rules cover all ten pages in `static/pages/`. They apply the hierarchy and
 | Page | Primary task | Page-level choice | Local choice |
 | --- | --- | --- | --- |
 | Login | Authenticate | None | Language, theme, and verification stay with the form |
-| Mirror | Prioritize the video viewport | Single/grid mode stays with devices | Quality, controls, recording, and account stay in their panels |
+| Mirror | Prioritize the video viewport | Single/grid mode stays with devices | Sidebar navigation shows names only; quality, controls, recording, and account stay in their panels |
 | Dashboard | Scan devices and attention items | None | Device filters and alert views stay in their panels |
 | Devices | Browse devices and details | None | Search and filters stay with the list |
 | Users | Browse and manage users | None | Filters stay inside the list; account policy is a separate disclosure |

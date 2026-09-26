@@ -499,19 +499,15 @@
     .menu-item [data-lucide] { width:20px; height:20px; flex:0 0 20px; display:grid; place-items:center; stroke-width:1.6; color:var(--c-text-sub); transition:color var(--motion-fast) var(--ease-fade); }
     .menu-text { display:flex; align-items:baseline; gap:8px; min-width:0; max-width:180px; white-space:nowrap; overflow:hidden; }
     .menu-text b { color:var(--c-text); font-size:12.5px; font-weight:500; transition:color var(--motion-fast) var(--ease-fade); }
-    .menu-text small { color:var(--c-text-faint); font-size:10px; font-weight:400; transition:color var(--motion-fast) var(--ease-fade); }
     .menu-item:hover { background:var(--c-hover); }
     .menu-item:hover b { color:var(--c-text-strong); }
-    .menu-item:hover small { color:var(--c-text-faint); }
     .menu-item.active { background:rgba(0,122,255,.1); }
     .menu-item.active [data-lucide] { color:var(--brand-400); }
     .menu-item.active b { color:var(--c-text-strong); }
-    .menu-item.active small { color:var(--c-text-faint); }
     .menu-item.logout [data-lucide] { color:var(--c-danger); }
     .menu-item.logout b { color:var(--c-danger); }
     .menu-item.logout:hover { background:rgba(255,77,87,.1); }
     .menu-item.logout:hover b { color:var(--c-danger); }
-    .menu-item.logout:hover small { color:var(--c-danger); }
     .sidebar-divider { height:1px; flex:0 0 auto; margin:12px 4px 10px; background:var(--c-line); }
     .logout-divider { margin:12px 4px 10px; }
     .logout-nav { margin-top:auto; margin-bottom:0; }
@@ -1584,7 +1580,6 @@
     .app .sidebar .menu-item { height:40px; padding-inline:12px; }
     .app .sidebar .menu-text { max-width:140px; }
     .app .sidebar .menu-text b { font-size:13px; font-weight:600; }
-    .app .sidebar .menu-text small { display:none; }
     @media (max-width:1023px) {
       .app .sidebar .menu-item { height:44px; }
     }

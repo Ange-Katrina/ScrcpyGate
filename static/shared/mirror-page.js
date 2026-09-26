@@ -4178,15 +4178,6 @@ document.addEventListener('DOMContentLoaded',function(){
         if(active) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
         var dot=document.getElementById('record-dot');
         if(dot) dot.hidden=!active;
-        var hint=document.getElementById('record-item-hint');
-        if(hint){
-          var s=recordState();
-          var session=recordSession();
-          var text='实时事件时间线';
-          if(localRecord.active&&!session) text='本端记录中';
-          else if(session) text=session.stopped?'记录已停止':'记录中（'+(session.participants||[]).length+' 个参与端）';
-          hint.textContent=text;
-        }
       }
       function startLocalRecord(){
         if(!localRecord.active){
