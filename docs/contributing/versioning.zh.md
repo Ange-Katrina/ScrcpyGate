@@ -21,7 +21,7 @@ Release 或 GHCR。
 ## 显示与构建
 
 - 源码运行、本地 Docker 和 Compose 构建读取 `VERSION`。
-- 管理后台侧栏、系统更新面板、登录页底部和 OpenAPI 版本保持一致。
+- 管理后台侧栏、登录页底部和 OpenAPI 版本保持一致。
 - CI 分支构建附带开发标识，例如 `1.0.0-dev.main.g0123456789ab`；PR 使用
   `dev.pr`，开发分支使用 `dev.dev`。这些标识包含提交缩写，方便追踪具体镜像。
 - 标签构建必须与 `VERSION` 完全匹配；`VERSION=1.0.0` 时仅接受 `v1.0.0`。

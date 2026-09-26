@@ -25,8 +25,8 @@ its image or GitHub Release has been published.
 ## Runtime and builds
 
 - Source runs and local Docker/Compose builds use `VERSION`.
-- The API's OpenAPI version, administrator update panel, administrator sidebar
-  and login footer share the same runtime version.
+- The API's OpenAPI version, administrator sidebar and login footer share the
+  same runtime version.
 - `main`, `dev` and PR builds append a development identifier, for example
   `1.0.0-dev.main.g0123456789ab`. This distinguishes snapshots from a release.
 - A tag build requires the exact tag `v` plus `VERSION`. Its image version is

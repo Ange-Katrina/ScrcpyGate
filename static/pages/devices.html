@@ -107,7 +107,7 @@
           <section class="alas-workspace" id="devWorkspace" aria-label="设备列表与详情">
             <aside class="alas-master">
               <div class="alas-pane-head">
-                <div><h2>设备列表</h2><p>搜索、筛选和选择设备</p></div>
+                <div class="sg-heading-help"><h2>设备列表</h2><span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="设备列表说明" aria-describedby="dev-list-help" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="dev-list-help" role="tooltip">按名称或 ADB 地址搜索，再按连接和投屏状态筛选设备。</span></span></div>
                 <button class="alas-row-action" id="devMasterRefreshBtn" type="button" title="刷新全部设备状态" aria-label="刷新全部设备状态"><i data-lucide="refresh-cw"></i></button>
               </div>
               <div class="alas-search">
@@ -206,10 +206,10 @@
 
   <!-- 新增 / 编辑设备弹窗 -->
   <div class="alas-drawer-mask" id="devDrawerMask" hidden></div>
-  <aside class="alas-drawer" id="devDrawer" aria-label="新增或编辑设备" aria-hidden="true" inert>
+  <section class="alas-drawer" id="devDrawer" role="dialog" aria-modal="true" aria-labelledby="devDrawerTitle" aria-hidden="true" inert>
     <div class="alas-drawer-head">
       <div><h2 id="devDrawerTitle">新增设备</h2><p>设备名称、ADB 地址和启用状态</p></div>
-      <button class="alas-row-action" type="button" data-close-drawer="devDrawer" aria-label="关闭抽屉" title="关闭"><i data-lucide="x"></i></button>
+      <button class="alas-row-action" type="button" data-close-drawer="devDrawer" aria-label="关闭弹窗" title="关闭"><i data-lucide="x"></i></button>
     </div>
     <div class="alas-drawer-body">
       <div class="alas-field">
@@ -235,14 +235,14 @@
       <button class="btn-ghost" type="button" data-close-drawer="devDrawer">取消</button>
       <button class="btn-primary" id="devFormSaveBtn" type="button"><i data-lucide="check"></i><span>保存设备</span></button>
     </div>
-  </aside>
+  </section>
 
-  <!-- 设备用户权限与 ALAS 绑定抽屉 -->
+  <!-- Device access dialog -->
   <div class="alas-drawer-mask" id="devAccessMask" hidden></div>
-  <aside class="alas-drawer dev-access-drawer" id="devAccessDrawer" aria-label="设备权限与 ALAS 绑定" aria-hidden="true" inert>
+  <section class="alas-drawer dev-access-drawer" id="devAccessDrawer" role="dialog" aria-modal="true" aria-labelledby="devAccessTitle" aria-hidden="true" inert>
     <div class="alas-drawer-head">
       <div><h2 id="devAccessTitle">权限与绑定</h2><p id="devAccessSubtitle">分别管理用户访问和 ALAS 关联</p></div>
-      <button class="alas-row-action" type="button" id="devAccessClose" aria-label="关闭抽屉" title="关闭"><i data-lucide="x"></i></button>
+      <button class="alas-row-action" type="button" id="devAccessClose" aria-label="关闭弹窗" title="关闭"><i data-lucide="x"></i></button>
     </div>
     <div class="alas-drawer-body">
       <div class="dev-access-context">
@@ -283,7 +283,7 @@
       <button class="btn-ghost" type="button" id="devAccessCancel">关闭</button>
       <button class="btn-primary" type="button" id="devAccessSave"><i data-lucide="check"></i><span>保存用户访问</span></button>
     </div>
-  </aside>
+  </section>
 
   <!-- 删除设备确认弹窗 -->
   <div class="alas-modal-mask" id="devDeleteMask" hidden></div>

@@ -329,7 +329,7 @@
       <div class="vp-backdrop" id="tl-backdrop" aria-hidden="true"></div>
     <!-- data-i18n-skip：记录里全是原始参数（键=值、序号、码率等），一律不翻译，
          否则未收录的词条会被 i18n 改写/丢掉，排查时看不到真实数据。 -->
-    <aside class="vp-panel" id="tl-panel" role="dialog" aria-modal="true" aria-label="投屏实时记录" aria-hidden="true" data-i18n-skip inert>
+    <section class="vp-panel" id="tl-panel" role="dialog" aria-modal="true" aria-label="投屏实时记录" aria-hidden="true" data-i18n-skip inert>
       <header class="tl-head">
         <div class="tl-title">
           <b>投屏实时记录</b>
@@ -392,7 +392,7 @@
           <li class="tl-empty">还没有原始数据。展开并在开始投屏后，这里会逐条显示控制面 JSON 原文、发出的控制消息、Raw v2 包头、接口调用、状态切换与环境快照。</li>
         </ol>
       </details>
-    </aside>
+    </section>
     <div class="vp-backdrop" id="tl-mode-backdrop" aria-hidden="true"></div>
     <div class="tl-dialog" id="tl-mode-dialog" role="dialog" aria-modal="true" aria-label="选择记录方式" aria-hidden="true" inert>
       <h3 class="tl-dialog-title">投屏记录方式</h3>
@@ -455,7 +455,7 @@
       <button class="tl-float-stop" id="tl-float-stop" type="button" title="停止记录" aria-label="停止记录"><i data-lucide="square"></i></button>
     </div>
     <div class="vp-backdrop" id="vp-backdrop" aria-hidden="true"></div>
-      <aside class="vp-panel" id="vp-panel" role="dialog" aria-modal="true" aria-label="画面设置" aria-hidden="true" inert>
+      <section class="vp-panel" id="vp-panel" role="dialog" aria-modal="true" aria-label="画面设置" aria-hidden="true" inert>
         <span class="vp-grabber" aria-hidden="true"></span>
         <header class="vp-head">
           <div class="vp-head-copy"><h2>画面</h2><p>显示与画质设置</p></div>
@@ -523,9 +523,9 @@
           </div>
           <p class="vp-note">预设一键应用；手动参数需点击应用画质。修改编码参数可能短暂重启共享视频流。</p>
         </div>
-      </aside>
+      </section>
       <div class="vp-backdrop" id="ap-backdrop" aria-hidden="true"></div>
-      <aside class="vp-panel ap-panel" id="ap-panel" role="dialog" aria-modal="true" aria-label="ALAS 设置" aria-hidden="true" inert>
+      <section class="vp-panel ap-panel" id="ap-panel" role="dialog" aria-modal="true" aria-label="ALAS 设置" aria-hidden="true" inert>
         <span class="vp-grabber" aria-hidden="true"></span>
         <header class="vp-head">
           <div class="vp-head-copy"><h2>ALAS</h2><p>自动化配置与运行</p></div>
@@ -580,7 +580,7 @@
             <p class="vp-note">ALAS 配置与绑定由管理员在后台"ALAS 管理"中维护;启动后 ALAS 将接管设备的自动化任务。</p>
           </section>
         </div>
-      </aside>
+      </section>
       <dialog class="alas-float-window" id="alas-float-window" aria-labelledby="alas-float-title" aria-describedby="alas-float-subtitle" aria-modal="false" aria-hidden="true" inert>
         <header class="alas-float-head" id="alas-float-head">
           <div class="alas-float-head-copy">
@@ -597,7 +597,7 @@
         </div>
       </dialog>
       <div class="vp-backdrop" id="up-backdrop" aria-hidden="true"></div>
-      <aside class="vp-panel up-panel" id="up-panel" role="dialog" aria-modal="true" aria-label="账户设置" aria-hidden="true" inert>
+      <section class="vp-panel up-panel" id="up-panel" role="dialog" aria-modal="true" aria-label="账户设置" aria-hidden="true" inert>
         <span class="vp-grabber" aria-hidden="true"></span>
         <header class="vp-head">
           <div class="vp-head-copy"><h2>账户</h2><p>资料、偏好与安全</p></div>
@@ -630,6 +630,12 @@
             <div class="ap-empty" id="up-perms-empty" hidden><i data-lucide="shield-off"></i><span>暂无设备权限</span><small>请联系管理员为你分配设备</small></div>
 
             <div class="vp-group-title vp-group-title-extra"><h3>修改密码</h3><span class="vp-hint">至少 12 位</span></div>
+            <div class="up-password-reminder" id="up-password-reminder" hidden>
+              <i data-lucide="shield-check" aria-hidden="true"></i>
+              <div><strong>建议修改初始密码</strong><p>为保护账户，请设置仅你知道的新密码；也可以稍后再说。</p>
+                <div class="up-reminder-actions"><button class="ap-btn ap-btn-primary" id="up-reminder-change" type="button">现在修改</button><button class="ap-btn" id="up-reminder-dismiss" type="button">稍后再说</button></div>
+              </div>
+            </div>
             <form class="up-password" id="up-password-form" novalidate>
               <label class="vp-field">当前密码
                 <span class="vp-input-wrap"><input id="up-cur" type="password" autocomplete="current-password"></span>
@@ -652,7 +658,7 @@
             <p class="vp-note">设备权限与账号状态由管理员维护;退出后需要重新登录才能继续使用。</p>
           </section>
         </div>
-      </aside>
+      </section>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
   </main>

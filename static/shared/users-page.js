@@ -67,6 +67,8 @@
           name: u.name || u.displayName || u.username || '—',
           role: u.role || 'user',
           enabled: u.enabled !== false,
+          passwordReminderPending: u.passwordReminderPending === true || u.password_reminder_pending === true,
+          mustChangePassword: u.mustChangePassword === true || u.must_change_password === true,
           // 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
           // 服务端可能是 0/1 或字符串，统一折算（0 表示隐藏）。
           alasVisible: !(u.alasVisible === false || u.alas_visible === false
@@ -150,13 +152,6 @@
       }
       function avatarLetter(name) { var a = Array.from(String(name || '?')); return a.length ? a[0] : '?'; }
       function statusLabel(s) { return dashboard.statusLabel ? dashboard.statusLabel(s) : (s === 'expired' ? '已到期' : (s === 'expiring' ? '即将到期' : (s === 'disabled' ? '已停用' : '正常'))); }
-      function deviceCountText(u) { return u.role === 'admin' ? '全部设备' : (u.deviceIds.length + ' 台设备'); }
-      function configCountText(u) {
-        if (u.role === 'admin') return '全部 ALAS';
-        var text = u.configIds.length + ' 个配置';
-        // 显式关掉「显示 ALAS」时标出来，否则管理员会以为配置丢了。
-        return u.alasVisible === false ? text + '（ALAS 已隐藏）' : text;
-      }
       function computeStatus(expiry) {
         var today = new Date(); today.setHours(0, 0, 0, 0);
         var d = new Date(String(expiry) + 'T00:00:00');
@@ -245,10 +240,9 @@
       function rowHtml(u) {
         return '<article class="user-row user-card" role="listitem" data-id="' + esc(u.id) + '">' +
           '<button class="user-card-main" type="button" data-act="details" aria-haspopup="dialog">' +
-          '<span class="user-cell"><span class="user-avatar">' + esc(avatarLetter(u.name)) + '</span><span class="user-card-identity"><strong class="user-name">' + esc(u.name) + '</strong><span class="user-handle">@' + esc(u.username) + '</span></span><i data-lucide="chevron-right"></i></span>' +
-          '<span class="user-card-badges"><span class="role-chip ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? '管理员' : '普通用户') + '</span><span class="status-chip ' + esc(u.status) + '"><span class="mini-dot"></span>' + esc(statusLabel(u.status)) + '</span></span>' +
-          '<span class="user-card-access">' + esc(deviceCountText(u)) + ' · ' + esc(configCountText(u)) + '</span>' +
-          '</button><div class="user-card-footer"><span class="expiry-cell">' + (u.expiry ? '<span class="expiry-date">' + esc(u.expiry) + '</span>' : '') + remainingChip(u) + '</span><div class="row-actions">' +
+          '<span class="user-cell"><span class="user-avatar">' + esc(avatarLetter(u.name)) + '</span><span class="user-card-identity"><strong class="user-name">' + esc(u.username) + '</strong></span><i data-lucide="chevron-right"></i></span>' +
+          '<span class="user-card-badges"><span class="role-chip ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? '管理员' : '普通用户') + '</span><span class="status-chip ' + esc(u.status) + '"><span class="mini-dot"></span>' + esc(statusLabel(u.status)) + '</span>' + remainingChip(u) + '</span>' +
+          '</button><div class="user-card-footer"><div class="row-actions">' +
           '<button class="row-btn neutral" type="button" data-act="edit" title="编辑用户"><i data-lucide="pencil"></i>编辑</button>' +
           '<button class="row-btn open" type="button" data-act="perm" title="权限管理"><i data-lucide="shield"></i>权限</button></div></div></article>';
       }
@@ -256,20 +250,35 @@
       function openUserDetails(u) {
         detailUserId = u.id;
         var stats = u.watchStats || {};
-        var fields = [
-          ['用户名', u.username], ['账户状态', statusLabel(u.status)],
-          ['登录 IP', u.lastLoginIp || '—'], ['上次登录', formatLoginAt(u.lastLoginAt)],
-          ['累计投屏时长', formatWatchDuration(stats.totalDurationMs)], ['投屏次数', stats.sessionCount || 0],
-          ['最近投屏开始', formatWatchAt(stats.lastStartedAtMs)], ['最近投屏结束', formatWatchAt(stats.lastEndedAtMs)],
-          ['当前投屏连接', stats.activeSessions || 0], ['到期时间', u.expiry || '长期有效']
-        ];
-        document.getElementById('user-details-title').textContent = '用户详情 · ' + u.name;
-        document.getElementById('user-details-body').innerHTML = '<dl class="user-detail-grid">' + fields.map(function (pair) {
-          return '<div><dt>' + esc(pair[0]) + '</dt><dd>' + esc(pair[1]) + '</dd></div>';
-        }).join('') + '</dl>' +
+        function facts(items) {
+          return '<dl class="user-detail-grid">' + items.map(function (pair) {
+            return '<div><dt>' + esc(pair[0]) + '</dt><dd' + (pair[0] === '密码提醒' ? ' id="user-password-reminder-state"' : '') + '>' + esc(pair[1]) + '</dd></div>';
+          }).join('') + '</dl>';
+        }
+        var devices = u.role === 'admin' ? '全部设备' : (u.deviceIds || []).map(function (id) {
+          var device = deviceById(id);
+          return esc(device ? device.name : id);
+        }).join('、') || '未授权设备';
+        var configs = u.role === 'admin' ? '全部 ALAS 配置' : (u.configs || []).map(function (config) {
+          return esc(config.name);
+        }).join('、') || '未关联配置';
+        document.getElementById('user-details-title').textContent = '用户详情 · ' + u.username;
+        document.getElementById('user-details-body').innerHTML =
+          '<section class="user-detail-block"><h4>账户</h4>' + facts([
+            ['角色', u.role === 'admin' ? '管理员' : '普通用户'], ['状态', statusLabel(u.status)],
+            ['到期时间', u.expiry || '长期有效'], ['密码提醒', u.mustChangePassword ? '强制修改密码' : (u.passwordReminderPending ? '待下次登录提醒' : '未设置')]
+          ]) + '</section>' +
+          '<section class="user-detail-block"><h4>登录与投屏</h4>' + facts([
+            ['上次登录', formatLoginAt(u.lastLoginAt)], ['登录 IP', u.lastLoginIp || '—'],
+            ['投屏次数', stats.sessionCount || 0], ['累计时长', formatWatchDuration(stats.totalDurationMs)],
+            ['上次投屏', formatWatchAt(stats.lastStartedAtMs)], ['当前连接', stats.activeSessions || 0]
+          ]) + '</section>' +
+          '<section class="user-detail-block"><h4>设备与配置</h4><dl class="user-detail-associations">' +
+            '<div><dt>设备权限</dt><dd>' + devices + '</dd></div>' +
+            '<div><dt>ALAS 配置</dt><dd>' + configs + '</dd></div></dl></section>' +
           '<details class="user-detail-section"><summary>最近投屏记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history">' + watchHistoryHtml(u) + '</div></details>' +
           '<details class="user-detail-section" data-login-history><summary>登录记录<i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="user-detail-history" data-login-history-list role="status">展开后加载最近登录记录</div></details>' +
-          '<p class="activity-scope-note">时间按浏览器本地时区显示。上次登录仅记录账号认证成功，不是打开页面的时间；观看时长按视频连接累计，多端同时观看分别计时，刷新或重连会新增次数。</p>';
+          '<p class="activity-scope-note">时间按浏览器本地时区显示；多端观看与重连分别计入投屏次数。</p>';
         var remove = document.getElementById('user-details-delete');
         remove.disabled = u.role === 'admin';
         remove.title = u.role === 'admin' ? '管理员账号不可删除' : '删除用户';
@@ -979,9 +988,9 @@
         window.ScrcpyGateApi.configured('users.reset-password', { params: { id: target && target.id }, method: 'POST', body: { password: p, forcePasswordChange: force } }).then(function () { closeModal('modal-reset-password'); showToast('密码已重置', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
-      /* ---------- 权限管理抽屉 ---------- */
+      /* ---------- Permission dialog ---------- */
       var perm = { user: null, deviceIds: null, controlIds: null, configIds: null, devSnapshot: null, controlSnapshot: null, cfgSnapshot: null, changes: [], batch: false, batchSnapshot: null };
-      function openPermDrawer(u) {
+      function openPermModal(u) {
         perm.user = u;
         perm.changes = [];
         perm.batch = false;
@@ -997,16 +1006,14 @@
           perm.cfgSnapshot = new Set(u.configIds || []);
         }
         renderPerm();
-        document.getElementById('drawer-mask').classList.add('open');
-        window.ScrcpyGateUi.modal.open('perm-drawer', {
-          initialFocus: '#perm-close', onEscape: cancelPerm, companions: ['drawer-mask']
+        window.ScrcpyGateUi.modal.open('modal-permissions', {
+          initialFocus: '#perm-close', onEscape: cancelPerm
         });
         var body = document.getElementById('perm-body');
         if (body) { body.scrollTop = 0; }
       }
-      function closePermDrawer() {
-        document.getElementById('drawer-mask').classList.remove('open');
-        window.ScrcpyGateUi.modal.close('perm-drawer');
+      function closePermModal() {
+        window.ScrcpyGateUi.modal.close('modal-permissions');
       }
       function renderWatchHistory() {
         var u = perm.user;
@@ -1036,7 +1043,9 @@
         if (!u) return;
         document.getElementById('perm-avatar').textContent = avatarLetter(u.name);
         document.getElementById('perm-name').textContent = u.name;
-        document.getElementById('perm-handle').textContent = '@' + u.username;
+        var handle = document.getElementById('perm-handle');
+        handle.textContent = '@' + u.username;
+        handle.hidden = u.name === u.username;
         var rc = document.getElementById('perm-role');
         rc.className = 'role-chip ' + (u.role === 'admin' ? 'admin' : 'user');
         rc.textContent = u.role === 'admin' ? '管理员' : '普通用户';
@@ -1253,7 +1262,7 @@
         perm.changes = [];
         perm.batch = false;
         perm.batchSnapshot = null;
-        closePermDrawer();
+        closePermModal();
       }
       function savePerm() {
         var u = perm.user;
@@ -1265,11 +1274,10 @@
             return { deviceId: deviceId, canView: true, canControl: perm.controlIds.has(deviceId) };
           }),
           configIds: u.role === 'admin' ? null : Array.from(perm.configIds),
-          /* 打开抽屉时的快照：适配层据此保留「编辑期间才出现」的设备/配置授权，
-             不会因为它们不在这份快照里就被整体替换删掉。 */
+          /* The opening snapshot preserves grants added while this dialog is open. */
           deviceIdsBaseline: u.role === 'admin' || !perm.devSnapshot ? null : Array.from(perm.devSnapshot),
           configIdsBaseline: u.role === 'admin' || !perm.cfgSnapshot ? null : Array.from(perm.cfgSnapshot)
-        } }).then(function () { closePermDrawer(); return loadUsers(); }).then(function () { showToast('权限变更已保存', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
+        } }).then(function () { closePermModal(); return loadUsers(); }).then(function () { showToast('权限变更已保存', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
       /* ---------- 事件绑定 ---------- */
@@ -1335,9 +1343,12 @@
         });
       });
       document.querySelectorAll('.modal-mask').forEach(function (m) {
-        m.addEventListener('click', function (e) { if (e.target === m) { closeModal(m.id); } });
+        m.addEventListener('click', function (e) {
+          if (e.target !== m) return;
+          if (m.id === 'modal-permissions') cancelPerm();
+          else closeModal(m.id);
+        });
       });
-      document.getElementById('drawer-mask').addEventListener('click', function (e) { if (e.target === this) { cancelPerm(); } });
 
       document.getElementById('users-search').addEventListener('input', function () { state.q = this.value; state.page = 1; render(); });
       document.getElementById('users-role-filter').addEventListener('change', function () { state.role = this.value; state.page = 1; render(); });
@@ -1360,6 +1371,20 @@
           else openDeleteModal(u);
         });
       });
+      document.getElementById('user-details-remind').addEventListener('click', function () {
+        var u = userById(detailUserId);
+        if (!u) return;
+        var button = this;
+        button.disabled = true;
+        window.ScrcpyGateApi.configured('users.password-reminder', { params: { id: u.id }, method: 'POST' })
+          .then(function () {
+            u.passwordReminderPending = true;
+            var status = document.getElementById('user-password-reminder-state');
+            if (status) status.textContent = u.mustChangePassword ? '强制修改密码' : '待下次登录提醒';
+            showToast('已安排下次登录时提醒修改密码', 'success');
+          }).catch(function (error) { showToast(apiError(error), 'error'); })
+          .finally(function () { button.disabled = false; });
+      });
       document.getElementById('user-details-body').addEventListener('toggle', function (e) {
         if (e.target.matches('[data-login-history]') && e.target.open) loadLoginHistory(e.target);
       }, true);
@@ -1367,16 +1392,16 @@
         var cf = e.target.closest('#clear-filters');
         if (cf) { clearFilters(); return; }
         var btn = e.target.closest('[data-act]');
-        if (!btn || btn.disabled) return;
-        var row = btn.closest('.user-row');
+        if (btn && btn.disabled) return;
+        var row = e.target.closest('.user-row');
         if (!row) return;
         var u = userById(row.getAttribute('data-id'));
         if (!u) return;
-        var act = btn.getAttribute('data-act');
+        var act = btn ? btn.getAttribute('data-act') : 'details';
         if (act === 'details') { openUserDetails(u); }
         else if (act === 'edit') { openEditModal(u); }
         else if (act === 'reset') { openResetModal(u); }
-        else if (act === 'perm') { openPermDrawer(u); }
+        else if (act === 'perm') { openPermModal(u); }
         else if (act === 'del') { openDeleteModal(u); }
       });
       document.getElementById('perm-body').addEventListener('click', function (e) {

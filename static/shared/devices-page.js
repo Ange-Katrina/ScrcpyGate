@@ -189,9 +189,17 @@
         }, 3000);
       }
 
-      /* ===== 抽屉控制（新增 / 编辑设备） ===== */
+      /* ===== Device dialogs ===== */
+      var deviceDialogOpener = null;
+      var accessDialogOpener = null;
+      function restoreDialogFocus(dialog, opener) {
+        if (!dialog.contains(document.activeElement)) return;
+        if (opener && opener.isConnected && !opener.disabled && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
+        else document.activeElement.blur();
+      }
       function openDrawer() {
         var drawer = $('devDrawer'), mask = $('devDrawerMask');
+        deviceDialogOpener = document.activeElement;
         drawer.classList.add('open');
         mask.classList.add('open');
         drawer.setAttribute('aria-hidden', 'false');
@@ -202,20 +210,23 @@
       }
       function closeDrawer() {
         var drawer = $('devDrawer'), mask = $('devDrawerMask');
+        if (!drawer.classList.contains('open')) return;
+        restoreDialogFocus(drawer, deviceDialogOpener);
         drawer.classList.remove('open');
         mask.classList.remove('open');
         drawer.setAttribute('aria-hidden', 'true');
         drawer.setAttribute('inert', '');
-        setTimeout(function () { mask.hidden = true; }, 190);
+        setTimeout(function () { if (!mask.classList.contains('open')) mask.hidden = true; }, 190);
       }
 
       var accessState = { permissions: [], permissionBaseline: {}, users: [], alas: [], configs: [], activeTab: 'users', grantContext: '' };
       function closeAccessDrawer() {
         var drawer = $('devAccessDrawer'), mask = $('devAccessMask');
-        if (!drawer) return;
+        if (!drawer || !drawer.classList.contains('open')) return;
+        restoreDialogFocus(drawer, accessDialogOpener);
         drawer.classList.remove('open'); mask.classList.remove('open');
         drawer.setAttribute('aria-hidden', 'true'); drawer.setAttribute('inert', '');
-        setTimeout(function () { mask.hidden = true; $('devAccessBtn').focus(); }, 190);
+        setTimeout(function () { if (!mask.classList.contains('open')) mask.hidden = true; }, 190);
       }
       function showAccessError(message) {
         $('devAccessError').textContent = message || '保存失败';
@@ -412,6 +423,7 @@
       function openAccessDrawer() {
         var device = currentAccessDevice();
         if (!device) { toast('请先选择设备', 'error'); return Promise.resolve(); }
+        accessDialogOpener = document.activeElement;
         $('devAccessError').hidden = true;
         $('devAccessTitle').textContent = '权限与绑定';
         $('devAccessSubtitle').textContent = '分别管理用户访问和 ALAS 关联';
@@ -554,8 +566,24 @@
       });
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-          closeDrawer();
-          closeModal('devDeleteModal'); closeModal('devDisableModal');
+          if (!$('devDeleteModal').hidden) closeModal('devDeleteModal');
+          else if (!$('devDisableModal').hidden) closeModal('devDisableModal');
+          else if ($('devAccessDrawer').classList.contains('open')) closeAccessDrawer();
+          else closeDrawer();
+        }
+        if (e.key === 'Tab') {
+          var dialog = $('devAccessDrawer').classList.contains('open') ? $('devAccessDrawer') :
+            ($('devDrawer').classList.contains('open') ? $('devDrawer') : null);
+          if (!dialog || !$('devDeleteModal').hidden || !$('devDisableModal').hidden) return;
+          var nodes = Array.prototype.filter.call(dialog.querySelectorAll('button, input, select, textarea, [tabindex]'), function (node) {
+            return !node.disabled && !node.hidden && node.tabIndex >= 0 && node.getClientRects().length;
+          });
+          if (!nodes.length) return;
+          var first = nodes[0], last = nodes[nodes.length - 1];
+          if (!dialog.contains(document.activeElement) || (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+          }
         }
       });
 

@@ -63,10 +63,8 @@
 .workspace-refined [hidden] { display:none; }
 .workspace-refined [data-scroll-table] { scrollbar-width:thin; overscroll-behavior-x:contain; }
 
-/* Overview: keep maintenance compact and the device list close to the summary. */
-.page-admin #update-panel { margin-bottom:16px; }
+/* Overview: keep the device list close to the summary. */
 .page-admin .panel-health[data-state="warning"] { color:var(--admin-muted); }
-.page-admin #update-panel > summary { flex-wrap:wrap; }
 .page-admin #devices .search-box { width:clamp(140px,18vw,240px); }
 
 /* Users: the list is the primary task, account policy is a secondary disclosure. */
@@ -177,4 +175,27 @@
 @media (max-height:600px) {
   .page-quality .quality-dock, .page-mirror-admin .wb-foot { position:static; }
 }
-.admin-rail .rail-bottom { position:sticky; bottom:0; z-index:1; background:var(--admin-surface); }
+html[data-sidebar-motion="off"] .admin-rail,
+html[data-sidebar-motion="off"] .mobile-scrim,
+html[data-sidebar-motion="off"] .admin-rail :is(.menu-text,.sidebar-group-label,.sidebar-divider,.side-version,.side-badge,.sidebar-nav,.side-item) {
+  transition:none!important;
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-sidebar-motion="on"] .admin-rail {
+    transition:width .22s cubic-bezier(.22,1,.36,1)!important;
+  }
+  html[data-sidebar-motion="on"] .admin-rail :is(.menu-text,.sidebar-group-label,.sidebar-divider,.side-version,.side-badge) {
+    transition:opacity .16s ease .04s,height .18s ease,margin .18s ease,visibility 0s linear 0s!important;
+  }
+  html[data-sidebar-motion="on"] .admin-rail.is-collapsed :is(.menu-text,.sidebar-group-label,.sidebar-divider,.side-version) {
+    transition:opacity .07s ease,height .18s ease,margin .18s ease,visibility 0s linear .07s!important;
+  }
+  html[data-sidebar-motion="on"] .admin-rail .sidebar-nav { transition:margin-top .18s ease!important; }
+  html[data-sidebar-motion="on"] .admin-rail .side-item { transition:background-color .15s ease,color .15s ease!important; }
+}
+@media (max-width:1023px) and (prefers-reduced-motion:reduce) {
+  html[data-sidebar-motion="on"] .admin-rail { transition:transform .28s cubic-bezier(.22,1,.36,1)!important; }
+  html[data-sidebar-motion="on"] .mobile-scrim { transition:opacity .28s ease,visibility 0s linear .28s!important; }
+  html[data-sidebar-motion="on"] .mobile-scrim.open { transition:opacity .28s ease,visibility 0s linear 0s!important; }
+}
+.admin-motion-state { margin-left:auto; color:var(--admin-muted); font-size:11px; }

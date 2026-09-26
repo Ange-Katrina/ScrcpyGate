@@ -160,11 +160,10 @@
                     <div class="param-group-title"><i data-lucide="sliders-horizontal"></i>基础画质</div>
                     <div class="param-row" id="row-resolution">
                       <div class="param-copy">
-                        <div class="param-label"><i data-lucide="monitor"></i>输出尺寸</div>
-                        <div class="param-desc">按最长边限制编码尺寸，保留设备比例；宽高仅作参考，实际尺寸由设备编码器决定</div>
+                        <div class="param-label"><i data-lucide="monitor"></i>输出尺寸<span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="输出尺寸说明" aria-describedby="desc-resolution" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="desc-resolution" role="tooltip">按最长边限制编码尺寸，保留设备比例；实际尺寸由设备编码器决定。</span></span></div>
                       </div>
                       <div class="param-control">
-                        <select class="select-control" id="sel-resolution" aria-label="输出尺寸">
+                        <select class="select-control" id="sel-resolution" aria-label="输出尺寸" aria-describedby="desc-resolution">
                           <option value="1280x720">720p · 1280 × 720</option>
                           <option value="1920x1080">1080p · 1920 × 1080</option>
                           <option value="custom">自定义</option>
@@ -180,8 +179,7 @@
                     </div>
                     <div class="param-row" id="row-fps">
                       <div class="param-copy">
-                        <label class="param-label" for="inp-fps"><i data-lucide="gauge"></i>帧率</label>
-                        <div class="param-desc" id="desc-fps">帧率上限，实际帧率随画面变化。日常建议 30 fps，游戏可尝试 60 fps；更高帧率需要设备和网络支持</div>
+                        <div class="sg-heading-help"><label class="param-label" for="inp-fps"><i data-lucide="gauge"></i>帧率</label><span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="帧率说明" aria-describedby="desc-fps" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="desc-fps" role="tooltip">帧率上限；日常建议 30 fps，游戏可尝试 60 fps。实际帧率取决于画面、设备和网络。</span></span></div>
                       </div>
                       <div class="param-control">
                         <input class="num-control" type="number" id="inp-fps" min="15" max="240" step="1" value="" aria-describedby="desc-fps unit-fps" aria-errormessage="err-fps">

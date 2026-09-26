@@ -676,6 +676,15 @@ async def api_change_password(request: Request):
     return {"ok": True, "other_sessions_removed": removed}
 
 
+@router.post("/api/account/password-reminder/dismiss")
+async def api_dismiss_password_reminder(request: Request):
+    security.verify_csrf(request)
+    user = security.require_user(request)
+    await asyncio.to_thread(storage.set_password_reminder, user["username"], False)
+    audit_request(request, user, "password_reminder_dismissed", target_type="account", target_id=user["username"])
+    return {"ok": True}
+
+
 from . import alas as alas_routes  # noqa: E402  (compatibility view after route declarations)
 from . import mirror as mirror_routes  # noqa: E402
 

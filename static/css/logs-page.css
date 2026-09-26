@@ -1107,6 +1107,26 @@ html, body { margin:0; height:100%; }
       }
       @media (max-width:560px){ .log-drawer { width:100%; } }
 
+      .log-drawer {
+        top:50%; right:auto; bottom:auto; left:50%;
+        width:min(680px,calc(100vw - 32px));
+        height:min(680px,calc(100dvh - 40px));
+        max-height:calc(100dvh - 40px);
+        border:1px solid var(--admin-elev-border);
+        border-radius:12px;
+        box-shadow:0 24px 64px var(--c-shadow);
+        transform:translate(-50%,-46%) scale(.98);
+        opacity:0;
+        visibility:hidden;
+        transition:transform 200ms var(--ease-standard),opacity 180ms var(--ease-fade),visibility 0s linear 200ms;
+      }
+      .log-drawer.open { transform:translate(-50%,-50%) scale(1); opacity:1; visibility:visible; transition-delay:0s; }
+      .drawer-mask { backdrop-filter:blur(3px); }
+      @media (max-width:560px) {
+        .log-drawer { width:calc(100vw - 24px); max-height:calc(100dvh - 24px); }
+        .drawer-foot { flex-wrap:wrap; }
+      }
+
 /* 自动刷新开关行：文字 + 共享开关（static/css/switch.css）。 */
 .switch { display:inline-flex; align-items:center; gap:8px; height:var(--page-h-field); padding:0 10px; border:0; border-radius:var(--page-radius-pill); background:transparent; color:var(--admin-muted); font-size:12px; white-space:nowrap; cursor:pointer; transition:color 150ms var(--ease-fade); }
 .switch:hover { color:var(--admin-text); }

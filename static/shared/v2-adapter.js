@@ -1250,6 +1250,8 @@
           displayName: u.username,
           role: u.role,
           enabled: u.enabled !== false,
+          passwordReminderPending: settingBoolean(u.password_reminder_pending, false),
+          mustChangePassword: settingBoolean(u.must_change_password, false),
           /* 服务端下发的是 0/1（或字符串 "0"/"false"），统一折算成布尔再给页面，
              否则 `0 !== false` 会把「隐藏 ALAS」当成开启。 */
           alasVisible: settingBoolean(
@@ -5256,6 +5258,15 @@
     });
   }
 
+  function handlerUsersPasswordReminder(opts) {
+    var params = (opts && opts.params) || {};
+    return apiPost('/api/admin/users/' + encodeURIComponent(params.id || '') + '/password-reminder', {});
+  }
+
+  function handlerAccountPasswordReminderDismiss() {
+    return apiPost('/api/account/password-reminder/dismiss', {});
+  }
+
   function handlerDevicePermissionUpdate(opts) {
     var body = (opts && opts.body) || {};
     return apiPut('/api/admin/permissions', {
@@ -6005,41 +6016,6 @@
       .then(function (payload) { return logRetentionPayload(payload); });
   }
 
-  /* 系统更新检查（只读）：后台只显示当前/最新版本与宿主机更新命令，
-     不提供下载或应用按钮——应用更新由宿主机 deploy.sh --update 完成。 */
-  function updateCheckPayload(payload) {
-    var data = (payload && payload.data && typeof payload.data === 'object') ? payload.data : (payload || {});
-    var latest = data.latest && typeof data.latest === 'object' ? data.latest : null;
-    return {
-      ok: data.ok === true,
-      reachable: data.reachable !== false && data.ok === true,
-      noRelease: data.noRelease === true || data.no_release === true,
-      checkedAt: data.checkedAt == null ? (data.checked_at == null ? null : Number(data.checked_at)) : Number(data.checkedAt),
-      cached: data.cached === true,
-      channel: String(data.channel || 'stable'),
-      status: String(data.status || ''),
-      currentVersion: String(((data.current || {}).version) || 'dev'),
-      currentImage: String(((data.current || {}).image) || ''),
-      image: String(data.image || ''),
-      repository: String(data.repository || ''),
-      latestVersion: latest ? String(latest.version || latest.tag || '') : '',
-      latestSource: latest ? String(latest.source || '') : '',
-      latestPublishedAt: latest ? String(latest.published_at || '') : '',
-      latestUrl: latest ? String(latest.url || '') : '',
-      updateAvailable: data.updateAvailable === undefined ? data.update_available : data.updateAvailable,
-      hostCommand: String(data.hostCommand || data.host_command || ''),
-      releaseUrl: String(data.releaseUrl || data.release_url || ''),
-      error: String(data.error || '')
-    };
-  }
-
-  function handlerSystemUpdate(opts) {
-    var query = {};
-    if (opts && opts.channel) query.channel = String(opts.channel);
-    if (opts && (opts.refresh || (opts.query && opts.query.refresh))) query.refresh = 1;
-    return apiGet('/api/admin/update-check', query).then(function (payload) { return updateCheckPayload(payload); });
-  }
-
   /* 访问记录（VIS）：IP 汇总 + 明细 + 线索 + 观测健康 + 导出。
      服务端已在写入时脱敏（无 query/Referer/body），这里只做形状归一化。 */
   function accessPayload(payload) {
@@ -6431,6 +6407,7 @@
     'auth.logout': handlerAuthLogout,
     'session.current': handlerSessionCurrent,
     'account.password': handlerAccountPassword,
+    'account.password-reminder.dismiss': handlerAccountPasswordReminderDismiss,
     'login.guard': handlerLoginGuard,
     'login.guard.update': handlerLoginGuardUpdate,
     'login.guard.unlock': handlerLoginGuardUnlock,
@@ -6438,7 +6415,6 @@
     'account.policy.update': handlerAccountPolicyUpdate,
     'logs.retention': handlerLogRetention,
     'logs.retention.update': handlerLogRetentionUpdate,
-    'system.update': handlerSystemUpdate,
     'access.summary': handlerAccessSummary,
     'access.records': handlerAccessRecords,
     'access.hints': handlerAccessHints,
@@ -6508,6 +6484,7 @@
     'devices.update': handlerDevicesUpdate,
     'devices.delete': handlerDevicesDelete,
     'users.list': handlerUsersList,
+    'users.password-reminder': handlerUsersPasswordReminder,
     'users.create': handlerUsersCreate,
     'users.update': handlerUsersUpdate,
     'users.delete': handlerUsersDelete,

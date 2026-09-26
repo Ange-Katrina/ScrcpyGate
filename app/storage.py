@@ -2654,7 +2654,7 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
             dict(row)
             for row in conn.execute(
                 "SELECT username,role,created_at,must_change_password,expires_at,enabled,alas_visible,"
-                "last_login_at,last_login_ip FROM users ORDER BY username"
+                "last_login_at,last_login_ip,password_reminder_pending FROM users ORDER BY username"
             )
         ]
         current = now_ts()
@@ -2829,7 +2829,7 @@ def upsert_user(
             if password:
                 conn.execute(
                     "UPDATE users SET password_hash=?, role=?, video_mode='normal', expires_at=?, "
-                    "must_change_password=?, enabled=?, alas_visible=? WHERE username=?",
+                    "must_change_password=?, enabled=?, alas_visible=?, password_reminder_pending=1 WHERE username=?",
                     (
                         hash_password(password),
                         role,
@@ -2870,8 +2870,8 @@ def upsert_user(
             if role == "admin" and normalized_expires_at is None and not normalized_enabled and available_permanent_admin_count(conn) < 1:
                 raise ValueError("last_permanent_admin_required")
             conn.execute(
-                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible,password_reminder_pending) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     username,
                     hash_password(password),
@@ -2881,6 +2881,7 @@ def upsert_user(
                     normalized_expires_at,
                     int(normalized_enabled),
                     int(normalized_alas_visible),
+                    1,
                 ),
             )
         conn.commit()
@@ -2927,10 +2928,20 @@ def change_user_password(username: str, current_password: str, new_password: str
         raise ValueError("new_password_must_be_different")
     with db_connect() as conn:
         conn.execute(
-            "UPDATE users SET password_hash=?, must_change_password=0 WHERE username=?",
+            "UPDATE users SET password_hash=?, must_change_password=0, password_reminder_pending=0 WHERE username=?",
             (hash_password(new_password), username),
         )
         conn.commit()
+
+
+def set_password_reminder(username: str, pending: bool) -> bool:
+    with db_connect() as conn:
+        changed = conn.execute(
+            "UPDATE users SET password_reminder_pending=? WHERE username=?",
+            (int(pending), username),
+        ).rowcount
+        conn.commit()
+    return bool(changed)
 
 
 def delete_user(username: str) -> None:

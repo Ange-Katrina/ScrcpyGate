@@ -168,6 +168,12 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('keydown',function(e){
         if(e.isComposing||e.keyCode===229||textSendComposing) return;
         if(e.key==='Escape'){
+          if(document.querySelector('.tl-dialog.open')) return;
+          if(tlPanel&&tlPanel.classList.contains('open')) return;
+          if((vpPanel&&vpPanel.classList.contains('open'))||(apPanel&&apPanel.classList.contains('open'))||(upPanel&&upPanel.classList.contains('open'))){
+            vpClose(); apClose(); upClose();
+            return;
+          }
           closeFixedPops(); vpClose(); apClose(); upClose(); takeoverClose(); alasFloatClose(); textSendClose();
           if(fullscreenActive){
             e.preventDefault();
@@ -3220,14 +3226,37 @@ document.addEventListener('DOMContentLoaded',function(){
           vpSetStatus('画质数据不可用,当前为内置默认值','error');
         });
       }
-      /* aria-hidden 不能被仍持有焦点的元素隐藏：先移出焦点再隐藏面板，否则
-         浏览器会拒绝 aria-hidden 并输出 “Blocked aria-hidden … retained focus”。 */
+      var panelOpeners=new WeakMap();
+      function rememberPanelOpener(panel){
+        if(panel&&!panel.classList.contains('open')) panelOpeners.set(panel,document.activeElement);
+      }
       function releasePanelFocus(panel){
         if(!panel||!panel.contains) return;
         var active=document.activeElement;
-        if(active&&active!==document.body&&panel.contains(active)&&typeof active.blur==='function') active.blur();
+        if(active&&active!==document.body&&panel.contains(active)){
+          var opener=panelOpeners.get(panel);
+          if(opener&&opener.isConnected&&!opener.closest('[inert]')&&!opener.disabled) opener.focus({preventScroll:true});
+          else if(typeof active.blur==='function') active.blur();
+        }
       }
+      document.addEventListener('keydown',function(event){
+        if(event.key!=='Tab') return;
+        var panel=document.querySelector('.tl-dialog.open')||[upPanel,tlPanel,apPanel,vpPanel].find(function(item){
+          return item&&item.classList.contains('open');
+        });
+        if(!panel) return;
+        var nodes=Array.prototype.filter.call(panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]'),function(node){
+          return !node.disabled&&!node.closest('[hidden], [inert]')&&node.tabIndex>=0&&node.getClientRects().length;
+        });
+        if(!nodes.length) return;
+        var first=nodes[0],last=nodes[nodes.length-1],active=document.activeElement;
+        if(!panel.contains(active)||(event.shiftKey?active===first:active===last)){
+          event.preventDefault();
+          (event.shiftKey?last:first).focus();
+        }
+      },true);
       function vpOpen(){
+        rememberPanelOpener(vpPanel);
         if(!vpLoaded) vpLoad();
         apClose();
         upClose();
@@ -4193,6 +4222,7 @@ document.addEventListener('DOMContentLoaded',function(){
       function tlOpen(){
         if(!mirrorIsAdmin()&&!recordParticipantActive()) return;
         if(!tlPanel) return;
+        rememberPanelOpener(tlPanel);
         vpClose();
         apClose();
         upClose();
@@ -4281,6 +4311,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var RECORD_STATE_LABEL={invited:'待确认',accepted:'参与中',declined:'已拒绝',uploaded:'已上传',left:'已离开',unavailable:'不可用'};
       function dialogOpen(dialog,backdrop){
         if(!dialog) return;
+        rememberPanelOpener(dialog);
         dialog.classList.add('open');
         if(backdrop) backdrop.classList.add('open');
         dialog.setAttribute('aria-hidden','false');
@@ -5291,6 +5322,7 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function apOpen(){
         if(!workbenchAlasVisible) return;
+        rememberPanelOpener(apPanel);
         apRefreshStatus();
         apLoadExitGuard();
         vpClose();
@@ -5508,6 +5540,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var upStatus=document.getElementById('up-status');
       var upStatusDot=document.getElementById('up-status-dot');
       var upStatusText=document.getElementById('up-status-text');
+      var upReminder=document.getElementById('up-password-reminder');
       var upLoaded=false;
       var upBusy=false;
       function upUser(){
@@ -5528,6 +5561,7 @@ document.addEventListener('DOMContentLoaded',function(){
         upAvatar.textContent=(name||'A').charAt(0).toUpperCase();
         upName.textContent=name;
         upUsername.textContent=username;
+        upUsername.hidden=name===username;
         upRole.textContent=role;
         upRole.hidden=!role;
         upRole.classList.toggle('user',!!role&&role.indexOf('管理员')<0);
@@ -5662,6 +5696,7 @@ document.addEventListener('DOMContentLoaded',function(){
           upCur.value='';
           upNew.value='';
           upConfirm.value='';
+          upReminder.hidden=true;
           upSetStatus('密码已更新');
         }).catch(function(error){
           upBusy=false;
@@ -5678,6 +5713,7 @@ document.addEventListener('DOMContentLoaded',function(){
         }
       }
       function upOpen(){
+        rememberPanelOpener(upPanel);
         if(!upLoaded){ upLoaded=true; upLoadPerms().catch(function(){}); }
         vpClose();
         apClose();
@@ -5702,6 +5738,29 @@ document.addEventListener('DOMContentLoaded',function(){
         upPanel.setAttribute('aria-hidden','true');
         upPanel.setAttribute('inert','');
         upBackdrop.setAttribute('aria-hidden','true');
+      }
+      document.getElementById('up-reminder-change').addEventListener('click',function(){
+        upReminder.hidden=true;
+        upCur.focus();
+      });
+      document.getElementById('up-reminder-dismiss').addEventListener('click',function(){
+        var button=this;
+        button.disabled=true;
+        window.ScrcpyGateApi.configured('account.password-reminder.dismiss',{ method:'POST' })
+          .then(function(){ upReminder.hidden=true; upSetStatus('已跳过密码提醒'); })
+          .catch(function(error){ upSetStatus('操作失败 · '+apiErrorText(error),'error'); })
+          .finally(function(){ button.disabled=false; });
+      });
+      if(new URLSearchParams(window.location.search).get('password_reminder')==='1'){
+        var reminderUrl=new URL(window.location.href);
+        reminderUrl.searchParams.delete('password_reminder');
+        window.history.replaceState(null,'',reminderUrl.pathname+reminderUrl.search+reminderUrl.hash);
+        window.ScrcpyGateSession.start().then(function(user){
+          if(user && user.password_reminder_pending && !user.must_change_password){
+            upReminder.hidden=false;
+            upOpen();
+          }
+        }).catch(function(){});
       }
       document.getElementById('acct-item').addEventListener('click',function(e){
         e.preventDefault();

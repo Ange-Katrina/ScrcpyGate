@@ -242,14 +242,18 @@
 
             submitted = true;
             attempt(proofFresh(name) ? proof.value : null)
-                .then(function () {
+                .then(function (login) {
                     // A successful login response is not enough when the browser rejects
                     // a Secure cookie on a direct HTTP test URL. Verify the session before
                     // navigating so the user gets an actionable error instead of a redirect loop.
                     loginAccepted = true;
-                    return window.ScrcpyGateApi.get('session.current');
+                    return window.ScrcpyGateApi.get('session.current').then(function () { return login; });
                 })
-                .then(function () { window.location.href = '/mirror'; })
+                .then(function (login) {
+                    var user = login && login.user || {};
+                    window.location.href = user.password_reminder_pending && !user.must_change_password
+                        ? '/mirror?password_reminder=1' : '/mirror';
+                })
                 .catch(function (err) {
                     var status = Number(err && err.detail && err.detail.status) || 0;
                     var code = codeOf(err);

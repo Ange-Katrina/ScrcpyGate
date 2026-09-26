@@ -234,7 +234,7 @@
 
 
   <div class="alas-drawer-mask" id="alasConnMask" hidden></div>
-  <aside class="alas-drawer" id="alasConnDrawer" aria-label="ALAS 连接设置" aria-hidden="true" inert>
+  <section class="alas-drawer" id="alasConnDrawer" role="dialog" aria-modal="true" aria-label="ALAS 连接设置" aria-hidden="true" inert>
     <div class="alas-drawer-head">
       <div><h2>ALAS 连接设置</h2><p>Runtime 地址与访问凭据</p></div>
       <button class="alas-row-action" type="button" data-close-drawer="alasConnDrawer" aria-label="关闭连接设置" title="关闭"><i data-lucide="x"></i></button>
@@ -260,11 +260,10 @@
         </div>
       </div>
       <div class="alas-field">
-        <label for="alasTokenInput">API Token</label>
+        <div class="sg-heading-help"><label for="alasTokenInput">API Token</label><span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="API Token 保存说明" aria-describedby="alas-token-help" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="alas-token-help" role="tooltip">已保存的 Token 不会回显；输入新值并保存可更新，留空则保持不变。</span></span></div>
         <div class="alas-input-row">
-          <input class="alas-input" type="password" id="alasTokenInput" placeholder="输入新 Token 以更新，留空保持不变" spellcheck="false" autocomplete="new-password">
+          <input class="alas-input" type="password" id="alasTokenInput" placeholder="输入新 Token 以更新，留空保持不变" spellcheck="false" autocomplete="new-password" aria-describedby="alas-token-help">
         </div>
-        <span class="alas-field-hint">已保存的 Token 不会回显；在此输入新值并点击“保存连接设置”即可更新</span>
         <div class="alas-inline-warning" id="alasTokenKeyWarning" hidden role="status" aria-live="polite">
           <i data-lucide="triangle-alert" aria-hidden="true"></i>
           <span id="alasTokenKeyWarningText">服务端未配置 ALAS Token 加密密钥，保存 Token 会被拒绝；请注入 ALAS_TOKEN_ENCRYPTION_KEY 或运行 python -m app.cli generate-alas-key</span>
@@ -279,10 +278,10 @@
       <button class="btn-ghost" type="button" data-close-drawer="alasConnDrawer">取消</button>
       <button class="btn-primary" id="alasSaveConnBtn" type="button"><i data-lucide="check"></i><span>保存连接设置</span></button>
     </div>
-  </aside>
+  </section>
 
   <div class="alas-drawer-mask" id="alasLinkMask" hidden></div>
-  <aside class="alas-drawer alas-link-drawer" id="alasLinkDrawer" aria-label="配置关联" aria-hidden="true" inert>
+  <section class="alas-drawer alas-link-drawer" id="alasLinkDrawer" role="dialog" aria-modal="true" aria-labelledby="alasLinkTitle" aria-hidden="true" inert>
     <div class="alas-drawer-head">
       <div><h2 id="alasLinkTitle">新增关联</h2><p id="alasLinkSubtitle">为用户连接设备与 ALAS 配置</p></div>
       <button class="alas-row-action" type="button" data-close-drawer="alasLinkDrawer" aria-label="关闭配置关联" title="关闭"><i data-lucide="x"></i></button>
@@ -326,7 +325,7 @@
       <button class="btn-ghost" type="button" data-close-drawer="alasLinkDrawer">取消</button>
       <button class="btn-primary" id="alasLinkSaveBtn" type="button" disabled><i data-lucide="check"></i><span>创建关联</span></button>
     </div>
-  </aside>
+  </section>
 
   <div class="alas-modal-mask" id="alasModalMask" hidden></div>
   <div class="alas-modal" id="alasConfirmModal" role="dialog" aria-modal="true" aria-labelledby="alasConfirmTitle" aria-hidden="true" hidden>

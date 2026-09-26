@@ -129,7 +129,7 @@
                   <option value="30">30 天</option>
                 </select>
               </label>
-              <span class="log-retention-hint" id="log-retention-hint">「不清理」仅关闭按天清理，行数与文件轮转上限仍生效。审计日志清理连续过期记录并保留校验链；运行日志只清理超期轮转段。</span>
+              <span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="日志保存时长说明" aria-describedby="log-retention-hint" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="log-retention-hint" role="tooltip">「不清理」仅关闭按天清理，行数与文件轮转上限仍生效。审计日志会保留校验链，运行日志只清理超期轮转段。</span></span>
               <button class="btn-primary" type="button" id="log-retention-save"><i data-lucide="save"></i><span>保存</span></button>
             </div>
           </details>
@@ -275,7 +275,7 @@
 
   <!-- ===== 日志详情抽屉 ===== -->
   <div class="drawer-mask" id="drawer-mask"></div>
-  <aside class="log-drawer" id="log-drawer" role="dialog" aria-modal="true" aria-labelledby="log-drawer-title">
+  <section class="log-drawer" id="log-drawer" role="dialog" aria-modal="true" aria-labelledby="log-drawer-title" aria-hidden="true" inert>
     <div class="drawer-head">
       <div><h3 class="drawer-title" id="log-drawer-title">日志详情</h3><div class="meta" id="log-drawer-meta"></div></div>
       <div class="drawer-head-actions">
@@ -304,7 +304,7 @@
         <button class="btn-primary-lg" id="log-drawer-copy" type="button"><i data-lucide="copy"></i>复制原始内容</button>
       </div>
     </div>
-  </aside>
+  </section>
 
   <!-- ===== 安全审计记录详情弹窗 ===== -->
   <div class="modal-mask" id="audit-modal-mask">

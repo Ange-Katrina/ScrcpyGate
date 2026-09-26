@@ -191,6 +191,7 @@ def user_payload(user: dict) -> dict:
         "is_admin": user["role"] == "admin",
         "video_mode": "normal",
         "must_change_password": bool(user.get("must_change_password")),
+        "password_reminder_pending": bool(user.get("password_reminder_pending")),
         "last_login_at": user.get("last_login_at"),
         "last_login_ip": user.get("last_login_ip") or "",
         "enabled": bool(user.get("enabled", 1)),

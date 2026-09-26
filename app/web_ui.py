@@ -43,6 +43,7 @@ ENDPOINTS_MAP = {
     "auth.logout": {"path": "/api/auth/logout", "method": "POST"},
     "session.current": {"path": "/api/me", "method": "GET"},
     "account.password": {"path": "/api/account/password", "method": "PUT"},
+    "account.password-reminder.dismiss": {"path": "/api/account/password-reminder/dismiss", "method": "POST"},
     # 登录会话（"谁登录了系统"）：管理员在安全页看全部并可踢出；account.sessions 是用户自助入口。
     "login.sessions": {"path": "/api/admin/login-sessions", "method": "GET"},
     "login.sessions.revoke": {"path": "/api/admin/login-sessions/:sessionId", "method": "DELETE"},
@@ -115,6 +116,7 @@ ENDPOINTS_MAP = {
     "users.update": {"path": "/api/admin/users", "method": "PUT"},
     "users.delete": {"path": "/api/admin/users/:id", "method": "DELETE"},
     "users.reset-password": {"path": "/api/admin/users", "method": "PUT"},
+    "users.password-reminder": {"path": "/api/admin/users/:id/password-reminder", "method": "POST"},
     "logs.list": {"path": "/api/admin/runtime-logs", "method": "GET"},
     "logs.audit": {"path": "/api/admin/logs", "method": "GET"},
     # 访问记录（VIS）：匿名/已认证都统计；明细与汇总都只对管理员开放。
@@ -136,8 +138,6 @@ ENDPOINTS_MAP = {
     "alerts.list": {"path": "/api/admin/alerts", "method": "GET"},
     "alerts.resolve": {"path": "/api/admin/alerts/:id/resolve", "method": "POST"},
     "admin.dashboard.snapshot": {"path": "/api/admin/dashboard/snapshot", "method": "GET"},
-    # 系统更新检查（只读）：后台只显示「有没有更新」，应用更新在宿主机跑 deploy.sh --update。
-    "system.update": {"path": "/api/admin/update-check", "method": "GET"},
     "logs.export": {"path": "/api/admin/logs/export", "method": "POST"},
     "logs.integrity": {"path": "/api/admin/logs/integrity-check", "method": "POST"},
     "alas.overview": {"path": "/api/admin/alas/permissions", "method": "GET"},
@@ -306,6 +306,12 @@ for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "l
     EXTRA_SCRIPTS[f"{_page}.html"].append(
         f'<link rel="stylesheet" href="{asset_url("css/admin-workspace.css")}">'
     )
+
+# Final shared control layer keeps form geometry and focus states consistent on
+# admin, login and mirror pages without changing their separate layouts.
+for _assets in EXTRA_SCRIPTS.values():
+    _assets.append(f'<link rel="stylesheet" href="{asset_url("css/interface-controls.css")}">')
+    _assets.append(f'<script defer src="{asset_url("shared/ui-hints.js")}"></script>')
 
 
 def _injection(request: Request, file: str, nonce: str = "") -> str:

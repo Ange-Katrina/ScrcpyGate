@@ -1,0 +1,138 @@
+.admin-shell, .app, .login-card {
+  --sg-control-radius: 8px;
+  --sg-control-border: var(--admin-border, var(--c-border));
+  --sg-control-surface: var(--admin-field, var(--c-surface));
+  --sg-control-focus: var(--admin-brand, var(--brand-blue, #0064d6));
+  --sg-control-text: var(--admin-text, var(--c-text-strong));
+  --sg-control-muted: var(--admin-muted, var(--c-text-sub));
+}
+.admin-shell { --sg-control-height: 36px; }
+.app, .login-card { --sg-control-height: 40px; }
+
+/* A compound field owns its border and focus state; its input stays transparent. */
+.admin-shell :is(.toolbar-search, .search-box, .guard-field, .expiry-custom-field),
+.app .vp-input-wrap,
+.login-card .login-field {
+  box-sizing: border-box;
+  border: 1px solid var(--sg-control-border);
+  border-radius: var(--sg-control-radius);
+  background: var(--sg-control-surface);
+}
+.admin-shell :is(.toolbar-search, .search-box, .guard-field, .expiry-custom-field):focus-within,
+.app .vp-input-wrap:focus-within,
+.login-card .login-field:focus-within {
+  border-color: var(--sg-control-focus);
+  outline: 2px solid var(--sg-control-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.admin-shell :is(.toolbar-search, .search-box, .guard-field, .expiry-custom-field) :is(input, select, textarea),
+.app .vp-input-wrap :is(input, select, textarea),
+.login-card .login-field input {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.admin-shell :is(.toolbar-search, .search-box, .guard-field, .expiry-custom-field) :is(input, select, textarea):focus-visible,
+.app .vp-input-wrap :is(input, select, textarea):focus-visible,
+.login-card .login-field input:focus-visible {
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.admin-shell :is(.toolbar-search, .search-box) input { min-height: 0; height: 100%; }
+.admin-shell :is(.toolbar-search, .search-box) [data-lucide] { flex: 0 0 auto; }
+.admin-shell .alas-search .alas-input { box-sizing: border-box; max-width: 100%; }
+.admin-shell .alas-search .alas-input:focus-visible { outline: 2px solid var(--sg-control-focus); outline-offset: 2px; box-shadow: none; }
+
+.admin-shell :is(.field-input, .field-select, .select-control, .num-control, .alas-input, .alas-select),
+.app .control-takeover-field {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: var(--sg-control-height);
+  border-radius: var(--sg-control-radius);
+  color: var(--sg-control-text);
+}
+.admin-shell :is(.field-input, .field-select, .select-control, .num-control, .alas-input, .alas-select):focus-visible,
+.app .control-takeover-field:focus-visible {
+  outline: 2px solid var(--sg-control-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.admin-shell select, .app select, .login-card select { color-scheme: inherit; }
+.admin-shell :is(.field-input, .field-select, .select-control, .num-control, .alas-input, .alas-select):disabled,
+.app .control-takeover-field:disabled { opacity: .55; cursor: not-allowed; }
+
+.admin-shell :is(.btn-primary, .btn-ghost, .btn-primary-lg, .btn-danger-lg, .guard-btn, .q-btn, .wb-btn, .alas-row-action, .row-btn, .page-btn, .preset-op-btn) {
+  box-sizing: border-box;
+  border-radius: var(--sg-control-radius);
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.admin-shell :is(.role-chip, .status-chip, .panel-badge, .readonly-chip),
+.app :is(.tl-mode-chip, .mg-alas-item) {
+  box-sizing: border-box;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.admin-shell :is(.role-chip, .status-chip, .panel-badge, .readonly-chip) { border-radius: 999px; }
+.admin-shell :is(.panel, .sec-card, .dev-card, .user-card, .geo-preview) {
+  border-radius: 8px;
+  box-shadow: none;
+}
+.admin-shell :is(.panel-header, .page-heading, .users-toolbar, .panel-tools) { min-width: 0; }
+.admin-shell :is(.panel-header, .users-toolbar, .panel-tools) > * { min-width: 0; }
+.admin-shell :is(.page-heading, .panel-header) { gap: 8px 12px; }
+.admin-shell :is(.page-heading, .panel-header) :is(h1, h2, h3) { min-width: 0; overflow-wrap: anywhere; }
+.admin-shell :is(.users-toolbar, .panel-tools, .dev-head-actions) { flex-wrap: wrap; gap: 8px; }
+.admin-shell :is(.vis-filter, .policy-field, .param-control, .geo-download-group) { min-width: 0; }
+
+.app .tool-btn { width: 32px; height: 32px; border-radius: var(--sg-control-radius); }
+.app .cb-btn { min-height: 32px; height: auto; border-radius: var(--sg-control-radius); }
+.app .vp-input-wrap { max-width: 100%; }
+.app .vp-input-wrap :is(input, select) { max-width: 100%; }
+.app .mirror-panel { min-width: 0; max-width: 100%; }
+.app .mirror-grid { min-width: 0; }
+.login-card #login-submit { border-radius: var(--sg-control-radius); }
+
+.sg-help { position: relative; display: inline-flex; align-items: center; flex: 0 0 auto; vertical-align: middle; }
+.sg-heading-help { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.sg-help-trigger {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: var(--sg-control-radius); background: transparent;
+  color: var(--sg-control-muted); cursor: help;
+}
+.sg-help-trigger:hover, .sg-help-trigger[aria-expanded="true"] { color: var(--sg-control-focus); background: var(--sg-control-surface); }
+.sg-help-trigger:focus-visible { outline: 2px solid var(--sg-control-focus); outline-offset: 2px; }
+.sg-help-trigger [data-lucide] { width: 15px; height: 15px; }
+.sg-help-pop {
+  position: fixed; z-index: 200;
+  width: max-content; max-width: min(320px, calc(100vw - 32px));
+  padding: 10px 12px; border: 1px solid var(--admin-border, var(--c-border)); border-radius: 8px;
+  background: var(--admin-elev, var(--c-surface)); color: var(--admin-text, var(--c-text-strong));
+  box-shadow: 0 12px 28px var(--c-shadow, rgba(0,0,0,.18));
+  font-size: 12px; font-weight: 400; line-height: 1.55; text-align: left;
+  white-space: normal; overflow-wrap: anywhere;
+  opacity: 0; visibility: hidden; pointer-events: none;
+}
+.sg-help-pop.is-visible {
+  opacity: 1; visibility: visible; pointer-events: auto;
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .admin-shell { --sg-control-height: 44px; }
+  .page-users .policy-field { grid-template-rows: minmax(44px, auto) minmax(44px, auto); }
+  .page-users .policy-field .field-input, .page-users .policy-field .policy-switch-row,
+  .page-users .policy-actions > button { min-height: 44px; height: 44px; }
+  .app .tool-btn { width: 44px; height: 44px; }
+  .app .cb-btn { min-height: 44px; }
+  .sg-help-trigger { width: 44px; height: 44px; }
+  .sg-help-pop { max-width: min(280px, calc(100vw - 24px)); }
+}
+@media (max-width: 767px) {
+  .admin-shell :is(.users-toolbar, .panel-tools, .dev-head-actions) > :is(button, select) { flex-shrink: 0; }
+  .admin-shell :is(.vis-filter, .policy-field, .param-control) :is(input:not([type=checkbox],[type=radio]), select, textarea) { max-width: 100%; }
+}

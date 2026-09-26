@@ -22,7 +22,6 @@ from .routers import (
     admin_audit,
     admin_overview,
     admin_settings,
-    admin_update,
     admin_video,
     admin_workbench,
     alas,
@@ -83,7 +82,6 @@ def create_app() -> FastAPI:
     app.include_router(admin_video.router)
     app.include_router(admin_alas.router)
     app.include_router(admin_settings.router)
-    app.include_router(admin_update.router)
     app.include_router(admin_workbench.router)
     app.include_router(admin_audit.router)
     app.include_router(websockets.router)

@@ -196,6 +196,16 @@ async def admin_delete_user(username: str, request: Request):
     return {"ok": True, "users": await asyncio.to_thread(storage.list_users)}
 
 
+@router.post("/api/admin/users/{username}/password-reminder")
+async def admin_remind_password_change(username: str, request: Request):
+    security.verify_csrf(request)
+    admin = security.require_admin(request)
+    if not await asyncio.to_thread(storage.set_password_reminder, username, True):
+        raise HTTPException(status_code=404, detail=i18n.translate("server.error.user_not_found"))
+    audit_request(request, admin, "password_reminder_set", target_type="account", target_id=username)
+    return {"ok": True}
+
+
 @router.get("/api/admin/devices")
 async def admin_devices(request: Request):
     security.require_admin(request)

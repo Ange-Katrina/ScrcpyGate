@@ -1171,3 +1171,32 @@ html, body { margin:0; height:100%; }
 
 /* Closed drawers must also hide shadows and remain hidden without motion. */
 .alas-drawer:not(.open) { visibility:hidden; }
+
+.alas-drawer,
+.alas-link-drawer {
+  top:50%;
+  right:auto;
+  bottom:auto;
+  left:50%;
+  width:min(480px,calc(100vw - 32px));
+  max-height:calc(100dvh - 40px);
+  border:1px solid var(--admin-elev-border);
+  border-radius:12px;
+  box-shadow:0 24px 64px var(--c-shadow);
+  transform:translate(-50%,-46%) scale(.98);
+  opacity:0;
+  transition:transform 200ms var(--ease-standard),opacity 180ms var(--ease-fade),visibility 0s linear 200ms;
+}
+.alas-link-drawer { width:min(560px,calc(100vw - 32px)); }
+.alas-link-drawer .alas-drawer-body { flex:0 1 auto; }
+.alas-drawer.open,
+.alas-link-drawer.open { transform:translate(-50%,-50%) scale(1); opacity:1; transition-delay:0s; }
+.alas-drawer:not(.open) { transform:translate(-50%,-46%) scale(.98); }
+.alas-drawer-mask { backdrop-filter:blur(3px); }
+@media (max-width:640px) {
+  .alas-drawer,
+  .alas-link-drawer { width:calc(100vw - 24px); max-height:calc(100dvh - 24px); }
+  .alas-drawer-head { padding:14px 16px; }
+  .alas-drawer-body { padding:16px; }
+  .alas-drawer-actions { padding:12px 16px; }
+}

@@ -37,6 +37,8 @@ _DASHBOARD_ACTION_LABELS = {
     "user_delete": "删除用户",
     "password_changed": "修改密码",
     "password_change": "修改密码",
+    "password_reminder_set": "安排改密提醒",
+    "password_reminder_dismissed": "跳过改密提醒",
     "permission_set": "更新设备权限",
     "permission_granted": "授予设备权限",
     "permission_revoked": "撤销设备权限",

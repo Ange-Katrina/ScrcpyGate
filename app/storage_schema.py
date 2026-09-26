@@ -196,7 +196,8 @@ USERS_COLUMNS = """
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
             last_login_at INTEGER NULL,
             last_login_ip TEXT NULL,
-            alas_visible INTEGER NOT NULL DEFAULT 1 CHECK(alas_visible IN (0, 1))
+            alas_visible INTEGER NOT NULL DEFAULT 1 CHECK(alas_visible IN (0, 1)),
+            password_reminder_pending INTEGER NOT NULL DEFAULT 0 CHECK(password_reminder_pending IN (0, 1))
 """
 
 
@@ -581,6 +582,8 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
     # 每个用户的 ALAS 可见性（有些账号用不上 ALAS）：只影响界面显隐，不参与权限判定。
     if "alas_visible" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN alas_visible INTEGER NOT NULL DEFAULT 1")
+    if "password_reminder_pending" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN password_reminder_pending INTEGER NOT NULL DEFAULT 0")
     conn.execute("UPDATE users SET enabled=1 WHERE enabled IS NULL")
     conn.execute("UPDATE users SET alas_visible=1 WHERE alas_visible IS NULL")
 

@@ -35,6 +35,21 @@
       }
       try{ var adminSaved=localStorage.getItem('scrcpygate-theme'); if(adminSaved){ document.documentElement.classList.toggle('dark',adminSaved==='dark'); } }catch(e){}
       syncAdminThemeToggle();
+      var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var sidebarMotionPreference = null;
+      var sidebarMotionToggle = null;
+      try { sidebarMotionPreference = localStorage.getItem('scrcpygate-sidebar-motion'); } catch (e) {}
+      function syncSidebarMotion() {
+        var enabled = sidebarMotionPreference === 'on' || (sidebarMotionPreference !== 'off' && !reducedMotion.matches);
+        document.documentElement.setAttribute('data-sidebar-motion', enabled ? 'on' : 'off');
+        if (sidebarMotionToggle) {
+          sidebarMotionToggle.setAttribute('aria-checked', String(enabled));
+          sidebarMotionToggle.querySelector('.admin-motion-state').textContent = enabled ? '已开启' : '已关闭';
+        }
+      }
+      syncSidebarMotion();
+      if (reducedMotion.addEventListener) reducedMotion.addEventListener('change', syncSidebarMotion);
+      else if (reducedMotion.addListener) reducedMotion.addListener(syncSidebarMotion);
       var sidebar = document.getElementById('admin-sidebar');
       var sToggle = document.getElementById('adminSidebarToggle');
       var railScrollbar = document.getElementById('admin-rail-scrollbar');
@@ -139,6 +154,29 @@
       var acct = document.getElementById('account-menu');
       if (acct) {
         var trig = acct.querySelector('.menu-trigger');
+        var menuPanel = acct.querySelector('.menu-panel');
+        if (menuPanel) {
+          sidebarMotionToggle = document.createElement('button');
+          sidebarMotionToggle.type = 'button';
+          sidebarMotionToggle.className = 'menu-item admin-motion-toggle';
+          sidebarMotionToggle.setAttribute('role', 'menuitemcheckbox');
+          var motionIcon = document.createElement('i');
+          motionIcon.setAttribute('data-lucide', 'panel-left');
+          motionIcon.setAttribute('aria-hidden', 'true');
+          var motionLabel = document.createElement('span');
+          motionLabel.textContent = '侧栏动画';
+          var motionState = document.createElement('span');
+          motionState.className = 'admin-motion-state';
+          sidebarMotionToggle.append(motionIcon, motionLabel, motionState);
+          menuPanel.insertBefore(sidebarMotionToggle, menuPanel.querySelector('.menu-sep'));
+          sidebarMotionToggle.addEventListener('click', function () {
+            sidebarMotionPreference = document.documentElement.getAttribute('data-sidebar-motion') === 'on' ? 'off' : 'on';
+            try { localStorage.setItem('scrcpygate-sidebar-motion', sidebarMotionPreference); } catch (e) {}
+            syncSidebarMotion();
+          });
+          syncSidebarMotion();
+          if (window.lucide) lucide.createIcons();
+        }
         trig.addEventListener('click', function (e) {
           e.stopPropagation();
           var open = acct.classList.toggle('open');

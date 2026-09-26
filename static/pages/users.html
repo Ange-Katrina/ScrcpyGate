@@ -123,16 +123,18 @@
               </summary>
               <div class="account-policy-grid">
                 <div class="policy-field">
-                  <label class="field-label" for="account-policy-reminder">到期提醒提前天数</label>
+                  <div class="policy-heading">
+                    <label class="field-label" for="account-policy-reminder">到期提醒提前天数</label>
+                    <span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="到期提醒说明" aria-describedby="account-policy-reminder-hint" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="account-policy-reminder-hint" role="tooltip">列表与仪表盘在这段时间内标记为「即将到期」，0 表示不提前提醒。</span></span>
+                  </div>
                   <input class="field-input" id="account-policy-reminder" type="number" min="0" max="90" step="1" inputmode="numeric" aria-describedby="account-policy-reminder-hint">
-                  <span class="policy-hint" id="account-policy-reminder-hint">列表与仪表盘在这段时间内标记为「即将到期」，0 表示不提前提醒。</span>
                 </div>
                 <div class="policy-field">
+                  <div class="policy-heading"><span class="field-label">到期处理</span><span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="自动停止 ALAS 说明" aria-describedby="account-policy-stop-hint" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="account-policy-stop-hint" role="tooltip">账户到期且会话与控制锁被回收时，仍在运行的关联 ALAS 配置会自动停止。</span></span></div>
                   <label class="policy-switch-row" for="account-policy-stop">
                     <input type="checkbox" id="account-policy-stop">
                     <span class="policy-switch-label">账户到期后自动停止其 ALAS 配置</span>
                   </label>
-                  <span class="policy-hint">开启后：账户到期（会话与控制锁被回收）时，其仍能运行的 ALAS 配置会被自动停止。</span>
                 </div>
                 <div class="policy-actions">
                   <button class="btn-primary" type="button" id="account-policy-save"><i data-lucide="save"></i><span>保存策略</span></button>
@@ -150,6 +152,7 @@
       <div class="modal-head"><h3 class="modal-title" id="user-details-title">用户详情</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body" id="user-details-body"></div>
       <div class="modal-foot user-details-actions">
+        <button class="btn-ghost" type="button" id="user-details-remind"><i data-lucide="bell"></i>提示修改密码</button>
         <button class="btn-ghost" type="button" id="user-details-reset">重置密码</button>
         <button class="row-btn danger" type="button" id="user-details-delete">删除用户</button>
         <button class="btn-primary" type="button" data-close>关闭</button>
@@ -322,57 +325,57 @@
     </div>
   </div>
 
-  <!-- ===== 权限管理抽屉 ===== -->
-  <div class="drawer-mask" id="drawer-mask"></div>
-  <div class="perm-drawer" id="perm-drawer" role="dialog" aria-modal="true" aria-labelledby="perm-drawer-title" aria-hidden="true" inert>
-    <div class="drawer-head">
-      <h3 class="drawer-title" id="perm-drawer-title">权限管理</h3>
-      <button class="modal-close" type="button" id="perm-close" aria-label="关闭"><i data-lucide="x"></i></button>
-    </div>
-    <div class="drawer-body" id="perm-body">
-      <div class="perm-user-head">
-        <span class="perm-avatar" id="perm-avatar">?</span>
-        <div class="perm-user-copy">
-          <b id="perm-name">—</b>
-          <span id="perm-handle">@—</span>
-          <span class="role-chip user" id="perm-role">普通用户</span>
-        </div>
+  <div class="modal-mask permission-modal-mask" id="modal-permissions" role="dialog" aria-modal="true" aria-labelledby="perm-title" aria-hidden="true" inert>
+    <div class="modal-card modal-card-wide permission-modal-card">
+      <div class="modal-head">
+        <h3 class="modal-title" id="perm-title">权限管理</h3>
+        <button class="modal-close" type="button" id="perm-close" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
-      <section class="perm-section">
-        <div class="perm-section-head">
-          <h4 class="perm-section-title"><i data-lucide="smartphone"></i>已绑定设备<span class="perm-count" id="perm-device-count">0</span></h4>
-          <div class="perm-section-actions" id="perm-device-actions"></div>
+      <div class="modal-body" id="perm-body">
+        <div class="perm-user-head">
+          <span class="perm-avatar" id="perm-avatar">?</span>
+          <div class="perm-user-copy">
+            <b id="perm-name">—</b>
+            <span id="perm-handle">@—</span>
+            <span class="role-chip user" id="perm-role">普通用户</span>
+          </div>
         </div>
-        <div id="perm-device-batch"></div>
-        <div class="perm-list" id="perm-devices"></div>
-      </section>
-      <section class="perm-section">
-        <div class="perm-section-head">
-          <h4 class="perm-section-title"><i data-lucide="bot"></i>ALAS 配置权限<span class="perm-count" id="perm-cfg-count">0</span></h4>
-          <div class="perm-section-actions" id="perm-cfg-actions"></div>
+        <section class="perm-section">
+          <div class="perm-section-head">
+            <h4 class="perm-section-title"><i data-lucide="smartphone"></i>已绑定设备<span class="perm-count" id="perm-device-count">0</span></h4>
+            <div class="perm-section-actions" id="perm-device-actions"></div>
+          </div>
+          <div id="perm-device-batch"></div>
+          <div class="perm-list" id="perm-devices"></div>
+        </section>
+        <section class="perm-section">
+          <div class="perm-section-head">
+            <h4 class="perm-section-title"><i data-lucide="bot"></i>ALAS 配置权限<span class="perm-count" id="perm-cfg-count">0</span></h4>
+            <div class="perm-section-actions" id="perm-cfg-actions"></div>
+          </div>
+          <div class="perm-list" id="perm-configs"></div>
+        </section>
+        <section class="perm-section watch-history-section">
+          <div class="perm-section-head">
+            <h4 class="perm-section-title"><i data-lucide="clock-3"></i>观看记录<span class="perm-count" id="watch-session-count">0</span></h4>
+            <span class="watch-total" id="watch-total">总时长 0 秒</span>
+          </div>
+          <div class="watch-history-list" id="watch-history-list"></div>
+        </section>
+        <section class="perm-section">
+          <div class="change-box">
+            <div class="change-head">权限变更摘要</div>
+            <div class="change-list" id="perm-changes"></div>
+            <div class="change-empty" id="perm-changes-empty">暂无待保存的变更</div>
+          </div>
+        </section>
+      </div>
+      <div class="modal-foot permission-modal-foot">
+        <span class="perm-foot-note">变更在点击「保存」后生效</span>
+        <div class="perm-foot-actions">
+          <button class="btn-ghost" type="button" id="perm-cancel">取消</button>
+          <button class="btn-primary-lg" type="button" id="perm-save"><i data-lucide="check"></i>保存</button>
         </div>
-        <div class="perm-list" id="perm-configs"></div>
-      </section>
-      <section class="perm-section watch-history-section">
-        <div class="perm-section-head">
-          <h4 class="perm-section-title"><i data-lucide="clock-3"></i>观看记录<span class="perm-count" id="watch-session-count">0</span></h4>
-          <span class="watch-total" id="watch-total">总时长 0 秒</span>
-        </div>
-        <div class="watch-history-list" id="watch-history-list"></div>
-      </section>
-      <section class="perm-section">
-        <div class="change-box">
-          <div class="change-head">权限变更摘要</div>
-          <div class="change-list" id="perm-changes"></div>
-          <div class="change-empty" id="perm-changes-empty">暂无待保存的变更</div>
-        </div>
-      </section>
-    </div>
-    <div class="drawer-foot">
-      <span class="drawer-foot-left">变更在点击「保存」后生效</span>
-      <div class="drawer-foot-actions">
-        <button class="btn-ghost" type="button" id="perm-cancel">取消</button>
-        <button class="btn-primary-lg" type="button" id="perm-save"><i data-lucide="check"></i>保存</button>
       </div>
     </div>
   </div>

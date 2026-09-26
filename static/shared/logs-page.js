@@ -594,8 +594,10 @@
   }
   function renderAll() { renderStats(); renderContent(); renderFooter(); }
 
+  var logDialogOpener = null;
   function openLogDetail(i) {
     var l = LOGS[i]; if (!l) return;
+    if (!$('log-drawer').classList.contains('open')) logDialogOpener = document.activeElement;
     currentLogIndex = i;
     $('log-drawer-meta').textContent = l.timeFull + ' · ' + l.sourceLabel + ' · ' + l.eventId;
     $('log-drawer-raw').textContent = l.raw;
@@ -610,9 +612,23 @@
     $('log-drawer-next').disabled = i >= LOGS.length - 1;
     $('log-drawer').classList.add('open');
     $('drawer-mask').classList.add('open');
+    $('log-drawer').setAttribute('aria-hidden', 'false');
+    $('log-drawer').removeAttribute('inert');
+    if (!$('log-drawer').contains(document.activeElement)) $('log-drawer-close').focus({ preventScroll: true });
   }
   function stepLogDetail(delta) { openLogDetail(currentLogIndex + delta); }
-  function closeLogDrawer() { $('log-drawer').classList.remove('open'); $('drawer-mask').classList.remove('open'); }
+  function closeLogDrawer() {
+    var dialog = $('log-drawer');
+    if (!dialog.classList.contains('open')) return;
+    if (dialog.contains(document.activeElement)) {
+      if (logDialogOpener && logDialogOpener.isConnected && !logDialogOpener.closest('[inert]')) logDialogOpener.focus({ preventScroll: true });
+      else document.activeElement.blur();
+    }
+    dialog.classList.remove('open');
+    dialog.setAttribute('aria-hidden', 'true');
+    dialog.setAttribute('inert', '');
+    $('drawer-mask').classList.remove('open');
+  }
   function auditJson(value) {
     try { return JSON.stringify(value == null ? {} : value, null, 2); } catch (e) { return '{}'; }
   }
@@ -999,6 +1015,19 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { closeLogDrawer(); closeAuditModal(); closeExportPop(); $('integrity-modal-mask').classList.remove('open'); }
+    if (e.key === 'Tab' && $('log-drawer').classList.contains('open')) {
+      var dialog = $('log-drawer');
+      var nodes = Array.prototype.filter.call(dialog.querySelectorAll('button, [href], [tabindex]'), function (node) {
+        return !node.disabled && node.tabIndex >= 0 && node.getClientRects().length;
+      });
+      if (nodes.length) {
+        var first = nodes[0], last = nodes[nodes.length - 1];
+        if (!dialog.contains(document.activeElement) || (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        }
+      }
+    }
     if (e.key === 'Enter' || e.key === ' ') {
       var logRow = e.target.closest ? e.target.closest('#logs-tbody tr[data-idx]') : null;
       if (logRow) { e.preventDefault(); openLogDetail(parseInt(logRow.getAttribute('data-idx'), 10)); return; }

@@ -137,13 +137,12 @@ body.dash-row-busy #dash-devices-tbody .menu-open-btn { opacity:.5; pointer-even
 .alert-meta { display:-webkit-box; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:11px; line-height:16px; color:var(--admin-muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .alert-time { color:var(--admin-muted); font-size:11px; line-height:16px; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .alert-list > li + li, .timeline > li + li { border-top:1px solid var(--admin-line); }
-.alert-group + .alert-group { border-top:1px solid var(--admin-line); }
+#alerts .panel-header, #alerts .panel-footer { border:0; }
 .alert-group .alert-list { padding-top:2px; }
-/* 分段控件：业务待处理 / 服务异常一次只显示一组，与安全机制页的预置控件同款。 */
-.alert-seg { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin:2px 14px 4px; padding:3px; border:1px solid var(--admin-border); border-radius:999px; background:var(--admin-field); }
-.alert-seg-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:0; height:26px; padding:0 10px; border:0; border-radius:999px; color:var(--admin-muted); background:transparent; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer; transition:color var(--motion-fast) var(--ease-fade),background-color var(--motion-fast) var(--ease-fade); }
-.alert-seg-btn:hover { color:var(--admin-text); }
-.alert-seg-btn.active { color:var(--admin-text); background:var(--admin-surface); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+.alert-seg { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; margin:0 14px 4px; }
+.alert-seg-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:0; height:30px; padding:0 10px; border:0; border-radius:6px; color:var(--admin-muted); background:transparent; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer; transition:color var(--motion-fast) var(--ease-fade),background-color var(--motion-fast) var(--ease-fade); }
+.alert-seg-btn:hover { color:var(--admin-text); background:var(--admin-hover); }
+.alert-seg-btn.active { color:var(--admin-brand); background:var(--admin-brand-soft); }
 .alert-seg-btn:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
 .alert-seg-btn [data-lucide] { width:13px; height:13px; flex:0 0 auto; }
 .alert-seg-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

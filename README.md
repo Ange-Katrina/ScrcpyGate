@@ -265,7 +265,7 @@ The **Mirror management** page covers text input, automatic control on fullscree
 
 ### Updates and ALAS scheduling
 
-The dashboard’s **System update** panel shows the running version, the selected release channel, the last check time, and a copyable command for bridge deployments managed by `deploy.sh`. Automatic channel selection follows `dev`/`edge` image tags or matching build versions; local builds default to stable. Floating tags require pulling and comparing images on the host. Checking never installs an update or grants the application Docker access. A failed check clears the old command, and a newer local version does not offer a downgrade.
+Update ScrcpyGate on the deployment host with `deploy.sh --update` and a published image reference. Check the tag or digest in GHCR before updating; floating tags such as `latest`, `dev`, and `edge` can change without a version-number change. The application does not check for or install its own updates and has no Docker access.
 
 ALAS updates separately. The [official configuration template](https://github.com/LmeSzinc/AzurLaneAutoScript/blob/master/deploy/template) supports these settings in **ALAS’s** `config/deploy.yaml` (merge into the existing sections):
 
@@ -279,7 +279,7 @@ Deploy:
     AutoRestartTime: '03:50'
 ```
 
-`AutoUpdate` enables startup updates; `CheckUpdateInterval` only schedules checks (minutes; `0` disables them). `AutoRestartTime` schedules daily installation when an update exists (`null` disables it), using the ALAS environment’s time. `EnableReload` and a reload-capable launcher such as the official `gui.py` are required for scheduled restarts. ALAS stops and resumes running instances during updates; its updater may force-stop tasks after a ten-minute wait. Writable Git source files, reachable upstreams, and dependency installation permissions are required. A read-only or image-only ALAS deployment needs its own image update process. ScrcpyGate does not currently read or change these settings, so the dashboard does not claim they are enabled.
+`AutoUpdate` enables startup updates; `CheckUpdateInterval` only schedules checks (minutes; `0` disables them). `AutoRestartTime` schedules daily installation when an update exists (`null` disables it), using the ALAS environment’s time. `EnableReload` and a reload-capable launcher such as the official `gui.py` are required for scheduled restarts. ALAS stops and resumes running instances during updates; its updater may force-stop tasks after a ten-minute wait. Writable Git source files, reachable upstreams, and dependency installation permissions are required. A read-only or image-only ALAS deployment needs its own image update process. ScrcpyGate does not currently read or change these settings, so it cannot report whether automatic ALAS updates are enabled.
 
 The ALAS web update button invokes the official updater through a PyWebIO callback. The current Alas-Gyre `/api/gyre` API does not expose ALAS application updates. Its separate `/runtime/update` service only updates Gyre overlay, launcher, and updater files. Use the ALAS management link to open its native page.
 

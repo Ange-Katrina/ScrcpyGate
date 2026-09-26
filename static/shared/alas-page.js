@@ -194,7 +194,7 @@
         $(maskId).classList.remove('open');
         $(id).setAttribute('aria-hidden', 'true');
         $(id).setAttribute('inert', '');
-        setTimeout(function () { $(maskId).hidden = true; }, 190);
+        setTimeout(function () { if (!$(maskId).classList.contains('open')) $(maskId).hidden = true; }, 190);
       }
        function apiError(error) { return tr(window.ScrcpyGateApi ? window.ScrcpyGateApi.errorMessage(error) : '数据服务不可用'); }
        /* 改绑到另一台设备＝移动：服务端先回 409（结构化 detail），
@@ -1100,9 +1100,23 @@
       $('alasModalClose').addEventListener('click', closeModal);
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-          if (!$('alasConfirmModal').hidden) { closeModal(); }
-          closeDrawer('alasConnDrawer');
-          closeDrawer('alasLinkDrawer');
+          if (!$('alasConfirmModal').hidden) closeModal();
+          else if ($('alasLinkDrawer').classList.contains('open')) closeDrawer('alasLinkDrawer');
+          else if ($('alasConnDrawer').classList.contains('open')) closeDrawer('alasConnDrawer');
+        }
+        if (e.key === 'Tab' && $('alasConfirmModal').hidden) {
+          var dialog = $('alasLinkDrawer').classList.contains('open') ? $('alasLinkDrawer') :
+            ($('alasConnDrawer').classList.contains('open') ? $('alasConnDrawer') : null);
+          if (!dialog) return;
+          var nodes = Array.prototype.filter.call(dialog.querySelectorAll('button, input, select, textarea, [tabindex]'), function (node) {
+            return !node.disabled && !node.hidden && node.tabIndex >= 0 && node.getClientRects().length;
+          });
+          if (!nodes.length) return;
+          var first = nodes[0], last = nodes[nodes.length - 1];
+          if (!dialog.contains(document.activeElement) || (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+          }
         }
       });
 
