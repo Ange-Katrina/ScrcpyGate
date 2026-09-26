@@ -97,8 +97,11 @@
 .admin-shell :is(.users-toolbar, .panel-tools, .dev-head-actions) { flex-wrap: wrap; gap: 8px; }
 .admin-shell :is(.vis-filter, .policy-field, .param-control, .geo-download-group) { min-width: 0; }
 
+.app .topnav-actions .sg-lang-wrap { height: 32px; border: 0; border-radius: var(--sg-control-radius); background: transparent; }
+.app .topnav-actions .sg-lang-wrap:hover { background: var(--c-hover); }
+.app .topnav-actions .sg-lang-wrap:focus-within { outline: 2px solid var(--sg-control-focus); outline-offset: 2px; }
 .app .tool-btn { width: 32px; height: 32px; border-radius: var(--sg-control-radius); }
-.app .ctrl-dock :is(.cb-btn, .cb-item) { min-height: 32px; height: auto; border-radius: 999px; }
+.app .ctrl-dock :is(.cb-btn, .cb-item) { min-height: 32px; height: auto; border-radius: var(--sg-control-radius); }
 .app .vp-input-wrap { max-width: 100%; }
 .app .vp-input-wrap :is(input, select) { max-width: 100%; }
 .app .mirror-panel { min-width: 0; max-width: 100%; }

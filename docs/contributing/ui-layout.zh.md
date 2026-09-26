@@ -1,6 +1,6 @@
 # ScrcpyGate 界面布局规范
 
-本规范适用于 `static/pages/` 的全部十个页面。以 [Apple HIG Layout](https://developer.apple.com/design/human-interface-guidelines/layout)、[Labels](https://developer.apple.com/design/human-interface-guidelines/labels) 和 [Segmented controls](https://developer.apple.com/design/human-interface-guidelines/segmented-controls) 的信息层级与交互原则为参考，沿用项目现有配色、字体、图标、原生 HTML/CSS/JS 以及深浅色主题。它不是 iOS 外观的逐像素复刻。
+本规范适用于 `static/pages/` 的全部十个页面。以 [Apple HIG Layout](https://developer.apple.com/design/human-interface-guidelines/layout)、[Labels](https://developer.apple.com/design/human-interface-guidelines/labels)、[Toolbars](https://developer.apple.com/design/human-interface-guidelines/toolbars) 和 [Segmented controls](https://developer.apple.com/design/human-interface-guidelines/segmented-controls) 的信息层级与交互原则为参考，沿用项目现有配色、字体、图标、原生 HTML/CSS/JS 以及深浅色主题。它不是 iOS 外观的逐像素复刻。
 
 ## 层级与位置
 
@@ -29,6 +29,7 @@
 
 - 后台使用紧凑的 36px 常规控件和 16px 内容间距；触屏或窄屏的主要控件至少 44px 高，页面间距缩为 12px。具体值由 `admin-workspace.css`、`interface-controls.css` 和现有令牌维护。
 - 后台侧栏只呈现一级导航名称；仪表盘和日志概览使用紧凑信息带。设备与 ALAS 的状态摘要使用更小的独立卡片，窄屏两列换行，长状态文字自然换行。
+- 投屏工作台的设备视图切换与设备卡片边缘对齐，两个选项等宽。状态行负责展示信息；顶部与底部工具栏的普通操作采用同一套圆角矩形点击区域，选中态和错误态仍保留清楚区分。
 - 同级卡片使用同一圆角令牌；输入框、按钮和弹窗按各自语义使用较小或较大的圆角。胶囊只用于状态、选择和少量强调，不把每段文字都包成胶囊。
 - 标题、标签、辅助信息、数值和操作按阅读顺序排列。字段须有可见标签或明确的无障碍名称；占位文字不能代替字段名。中英文文案都应允许自然换行。
 - 手机与平板按可用宽度重排，不让固定宽度造成页面横向溢出。分段控件空间不足时可横向滑动且隐藏滚动条，但键盘仍能逐项聚焦。投屏画面优先于侧栏和工具栏；全屏时只保留必要控制。

@@ -1,6 +1,6 @@
 # ScrcpyGate UI layout rules
 
-These rules cover all ten pages in `static/pages/`. They apply the hierarchy and interaction principles in Apple's [Layout](https://developer.apple.com/design/human-interface-guidelines/layout), [Labels](https://developer.apple.com/design/human-interface-guidelines/labels), and [Segmented controls](https://developer.apple.com/design/human-interface-guidelines/segmented-controls) guidance while retaining ScrcpyGate's existing palette, themes, icons, and native HTML/CSS/JS stack. They are not a pixel-for-pixel iOS imitation.
+These rules cover all ten pages in `static/pages/`. They apply the hierarchy and interaction principles in Apple's [Layout](https://developer.apple.com/design/human-interface-guidelines/layout), [Labels](https://developer.apple.com/design/human-interface-guidelines/labels), [Toolbars](https://developer.apple.com/design/human-interface-guidelines/toolbars), and [Segmented controls](https://developer.apple.com/design/human-interface-guidelines/segmented-controls) guidance while retaining ScrcpyGate's existing palette, themes, icons, and native HTML/CSS/JS stack. They are not a pixel-for-pixel iOS imitation.
 
 ## Hierarchy
 
@@ -29,6 +29,7 @@ These rules cover all ten pages in `static/pages/`. They apply the hierarchy and
 
 - Admin controls are compact at 36px, with 16px content spacing. Primary touch controls are at least 44px high, with 12px content spacing on narrow screens. `admin-workspace.css`, `interface-controls.css`, and existing tokens own the values.
 - The admin rail shows one clear label per destination. Dashboard and log summaries use a compact information band; device and ALAS summaries use smaller independent cards that wrap into two columns on narrow screens.
+- In the mirror workbench, align the device-view selector with the device cards. Keep its two choices equal in size. Treat the status line as information and the top and bottom bars as toolbars: quiet controls share a rounded-rectangle hit area; selected and error states remain distinct.
 - Peer cards share one radius token. Inputs, commands, and dialogs use smaller or larger radii according to purpose. Reserve pills for status and compact choices.
 - Every field has a visible label or a clear accessible name; a placeholder is not a label. Both locales must wrap naturally.
 - Reflow by available width on phones and tablets. Segmented controls may scroll without a visible scrollbar when space is scarce, while all choices remain keyboard focusable. Preserve video space in the mirror workbench and necessary controls in fullscreen.
