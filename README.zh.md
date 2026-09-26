@@ -350,6 +350,7 @@ CI/CD 验证 amd64 和 arm64 镜像后发布到 GHCR，服务器手动部署。
 
 产品版本统一定义在 [`VERSION`](VERSION)，版本递增、开发镜像标识与显示规则见
 [版本号规范](docs/contributing/versioning.zh.md)。
+全部页面的层级、标签、切换和响应式约定见 [界面布局规范](docs/contributing/ui-layout.zh.md)。
 
 健康检查：`GET /healthz`；日志：stdout（JSON，`LOG_FORMAT=json`），可选写入数据目录。
 

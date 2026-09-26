@@ -18,7 +18,7 @@
 
 
 </head>
-<body class="flex min-h-screen items-center justify-center font-sans antialiased" style="background: var(--carbon-ambient); background-color: var(--carbon-mid);">
+<body class="flex min-h-screen items-center justify-center font-sans antialiased">
     <style id="critical-layout">
         body { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
         main { width: 100%; }
@@ -27,7 +27,7 @@
 
 
         <!-- 顶部工具栏：语言 / 主题切换（毛玻璃悬浮胶囊） -->
-        <div data-i18n-skip class="fixed right-4 top-4 z-50 flex items-center gap-1 rounded-full border border-border/80 p-1 shadow-[var(--shadow-md)]" style="background: var(--glass-panel-solid); backdrop-filter: blur(16px) saturate(1.15); -webkit-backdrop-filter: blur(16px) saturate(1.15); box-shadow: 0 12px 32px var(--deep-shadow), inset 0 1px 0 var(--inner-highlight); transition: background-color var(--motion-base) var(--ease-fade), border-color var(--motion-base) var(--ease-fade), box-shadow var(--motion-base) var(--ease-fade)">
+        <div data-i18n-skip class="login-toolbar fixed right-4 top-4 z-50 flex items-center gap-1 rounded-full border border-border/80 p-1 shadow-[var(--shadow-md)]">
             <label class="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-sm text-foreground hover:bg-accent focus-within:bg-accent" style="transition: background-color var(--motion-base) var(--ease-fade), color var(--motion-base) var(--ease-fade), opacity var(--motion-base) var(--ease-fade)">
                 <span class="sr-only">界面语言</span>
                 <i data-lucide="languages" class="h-4 w-4 shrink-0 text-muted-foreground"></i>
@@ -48,25 +48,29 @@
         </div>
 
         <!-- 登录面板（毛玻璃） -->
-        <section aria-labelledby="login-title" class="login-card mx-auto w-full max-w-[400px] rounded-[var(--radius)] border border-[var(--c-border)] p-10 shadow-[var(--shadow-xl)]" style="background: var(--glass-panel); backdrop-filter: blur(22px) saturate(1.15); -webkit-backdrop-filter: blur(22px) saturate(1.15); box-shadow: 0 32px 80px var(--deep-shadow-strong), 0 12px 32px var(--deep-shadow), inset 0 1px 0 var(--inner-highlight-strong);">
+        <section aria-labelledby="login-title" class="login-card mx-auto w-full max-w-[400px] rounded-[var(--radius)] border border-[var(--c-border)] p-10 shadow-[var(--shadow-xl)]">
             <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl" style="background: var(--brand-blue); box-shadow: 0 6px 16px var(--brand-glow-soft);"><i data-lucide="monitor" class="h-6 w-6 text-white" style="stroke-width:1.7"></i></div>
             <h1 id="login-title" class="text-center text-4xl font-semibold tracking-normal text-foreground">ScrcpyGate</h1>
             <p class="mt-2 text-center text-sm text-muted-foreground">远程投屏控制台</p>
 
             <form id="login-form" data-dom-id="login-form" class="mt-8 space-y-4">
-                <div class="login-field flex h-11 items-center gap-2 rounded-[var(--radius)] border border-[var(--c-border)] px-3 shadow-[var(--shadow-xs)] focus-within:border-ring focus-within:shadow-[0_0_0_1px_var(--apple-ring)]" style="background: var(--glass-field); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: border-color var(--motion-base) var(--ease-fade), box-shadow var(--motion-base) var(--ease-fade)">
-
-                    <i data-lucide="user" class="h-4 w-4 shrink-0 text-muted-foreground"></i>
-                    <input id="username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="请输入用户名" aria-label="用户名" class="h-full min-w-0 flex-1 border-0 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground" />
+                <div class="login-field-group">
+                    <label class="login-field-label" for="username">用户名</label>
+                    <div class="login-field flex h-11 items-center gap-2 rounded-[var(--radius)] border border-[var(--c-border)] px-3 shadow-[var(--shadow-xs)] focus-within:border-ring focus-within:shadow-[0_0_0_1px_var(--apple-ring)]" style="background: var(--glass-field); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: border-color var(--motion-base) var(--ease-fade), box-shadow var(--motion-base) var(--ease-fade)">
+                        <i data-lucide="user" class="h-4 w-4 shrink-0 text-muted-foreground"></i>
+                        <input id="username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="请输入用户名" class="h-full min-w-0 flex-1 border-0 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground" />
+                    </div>
                 </div>
 
-                <div class="login-field flex h-11 items-center gap-2 rounded-[var(--radius)] border border-[var(--c-border)] px-3 shadow-[var(--shadow-xs)] focus-within:border-ring focus-within:shadow-[0_0_0_1px_var(--apple-ring)]" style="background: var(--glass-field); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: border-color var(--motion-base) var(--ease-fade), box-shadow var(--motion-base) var(--ease-fade)">
-
-                    <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" aria-label="密码" class="h-full min-w-0 flex-1 border-0 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground" />
-                    <button type="button" id="pwd-toggle" aria-label="显示密码" aria-pressed="false" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground active:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" style="transition: color var(--motion-base) var(--ease-fade)">
-                        <i data-lucide="eye" class="h-4 w-4"></i>
-                        <i data-lucide="eye-off" class="hidden h-4 w-4"></i>
-                    </button>
+                <div class="login-field-group">
+                    <label class="login-field-label" for="password">密码</label>
+                    <div class="login-field flex h-11 items-center gap-2 rounded-[var(--radius)] border border-[var(--c-border)] px-3 shadow-[var(--shadow-xs)] focus-within:border-ring focus-within:shadow-[0_0_0_1px_var(--apple-ring)]" style="background: var(--glass-field); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: border-color var(--motion-base) var(--ease-fade), box-shadow var(--motion-base) var(--ease-fade)">
+                        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" class="h-full min-w-0 flex-1 border-0 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground" />
+                        <button type="button" id="pwd-toggle" aria-label="显示密码" aria-pressed="false" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground active:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" style="transition: color var(--motion-base) var(--ease-fade)">
+                            <i data-lucide="eye" class="h-4 w-4"></i>
+                            <i data-lucide="eye-off" class="hidden h-4 w-4"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <p id="login-error" role="alert" style="display:none" class="text-sm text-destructive">用户名或密码错误</p>

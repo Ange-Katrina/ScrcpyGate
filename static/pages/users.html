@@ -90,21 +90,16 @@
           </div>
 
           <div class="main-col">
-            <section class="panel" id="users-toolbar-panel" aria-label="用户筛选工具栏">
+            <section class="panel" id="users" aria-labelledby="users-title">
+              <div class="panel-header">
+                <h2 class="panel-title" id="users-title">用户列表<span class="panel-subtitle" id="users-subtitle">等待数据</span></h2>
+              </div>
               <div class="users-toolbar">
                 <label class="toolbar-search"><i data-lucide="search"></i><input type="search" id="users-search" placeholder="搜索用户名" aria-label="搜索用户名"></label>
                 <span class="select-wrap"><select id="users-role-filter" aria-label="按角色筛选"><option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option></select><i data-lucide="chevron-down"></i></span>
                 <span class="select-wrap"><select id="users-status-filter" aria-label="按账户状态筛选"><option value="all">全部状态</option><option value="normal">正常</option><option value="expiring">即将到期</option><option value="expired">已到期</option><option value="disabled">已停用</option></select><i data-lucide="chevron-down"></i></span>
                 <div class="toolbar-spacer"></div>
                 <button class="btn-primary-lg" type="button" id="add-user-btn"><i data-lucide="plus"></i>新增用户</button>
-              </div>
-            </section>
-
-
-
-            <section class="panel" id="users" aria-labelledby="users-title">
-              <div class="panel-header">
-                <h2 class="panel-title" id="users-title">用户列表<span class="panel-subtitle" id="users-subtitle">等待数据</span></h2>
               </div>
               <p class="activity-scope-note">点击用户卡片查看登录与投屏详情。</p>
               <div class="user-card-grid" id="users-tbody" role="list" aria-label="用户列表" aria-busy="true">

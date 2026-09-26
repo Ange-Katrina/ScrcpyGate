@@ -306,6 +306,8 @@ release tags, package permissions, image attestations, and deployment commands.
 The product version is defined in [`VERSION`](VERSION). See the
 [versioning guide](docs/contributing/versioning.md) for release numbering,
 development builds, and version display.
+The [UI layout rules](docs/contributing/ui-layout.md) define page hierarchy,
+labels, segmented controls, and responsive behavior across the frontend.
 
 Health endpoint `GET /healthz`; logs are JSON on stdout (`LOG_FORMAT=json`) with optional file
 logging in the data directory.
