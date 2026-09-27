@@ -1093,12 +1093,16 @@
       return list;
   }
 
-  function fetchDevicesEnriched(baseOnly) {
+  function fetchDevicesEnriched(baseOnly, options) {
     // One snapshot is the normal path. The old three-request enrichment remains
     // a compatibility fallback only for older deployments that return 404/405.
     var current = window.ScrcpyGateSession && window.ScrcpyGateSession.current && window.ScrcpyGateSession.current();
     var knownRole = state.userRole || (current && (current.roleKey === 'admin' || current.role === '管理员' || current.isAdmin === true ? 'admin' : 'user'));
-    var snapshot = apiGet('/api/workbench/snapshot').then(function (payload) {
+    options = options || {};
+    function readDevices(path) {
+      return apiRequest(path, { cache: options.cache, force: options.force });
+    }
+    var snapshot = readDevices('/api/workbench/snapshot').then(function (payload) {
       // The snapshot is authoritative on a cold load. Reading the session
       // cache before it resolves used to hide the admin supplement on the
       // first render and then force a second refresh to recover it.
@@ -1125,9 +1129,9 @@
       var emptyAdminSupplement = function () { return [{ devices: [] }, { sessions: [] }, { assignments: [] }]; };
       var loadAdminSupplement = function () {
         return Promise.all([
-          apiGet('/api/admin/devices').catch(function () { return { devices: [] }; }),
-          apiGet('/api/admin/sessions').catch(function () { return { sessions: [] }; }),
-          apiGet('/api/admin/alas/permissions').catch(function () { return { assignments: [] }; })
+          readDevices('/api/admin/devices').catch(function () { return { devices: [] }; }),
+          readDevices('/api/admin/sessions').catch(function () { return { sessions: [] }; }),
+          readDevices('/api/admin/alas/permissions').catch(function () { return { assignments: [] }; })
         ]);
       };
       var adminSupplement = function () {
@@ -1139,7 +1143,7 @@
           return state.userRole === 'admin' ? loadAdminSupplement() : emptyAdminSupplement();
         }).catch(function () { return emptyAdminSupplement(); });
       };
-      return Promise.all([apiGet('/api/devices'), adminSupplement()]).then(function (results) {
+      return Promise.all([readDevices('/api/devices'), adminSupplement()]).then(function (results) {
         return mergeDevicePayload(results[0], results[1]);
       });
     });
@@ -4325,7 +4329,7 @@
 
   function handlerDevicesList(opts) {
     var query = (opts && opts.query) || {};
-    return fetchDevicesEnriched(query.permission === 'watch').then(function (list) {
+    return fetchDevicesEnriched(query.permission === 'watch', opts).then(function (list) {
       if (query.permission === 'watch') {
         list = list.filter(function (d) { return d.permission !== false; });
       }

@@ -1154,12 +1154,6 @@
     .up-expiry[data-state="expired"] .up-expiry-copy strong, .up-expiry[data-state="expired"] .up-expiry-copy small { color:#d70015; }
     .up-last-login { display:flex; align-items:center; gap:8px; margin-top:10px; padding:0 4px; font-size:12.5px; color:var(--c-text-sub); }
     .up-last-login [data-lucide] { width:14px; height:14px; }
-    .up-perms { display:flex; flex-direction:column; gap:8px; }
-    .up-perm { display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--c-border); border-radius:12px; background:var(--c-surface); }
-    .up-perm [data-lucide] { width:15px; height:15px; color:var(--c-text-faint); }
-    .up-perm-name { flex:1 1 auto; min-width:0; font-size:13px; font-weight:500; color:var(--c-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .up-perm-chip { flex:0 0 auto; display:inline-flex; align-items:center; height:18px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:500; color:var(--c-text-sub); background:var(--c-surface-hover); }
-    .up-perm-chip.control { color:#248a3d; background:rgba(52,199,89,.14); }
     .up-password { display:flex; flex-direction:column; gap:12px; }
     .up-password-reminder { display:flex; align-items:flex-start; gap:10px; padding:12px; margin-bottom:12px; border:1px solid var(--c-border); border-radius:8px; background:var(--c-surface); }
     .up-password-reminder[hidden] { display:none; }
@@ -1223,7 +1217,6 @@
     .mg-menu-item [data-lucide] { width:13px; height:13px; flex:0 0 auto; color:var(--brand-400); opacity:0; transition:opacity var(--motion-fast) var(--ease-fade); }
     .mg-menu-item[aria-checked="true"] { color:var(--c-text-strong); font-weight:600; }
     .mg-menu-item[aria-checked="true"] [data-lucide] { opacity:1; }
-    .mg-hint { min-width:0; flex:1 1 180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; color:var(--c-text-sub); }
     .mg-refresh { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; height:30px; padding:0 11px; border:0; border-radius:10px; background:transparent; color:var(--c-text-sub); font:inherit; font-size:11.5px; font-weight:500; cursor:pointer; transition:background-color var(--motion-fast) var(--ease-fade),color var(--motion-fast) var(--ease-fade); }
     .mg-refresh:hover:not(:disabled) { background:var(--c-surface-hover); color:var(--c-text); }
     .mg-refresh:disabled { opacity:.5; cursor:not-allowed; }
@@ -1231,7 +1224,7 @@
     .mg-refresh.mg-primary:hover:not(:disabled) { background:#0a6cd6; color:#fff; }
     .mg-refresh:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #007aff; }
     .mg-refresh [data-lucide] { width:12px; height:12px; }
-    .mg-grid { display:flex; flex:1 1 0; width:100%; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; justify-content:flex-start; gap:8px; min-height:0; overflow-y:auto; padding-bottom:8px; scrollbar-width:thin; }
+    .mg-grid { display:flex; flex:0 0 auto; width:100%; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; justify-content:flex-start; gap:8px; min-height:0; overflow:visible; padding-bottom:8px; }
     /* 卡片宽度跟随滑块与可用宽度，较高的卡片在宫格内滚动查看。 */
     .mg-tile { flex:0 0 var(--mg-tile-w,var(--mg-tile-min,300px)); min-width:0; max-width:100%; display:flex; flex-direction:column; gap:5px; padding:4px; border:1px solid var(--c-border); border-radius:12px; background:var(--c-surface); transition:border-color var(--motion-fast) var(--ease-fade),box-shadow var(--motion-fast) var(--ease-fade),transform var(--motion-fast) var(--ease-standard); }
     .mg-tile:hover { border-color:var(--c-text-faint-hover); box-shadow:0 10px 28px -14px var(--c-shadow); }
@@ -1331,8 +1324,6 @@
     .mg-alas-item:focus-visible { outline:2px solid var(--brand-400); outline-offset:1px; }
     #mg-alas-summary { min-width:0; font-size:11px; color:var(--c-text-sub); }
     #mg-alas-summary.is-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-    .mirror-grid #mg-alas-refresh { flex:none; width:28px; height:28px; min-height:28px; padding:0; justify-content:center; margin-left:auto; }
-    @media (pointer:coarse) { .mirror-grid #mg-alas-refresh { width:44px; height:44px; min-height:44px; } }
     @media (pointer:coarse) {
       .mg-actions { flex-wrap:wrap; }
       .mg-actions .mg-btn { min-height:44px; height:44px; }
@@ -1365,7 +1356,6 @@
     .mg-add-device:hover { border-color:#007aff; background:var(--c-surface-hover); color:var(--c-text-strong); }
     .mg-add-device:active { transform:scale(.98); }
     .mg-add-device:focus-visible { outline:none; border-style:solid; box-shadow:inset 0 0 0 2px #007aff; }
-    .mg-grid-foot-note { font-size:11.5px; color:var(--c-text-sub); }
     .app.is-grid .mirror-panel,
     .app.is-grid .ctrl-dock,
     .app.is-grid .status-pill,
@@ -1639,7 +1629,7 @@
     .app .conn-overlay h2 { font-size:16px; }
     .app .conn-overlay p { font-size:12px; line-height:1.5; }
     .app .conn-icon { border:0; background:var(--c-hover); }
-    .app .ctrl-dock { border-radius:12px; background:var(--c-surface); box-shadow:0 6px 24px var(--c-shadow); }
+    .app .ctrl-dock { border-radius:20px; background:var(--c-surface); box-shadow:0 6px 24px var(--c-shadow); }
     .app .ctrl-dock > .cb-btn, .app .ctrl-dock > .cb-more > .cb-btn { border-radius:8px; font-size:12px; }
     .app .ctrl-dock > .cb-btn:active:not(:disabled), .app .ctrl-dock > .cb-more > .cb-btn:active:not(:disabled) { transform:scale(.96); }
     .app .ctrl-dock .ctrl-sep { opacity:.65; }
@@ -1674,10 +1664,8 @@
     .app .ap-switch-row { border-radius:10px; }
     .app .up-expiry[data-state="warn"] { background:rgba(255,159,10,.10); }
     .app .up-expiry[data-state="expired"] { background:rgba(255,59,48,.10); }
-    .app .up-perm { border:0; border-radius:8px; background:var(--c-surface-hover); }
     .app .mirror-grid { gap:12px; padding-top:0; }
     .app .mg-toolbar { padding:4px 0; }
-    .app .mg-hint { flex-basis:100%; order:3; }
     .app .mg-controls { border-radius:10px; box-shadow:none; }
     .app .mg-grid { gap:10px; }
     .app .mg-tile { border-radius:10px; }
@@ -1717,6 +1705,81 @@
       .app:not(.is-fullscreen) .workspace { padding-block:4px; }
       .app:not(.is-grid):not(.is-fullscreen) .status-pill { min-height:30px; height:30px; }
       .app:not(.is-fullscreen) .mirror-panel { border-radius:6px; }
+    }
+
+    /* Keep the grid in the workspace's single vertical scroll flow. */
+    .app.is-grid .mirror-grid { flex:0 0 auto; min-height:0; padding-top:0; }
+    .app.is-grid .mg-toolbar, .app.is-grid .mg-alas, .app.is-grid .mg-grid-foot { flex:none; }
+    .app .mg-refresh-status { margin:0; font-size:12px; overflow-wrap:anywhere; }
+    .app .mg-refresh-status[data-tone="error"] { color:var(--state-error); }
+    .app .mg-refresh-status[data-tone="success"] { color:var(--success-text); }
+    .app #mg-refresh[aria-busy="true"] [data-lucide] { animation:mg-spin .8s linear infinite; }
+    .app .mg-alas { flex-wrap:wrap; min-width:0; }
+    .app .mg-alas-list { flex:1 1 0; min-width:0; overflow-x:auto; scrollbar-width:none; }
+    .app .mg-alas-list::-webkit-scrollbar { display:none; }
+    .app .mg-alas-item { display:flex; flex-direction:column; align-items:stretch; gap:2px; flex:0 0 auto; width:210px; max-width:min(260px,100%); padding:6px 10px; border-radius:12px; }
+    .app .mg-alas-item strong { display:flex; flex:none; max-width:none; min-width:0; font-size:12px; }
+    .app .mg-alas-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .app .mg-alas-state { flex:none; }
+    .app .mg-alas-task { border:0; padding:0; font-size:11px; }
+    .app .mg-meta { display:inline; max-width:50%; }
+    .app #mg-alas-summary:not(.is-visually-hidden) { flex:1 0 100%; }
+    .app:not(.is-grid):not(.is-fullscreen) .status-pill {
+      width:max-content; max-width:100%; justify-content:safe center; flex:none;
+      padding:8px 16px; min-height:38px; height:auto; max-height:none; border:1px solid var(--c-border);
+      border-radius:999px; background:var(--c-glass-strong,var(--c-surface));
+      overflow-x:auto; overflow-y:hidden; scrollbar-width:none;
+    }
+    .app .status-pill .pill-block { flex:none; }
+    .app:not(.is-grid):not(.is-fullscreen) .mirror-panel.video-frame-empty {
+      width:min(100%,640px); height:auto; min-height:0; flex:0 0 auto; margin:auto 0;
+    }
+    .app:not(.is-fullscreen) .video-frame-empty .video-box { height:auto; aspect-ratio:auto; }
+    .app:not(.is-fullscreen) .video-frame-empty .conn-overlay.show { position:relative; inset:auto; min-height:220px; overflow:visible; padding:24px 16px; }
+    .app #ctrl-dock { border-radius:20px; gap:4px; padding-inline:6px; background:var(--c-glass-strong,var(--c-surface)); backdrop-filter:blur(14px); box-shadow:0 10px 28px var(--c-shadow); }
+    .app #ctrl-dock > .cb-btn, .app #ctrl-dock > .cb-more > .cb-btn { border-radius:8px; padding-inline:8px; }
+    .app :is(.vp-seg,.vp-tabs) { position:relative; isolation:isolate; padding:3px; }
+    .app :is(.vp-seg,.vp-tabs) > button { position:relative; z-index:1; }
+    .app :is(.vp-seg,.vp-tabs) > .vp-seg-thumb {
+      position:absolute; top:3px; left:3px; height:calc(100% - 6px); z-index:0;
+      border-radius:var(--sg-seg-radius-inner,9px); background:var(--c-surface);
+      box-shadow:0 1px 3px -1px var(--c-shadow);
+      transition:transform 200ms var(--ease-standard),width 200ms var(--ease-standard);
+    }
+    .app .vp-tabs .vp-tab.active { background:transparent; box-shadow:none; }
+    .app .segment-initializing .vp-seg-thumb { transition:none; }
+    .app #mg-settings[hidden] { display:none; }
+    .app #mg-settings-dialog .mg-controls { display:flex; flex:none; flex-direction:column; align-items:stretch; width:100%; height:auto; padding:0; border:0; background:transparent; box-shadow:none; gap:12px; }
+    .app #mg-settings-dialog .mg-control { display:flex; justify-content:space-between; width:100%; height:auto; min-height:44px; padding:0; }
+    .app #mg-settings-dialog .mg-control-sep { display:none; }
+    .app #mg-settings-dialog .mg-control-label { font-size:13px; color:var(--c-text); }
+    .app #mg-settings-dialog #mg-zoom [data-lucide] { display:none; }
+    .app #mg-settings-dialog .mg-zoom-range { min-width:0; width:auto; flex:1; height:44px; }
+    .app #mg-settings-dialog .mg-zoom-value { flex:none; max-width:45%; font-size:12px; white-space:normal; }
+    .app #mg-settings-dialog .mg-menu-trigger { min-height:44px; }
+    .app #mg-settings-dialog .mg-menu { position:relative; top:auto; right:auto; width:100%; display:none; margin-top:4px; }
+    .app #mg-settings-dialog .mg-menu.open { display:block; }
+    .app #mg-settings-dialog .mg-menu-wrap { flex-wrap:wrap; }
+    .app #mg-settings-dialog .mg-menu-item { min-height:44px; height:auto; }
+    @media (max-width:767px), (pointer:coarse) and (max-height:500px) {
+      .app .mg-toolbar { gap:0; }
+      .app #mg-controls-home { display:none; }
+      .app .mg-toolbar-actions { flex-wrap:nowrap; width:100%; margin:0; justify-content:flex-end; gap:6px; }
+      .app .mg-toolbar-actions .mg-refresh, .app .mg-grid-foot .mg-add-device { width:44px; min-width:44px; height:44px; min-height:44px; padding:0; justify-content:center; border-radius:8px; }
+      .app .mg-toolbar-actions .mg-refresh > span, .app .mg-grid-foot .mg-add-device > span, .app .mg-actions .mg-btn-text { display:none; }
+      .app .mg-toolbar-actions [data-lucide], .app .mg-grid-foot [data-lucide], .app .mg-actions [data-lucide] { width:18px; height:18px; }
+      .app .mirror-grid .mg-actions .mg-btn { height:44px; min-height:44px; min-width:44px; border-radius:8px; }
+      .app .mg-alas { gap:6px; }
+      .app .mg-alas-head { flex:1 0 100%; }
+      .app .mg-alas-list { flex-basis:100%; }
+      @container mirror-tile (max-width:200px) {
+        .mg-tile .mg-actions, .mg-tile.is-playing .mg-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .mg-slot .mg-actions { grid-template-columns:minmax(0,1fr); }
+      }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      .app :is(.vp-seg,.vp-tabs) > .vp-seg-thumb { transition:none; }
+      .app #mg-refresh[aria-busy="true"] [data-lucide] { animation:none; }
     }
     @media (prefers-reduced-transparency:reduce) {
       .app .topnav, .app .ctrl-dock, .app .vp-panel, .app .cb-pop { backdrop-filter:none; -webkit-backdrop-filter:none; }

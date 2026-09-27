@@ -168,6 +168,7 @@ document.addEventListener('DOMContentLoaded',function(){
       document.addEventListener('keydown',function(e){
         if(e.isComposing||e.keyCode===229||textSendComposing) return;
         if(e.key==='Escape'){
+          if(gridSettingsDialog&&gridSettingsDialog.classList.contains('open')) return;
           if(document.querySelector('.tl-dialog.open')) return;
           if(tlPanel&&tlPanel.classList.contains('open')) return;
           if((vpPanel&&vpPanel.classList.contains('open'))||(apPanel&&apPanel.classList.contains('open'))||(upPanel&&upPanel.classList.contains('open'))){
@@ -425,8 +426,7 @@ document.addEventListener('DOMContentLoaded',function(){
         });
         gridView.mount(host,{
           startAll:document.getElementById('mg-start-all'),
-          stopAll:document.getElementById('mg-stop-all'),
-          refreshAll:document.getElementById('mg-refresh-streams')
+          stopAll:document.getElementById('mg-stop-all')
         });
         gridView.setThumbnailFps(pendingGridFps||1);
         gridView.setMaxLive(GRID_MAX_LIVE);
@@ -444,6 +444,7 @@ document.addEventListener('DOMContentLoaded',function(){
       function setViewMode(mode){
         var next=mode==='grid'?'grid':'single';
         if(next===viewMode) return Promise.resolve();
+        closeGridSettings();
         var app=document.querySelector('.app');
         var gridEl=document.getElementById('mirror-grid');
         var stopped=Promise.resolve();
@@ -625,12 +626,13 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function loadMirrorDevices(options){
         options=options || {};
-        return window.ScrcpyGateApi.configured('devices.list',{query:{permission:'watch'}}).then(function(payload){
+        return window.ScrcpyGateApi.configured('devices.list',{query:{permission:'watch'},cache:options.fresh?false:undefined}).then(function(payload){
           var previousId=selectedDevice && selectedDevice.id;
           var nextItems=listPayload(payload).map(normalizeMirrorDevice).filter(function(d){return d.id;});
           var nextSignature=deviceListSignature(nextItems,false);
           var shouldRender=nextSignature!==deviceRenderSignature;
           deviceListStale=!!(payload && payload.stale);
+          if(options.fresh&&deviceListStale) throw new Error(tr('设备列表可能已过期,将在下一次刷新时重试'));
           deviceLoadError=deviceListStale && !nextItems.length;
           deviceItems=nextItems;
           deviceRenderSignature=nextSignature;
@@ -665,6 +667,7 @@ document.addEventListener('DOMContentLoaded',function(){
           if(viewMode==='grid'&&gridView) gridView.render(deviceItems);
         }).catch(function(error){
           deviceLoadError=true;
+          if(options.propagate) throw error;
           if(deviceItems.length){
             if(!options.silent) showToast(apiErrorText(error));
             return;
@@ -932,13 +935,24 @@ document.addEventListener('DOMContentLoaded',function(){
       var mgRefreshBtn=document.getElementById('mg-refresh');
       if(mgRefreshBtn){
         mgRefreshBtn.addEventListener('click',function(){
-          var label=mgRefreshBtn.querySelector('span');
+          if(mgRefreshBtn.disabled) return;
+          var grid=ensureGridView();
+          if(!grid) return;
+          var status=document.getElementById('mg-refresh-status');
           mgRefreshBtn.disabled=true;
-          if(label) label.textContent='刷新中…';
-          loadMirrorDevices().catch(function(){}).then(function(){
+          mgRefreshBtn.setAttribute('aria-busy','true');
+          status.hidden=false;
+          status.dataset.tone='busy';
+          status.textContent=tr('刷新中…');
+          grid.refreshDevices(function(){ return loadMirrorDevices({fresh:true,propagate:true,silent:true}); }).then(function(result){
+            status.dataset.tone=result.failed?'error':'success';
+            status.textContent=tr(result.cancelled?'刷新已取消':result.failed?'部分状态不可用，请重试':'刷新完成');
+          }).catch(function(error){
+            status.dataset.tone='error';
+            status.textContent=tr('刷新失败')+' · '+apiErrorText(error);
+          }).finally(function(){
             mgRefreshBtn.disabled=false;
-            if(label) label.textContent='刷新设备';
-            if(window.lucide) lucide.createIcons();
+            mgRefreshBtn.removeAttribute('aria-busy');
           });
         });
       }
@@ -956,13 +970,46 @@ document.addEventListener('DOMContentLoaded',function(){
           if(grid) grid.stopAll();
         });
       }
-      var mgRefreshStreamsBtn=document.getElementById('mg-refresh-streams');
-      if(mgRefreshStreamsBtn){
-        mgRefreshStreamsBtn.addEventListener('click',function(){
-          var grid=ensureGridView();
-          if(grid) grid.refreshAll();
-        });
+      var gridSettingsDialog=document.getElementById('mg-settings-dialog');
+      var gridSettingsBackdrop=document.getElementById('mg-settings-backdrop');
+      var gridSettingsTrigger=document.getElementById('mg-settings');
+      var gridControls=document.getElementById('mg-controls');
+      var gridCompactQuery=window.matchMedia('(max-width:767px), (pointer:coarse) and (max-height:500px)');
+      function closeGridSettings(){
+        if(!gridSettingsDialog) return;
+        if(openGridMenu) openGridMenu.close();
+        gridSettingsDialog.classList.remove('open');
+        gridSettingsBackdrop.classList.remove('open');
+        releasePanelFocus(gridSettingsDialog);
+        gridSettingsDialog.setAttribute('aria-hidden','true');
+        gridSettingsDialog.inert=true;
+        gridSettingsBackdrop.setAttribute('aria-hidden','true');
       }
+      function syncGridSettings(){
+        if(!gridSettingsDialog||!gridControls) return;
+        var wasOpen=gridSettingsDialog.classList.contains('open');
+        closeGridSettings();
+        var compact=gridCompactQuery.matches;
+        gridSettingsTrigger.hidden=!compact;
+        document.getElementById(compact?'mg-settings-body':'mg-controls-home').appendChild(gridControls);
+        if(wasOpen&&!compact) gridControls.querySelector('input').focus({preventScroll:true});
+      }
+      gridSettingsTrigger.addEventListener('click',function(){
+        rememberPanelOpener(gridSettingsDialog);
+        gridSettingsDialog.classList.add('open');
+        gridSettingsBackdrop.classList.add('open');
+        gridSettingsDialog.setAttribute('aria-hidden','false');
+        gridSettingsDialog.inert=false;
+        gridSettingsBackdrop.setAttribute('aria-hidden','false');
+        document.getElementById('mg-settings-close').focus();
+      });
+      document.getElementById('mg-settings-close').addEventListener('click',closeGridSettings);
+      gridSettingsBackdrop.addEventListener('click',closeGridSettings);
+      gridSettingsDialog.addEventListener('keydown',function(event){
+        if(event.key==='Escape'&&!event.defaultPrevented&&!openGridMenu){ event.preventDefault(); closeGridSettings(); }
+      });
+      gridCompactQuery.addEventListener('change',syncGridSettings);
+      syncGridSettings();
       /* 宫格画面缩放：滑块按百分比调格子宽度（100% = 300px），列数仍由宽度自适应。
          范围 40%–150%（默认 80%）：最小 120px，保留两个完整的触控按钮。 */
       var GRID_ZOOM_KEY='scrcpygate-grid-zoom';
@@ -1039,11 +1086,6 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function savedGridNumber(key,options,fallback){
         try{ return pickGridValue(options,localStorage.getItem(key),fallback); }catch(e){ return fallback; }
-      }
-      function updateGridHint(maxLive){
-        var hint=document.getElementById('mg-hint');
-        if(!hint) return;
-        hint.textContent=String(tr('点击「开始截图」后按所选帧率抓取画面，最多同时预览 {0} 路')).replace('{0}',String(maxLive));
       }
       /* 自定义下拉菜单：原生 select 的弹出层由系统绘制（深色下是刺眼的白底），
          这里用按钮 + 菜单复刻 Apple 风格的浮层（圆角、发丝边、柔和阴影、勾选态）。 */
@@ -1160,7 +1202,6 @@ document.addEventListener('DOMContentLoaded',function(){
       });
       applyGridOrientation(gridOrientationMenu?gridOrientationMenu.value:GRID_ORIENTATION_VALUES[0]);
       applyGridFps(gridFpsMenu?gridFpsMenu.value:GRID_FPS_VALUES[0]);
-      updateGridHint(GRID_MAX_LIVE);
       var addDeviceBtn=document.getElementById('mg-add-device');
       if(addDeviceBtn){
         addDeviceBtn.addEventListener('click',function(){ addAdbDevice(); });
@@ -1729,6 +1770,12 @@ document.addEventListener('DOMContentLoaded',function(){
       function applyAdaptiveVideoFrame(detail){
         if(!mirrorPanel||viewMode==='grid') return;
         if(fullscreenActive){
+          syncLayoutPressure({width:0,height:0});
+          clearAdaptiveVideoFrame();
+          return;
+        }
+        mirrorPanel.classList.toggle('video-frame-empty',!streamLive());
+        if(!streamLive()){
           syncLayoutPressure({width:0,height:0});
           clearAdaptiveVideoFrame();
           return;
@@ -2975,12 +3022,12 @@ document.addEventListener('DOMContentLoaded',function(){
       function vpSyncSeg(seg){
         if(!seg) return;
         var thumb=seg.querySelector('.vp-seg-thumb');
-        var active=seg.querySelector('button[aria-pressed="true"]');
+        var active=seg.querySelector('button[aria-pressed="true"],button[aria-selected="true"]');
         if(!thumb||!active) return;
         thumb.style.width=active.offsetWidth+'px';
-        thumb.style.transform='translateX('+(active.offsetLeft-2)+'px)';
+        thumb.style.transform='translateX('+(active.offsetLeft-parseFloat(getComputedStyle(thumb).left))+'px)';
       }
-      function vpSyncSegs(){ vpSyncSeg(vpFitSeg); vpSyncSeg(vpModeSeg); }
+      function vpSyncSegs(){ vpSyncSeg(vpFitSeg); vpSyncSeg(vpModeSeg); vpSyncSeg(document.querySelector('.vp-tabs')); }
       var vpActiveSegment='presets';
       function vpShowSegment(name, moveFocus){
         if(name!=='tuning') name='presets';
@@ -2996,6 +3043,7 @@ document.addEventListener('DOMContentLoaded',function(){
         document.querySelectorAll('[data-vp-panel]').forEach(function(panel){
           panel.hidden=panel.getAttribute('data-vp-panel')!==name;
         });
+        vpSyncSeg(document.querySelector('.vp-tabs'));
         if(window.lucide) lucide.createIcons();
       }
       document.querySelectorAll('.vp-tab').forEach(function(tab, index, all){
@@ -3246,7 +3294,7 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       document.addEventListener('keydown',function(event){
         if(event.key!=='Tab') return;
-        var panel=document.querySelector('.tl-dialog.open')||[upPanel,tlPanel,apPanel,vpPanel].find(function(item){
+        var panel=document.querySelector('.tl-dialog.open')||[gridSettingsDialog,upPanel,tlPanel,apPanel,vpPanel].find(function(item){
           return item&&item.classList.contains('open');
         });
         if(!panel) return;
@@ -3274,7 +3322,10 @@ document.addEventListener('DOMContentLoaded',function(){
         document.body.classList.remove('sg-mobile-nav');
         var scrim=document.getElementById('mobile-scrim');
         if(scrim){ scrim.classList.remove('open'); scrim.setAttribute('aria-hidden','true'); }
+        vpPanel.classList.add('segment-initializing');
         vpSyncSegs();
+        void vpPanel.offsetWidth;
+        vpPanel.classList.remove('segment-initializing');
         var closeBtn=document.getElementById('vp-close');
         if(closeBtn) closeBtn.focus();
       }
@@ -5527,8 +5578,6 @@ document.addEventListener('DOMContentLoaded',function(){
       var upName=document.getElementById('up-name');
       var upUsername=document.getElementById('up-username');
       var upRole=document.getElementById('up-role');
-      var upPermsBox=document.getElementById('up-perms');
-      var upPermsEmpty=document.getElementById('up-perms-empty');
       var upCur=document.getElementById('up-cur');
       var upNew=document.getElementById('up-new');
       var upConfirm=document.getElementById('up-confirm');
@@ -5537,7 +5586,6 @@ document.addEventListener('DOMContentLoaded',function(){
       var upStatusDot=document.getElementById('up-status-dot');
       var upStatusText=document.getElementById('up-status-text');
       var upReminder=document.getElementById('up-password-reminder');
-      var upLoaded=false;
       var upBusy=false;
       function upUser(){
         var u=null;
@@ -5609,62 +5657,6 @@ document.addEventListener('DOMContentLoaded',function(){
           upSetStatus('提交失败 · '+apiErrorText(error),'error');
         });
       }
-      function upRenderPerms(items){
-        upPermsBox.innerHTML='';
-        upPermsEmpty.hidden=!!(items&&items.length);
-        (items||[]).forEach(function(p){
-          var row=document.createElement('div');
-          row.className='up-perm';
-          var icon=document.createElement('i');
-          icon.setAttribute('data-lucide',p.permission==='control'?'smartphone':'eye');
-          var nm=document.createElement('span');
-          nm.className='up-perm-name';
-          nm.textContent=p.device||p.deviceName||p.name||p.deviceId||'—';
-          var chip=document.createElement('span');
-          chip.className='up-perm-chip'+(p.permission==='control'?' control':'');
-          chip.textContent=p.permission==='control'?'控制':'观看';
-          row.appendChild(icon);
-          row.appendChild(nm);
-          row.appendChild(chip);
-          upPermsBox.appendChild(row);
-        });
-        if(window.lucide) lucide.createIcons();
-      }
-      function upLoadPerms(){
-        // The admin permissions catalog is not available to regular users.
-        // Use the filtered device catalog instead, which is also the source
-        // for the workbench device list and therefore reflects this account's
-        // actual grants.
-        var p=(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('devices.list'))
-          ? window.ScrcpyGateApi.configured('devices.list',{ method:'GET', timeout:10000 })
-          : Promise.resolve(null);
-        return p.then(function(payload){
-          var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||null;
-          var devices=d&&(d.devices||d.items||d.list)||(Array.isArray(d)?d:null)||[];
-          var items=devices.filter(function(device){
-            return device && device.enabled !== false && device.can_view !== false && device.noPermission !== true;
-          }).map(function(device){
-            // 页面里的设备对象由适配层规范化过：控制权限是驼峰 canControl，蛇形
-            // can_control 只存在于裸接口响应里。此前只看 can_control，导致每一行都
-            // 落回「观看」（连管理员也一样）。只认显式 true —— 字段缺失时按仅观看
-            // 显示，不虚报控制权。
-            var canControl=device.canControl===true||device.can_control===true;
-            return {
-              device:device.name||device.display_name||device.displayName||device.id||device.device_id||'—',
-              deviceId:device.id||device.device_id||'',
-              permission:canControl?'control':'watch',
-              canView:device.can_view!==false&&device.noPermission!==true,
-              canControl:canControl
-            };
-          });
-          upRenderPerms(items);
-          return payload;
-        }).catch(function(){
-          upRenderPerms(null);
-          var empty=upPermsEmpty.querySelector('span');
-          if(empty) empty.textContent='权限信息不可用';
-        });
-      }
       function upSetStatus(text,state){
         upStatus.classList.remove('busy','error');
         if(state) upStatus.classList.add(state);
@@ -5710,7 +5702,6 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function upOpen(){
         rememberPanelOpener(upPanel);
-        if(!upLoaded){ upLoaded=true; upLoadPerms().catch(function(){}); }
         vpClose();
         apClose();
         tlClose();

@@ -20,6 +20,13 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "显示设置": "Display settings",
+    "缩放": "Zoom",
+    "无任务": "No task",
+    "刷新完成": "Refresh complete",
+    "刷新失败": "Refresh failed",
+    "刷新已取消": "Refresh cancelled",
+    "账号状态由管理员维护；退出后需要重新登录才能继续使用。": "Account status is managed by an administrator. Sign in again after signing out to continue.",
     "提示修改密码": "Remind to change password",
     "已安排下次登录时提醒修改密码": "Password reminder scheduled for the next sign-in",
     "密码提醒": "Password reminder",
@@ -944,7 +951,7 @@
     '参数配置': 'Parameter settings', '应用预设：均衡': 'Applied preset: Balanced', '基础画质': 'Base quality',
     '输出尺寸': 'Output size', '决定画面像素尺寸，更高分辨率消耗更多带宽': 'Higher resolution uses more bandwidth',
     '自定义': 'Custom', '自定义宽度和高度': 'Custom width & height', '宽度需在': 'Width must be ',
-    '高度需在': 'Height must be ', '之间': '', '帧率': 'FPS', '每秒画面刷新次数，越高越流畅但更耗资源': 'Higher FPS is smoother but heavier',
+    '高度需在': 'Height must be ', '之间': '', '每秒画面刷新次数，越高越流畅但更耗资源': 'Higher FPS is smoother but heavier',
     '帧率需在': 'FPS must be ', '码率': 'Bitrate', '视频编码比特率，越高画质越好占用带宽越大': 'Higher bitrate, better quality, more bandwidth',
     '码率需在': 'Bitrate must be ', '传输模式': 'Transfer mode', '默认传输模式': 'Default transfer mode',
     '默认使用': 'Uses ', '切换将中断当前会话并需手动重启': 'Switching interrupts the current session',

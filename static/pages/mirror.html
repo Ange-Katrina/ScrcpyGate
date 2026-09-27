@@ -190,10 +190,11 @@
 
       <section class="mirror-grid" id="mirror-grid" aria-label="全部设备宫格" hidden>
         <div class="mg-toolbar">
-          <span class="mg-hint" id="mg-hint">点击「开始截图」后按所选帧率抓取画面，最多同时预览 {0} 路</span>
-          <div class="mg-controls" role="group" aria-label="宫格显示设置">
+          <div id="mg-controls-home">
+          <div class="mg-controls" id="mg-controls" role="group" aria-label="宫格显示设置">
             <div class="mg-control" id="mg-zoom" title="画面缩放（百分比）">
               <i data-lucide="move-horizontal" aria-hidden="true"></i>
+              <label class="mg-control-label" for="mg-zoom-range">缩放</label>
               <input class="mg-zoom-range" id="mg-zoom-range" type="range" min="40" max="150" step="5" value="80" aria-label="宫格画面缩放百分比">
               <span class="mg-zoom-value" id="mg-zoom-value">80%</span>
             </div>
@@ -218,26 +219,34 @@
               </div>
             </div>
           </div>
+          </div>
           <div class="mg-toolbar-actions">
-            <button class="mg-refresh mg-primary" id="mg-start-all" type="button"><i data-lucide="play"></i><span>全部截图</span></button>
-            <button class="mg-refresh" id="mg-stop-all" type="button"><i data-lucide="square"></i><span>全部停止</span></button>
-            <button class="mg-refresh" id="mg-refresh-streams" type="button"><i data-lucide="rotate-cw"></i><span>刷新截图</span></button>
-            <button class="mg-refresh" id="mg-refresh" type="button"><i data-lucide="refresh-cw"></i><span>刷新设备</span></button>
+            <button class="mg-refresh mg-primary" id="mg-start-all" type="button" title="全部截图" aria-label="全部截图"><i data-lucide="play" aria-hidden="true"></i><span>全部截图</span></button>
+            <button class="mg-refresh" id="mg-stop-all" type="button" title="全部停止" aria-label="全部停止"><i data-lucide="square" aria-hidden="true"></i><span>全部停止</span></button>
+            <button class="mg-refresh" id="mg-refresh" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+            <button class="mg-refresh" id="mg-settings" type="button" title="显示设置" aria-label="显示设置" aria-haspopup="dialog" aria-controls="mg-settings-dialog"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>显示设置</span></button>
           </div>
         </div>
+        <p class="mg-refresh-status" id="mg-refresh-status" role="status" aria-live="polite" hidden></p>
         <section class="mg-alas" id="mg-alas" aria-label="ALAS 运行状态">
           <div class="mg-alas-head">
             <strong>ALAS 运行状态</strong>
           </div>
           <div class="mg-alas-list" id="mg-alas-list" role="list" aria-label="ALAS 运行状态"></div>
           <span id="mg-alas-summary" role="status">未检查</span>
-          <button class="mg-refresh" id="mg-alas-refresh" type="button" title="刷新状态" aria-label="刷新状态"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
         </section>
         <div class="mg-grid" id="mg-grid"></div>
         <div class="mg-grid-foot">
-          <button class="mg-add-device" id="mg-add-device" type="button" title="添加 ADB 设备"><i data-lucide="plus" aria-hidden="true"></i><span>添加 ADB 设备</span></button>
-          <span class="mg-grid-foot-note" id="mg-grid-foot-note">宫格固定 12 个坑位，空坑位可直接添加设备</span>
+          <button class="mg-add-device" id="mg-add-device" type="button" title="添加 ADB 设备" aria-label="添加 ADB 设备"><i data-lucide="plus" aria-hidden="true"></i><span>添加 ADB 设备</span></button>
         </div>
+      </section>
+      <div class="vp-backdrop" id="mg-settings-backdrop" aria-hidden="true"></div>
+      <section class="vp-panel" id="mg-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="mg-settings-title" aria-hidden="true" inert>
+        <header class="vp-head">
+          <div class="vp-head-copy"><h2 id="mg-settings-title">显示设置</h2></div>
+          <button class="vp-close" id="mg-settings-close" type="button" aria-label="关闭"><i data-lucide="x" aria-hidden="true"></i></button>
+        </header>
+        <div class="vp-body" id="mg-settings-body"></div>
       </section>
 
       <div class="ctrl-dock" id="ctrl-dock" role="toolbar" aria-label="观看控制">
@@ -474,6 +483,7 @@
             <p class="vp-note">只改变本页显示尺寸,不会重启视频流。</p>
           </section>
           <div class="vp-tabs" role="tablist" aria-label="画质设置">
+            <span class="vp-seg-thumb" aria-hidden="true"></span>
             <button class="vp-tab active" type="button" role="tab" id="vp-tab-presets" data-vp-seg="presets" aria-selected="true" aria-controls="vp-panel-presets"><i data-lucide="layout-grid"></i><span>预设</span></button>
             <button class="vp-tab" type="button" role="tab" id="vp-tab-tuning" data-vp-seg="tuning" aria-selected="false" aria-controls="vp-panel-tuning" tabindex="-1"><i data-lucide="sliders-horizontal"></i><span>微调</span></button>
           </div>
@@ -623,10 +633,6 @@
             </div>
             <div class="up-last-login"><i data-lucide="clock"></i><span id="up-last-login">上次登录 —</span></div>
 
-            <div class="vp-group-title vp-group-title-extra"><h3>设备权限</h3><span class="vp-hint">由管理员分配</span></div>
-            <div class="up-perms" id="up-perms"></div>
-            <div class="ap-empty" id="up-perms-empty" hidden><i data-lucide="shield-off"></i><span>暂无设备权限</span><small>请联系管理员为你分配设备</small></div>
-
             <div class="vp-group-title vp-group-title-extra"><h3>修改密码</h3><span class="vp-hint">至少 12 位</span></div>
             <div class="up-password-reminder" id="up-password-reminder" hidden>
               <i data-lucide="shield-check" aria-hidden="true"></i>
@@ -653,7 +659,7 @@
             </div>
 
             <button class="ap-btn up-logout" id="up-logout" type="button"><i data-lucide="log-out"></i>退出登录</button>
-            <p class="vp-note">设备权限与账号状态由管理员维护;退出后需要重新登录才能继续使用。</p>
+            <p class="vp-note">账号状态由管理员维护；退出后需要重新登录才能继续使用。</p>
           </section>
         </div>
       </section>

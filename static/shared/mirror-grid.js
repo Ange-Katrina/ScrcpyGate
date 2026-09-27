@@ -55,6 +55,8 @@
     var metricsTimer = null;
     var METRICS_INTERVAL = 15000;
     var alasBusy = false;
+    var alasPromise = null;
+    var refreshPromise = null;
     var alasLastAttempt = 0;
     var alasGeneration = 0;
     var alasVisible = true;
@@ -62,60 +64,59 @@
     var lastTileRequestedWidth = 0; // 滑块请求的宽度
     var batchToken = 0;             // 批量操作令牌（一键全部投屏/停止/刷新）
 
-    function refreshAlas() {
+    function refreshAlas(force) {
       var list = document.getElementById('mg-alas-list');
       var summary = document.getElementById('mg-alas-summary');
-      var button = document.getElementById('mg-alas-refresh');
-      if (!list || !summary || !active || !alasVisible || document.hidden || alasBusy) return;
-      if (Date.now() - alasLastAttempt < 5000) return;
+      if (!list || !summary || !active || !alasVisible || document.hidden) return Promise.resolve(true);
+      if (alasBusy) return alasPromise || Promise.resolve(true);
+      if (force !== true && Date.now() - alasLastAttempt < 5000) return Promise.resolve(true);
       alasLastAttempt = Date.now();
       alasBusy = true;
       var generation = alasGeneration;
-      if (button) button.disabled = true;
       summary.textContent = tr('检查中');
       summary.classList.toggle('is-visually-hidden', !!list.children.length);
-      global.ScrcpyGateApi.configured('alas.grid.status', { cache: false }).then(function (payload) {
+      alasPromise = global.ScrcpyGateApi.configured('alas.grid.status', { cache: false }).then(function (payload) {
         if (generation !== alasGeneration || !active) return;
         var data = payload || {};
         var items = Array.isArray(data.config_statuses) ? data.config_statuses : [];
         var labels = { running: '运行中', stopped: '已停止', idle: '空闲', waiting: '等待中',
           error: '异常', disconnected: '连接中断', disabled: '已禁用', unknown: '未检查', starting: '启动中', stopping: '停止中' };
         list.innerHTML = items.map(function (item) {
-          var state = item.status || 'unknown';
+          var state = Object.prototype.hasOwnProperty.call(labels, item.status) ? item.status : 'unknown';
           var checked = Number(item.checked_at);
           var stale = state !== 'disabled' && state !== 'unknown' && (!(checked > 0) || Date.now() / 1000 - checked > 90);
           var failed = state !== 'disabled' && (item.ok === false || !!item.error || state === 'error');
           var tone = failed ? 'error' : stale ? 'pending' : state === 'running' ? 'running' : (state === 'unknown' || state === 'waiting' || state === 'starting' || state === 'stopping') ? 'pending' : 'muted';
-          var statusLabel = tr(failed ? '检查失败' : stale ? '状态已过期' : labels[state] || '未检查');
+          var statusLabel = tr(failed ? state === 'error' ? labels.error : '检查失败' : stale || state === 'unknown' ? '未知' : labels[state]);
           var name = String(item.config || '—');
-          var task = !failed && !stale ? String(item.task || '') : '';
+          var task = !failed && !stale && ['running', 'starting', 'stopping', 'waiting'].indexOf(state) !== -1 ? String(item.task || '') : '';
           var description = name + ' · ' + statusLabel + (task ? ' · ' + task : '') + (item.error ? ' · ' + String(item.error) : '');
           return '<div class="mg-alas-item" role="listitem" tabindex="0" data-tone="' + tone + '" title="' + escHtml(description) + '" aria-label="' + escHtml(description) + '">' +
-            '<strong>' + escHtml(name) + '</strong>' +
-            (task ? '<span class="mg-alas-task">' + escHtml(task) + '</span>' : '') + '</div>';
+            '<strong><span class="mg-alas-name">' + escHtml(name) + '</span><span class="mg-alas-state"> · ' + escHtml(statusLabel) + '</span></strong>' +
+            '<span class="mg-alas-task">' + escHtml(task || tr('无任务')) + '</span></div>';
         }).join('');
         var running = items.filter(function (item) { return item.status === 'running' && item.ok !== false && !item.error && Number(item.checked_at) > Date.now() / 1000 - 90; }).length;
         var hasError = data.error || items.some(function (item) { return item.ok === false || !!item.error; });
         summary.textContent = data.status === 'disabled' ? tr('ALAS 已禁用') : hasError ? tr('部分状态不可用，请重试') : items.length ? noticeText('{0} 个配置 · {1} 个运行中', [items.length, running]) : tr('暂无 ALAS 配置');
-        summary.classList.toggle('is-visually-hidden', items.length > 0);
+        summary.classList.toggle('is-visually-hidden', items.length > 0 && !hasError);
+        return !hasError;
       }).catch(function () {
         if (generation !== alasGeneration || !active) return;
         list.textContent = '';
         summary.classList.remove('is-visually-hidden');
         summary.textContent = tr('状态获取失败，请重试');
+        return false;
       }).finally(function () {
         if (generation !== alasGeneration) return;
         alasBusy = false;
-        if (button) button.disabled = false;
       });
+      return alasPromise;
     }
     function updateAlasPolling() {
       if (alasTimer) global.clearInterval(alasTimer);
       alasTimer = null;
       var panel = document.getElementById('mg-alas');
       if (panel) panel.hidden = !alasVisible;
-      var button = document.getElementById('mg-alas-refresh');
-      if (button) button.disabled = alasBusy;
       if (!active || !alasVisible || document.hidden) return;
       refreshAlas();
       alasTimer = global.setInterval(refreshAlas, 30000);
@@ -253,7 +254,7 @@
       if (!controls) return;
       var live = liveCount();
       if (controls.startAll) controls.startAll.disabled = !active || live >= maxLive || !startableTiles().length;
-      if (controls.stopAll) controls.stopAll.disabled = !active || live === 0;
+      if (controls.stopAll) controls.stopAll.disabled = !active || (live === 0 && !refreshPromise);
       if (controls.refreshAll) controls.refreshAll.disabled = !active || !restartableTiles().length;
     }
     function noticeText(template, values) {
@@ -580,7 +581,9 @@
       var placeholderText = offline ? tr('设备离线') : (noPermission ? tr('仅观看') : tr('未截图'));
       if (tile.error) placeholderText = tile.error;
       tile.placeholderText.textContent = placeholderText;
-      tile.overlayText.textContent = state === 'starting' ? tr('正在开始截图…') : tr('正在连接…');
+      tile.overlayText.textContent = tile.error || (state === 'starting' ? tr('正在开始截图…') : tr('正在连接…'));
+      var spinner = tile.overlay.querySelector('.mg-spinner');
+      if (spinner) spinner.hidden = !busy;
       tile.meta.textContent = statusText(tile.device);
       if (global.lucide) refreshIcons();
       syncToolbar();
@@ -762,9 +765,12 @@
     }
 
     function stopTile(tile, keepError) {
+      tile.requestEpoch = (tile.requestEpoch || 0) + 1;
       clearRetry(tile);
       var token = tile.viewerToken;
       var clientId = tile.clientId;
+      var socket = tile.ws;
+      tile.ws = null;
       destroyPlayer(tile);
       tile.viewerToken = '';
       tile.clientId = '';
@@ -780,10 +786,10 @@
           clientId: clientId,
           viewerToken: token
         }).catch(function () {}).then(function () {
-          closeSocket(tile);
+          if (socket) { try { socket.close(); } catch (error) {} }
         });
       }
-      closeSocket(tile);
+      if (socket) { try { socket.close(); } catch (error) {} }
       return Promise.resolve();
     }
 
@@ -793,14 +799,21 @@
       if (tile.device.permission === false) { onNotice(tr('没有该设备的观看权限')); return; }
       if (liveCount() >= maxLive) { onNotice(tr('最多同时预览 ') + maxLive + tr(' 路，请先停止其他格子')); return; }
       setState(tile, 'starting', '');
-      apiCall('sessions.viewer.start', { deviceId: tile.deviceId, thumbnail: true, thumbnailFps: thumbnailFps }).then(function (payload) {
-        if (tile.state !== 'starting') return;
+      var epoch = tile.requestEpoch = (tile.requestEpoch || 0) + 1;
+      return apiCall('sessions.viewer.start', { deviceId: tile.deviceId, thumbnail: true, thumbnailFps: thumbnailFps }).then(function (payload) {
         var data = payload && payload.data && typeof payload.data === 'object' ? payload.data : (payload || {});
+        if (!active || tiles[tile.deviceId] !== tile || tile.requestEpoch !== epoch || tile.state !== 'starting') {
+          if (data.viewer_token) return apiCall('sessions.viewer.stop', { deviceId: tile.deviceId, viewerToken: data.viewer_token }).catch(function () {});
+          return;
+        }
         if (data.ok === false) throw new Error(tr('服务端未启动投屏'));
         tile.viewerToken = String(data.viewer_token || '');
         openSocket(tile);
+        return tile.state !== 'error';
       }).catch(function (error) {
+        if (tile.requestEpoch !== epoch || !active) return;
         setState(tile, 'error', (error && error.message) ? error.message : tr('开始截图失败'));
+        return false;
       });
     }
 
@@ -908,6 +921,7 @@
         var tile = ensureTile(device);
         if (!tile) return;
         tile.device = device;
+        if (isLive(tile) && (device.online !== true || device.permission === false)) stopTile(tile);
         var resources = tile.element.querySelector('[data-action="metrics"]');
         resources.disabled = device.online === false || device.permission === false;
         if (device.online === false || device.permission === false) {
@@ -1003,29 +1017,36 @@
       return chosen.length;
     }
 
-    /* 一键刷新画面：重连正在投屏或出错的格子，未投屏的格子保持不动。 */
-    function refreshAll() {
-      if (!active) return 0;
-      var targets = restartableTiles();
-      if (!targets.length) {
-        onNotice(tr('没有正在投屏的格子'));
-        return 0;
-      }
+    // Snapshot viewer intent before fetching; per-tile epochs preserve intervening stops.
+    function refreshDevices(loadDevices) {
+      if (refreshPromise) return refreshPromise;
+      if (!active) return Promise.resolve({ cancelled: true });
       var token = ++batchToken;
-      var ids = targets.map(function (tile) { return tile.deviceId; });
-      targets.forEach(function (tile) { stopTile(tile); });
-      global.setTimeout(function () {
-        if (!active || token !== batchToken) return;
-        ids.forEach(function (deviceId, index) {
-          global.setTimeout(function () {
-            if (!active || token !== batchToken) return;
-            var tile = tiles[deviceId];
-            if (tile && !isLive(tile)) startTile(tile);
-          }, index * 150);
-        });
-      }, 450);
+      var targets = restartableTiles().map(function (tile) { return { tile: tile, epoch: tile.requestEpoch || 0 }; });
+      function cancelled() { return !active || token !== batchToken; }
+      refreshPromise = Promise.all([Promise.resolve().then(loadDevices || function () {}), refreshAlas(true)]).then(async function (results) {
+        var failed = results[1] === false;
+        for (var index = 0; index < targets.length; index += 1) {
+          if (cancelled()) return { cancelled: true };
+          var target = targets[index], tile = target.tile;
+          if (tiles[tile.deviceId] !== tile || (tile.requestEpoch || 0) !== target.epoch || tile.device.online !== true || tile.device.permission === false) continue;
+          var stopped = stopTile(tile), epoch = tile.requestEpoch;
+          await stopped;
+          if (cancelled()) return { cancelled: true };
+          if (tile.requestEpoch !== epoch || tiles[tile.deviceId] !== tile) continue;
+          if (await startTile(tile) === false) failed = true;
+        }
+        return { cancelled: cancelled(), failed: failed };
+      }).finally(function () {
+        refreshPromise = null;
+        syncToolbar();
+      });
       syncToolbar();
-      return ids.length;
+      return refreshPromise;
+    }
+
+    function refreshAll() {
+      return refreshDevices();
     }
 
     function destroy() {
@@ -1038,8 +1059,7 @@
       alasBusy = false;
       document.removeEventListener('scrcpygate:auth-invalid', destroy);
       global.removeEventListener('scrcpygate:workbench-alas-visibility', onAlasVisibility);
-      var refreshButton = document.getElementById('mg-alas-refresh');
-      if (refreshButton) refreshButton.removeEventListener('click', refreshAlas);
+      global.removeEventListener('pagehide', stopAll);
       batchToken += 1;
       stopAll();
       if (host) host.innerHTML = '';
@@ -1080,6 +1100,7 @@
       stopAll: stopAll,
       startAll: startAll,
       refreshAll: refreshAll,
+      refreshDevices: refreshDevices,
       setMaxLive: setMaxLive,
       setThumbnailFps: setThumbnailFps,
       setOrientation: setOrientation,
@@ -1091,11 +1112,10 @@
       maxLive: maxLive,
       slotCount: slotCount
     };
-    var alasRefreshButton = document.getElementById('mg-alas-refresh');
-    if (alasRefreshButton) alasRefreshButton.addEventListener('click', refreshAlas);
     document.addEventListener('visibilitychange', updateAlasPolling);
     document.addEventListener('visibilitychange', updateMetricsPolling);
     document.addEventListener('scrcpygate:auth-invalid', destroy);
+    global.addEventListener('pagehide', stopAll);
     global.addEventListener('scrcpygate:workbench-alas-visibility', onAlasVisibility);
     if (global.ScrcpyGateV2 && typeof global.ScrcpyGateV2.getWorkbenchAlasVisible === 'function') {
       alasVisible = global.ScrcpyGateV2.getWorkbenchAlasVisible() !== false;
