@@ -67,6 +67,16 @@
   box-shadow: none;
 }
 .admin-shell select, .app select, .login-card select { color-scheme: inherit; }
+/* The language selector has one surface, owned by its wrapper. */
+.admin-shell .sg-lang-wrap { position:relative; box-sizing:border-box; height:36px; padding:0 28px 0 10px; gap:6px; }
+.admin-shell .sg-lang-wrap::after { content:""; position:absolute; right:11px; top:50%; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; color:var(--sg-control-muted); transform:translateY(-65%) rotate(45deg); pointer-events:none; }
+.admin-shell .sg-lang-wrap .sg-lang-select {
+  box-sizing:border-box; width:auto; max-width:112px; min-width:0; min-height:0; height:100%;
+  appearance:none; -webkit-appearance:none; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none;
+  font-size:12px; line-height:normal;
+}
+.admin-shell .sg-lang-wrap:focus-within { outline:2px solid var(--sg-control-focus); outline-offset:2px; }
+.admin-shell .sg-lang-wrap .sg-lang-select:focus-visible { outline:0; box-shadow:none; }
 .admin-shell :is(.field-input, .field-select, .select-control, .num-control, .alas-input, .alas-select):disabled,
 .app .control-takeover-field:disabled { opacity: .55; cursor: not-allowed; }
 

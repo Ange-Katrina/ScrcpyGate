@@ -20,6 +20,14 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "按国家或地区限制访问，建议先观察并预演。": "Restrict access by country or region. Observe and preview first.",
+    "观察模式只记录，不拦截。": "Observe mode records without blocking.",
+    "国家代码说明": "Country code information",
+    "逗号分隔，如 CN,JP,SG。": "Comma separated, e.g. CN,JP,SG.",
+    "内网地址也适用；请设置例外网段。": "Also applies to private addresses. Configure exceptions.",
+    "跳过地域限制；IP 封禁仍优先。": "Skip region rules. IP bans still take precedence.",
+    "检查当前设置，不会保存。": "Preview the current settings without saving.",
+    "未安装地区库，请在下方下载或上传。": "No database installed. Download or upload one below.",
     "打开设备 {0} 的单视图": "Open single view for {0}",
     "显示设置": "Display settings",
     "缩放": "Zoom",

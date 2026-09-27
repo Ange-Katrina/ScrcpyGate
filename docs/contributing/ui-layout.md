@@ -54,3 +54,12 @@ Validation uses isolated synthetic APIs and frames with the real page/grid contr
 - Standard workbench motion replaces the previous system-driven suppression. There is no reduced-motion setting. Workbench and admin initialization delete the obsolete `scrcpygate-workbench-motion` and `scrcpygate-sidebar-motion` keys; the admin account menu no longer writes them.
 - Settings, account, and recording dialogs use reversible opacity and small displacement transitions. Menus become inert as they close, so exit animation cannot leave hidden keyboard targets. Desktop ALAS floating windows fade from their current opacity and release their iframe after closing.
 - Selection and switch transitions share 200ms timing. Window and menu timings are project choices, informed by HIG continuity and feedback guidance. The explicit standard-motion behavior is a product choice, not HIG's recommendation to respect Reduce Motion.
+
+## Admin layout fixes in 2.1.12
+
+- Dashboard metric cards remain independent cards at desktop and narrow widths. The grid has no enclosing border or shared divider lines, so responsive reflow does not create a false table outline.
+- Device details keep ADB address and latest heartbeat in the facts area below the detail actions. The title and action groups wrap independently, preventing long metadata from colliding with controls.
+- The transport mode list uses an adaptive minimum column width, so protocol cards stay readable instead of being forced into a narrow column by the shared quality layout.
+- Geo restriction copy keeps the page-level guidance short. Detailed country-code semantics remain available from an accessible information button; errors, warnings, save results, and runtime status stay visible inline.
+- The admin language selector uses one outer capsule surface. The native select is transparent and borderless with a custom chevron, preserving keyboard and screen-reader behavior without a second square frame.
+- At medium device-detail widths, the device title and action group occupy separate rows; geo country fields and CIDR exceptions use the same compact desktop width and return to full width on phones.

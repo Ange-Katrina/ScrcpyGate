@@ -619,7 +619,7 @@
     </span>
     <p class="sec-hint" id="geo-policy-notice" role="status" hidden></p>
     <p class="sec-hint">
-     按国家或地区管理访问。建议先只观察，再预演自己的来源，最后开启强制执行。
+     按国家或地区限制访问，建议先观察并预演。
     </p>
     <div class="guard-row" data-field="geo_mode">
      <div class="guard-copy">
@@ -627,7 +627,7 @@
        地域限制模式
       </b>
       <span>
-       关闭 / 只观察（记录但不拦） / 强制执行
+       观察模式只记录，不拦截。
       </span>
      </div>
      <div class="guard-field">
@@ -646,12 +646,7 @@
     </div>
     <div class="guard-row" data-field="geo_countries">
      <div class="guard-copy">
-      <b>
-       允许的国家/地区
-      </b>
-      <span>
-       两位 ISO 码，逗号分隔；HK、MO、TW 与 CN 彼此独立（只写 CN 不会放行港澳台）
-      </span>
+      <b>允许的国家/地区 <span class="sg-help"><button class="sg-help-trigger" type="button" aria-label="国家代码说明" aria-describedby="geo-code-help" aria-expanded="false"><i data-lucide="info" aria-hidden="true"></i></button><span class="sg-help-pop" id="geo-code-help" role="tooltip">两位 ISO 码，逗号分隔；HK、MO、TW 与 CN 彼此独立（只写 CN 不会放行港澳台）</span></span></b>
      </div>
      <div class="geo-country-fields">
       <label for="geo-country-preset">快速选择</label>
@@ -663,7 +658,7 @@
       </select>
       <label for="geo-countries">允许的国家或地区代码</label>
       <input id="geo-countries" placeholder="CN,JP,SG" type="text" aria-describedby="geo-country-help" spellcheck="false" autocomplete="off"/>
-      <small id="geo-country-help">预设仅填入代码，点击「保存地域设置」后生效。</small>
+      <small id="geo-country-help">逗号分隔，如 CN,JP,SG。</small>
      </div>
     </div>
     <div class="guard-row" data-field="geo_unknown">
@@ -672,7 +667,7 @@
        无法定位来源
       </b>
       <span>
-       查不到国家时如何处理；内网地址也走这一条，局域网部署请配合下面的例外网段
+       内网地址也适用；请设置例外网段。
       </span>
      </div>
      <div class="guard-field">
@@ -692,7 +687,7 @@
        例外网段
       </b>
       <span>
-       CIDR，逗号分隔；这些地址不受地域限制（仍然受 IP 封禁约束，封禁优先）
+       跳过地域限制；IP 封禁仍优先。
       </span>
      </div>
      <div class="guard-field geo-wide">
@@ -705,7 +700,7 @@
        保存前预演
       </h3>
       <p>
-       使用当前表单检查访问结果，不会保存或改变策略。
+       检查当前设置，不会保存。
       </p>
      </div>
      <label class="vis-filter">

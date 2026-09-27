@@ -696,7 +696,6 @@
         if (!d) {
           $('devDetailAvatar').textContent = '—';
           $('devDetailName').textContent = '请选择设备';
-          $('devDetailMeta').textContent = '—';
           $('devDetailChips').innerHTML = '';
           $('devEditBtn').disabled = true;
           $('devToggleBtn').disabled = true;
@@ -705,7 +704,7 @@
           $('devReleaseCtrlBtn').disabled = true;
           $('devStopStreamBtn').disabled = true;
           $('devDeleteBtn').disabled = true;
-          ['devFactOnline','devFactLatency','devFactViewers','devFactController','devFactStreaming','devFactEnabled','devFactAlas','devFactError'].forEach(function (id) { $(id).textContent = '—'; });
+          ['devFactAdb','devFactHeartbeat','devFactOnline','devFactLatency','devFactViewers','devFactController','devFactStreaming','devFactEnabled','devFactAlas','devFactError'].forEach(function (id) { $(id).textContent = '—'; });
           $('devWarningBand').hidden = true;
           $('devSessionSummary').textContent = '—';
           $('devSessionList').innerHTML = '<div class="dev-session-empty">' + icon('monitor-play') + '<div>请先在左侧选择设备</div></div>';
@@ -722,7 +721,8 @@
 
         $('devDetailAvatar').textContent = devInit(d);
         $('devDetailName').textContent = d.name;
-        $('devDetailMeta').textContent = 'ADB ' + (d.adb || '未配置') + ' · 最近心跳 ' + (d.heartbeat || '—');
+        fact('devFactAdb', d.adb || '未配置');
+        fact('devFactHeartbeat', d.heartbeat || '—');
         $('devDetailChips').innerHTML = chips;
 
         var isDisabled = d.status === 'disabled';

@@ -425,7 +425,7 @@
       els.policyNotice.hidden = !unavailable && !status.forcedOff;
       els.policyNotice.textContent = status.forcedOff ? '服务器已临时关闭地域限制。这里保存的策略暂不执行。'
         : status.mode === 'enforce' ? '地区库不可用，当前按保护策略拒绝访问。请恢复地区库或从服务器关闭地域限制。'
-          : '地区库尚未就绪。请展开「地区库与自动更新」完成配置，再开启地域限制。';
+          : '未安装地区库，请在下方下载或上传。';
       els.policyNotice.setAttribute('data-tone', status.mode === 'enforce' && !status.forcedOff ? 'error' : '');
     }
   }
