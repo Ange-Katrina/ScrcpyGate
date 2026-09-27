@@ -2395,10 +2395,14 @@ document.addEventListener('DOMContentLoaded',function(){
         // Compact view keeps the live controls visible; the existing button
         // nodes move into More so their handlers and permission state persist.
         var narrow=window.matchMedia('(max-width:767px)').matches;
-        var secondary=narrow?['cb-keyboard','cb-alas','cb-tasks','cb-rotate','cb-back']:['cb-alas','cb-tasks','cb-rotate'];
+        // Android navigation is a primary control group. Keep all three
+        // actions in the first level even when the dock has to compact.
+        var fixedPrimary=['cb-back','cb-home','cb-tasks'];
+        var secondary=narrow?['cb-keyboard','cb-alas','cb-rotate']:['cb-alas','cb-rotate'];
         if(narrow||dockOverflow()>0) ctrlDock.classList.add('dock-compact');
-        var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-tasks','cb-back','cb-home','cb-fullscreen','cb-watch','cb-acquire'];
+        var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-fullscreen','cb-watch','cb-acquire'];
         Array.prototype.forEach.call(ctrlDock.querySelectorAll(':scope > button'),function(el){
+          if(fixedPrimary.indexOf(el.id)>=0) return;
           if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
         });
         secondary.concat(candidates).forEach(function(id){
@@ -4924,6 +4928,15 @@ document.addEventListener('DOMContentLoaded',function(){
         var layout=dockLayout&&typeof dockLayout==='object'?dockLayout:null;
         var level1=layout&&layout.level1&&layout.level1.length?layout.level1.slice():DOCK_MENU_DEFAULT.level1.slice();
         var level2=layout&&layout.level2?layout.level2.slice():DOCK_MENU_DEFAULT.level2.slice();
+        // Navigation is a primary Android control group. Migrate older or
+        // custom layouts that placed it in More before rendering the dock.
+        level2=level2.filter(function(id){ return id!=='nav'; });
+        if(level1.indexOf('nav')<0){
+          var navInsertAt=level1.indexOf('fullscreen');
+          if(navInsertAt<0) navInsertAt=level1.indexOf('rotate');
+          if(navInsertAt<0) navInsertAt=level1.length;
+          level1.splice(navInsertAt,0,'nav');
+        }
         return {level1:level1,level2:level2};
       }
       function dockFeatureEnabled(id){

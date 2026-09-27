@@ -1821,6 +1821,52 @@
     .app :is(.mg-btn,.mg-refresh,.mg-add-device,.ap-btn,.vp-apply,.conn-btn,.topnav-icon-btn,.vp-close,.cb-btn,.mobile-menu-btn):active:not(:disabled):not([aria-disabled="true"]) { transform:scale(.97); }
     .app .sg-switch > i, .app .sg-switch::before { transition-duration:200ms; }
     .app .mg-tile.is-playing .mg-dot { animation:none; }
+    /* More is portaled outside .app while open, so its controls need rules
+       rooted at the popup itself. */
+    #cb-pop { min-width:220px; max-width:calc(100vw - 24px); padding:6px; border-radius:12px; }
+    #cb-pop :is(.cb-btn,.cb-item) {
+      box-sizing:border-box;
+      display:grid;
+      grid-template-columns:16px minmax(0,1fr) auto;
+      align-items:center;
+      gap:8px;
+      width:100%;
+      height:40px;
+      min-height:40px;
+      padding:0 10px;
+      border-radius:8px;
+      font-size:12px;
+      line-height:1.2;
+      text-align:left;
+      white-space:nowrap;
+    }
+    #cb-pop :is(.cb-btn,.cb-item) > [data-lucide] {
+      width:16px;
+      height:16px;
+      flex:none;
+    }
+    #cb-pop :is(.cb-btn,.cb-item) > span {
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    #cb-pop :is(.cb-btn,.cb-item) > small {
+      margin:0;
+      justify-self:end;
+      color:var(--c-text-faint);
+      font-size:10px;
+      font-weight:500;
+      line-height:1;
+      white-space:nowrap;
+    }
+    #cb-pop :is(.cb-btn,.cb-item):focus-visible {
+      outline:2px solid var(--brand-400);
+      outline-offset:-2px;
+    }
+    @media (max-width:767px){
+      #cb-pop :is(.cb-btn,.cb-item) { height:44px; min-height:44px; }
+    }
     @media (prefers-reduced-transparency:reduce) {
       .app .topnav, .app .ctrl-dock, .app .vp-panel, .app .cb-pop { backdrop-filter:none; -webkit-backdrop-filter:none; }
     }

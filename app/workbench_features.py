@@ -40,6 +40,8 @@ ROLE_LABELS: dict[str, str] = {
 
 # ALAS 入口只作为一级菜单里的位置锚点参与排序，没有独立开关。
 ALAS_ANCHOR = "@alas"
+# Android navigation is a primary control group and is never placed in More.
+NAV_FEATURE_ID = "nav"
 # 旋转按钮：新加的功能 id。老布局里没有它时会被补回默认位置（见 normalize_layout），
 # 否则升级后用户会觉得「少了一个按钮」；仍然可以用它自己的开关真正关掉。
 ROTATE_FEATURE_ID = "rotate"
@@ -195,13 +197,13 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "anchor": True,
     },
     {
-        "id": "nav",
+        "id": NAV_FEATURE_ID,
         "group": "dock",
         "label": "导航键",
-        "hint": "返回 / 主页 / 多任务三个按键（放到二级会变成三个菜单项）",
+        "hint": "返回 / 主页 / 多任务三个按键，始终显示在一级控制栏",
         "icon": "arrow-left",
         "dock_group": "nav",
-        "levels": [1, 2],
+        "levels": [1],
         "level": 1,
         "parts": ["返回", "主页", "多任务"],
     },
@@ -522,6 +524,10 @@ def _normalize_level2(raw: object, *, strict: bool = False) -> list[str]:
                 if strict:
                     raise ValueError("workbench_layout_level_invalid")
                 continue
+            if feature_id == NAV_FEATURE_ID:
+                # Older saved layouts could put navigation in More. Ignore
+                # that placement and let normalize_layout migrate it below.
+                continue
             if feature_id not in DOCK_FEATURE_IDS:
                 if strict:
                     raise ValueError("workbench_layout_feature_unknown")
@@ -561,6 +567,15 @@ def normalize_layout(raw: object, *, strict: bool = False) -> dict[str, dict[str
         level2 = _normalize_level2(section.get("level2"), strict=strict)
         # 只允许出现在一个层级：一级优先（前端从一级拖到二级时会先移除）。
         level2 = [item for item in level2 if item not in level1]
+        # 导航键是一级控制栏的基础操作。旧版本允许放入二级，升级时
+        # 将其恢复到默认顺序中，避免保存布局与实际工作台不一致。
+        if NAV_FEATURE_ID not in level1:
+            defaults = default_layout()[role]["level1"]
+            following = [item for item in defaults[defaults.index(NAV_FEATURE_ID) + 1:] if item in level1]
+            if following:
+                level1.insert(level1.index(following[0]), NAV_FEATURE_ID)
+            else:
+                level1.append(NAV_FEATURE_ID)
         # 锚点（@alas / rotate）必须恰好在一级出现一次：老布局里没有它时按默认位置补回，
         # 否则升级后按钮会凭空消失。位置按「默认顺序里它后面第一个仍然存在的按钮」定，
         # 而不是绝对下标 —— 旧布局少了别的按钮时，绝对下标会把它插到末尾去。
