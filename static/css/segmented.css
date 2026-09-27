@@ -63,5 +63,5 @@
   .sg-seg [data-lucide] { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sg-seg { transition: none; }
+  html:not([data-motion="standard"]) .sg-seg { transition: none; }
 }

@@ -20,6 +20,7 @@
 
   /* ================= 词典：中文 → English ================= */
   var EN = {
+    "打开设备 {0} 的单视图": "Open single view for {0}",
     "显示设置": "Display settings",
     "缩放": "Zoom",
     "无任务": "No task",

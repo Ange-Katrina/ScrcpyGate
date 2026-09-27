@@ -4,6 +4,8 @@
 (function (global) {
   'use strict';
   function reducedMotion() {
+    var mode = document.documentElement.dataset.motion;
+    if (mode === 'standard') return false;
     return !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
   function angleOf(transform) {

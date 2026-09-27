@@ -92,5 +92,8 @@ input.sg-switch-input:focus-visible { outline: 2px solid var(--sg-switch-ring); 
 input.sg-switch-input:disabled { cursor: not-allowed; opacity: .45; }
 
 @media (prefers-reduced-motion: reduce) {
-  .sg-switch::before, .sg-switch > i, input.sg-switch-input, input.sg-switch-input::after { transition: none; }
+  html:not([data-motion="standard"]) .sg-switch::before,
+  html:not([data-motion="standard"]) .sg-switch > i,
+  html:not([data-motion="standard"]) input.sg-switch-input,
+  html:not([data-motion="standard"]) input.sg-switch-input::after { transition: none; }
 }

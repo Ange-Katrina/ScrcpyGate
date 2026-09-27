@@ -1379,7 +1379,9 @@
       .mg-menu-trigger { height:26px; }
     }
     @media (prefers-reduced-transparency:reduce) { .control-takeover-dialog { background:var(--c-surface); backdrop-filter:none; -webkit-backdrop-filter:none; } }
-    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; } }
+    @media (prefers-reduced-motion:reduce) {
+      html:not([data-motion="standard"]) *, html:not([data-motion="standard"]) *::before, html:not([data-motion="standard"]) *::after { transition:none!important; animation:none!important; }
+    }
 
     /* ---------- 管理员「投屏实时记录」面板 ----------
        抽屉几何直接复用 .vp-panel / .vp-backdrop（含 ≤640px 的底部抽屉断点），
@@ -1458,7 +1460,7 @@
     .tl-float-stop [data-lucide] { width:13px; height:13px; }
     .tl-float-stop[hidden] { display:none; }
     @keyframes tl-float-pulse { 0%{box-shadow:0 0 0 0 rgba(229,72,77,.55);} 70%{box-shadow:0 0 0 7px rgba(229,72,77,0);} 100%{box-shadow:0 0 0 0 rgba(229,72,77,0);} }
-    @media (prefers-reduced-motion: reduce) { .tl-float-dot { animation:none; } }
+    @media (prefers-reduced-motion: reduce) { html:not([data-motion="standard"]) .tl-float-dot { animation:none; } }
     .tl-multi-role { margin:0 0 8px; font-size:11.5px; line-height:1.55; color:var(--c-text-sub); }
     .tl-multi-role[hidden] { display:none; }
     /* 单端 / 多端徽标：面板里一眼能看出这次记录是哪一种。 */
@@ -1469,7 +1471,7 @@
     /* 侧栏「投屏记录」：只有真的在记录时才高亮 + 红点，避免"打开了就永远蓝着"。 */
     .menu-item .rec-dot { width:7px; height:7px; margin-left:auto; flex:0 0 auto; border-radius:50%; background:#e5484d; box-shadow:0 0 0 0 rgba(229,72,77,.55); animation:tl-float-pulse 1.6s infinite; }
     .menu-item .rec-dot[hidden] { display:none; }
-    @media (prefers-reduced-motion: reduce) { .menu-item .rec-dot { animation:none; } }
+    @media (prefers-reduced-motion: reduce) { html:not([data-motion="standard"]) .menu-item .rec-dot { animation:none; } }
 
     /* Keep settings and record dialogs centered without reducing the video viewport. */
     .vp-panel {
@@ -1777,16 +1779,48 @@
         .mg-slot .mg-actions { grid-template-columns:minmax(0,1fr); }
       }
     }
-    @media (prefers-reduced-motion:reduce) {
-      .app :is(.vp-seg,.vp-tabs) > .vp-seg-thumb { transition:none; }
-      .app #mg-refresh[aria-busy="true"] [data-lucide] { animation:none; }
+    .app .mg-stage[role="button"] { cursor:pointer; touch-action:manipulation; }
+    .app .mg-stage[role="button"]:focus-visible { outline:2px solid var(--brand-400); outline-offset:2px; }
+    .app .mg-stage[role="button"]:active { box-shadow:inset 0 0 0 2px var(--brand-400); }
+    .app .mg-tile.is-compact > :is(.mg-actions,.mg-metrics) { display:none; }
+
+    /* Workbench motion values are project choices, not fixed HIG specifications. */
+    .app {
+      --motion-fast:140ms; --motion-base:240ms; --motion-layout:300ms;
+      --wb-surface-motion:260ms; --ease-standard:cubic-bezier(.22,.8,.25,1);
+      --sg-switch-ease:var(--ease-standard);
+      transition:grid-template-columns var(--motion-layout) var(--ease-standard);
     }
+    .app :is(.vp-panel,.tl-dialog) {
+      transform:translate(-50%,calc(-50% + 10px)) scale(.98);
+      transition:transform var(--wb-surface-motion) var(--ease-standard),opacity var(--wb-surface-motion) ease,visibility 0s linear var(--wb-surface-motion);
+    }
+    .app :is(.vp-panel,.tl-dialog).open { transform:translate(-50%,-50%) scale(1); transition-delay:0s; }
+    .app :is(.vp-backdrop,.control-takeover-layer) {
+      transition:opacity var(--wb-surface-motion) ease,visibility 0s linear var(--wb-surface-motion);
+    }
+    .app :is(.vp-backdrop,.control-takeover-layer).open { transition-delay:0s; }
+    .app .control-takeover-dialog {
+      transform:translateY(10px) scale(.98);
+      transition:transform var(--wb-surface-motion) var(--ease-standard),opacity var(--wb-surface-motion) ease;
+    }
+    .app .control-takeover-layer.open .control-takeover-dialog { transform:translateY(0) scale(1); }
+    .app :is(.cb-pop,.notify-pop,.mg-menu) {
+      transition:transform 180ms var(--ease-standard),opacity 180ms ease,visibility 0s linear 180ms;
+    }
+    .app .notify-pop { transform-origin:top right; transform:translateY(-6px) scale(.98); }
+    .app :is(.cb-pop,.notify-pop,.mg-menu).open { transform:translateY(0) scale(1); transition-delay:0s; }
+    .app #mg-settings-dialog .mg-menu {
+      display:block; max-height:0; overflow:hidden; margin:0; padding:0 5px; border-width:0;
+      transition:max-height 180ms var(--ease-standard),opacity 180ms ease,transform 180ms var(--ease-standard),visibility 0s linear 180ms;
+    }
+    .app #mg-settings-dialog .mg-menu.open { max-height:300px; margin-top:4px; padding-block:5px; border-width:1px; transition-delay:0s; }
+    .app :is(.mg-btn,.mg-refresh,.mg-add-device,.ap-btn,.vp-apply,.conn-btn,.topnav-icon-btn,.vp-close,.cb-btn,.mobile-menu-btn) {
+      transition:transform 100ms ease-out,background-color var(--motion-fast) ease,color var(--motion-fast) ease,border-color var(--motion-fast) ease;
+    }
+    .app :is(.mg-btn,.mg-refresh,.mg-add-device,.ap-btn,.vp-apply,.conn-btn,.topnav-icon-btn,.vp-close,.cb-btn,.mobile-menu-btn):active:not(:disabled):not([aria-disabled="true"]) { transform:scale(.97); }
+    .app .sg-switch > i, .app .sg-switch::before { transition-duration:200ms; }
+    .app .mg-tile.is-playing .mg-dot { animation:none; }
     @media (prefers-reduced-transparency:reduce) {
       .app .topnav, .app .ctrl-dock, .app .vp-panel, .app .cb-pop { backdrop-filter:none; -webkit-backdrop-filter:none; }
-    }
-    @media (prefers-reduced-motion:reduce) {
-      .app :is(.vp-panel,.tl-dialog) { transform:translate(-50%,-50%) !important; transition:opacity .12s ease,visibility 0s linear .12s !important; }
-      .app :is(.vp-panel,.tl-dialog).open { transition:opacity .12s ease,visibility 0s !important; }
-      .app :is(.cb-pop,.notify-pop,.mg-menu) { transform:none !important; transition:opacity .12s ease,visibility 0s linear .12s !important; }
-      .app :is(.cb-pop,.notify-pop,.mg-menu).open { transition:opacity .12s ease,visibility 0s !important; }
     }

@@ -291,7 +291,7 @@
             '<span class="mg-name" title="' + name + '">' + name + '</span>' +
             '<span class="mg-meta"></span>' +
           '</header>' +
-          '<div class="mg-stage">' +
+          '<div class="mg-stage" role="button" tabindex="0" aria-label="' + escHtml(noticeText('打开设备 {0} 的单视图', [device.name || device.id])) + '">' +
             '<video class="mg-video" muted playsinline></video>' +
             '<div class="mg-placeholder"><i data-lucide="monitor-off" aria-hidden="true"></i><span class="mg-placeholder-text"></span></div>' +
             '<div class="mg-overlay" hidden><span class="mg-spinner" aria-hidden="true"></span><span class="mg-overlay-text"></span></div>' +
@@ -423,6 +423,13 @@
       tile.buttons.stop.addEventListener('click', function () { stopTile(tile); });
       tile.buttons.open.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: false }); });
       tile.buttons.control.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: true }); });
+      var stage = element.querySelector('.mg-stage');
+      stage.addEventListener('click', function () { onOpenDevice(tile.deviceId, { control: false }); });
+      stage.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        if (!event.repeat) onOpenDevice(tile.deviceId, { control: false });
+      });
       element.querySelector('[data-action="metrics"]').addEventListener('click', function () { toggleMetrics(tile); });
       tiles[device.id] = tile;
       // 屏幕区按真实画面比例自适应：竖屏手机不再被塞进 16:9 的黑框里。
@@ -504,6 +511,11 @@
       var available = host.clientWidth || requested;
       var width = Math.min(Math.max(120, requested), available);
       element.style.setProperty('--mg-tile-w', width + 'px');
+      var compact = width < 180;
+      if (compact && element.contains(document.activeElement) && document.activeElement.closest('.mg-actions')) {
+        (element.querySelector('.mg-stage[role="button"]') || element).focus({ preventScroll: true });
+      }
+      element.classList.toggle('is-compact', compact);
       lastTileWidth = width;
       lastTileRequestedWidth = requested;
       return width;
@@ -529,7 +541,10 @@
 
     function syncTileWidth(tile) {
       if (!tile || !tile.element) return;
-      applyElementWidth(tile.element);
+      if (applyElementWidth(tile.element) < 180 && tile.metricsEnabled) {
+        closeMetrics(tile);
+        updateMetricsPolling();
+      }
     }
 
     function syncTileWidths() {
@@ -921,6 +936,7 @@
         var tile = ensureTile(device);
         if (!tile) return;
         tile.device = device;
+        tile.element.querySelector('.mg-stage').setAttribute('aria-label', noticeText('打开设备 {0} 的单视图', [device.name || device.id]));
         if (isLive(tile) && (device.online !== true || device.permission === false)) stopTile(tile);
         var resources = tile.element.querySelector('[data-action="metrics"]');
         resources.disabled = device.online === false || device.permission === false;

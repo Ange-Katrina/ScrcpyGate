@@ -33,7 +33,7 @@ These rules cover all ten pages in `static/pages/`. They apply the hierarchy and
 - Use ScrcpyGate's own radius scale on all ten pages: 8px for fields, command buttons, and icon buttons; 12px outside and 9px inside segmented choices; 16px for peer cards and centered dialogs. The workbench status bar uses a capsule container; its bottom toolbar has a 20px outer radius and compact rectangular buttons with 8px corners. These values are project decisions, not Apple HIG specifications. Status badges, avatars, switch tracks, and genuinely circular indicators retain their semantic shapes. Keep each compound field's border on its outer wrapper only.
 - Every field has a visible label or a clear accessible name; a placeholder is not a label. Both locales must wrap naturally.
 - Reflow by available width on phones and tablets. Segmented controls may scroll without a visible scrollbar when space is scarce, while all choices remain keyboard focusable. Preserve video space in the mirror workbench and necessary controls in fullscreen.
-- Use existing semantic colors in both themes, with text or icons alongside color. Keep keyboard focus visible and honor reduced-motion preferences.
+- Use existing semantic colors in both themes, with text or icons alongside color. Keep keyboard focus visible. The workbench explicitly uses standard motion; other controls retain their existing system preference behavior.
 
 When editing a page, check heading, page-level choice, task container, local actions, save area, and dialogs against this map, then inspect desktop, tablet, phone, long text, both themes, keyboard, and touch. Layout work must not change API, permission, WebSocket, or business-state semantics.
 
@@ -47,3 +47,10 @@ When editing a page, check heading, page-level choice, task container, local act
 - Display sizing and preset/tuning choices share an interruptible 200ms sliding selection. Initial opening positions the selection directly; reduced motion removes displacement animation. The account dialog no longer duplicates device permissions; server authorization is unchanged.
 
 Validation uses isolated synthetic APIs and frames with the real page/grid controllers, including headed and headless browsers and frame sampling. Browser touch emulation is separate from real-phone and production acceptance.
+
+## Workbench changes in 2.1.11
+
+- Cards narrower than 180px hide their footer and resource controls. Their picture opens the matching device in single view through click, Enter, or Space, without requesting control. Growing the card restores its actions; hidden resource panels stop polling.
+- Standard workbench motion replaces the previous system-driven suppression. There is no reduced-motion setting. Workbench and admin initialization delete the obsolete `scrcpygate-workbench-motion` and `scrcpygate-sidebar-motion` keys; the admin account menu no longer writes them.
+- Settings, account, and recording dialogs use reversible opacity and small displacement transitions. Menus become inert as they close, so exit animation cannot leave hidden keyboard targets. Desktop ALAS floating windows fade from their current opacity and release their iframe after closing.
+- Selection and switch transitions share 200ms timing. Window and menu timings are project choices, informed by HIG continuity and feedback guidance. The explicit standard-motion behavior is a product choice, not HIG's recommendation to respect Reduce Motion.

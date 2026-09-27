@@ -231,11 +231,6 @@
   .workspace-refined .stats-grid .stat-card:nth-child(odd),
   .workspace-refined .stats-grid .stat-card:nth-child(n+3) { border:1px solid var(--admin-border); }
 }
-html[data-sidebar-motion="off"] .admin-rail,
-html[data-sidebar-motion="off"] .mobile-scrim,
-html[data-sidebar-motion="off"] .admin-rail :is(.menu-text,.sidebar-group-label,.sidebar-divider,.side-version,.side-badge,.sidebar-nav,.side-item) {
-  transition:none!important;
-}
 @media (prefers-reduced-motion:reduce) {
   html[data-sidebar-motion="on"] .admin-rail {
     transition:width .22s cubic-bezier(.22,1,.36,1)!important;
@@ -254,7 +249,6 @@ html[data-sidebar-motion="off"] .admin-rail :is(.menu-text,.sidebar-group-label,
   html[data-sidebar-motion="on"] .mobile-scrim { transition:opacity .28s ease,visibility 0s linear .28s!important; }
   html[data-sidebar-motion="on"] .mobile-scrim.open { transition:opacity .28s ease,visibility 0s linear 0s!important; }
 }
-.admin-motion-state { margin-left:auto; color:var(--admin-muted); font-size:11px; }
 
 /* The navigation, summary, and task area share one visual hierarchy. */
 .admin-shell { background:var(--admin-bg); }
