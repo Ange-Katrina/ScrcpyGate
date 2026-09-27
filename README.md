@@ -299,8 +299,9 @@ User times use the browser's local time zone. Last login means successful authen
 
 ## Operations
 
-CI/CD publishes verified amd64 and arm64 images to GHCR; servers are deployed
-manually. See [CI/CD and manual deployment](docs/deployment/ci-cd.md) for
+CI/CD publishes verified amd64 and arm64 images to GHCR. Operators can opt in
+to an SSH deployment job after publication; automatic deployment is disabled by
+default. See [CI/CD and server deployment](docs/deployment/ci-cd.md) for
 release tags, package permissions, image attestations, and deployment commands.
 
 The product version is defined in [`VERSION`](VERSION). See the

@@ -1,6 +1,7 @@
-# CI/CD 与手动部署
+# CI/CD 与服务器部署
 
-`Builds` 工作流负责源码检查、双架构镜像验证和 GHCR 发布，服务器由维护者手动部署。
+`Builds` 工作流负责源码检查、双架构镜像验证和 GHCR 发布。部署者可选用 SSH 任务，
+把同一次发布的镜像 digest 部署到已配置的 bridge 模式服务器；默认不开启自动部署。
 
 ## 触发规则
 
@@ -12,6 +13,11 @@
 | 推送 `v1.2.3` 标签 | 全部执行 | `v1.2.3`、`latest`、`sha-<完整提交号>` |
 | 推送 `v1.2.3-rc.1` 标签 | 全部执行 | 预发布版本、`sha-<完整提交号>` |
 | Actions 页面手动运行 | 全部执行 | 按所选分支或版本标签应用上述规则 |
+
+手动运行时有 **Deploy** 复选框，默认关闭。勾选后，只有镜像发布成功才继续部署。
+自动部署需主动设置仓库变量 `SCRCPYGATE_DEPLOY_BRANCH` 为 `main` 或 `dev`；
+仅该分支推送成功后触发。PR 不部署，检查或发布失败也不会连接服务器。
+部署任务串行执行，避免两个构建同时更新同一台服务器。
 
 手动运行其他分支时只验证。版本标签采用 `v主版本.次版本.修订号[-预发布标识]`，
 预发布版本不会修改 `latest`。服务器建议固定镜像 digest。
@@ -62,6 +68,49 @@
 相互独立；给 CLI 增加 Packages scope 不会为工作流授权。
 发布任务成功和失败时都会生成摘要；候选镜像推送失败时，还会显示包授权修复步骤。
 请结合失败步骤的日志区分权限、仓库服务或网络故障。
+
+## 配置可选的 SSH 部署
+
+先在目标机完成 **bridge 模式**安装。部署目录必须已有当前版本的 `deploy.sh`、
+`compose.yaml`、`.env` 和正在运行的 ScrcpyGate 容器。SSH 用户需能写入该目录，
+并能无交互地运行 Docker/Compose。服务器必须能拉取 GHCR 镜像；私有包需先在服务器
+完成 Docker 登录。流水线只更新应用镜像，不自动安装 Docker、上传部署脚本或修改服务器配置。
+
+在仓库 **Settings → Environments** 创建 `scrcpygate-deploy`，配置以下环境 Secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `SCRCPYGATE_DEPLOY_HOST` | GitHub 托管 Runner 可连接的 SSH 域名或 IPv4 地址 |
+| `SCRCPYGATE_DEPLOY_PORT` | SSH 端口；留空则为 22 |
+| `SCRCPYGATE_DEPLOY_USER` | 具备上述权限的专用 SSH 用户 |
+| `SCRCPYGATE_DEPLOY_DIR` | 部署目录绝对路径，例如 `/opt/scrcpygate`；不能含空格 |
+| `SCRCPYGATE_DEPLOY_SSH_KEY` | 该用户的 SSH 私钥 |
+| `SCRCPYGATE_DEPLOY_KNOWN_HOSTS` | 对应地址和端口的 OpenSSH `known_hosts` 固定条目 |
+
+在仓库外生成专用 SSH 密钥，将公钥加入部署用户的 `authorized_keys`。可以用
+`ssh-keyscan -p <端口> <地址>` 取得主机公钥，但**必须先通过独立可信渠道核对指纹**，
+再保存为 `known_hosts` Secret。非标准端口的条目需写成 `[地址]:端口`。
+工作流严格核验主机密钥，不自动信任首次连接。
+
+可在该 Environment 中设置允许部署的分支/标签和必需审核人。具体规则见 GitHub 官方
+[Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)。
+环境 Secrets 仅在部署任务通过环境保护规则后可用；某些功能受仓库可见性和账号套餐限制。
+不要把 `.env`、SSH 私钥或数据备份提交到 Git。
+
+按需部署：打开 **Actions → Builds → Run workflow**，选择已信任的 `main` 或 `dev` 分支，
+勾选 **Deploy**。这会先重新构建、验证并发布双架构镜像，然后远程更新。
+自动部署：在 **Settings → Secrets and variables → Actions** 添加仓库变量
+`SCRCPYGATE_DEPLOY_BRANCH=dev` 或 `main`。删除该变量即可停止自动部署。
+每个仓库目前只支持一个部署目标；第二个目标需单独的 fork 或部署工作流。
+
+GitHub 托管 Runner 必须能访问 SSH 入口，仅有内网地址无法直连。可使用安全暴露的 SSH
+入口，或把任务适配到可访问该内网的可信自托管 Runner。
+
+远端实际执行 `deploy.sh --update --image ghcr.io/<owner>/scrcpygate@sha256:<发布的digest>`，
+沿用脚本的数据/配置备份、健康检查与失败回滚。使用 digest 固定已验证产物，见 Docker 官方
+[按 digest 拉取说明](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier)。
+不兼容数据库迁移仍需人工恢复对应数据备份。Actions 不连接真实设备，也不验证部署后的
+ALAS 行为。若版本修改了宿主部署文件，仍需按部署包更新流程同步服务器上的文件。
 
 ## 发布版本
 

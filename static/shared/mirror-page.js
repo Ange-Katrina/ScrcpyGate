@@ -2406,7 +2406,9 @@ document.addEventListener('DOMContentLoaded',function(){
           if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
         });
         secondary.concat(candidates).forEach(function(id){
-          if(secondary.indexOf(id)<0&&dockOverflow()<=0) return;
+          // The admin page stores the level; only a real width overflow may
+          // temporarily move a level-one action into More at runtime.
+          if(dockOverflow()<=0) return;
           var el=document.getElementById(id);
           if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return;
           var anchor=document.createComment('dock action');

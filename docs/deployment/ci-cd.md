@@ -1,7 +1,9 @@
-# CI/CD and manual deployment
+# CI/CD and server deployment
 
 The `Builds` workflow validates source changes, tests both image architectures,
-and publishes verified images to GHCR. Deployments to servers remain manual.
+and publishes verified images to GHCR. An optional SSH job deploys that exact
+published digest to a preconfigured bridge-mode server. Automatic deployment is
+disabled until an operator enables it.
 
 ## Triggers and tags
 
@@ -13,6 +15,14 @@ and publishes verified images to GHCR. Deployments to servers remain manual.
 | Push tag `v1.2.3` | Yes | `v1.2.3`, `latest`, `sha-<full-commit>` |
 | Push tag `v1.2.3-rc.1` | Yes | `v1.2.3-rc.1`, `sha-<full-commit>` |
 | Manual run | Yes | Same policy for the selected branch or version tag |
+
+The manual run has a **Deploy** checkbox, off by default. When checked, a
+successful publication proceeds to the deployment job. Automatic deployment is
+opt-in through the repository variable `SCRCPYGATE_DEPLOY_BRANCH` (`main` or
+`dev`); only a successful push to that branch can deploy. Pull requests never
+deploy. A failed check or publication stops before SSH is opened. Deployment
+runs are serialized, so two successful builds cannot update the same server
+concurrently.
 
 Manual runs on other branches perform verification without publishing.
 Release tags must use `vMAJOR.MINOR.PATCH[-prerelease]` syntax. A prerelease
@@ -82,6 +92,65 @@ adding package scopes to the CLI does not grant the workflow access.
 The publication job writes a summary on success and failure, including package
 access recovery steps when the candidate push fails. Consult the failed step
 to distinguish authorization errors from other registry or network failures.
+
+## Configure optional SSH deployment
+
+Install ScrcpyGate in **bridge mode** first. The deployment directory must
+already contain a current `deploy.sh`, `compose.yaml`, `.env`, and a running
+ScrcpyGate container. The SSH user must be able to write that directory and
+use Docker/Compose without an interactive password prompt. The server must be
+able to pull its GHCR image; private packages require Docker registry login on
+the server. This job updates the application image; it does not install Docker,
+copy host deployment files, or change server configuration automatically.
+
+In **Settings > Environments**, create `scrcpygate-deploy`. Add these
+environment secrets (keep the private key out of Git):
+
+| Secret | Value |
+| --- | --- |
+| `SCRCPYGATE_DEPLOY_HOST` | SSH DNS name or IPv4 address reachable by GitHub-hosted runners |
+| `SCRCPYGATE_DEPLOY_PORT` | SSH port; omit for 22 |
+| `SCRCPYGATE_DEPLOY_USER` | Dedicated SSH user with the permissions above |
+| `SCRCPYGATE_DEPLOY_DIR` | Absolute deployment path, for example `/opt/scrcpygate`; no spaces |
+| `SCRCPYGATE_DEPLOY_SSH_KEY` | Private SSH key for that user |
+| `SCRCPYGATE_DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH `known_hosts` entry for the exact host and port |
+
+Generate a dedicated SSH key outside the repository and add its public key to
+the deploy user's `authorized_keys`. Obtain the server host key with
+`ssh-keyscan -p <port> <host>`, then compare its fingerprint with one obtained
+through an independent trusted channel **before** saving the `known_hosts`
+entry. For nonstandard ports, the entry must use `[host]:port`. The workflow
+requires strict host-key checking and never accepts a first-seen key silently.
+
+Use the environment's deployment branch/tag restrictions and required reviewers
+if that server needs an approval gate. GitHub documents these controls in
+[Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+The environment secrets become available only to its deployment job; account
+plan and repository visibility can affect which protection features are
+available. Never commit `.env`, SSH keys, or database backups.
+
+To deploy on demand, select **Actions > Builds > Run workflow**, choose the
+already trusted `main` or `dev` branch, and check **Deploy**. The run rebuilds
+and verifies both architectures, publishes the image, then runs the remote
+update. To automate a channel, add repository variable
+`SCRCPYGATE_DEPLOY_BRANCH=dev` or `main` under **Settings > Secrets and
+variables > Actions**. Remove the variable to stop automatic deployments.
+Only one deployment target is supported per repository; use a separate fork or
+deployment workflow for a second target.
+
+GitHub-hosted runners need network access to the SSH endpoint. A private LAN
+address alone is not reachable from them; use a securely exposed SSH endpoint
+or adapt this job to a trusted self-hosted runner with access to that network.
+
+The remote command runs `deploy.sh --update --image
+ghcr.io/<owner>/scrcpygate@sha256:<published-digest>`. It uses the script's
+data/configuration backup, health gate, and rollback. The image is pinned to
+the published digest rather than a mutable tag; see Docker's
+[digest pull documentation](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier).
+An incompatible database migration still requires restoring the matching data
+backup manually. The Actions job does not connect to real devices or validate
+ALAS behavior after deployment. Keep the host deployment files current through
+the documented deployment-package upgrade path when a release changes them.
 
 ## Publish a release
 

@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the verified image to the configured server
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -167,6 +173,8 @@ jobs:
       attestations: write
     env:
       IMAGE_REPO: ${{ needs.checks.outputs.image }}
+    outputs:
+      digest: ${{ steps.candidate.outputs.digest }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -278,4 +286,45 @@ jobs:
               printf '\n[Publication and recovery guide](%s/%s/blob/%s/docs/deployment/ci-cd.md)\n' \
                 "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy verified image
+    needs: [checks, publish]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.deploy == true) ||
+      (github.event_name == 'push' && github.ref_type == 'branch' &&
+       vars.SCRCPYGATE_DEPLOY_BRANCH != '' && github.ref_name == vars.SCRCPYGATE_DEPLOY_BRANCH)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: scrcpygate-deploy
+      cancel-in-progress: false
+    environment: scrcpygate-deploy
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Deploy the published digest over SSH
+        env:
+          DEPLOY_IMAGE: ${{ format('{0}@{1}', needs.checks.outputs.image, needs.publish.outputs.digest) }}
+          DEPLOY_HOST: ${{ secrets.SCRCPYGATE_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.SCRCPYGATE_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.SCRCPYGATE_DEPLOY_USER }}
+          DEPLOY_DIR: ${{ secrets.SCRCPYGATE_DEPLOY_DIR }}
+          DEPLOY_SSH_KEY: ${{ secrets.SCRCPYGATE_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.SCRCPYGATE_DEPLOY_KNOWN_HOSTS }}
+        run: sh tools/ci_deploy_ssh.sh
+      - name: Summarize deployment
+        env:
+          DEPLOY_IMAGE: ${{ format('{0}@{1}', needs.checks.outputs.image, needs.publish.outputs.digest) }}
+        run: |
+          {
+            echo '## Server deployment'
+            echo
+            printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Verified image: `%s`\n\n' "$DEPLOY_IMAGE"
+            echo 'The remote deploy.sh update completed its backup and health gate.'
           } >> "$GITHUB_STEP_SUMMARY"
