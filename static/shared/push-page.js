@@ -85,7 +85,7 @@
       badge.dataset.enabled = String(!!data.enabled);
       badge.textContent = data.enabled ? t('已启用', 'Enabled') : (configured ? t('已停用', 'Disabled') : t('未配置', 'Not configured'));
       document.getElementById('push-url').placeholder = data.endpoint_host ? data.endpoint_host + ' · ' + t('留空保留', 'leave blank to keep') : 'https://example.com/notify';
-      message(configured ? t('当前配置已加载，敏感字段不回显。', 'Configuration loaded. Secrets are hidden.') : t('尚未配置推送。', 'No notification destination configured.'));
+      message('');
       syncProvider();
     }).catch(function (error) { message(errorText(error), 'error'); });
   }

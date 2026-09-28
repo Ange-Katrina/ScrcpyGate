@@ -52,18 +52,19 @@
         <div class="admin-content workspace-refined push-page">
           <div class="page-heading"><h1 data-en="Notifications">通知推送</h1><p data-en="Delivery settings for account and device events">账户与设备事件的定向推送</p></div>
           <div class="push-status" id="push-status" role="status" aria-live="polite" data-en="Loading…">正在读取配置…</div>
+          <div class="push-layout">
           <section class="push-section" aria-labelledby="push-own-title">
             <div class="push-section-head"><div><h2 id="push-own-title" data-en="ScrcpyGate">ScrcpyGate</h2><p data-en="Send to the QQ number saved on each account.">发送给账户中填写的 QQ 号。</p></div><span class="push-badge" id="push-badge">未配置</span></div>
             <form id="push-form" novalidate>
               <div class="push-grid">
                 <label class="push-field"><span data-en="Provider">发送方式</span><select id="push-provider"><option value="custom">Custom Webhook</option><option value="gocqhttp">go-cqhttp / NapCat</option></select></label>
                 <label class="push-field"><span data-en="HTTP method">请求方法</span><select id="push-method"><option value="POST">POST</option><option value="GET">GET</option></select></label>
-                <label class="push-field push-wide"><span data-en="Endpoint URL">接口地址</span><input id="push-url" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/notify" aria-describedby="push-url-note"><small id="push-url-note" data-en="Leave blank to keep the saved URL. Private hosts must be listed in NOTIFICATION_ALLOWED_HOSTS.">留空保留原地址；内网地址需列入 NOTIFICATION_ALLOWED_HOSTS。</small></label>
+                <label class="push-field push-wide"><span data-en="Endpoint URL">接口地址</span><input id="push-url" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/notify" aria-describedby="push-url-note"><small id="push-url-note" data-en="Leave blank to keep the saved URL. Allow private hosts in server settings first.">留空保留原地址；内网地址需先加入服务器允许列表。</small></label>
                 <label class="push-field push-wide"><span data-en="Access token (optional)">访问令牌（可选）</span><input id="push-token" type="password" autocomplete="new-password" placeholder="留空保留原令牌"><small data-en="Used by go-cqhttp. For custom webhooks, put credentials in headers.">go-cqhttp 使用；自定义 Webhook 可在请求头中填写凭据。</small></label>
                 <label class="push-clear"><input type="checkbox" id="push-clear-token"><span data-en="Remove saved token">清除已有令牌</span></label>
                 <label class="push-field push-wide"><span data-en="Request headers (JSON)">请求头（JSON）</span><textarea id="push-headers" rows="3" spellcheck="false" placeholder='{"Authorization":"Bearer ..."}'></textarea><small data-en="Leave blank to keep saved headers.">留空保留已有请求头。</small></label>
                 <label class="push-clear"><input type="checkbox" id="push-clear-headers"><span data-en="Remove saved headers">清除已有请求头</span></label>
-                <label class="push-field push-wide" id="push-template-field"><span data-en="JSON body template">JSON 正文模板</span><textarea id="push-template" rows="5" spellcheck="false"></textarea></label>
+                <label class="push-field push-wide" id="push-template-field"><span data-en="JSON body template">JSON 正文模板</span><textarea id="push-template" rows="7" spellcheck="false"></textarea></label>
               </div>
               <div class="push-variables"><b data-en="Variables">可用变量</b><code>{event}</code><code>{username}</code><code>{qq}</code><code>{device}</code><code>{title}</code><code>{message}</code><code>{expires_at}</code><code>{days}</code></div>
               <fieldset class="push-events"><legend data-en="Events">发送事件</legend><label><input type="checkbox" name="event" value="device_offline"><span data-en="Device offline">设备离线</span></label><label><input type="checkbox" name="event" value="account_expiring"><span data-en="Account expiring">账户即将到期</span></label><label><input type="checkbox" name="event" value="account_expired"><span data-en="Account expired">账户已到期</span></label></fieldset>
@@ -71,6 +72,7 @@
             </form>
             <div class="push-test"><label class="push-field"><span data-en="Test recipient QQ">测试收件 QQ</span><input id="push-test-qq" type="text" inputmode="numeric" pattern="[0-9]{5,15}" maxlength="15" autocomplete="off"></label><button id="push-test" type="button"><i data-lucide="send"></i><span data-en="Send test">发送测试</span></button></div>
           </section>
+          <div class="push-side">
           <section class="push-section" aria-labelledby="push-deliveries-title">
             <div class="push-section-head"><div><h2 id="push-deliveries-title" data-en="Recent deliveries">最近投递</h2><p data-en="Automatic event deliveries; test requests are not listed">自动事件投递，测试请求不计入</p></div><button id="push-deliveries-refresh" type="button" aria-label="刷新投递记录" title="刷新投递记录"><i data-lucide="refresh-cw"></i></button></div>
             <ul class="push-deliveries" id="push-deliveries"><li data-en="No delivery records">暂无投递记录</li></ul>
@@ -84,6 +86,8 @@
             </form>
             <p class="push-alas-note" data-en="Existing manual settings and running ALAS configurations are preserved. Users without QQ receive no push configuration.">已有手工推送设置和运行中的 ALAS 配置不会被覆盖；未填写 QQ 的用户不配置推送。</p>
           </section>
+          </div>
+          </div>
         </div>
       </div>
     </section>
