@@ -1250,6 +1250,7 @@
         return {
           id: u.username,
           username: u.username,
+          qq: u.qq || '',
           name: u.username,
           displayName: u.username,
           role: u.role,
@@ -5215,6 +5216,7 @@
       role: body.role === 'admin' ? 'admin' : 'user',
       must_change_password: body.forcePasswordChange === true
     };
+    if (body.qq !== undefined) req.qq = body.qq;
     if (body.password) req.password = body.password;
     if (body.enabled !== undefined) req.enabled = body.enabled !== false;
     if (body.alasVisible !== undefined || body.alas_visible !== undefined) {
@@ -5231,6 +5233,7 @@
     var params = (opts && opts.params) || {};
     var body = (opts && opts.body) || {};
     var req = { username: params.id || body.username };
+    if (body.qq !== undefined) req.qq = body.qq;
     if (body.role !== undefined) req.role = body.role === 'admin' ? 'admin' : 'user';
     if (body.expiry !== undefined) req.expires_at = body.expiry ? expiryEpoch(body.expiry) : null;
     if (body.password) req.password = body.password;
@@ -5238,15 +5241,21 @@
     if (body.alasVisible !== undefined || body.alas_visible !== undefined) {
       req.alas_visible = (body.alasVisible !== undefined ? body.alasVisible : body.alas_visible) !== false;
     }
-    return apiPut('/api/admin/users', req).then(function () {
-      return fetchUsersEnriched();
+    return apiPut('/api/admin/users', req).then(function (saved) {
+      return fetchUsersEnriched().then(function (users) {
+        users.push_setup = saved && saved.push_setup;
+        return users;
+      });
     });
   }
 
   function handlerUsersDelete(opts) {
     var params = (opts && opts.params) || {};
-    return apiDelete('/api/admin/users/' + encodeURIComponent(params.id || '')).then(function () {
-      return fetchUsersEnriched();
+    return apiDelete('/api/admin/users/' + encodeURIComponent(params.id || '')).then(function (deleted) {
+      return fetchUsersEnriched().then(function (users) {
+        users.push_cleanup = deleted && deleted.push_cleanup;
+        return users;
+      });
     });
   }
 

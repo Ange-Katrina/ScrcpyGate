@@ -197,7 +197,8 @@ USERS_COLUMNS = """
             last_login_at INTEGER NULL,
             last_login_ip TEXT NULL,
             alas_visible INTEGER NOT NULL DEFAULT 1 CHECK(alas_visible IN (0, 1)),
-            password_reminder_pending INTEGER NOT NULL DEFAULT 0 CHECK(password_reminder_pending IN (0, 1))
+            password_reminder_pending INTEGER NOT NULL DEFAULT 0 CHECK(password_reminder_pending IN (0, 1)),
+            qq TEXT NOT NULL DEFAULT ''
 """
 
 
@@ -584,6 +585,16 @@ def ensure_compatibility_schema(conn: sqlite3.Connection, *, logger=None) -> Non
         conn.execute("ALTER TABLE users ADD COLUMN alas_visible INTEGER NOT NULL DEFAULT 1")
     if "password_reminder_pending" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN password_reminder_pending INTEGER NOT NULL DEFAULT 0")
+    if "qq" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN qq TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS push_deliveries ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE, "
+        "username TEXT NOT NULL, event TEXT NOT NULL, data_json TEXT NOT NULL, "
+        "state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, "
+        "next_attempt_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_push_due ON push_deliveries(state, next_attempt_at)")
     conn.execute("UPDATE users SET enabled=1 WHERE enabled IS NULL")
     conn.execute("UPDATE users SET alas_visible=1 WHERE alas_visible IS NULL")
 

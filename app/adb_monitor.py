@@ -232,7 +232,7 @@ class AdbDeviceMonitor:
                     or not await asyncio.to_thread(storage.get_device, device_id)
                 ):
                     return self._default_status(device_id)
-                return self._set_status(
+                status = self._set_status(
                     device_id,
                     result["state"],
                     ok=result["ok"],
@@ -240,6 +240,15 @@ class AdbDeviceMonitor:
                     address=address,
                     latency_ms=result.get("latency_ms"),
                 )
+                if current.get("state") == "online" and status.get("state") in ("offline", "unauthorized"):
+                    try:
+                        from .services.push_service import queue_device_offline
+
+                        await asyncio.to_thread(queue_device_offline, device_id, str(device.get("name") or device_id),
+                                                int(current.get("last_checked_at") or _now()))
+                    except Exception as exc:
+                        log.warning("PUSH_DEVICE_EVENT_FAILED error_type=%s", type(exc).__name__)
+                return status
         finally:
             self._end_operation(device_id, lock)
 

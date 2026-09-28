@@ -2654,7 +2654,7 @@ def list_users(*, include_watch_data: bool = False, watch_history_limit: int = V
             dict(row)
             for row in conn.execute(
                 "SELECT username,role,created_at,must_change_password,expires_at,enabled,alas_visible,"
-                "last_login_at,last_login_ip,password_reminder_pending FROM users ORDER BY username"
+                "last_login_at,last_login_ip,password_reminder_pending,qq FROM users ORDER BY username"
             )
         ]
         current = now_ts()
@@ -2769,6 +2769,7 @@ def upsert_user(
     must_change_password: bool | None = None,
     enabled=ENABLED_UNSET,
     alas_visible=ALAS_VISIBLE_UNSET,
+    qq=None,
 ) -> None:
     _ = video_mode  # 兼容旧调用；统一画质不再按用户保存模式。
     username = (username or "").strip()
@@ -2784,6 +2785,10 @@ def upsert_user(
         raise ValueError("invalid_username")
     if role not in ("admin", "user"):
         raise ValueError("invalid_role")
+    if qq is not None:
+        qq = str(qq).strip()
+        if qq and (not qq.isascii() or not qq.isdecimal() or not 5 <= len(qq) <= 15):
+            raise ValueError("invalid_qq")
     if password:
         error = validate_password(password, username)
         if error:
@@ -2791,8 +2796,9 @@ def upsert_user(
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         current = conn.execute(
-            "SELECT username,role,expires_at,must_change_password,enabled,alas_visible FROM users WHERE username=?", (username,)
+            "SELECT username,role,expires_at,must_change_password,enabled,alas_visible,qq FROM users WHERE username=?", (username,)
         ).fetchone()
+        normalized_qq = str(current["qq"] or "") if qq is None and current else str(qq or "")
         final_must_change_password = (
             bool(current["must_change_password"])
             if must_change_password is None and current
@@ -2829,7 +2835,7 @@ def upsert_user(
             if password:
                 conn.execute(
                     "UPDATE users SET password_hash=?, role=?, video_mode='normal', expires_at=?, "
-                    "must_change_password=?, enabled=?, alas_visible=?, password_reminder_pending=1 WHERE username=?",
+                    "must_change_password=?, enabled=?, alas_visible=?, qq=?, password_reminder_pending=1 WHERE username=?",
                     (
                         hash_password(password),
                         role,
@@ -2837,6 +2843,7 @@ def upsert_user(
                         int(final_must_change_password),
                         int(normalized_enabled),
                         int(normalized_alas_visible),
+                        normalized_qq,
                         username,
                     ),
                 )
@@ -2844,13 +2851,14 @@ def upsert_user(
             else:
                 conn.execute(
                     "UPDATE users SET role=?, video_mode='normal', expires_at=?, must_change_password=?, enabled=?, "
-                    "alas_visible=? WHERE username=?",
+                    "alas_visible=?, qq=? WHERE username=?",
                     (
                         role,
                         normalized_expires_at,
                         int(final_must_change_password),
                         int(normalized_enabled),
                         int(normalized_alas_visible),
+                        normalized_qq,
                         username,
                     ),
                 )
@@ -2870,8 +2878,8 @@ def upsert_user(
             if role == "admin" and normalized_expires_at is None and not normalized_enabled and available_permanent_admin_count(conn) < 1:
                 raise ValueError("last_permanent_admin_required")
             conn.execute(
-                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible,password_reminder_pending) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO users(username,password_hash,role,created_at,must_change_password,expires_at,enabled,alas_visible,password_reminder_pending,qq) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     username,
                     hash_password(password),
@@ -2882,6 +2890,7 @@ def upsert_user(
                     int(normalized_enabled),
                     int(normalized_alas_visible),
                     1,
+                    normalized_qq,
                 ),
             )
         conn.commit()

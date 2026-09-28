@@ -19,6 +19,7 @@ from ..http_helpers import parse_body, public_error_detail
 from ..mirror_manager import manager
 from ..mirror_runtime import acquire_control_lock
 from ..services.alas_service import admin_alas_permissions_payload
+from ..services.alas_push import clear_unbound_configs, sync_user_bindings
 from ..services.audit_service import audit_request
 from ..services.mirror_service import resolve_device_or_404
 from ..services.notification_service import (
@@ -93,6 +94,7 @@ async def admin_upsert_user(request: Request):
     must_change_password = _strict_bool(payload, "must_change_password") if "must_change_password" in payload else None
     # 用户列表里的「显示 ALAS」：只影响界面显隐，不参与权限判定。
     alas_visible = _strict_bool(payload, "alas_visible") if "alas_visible" in payload else None
+    qq = payload.get("qq") if "qq" in payload else None
     try:
         if "expires_at" in payload:
             await asyncio.to_thread(
@@ -104,6 +106,7 @@ async def admin_upsert_user(request: Request):
                 must_change_password=must_change_password,
                 enabled=enabled if enabled is not None else storage.ENABLED_UNSET,
                 alas_visible=alas_visible if alas_visible is not None else storage.ALAS_VISIBLE_UNSET,
+                qq=qq,
             )
         else:
             await asyncio.to_thread(
@@ -114,10 +117,14 @@ async def admin_upsert_user(request: Request):
                 must_change_password=must_change_password,
                 enabled=enabled if enabled is not None else storage.ENABLED_UNSET,
                 alas_visible=alas_visible if alas_visible is not None else storage.ALAS_VISIBLE_UNSET,
+                qq=qq,
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=public_error_detail(exc)) from exc
     updated = await asyncio.to_thread(storage.get_user, username)
+    push_setup = None
+    if previous and updated and previous["qq"] != updated["qq"]:
+        push_setup = await asyncio.to_thread(sync_user_bindings, username)
     gateway_contexts_revoked = alas_gateway.revoke_user_contexts(username)
     should_close_connections = (
         "expires_at" in payload
@@ -177,7 +184,7 @@ async def admin_upsert_user(request: Request):
             "gateway_contexts_revoked": gateway_contexts_revoked,
         },
     )
-    return {"ok": True, "users": await asyncio.to_thread(storage.list_users)}
+    return {"ok": True, "push_setup": push_setup, "users": await asyncio.to_thread(storage.list_users)}
 
 
 @router.delete("/api/admin/users/{username}")
@@ -186,14 +193,16 @@ async def admin_delete_user(username: str, request: Request):
     admin = security.require_admin(request)
     if username == admin["username"]:
         raise HTTPException(status_code=403, detail=i18n.translate("server.error.cannot_delete_current_admin"))
+    bound_names = [row["config_name"] for row in await asyncio.to_thread(storage.list_user_alas_bindings, username)]
     try:
         await asyncio.to_thread(storage.delete_user, username)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=public_error_detail(exc)) from exc
     alas_gateway.revoke_user_contexts(username)
     await account_connections.close_user_connections(username)
+    push_cleanup = await asyncio.to_thread(clear_unbound_configs, bound_names)
     audit_request(request, admin, "user_delete", target_type="account", target_id=username)
-    return {"ok": True, "users": await asyncio.to_thread(storage.list_users)}
+    return {"ok": True, "push_cleanup": push_cleanup, "users": await asyncio.to_thread(storage.list_users)}
 
 
 @router.post("/api/admin/users/{username}/password-reminder")
@@ -617,6 +626,9 @@ async def admin_replace_user_permissions(username: str, request: Request):
     alas_assignments = payload.get("alas_assignments", payload.get("alasAssignments"))
     if not isinstance(device_permissions, list) or (alas_submitted and not isinstance(alas_assignments, list)):
         raise HTTPException(status_code=400, detail="permissions must be arrays")
+    previous_alas_names = {
+        str(row["config_name"]) for row in await asyncio.to_thread(storage.list_user_alas_bindings, target)
+    } if alas_submitted else set()
 
     async def resolve_rows(rows, device_keys):
         normalized = []
@@ -661,6 +673,18 @@ async def admin_replace_user_permissions(username: str, request: Request):
         status = 409 if str(exc) == "device_view_permission_required" else 400
         raise HTTPException(status_code=status, detail=public_error_detail(exc)) from exc
     current_rows = await asyncio.to_thread(storage.list_permissions)
+    push_setup = None
+    push_cleanup = None
+    if alas_submitted:
+        current_alas_names = {
+            str(row["config_name"]) for row in await asyncio.to_thread(storage.list_user_alas_bindings, target)
+        }
+        removed_names = sorted(previous_alas_names - current_alas_names)
+        if removed_names:
+            push_cleanup = await asyncio.to_thread(clear_unbound_configs, removed_names)
+        new_names = sorted(current_alas_names - previous_alas_names)
+        if new_names:
+            push_setup = await asyncio.to_thread(sync_user_bindings, target, new_names)
     current_view_devices = {
         str(row["device_id"])
         for row in current_rows
@@ -704,7 +728,10 @@ async def admin_replace_user_permissions(username: str, request: Request):
     )
     permissions = await asyncio.to_thread(storage.list_permissions)
     alas_permissions = await asyncio.to_thread(admin_alas_permissions_payload)
-    return {"ok": True, **result, "permissions": permissions, "alas": alas_permissions}
+    return {
+        "ok": True, **result, "push_setup": push_setup, "push_cleanup": push_cleanup,
+        "permissions": permissions, "alas": alas_permissions,
+    }
 
 
 __all__ = [name for name in globals() if name.startswith("admin_")] + ["router"]

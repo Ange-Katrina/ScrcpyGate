@@ -1016,12 +1016,13 @@
            retryBody.confirmMove = true;
            var retryOptions = { method: options.method, body: retryBody };
            if (options.params) { retryOptions.params = options.params; }
-           window.ScrcpyGateApi.configured(endpoint, retryOptions).then(function () {
+           window.ScrcpyGateApi.configured(endpoint, retryOptions).then(function (result) {
              closeDrawer('alasLinkDrawer');
-             return loadOverview(false);
-           }).then(function () {
+             return loadOverview(false).then(function () { return result; });
+           }).then(function (result) {
              loading(false); close();
-             toast('配置关联已移动到新设备', 'success');
+             var issue = result.push_setup && (result.push_setup.status === 'error' || result.push_setup.reason === 'manual_config_preserved');
+             toast(issue ? '关联已移动，ALAS 推送未自动写入' : '配置关联已移动到新设备', issue ? 'info' : 'success');
              if (done) { done(); }
            }).catch(function (error) {
              loading(false);
@@ -1029,7 +1030,7 @@
              if (done) { done(error); }
            });
          }
-         window.ScrcpyGateApi.configured(endpoint, options).then(function () { closeDrawer('alasLinkDrawer'); return loadOverview(false); }).then(function () { toast('配置关联已保存', 'success'); if (done) { done(); } }).catch(function (error) {
+         window.ScrcpyGateApi.configured(endpoint, options).then(function (result) { closeDrawer('alasLinkDrawer'); return loadOverview(false).then(function () { return result; }); }).then(function (result) { var issue = result.push_setup && (result.push_setup.status === 'error' || result.push_setup.reason === 'manual_config_preserved'); toast(issue ? '关联已保存，ALAS 推送未自动写入' : '配置关联已保存', issue ? 'info' : 'success'); if (done) { done(); } }).catch(function (error) {
            var move = alasMoveConfirm(error);
            if (move) {
              confirmModal({
@@ -1062,7 +1063,11 @@
        }
        function deleteRelation(relId) {
          if (!guardService('alas.relations.delete')) { return; }
-         window.ScrcpyGateApi.configured('alas.relations.delete', { method: 'DELETE', params: { id: relId }, body: { relationId: relId } }).then(function () { return loadOverview(false); }).then(function () { toast('关联已删除', 'success'); }).catch(function (error) { toast(apiError(error), 'error'); });
+         window.ScrcpyGateApi.configured('alas.relations.delete', { method: 'DELETE', params: { id: relId }, body: { relationId: relId } }).then(function (result) { return loadOverview(false).then(function () { return result; }); }).then(function (result) {
+           var cleanup = result && result.push_cleanup;
+           var warning = cleanup && (cleanup.status === 'error' || cleanup.reason === 'manual_config_preserved');
+           toast(warning ? '关联已删除；ALAS 推送配置需检查或停用后重试' : '关联已删除', warning ? 'info' : 'success');
+         }).catch(function (error) { toast(apiError(error), 'error'); });
        }
        function checkConnection(done) {
          // 连接检查允许在服务未启用时执行(先探地址、再启用保存),只要求接口已配置。

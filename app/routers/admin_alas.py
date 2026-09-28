@@ -24,6 +24,7 @@ from ..services.alas_service import (
 from ..services.audit_service import audit_request
 from ..services.mirror_service import resolve_device_or_404
 from ..services.notification_service import notify_permission_changed
+from ..services.alas_push import apply_to_binding, clear_unbound_configs
 
 log = logging.getLogger("webscrcpy.main")
 router = APIRouter()
@@ -308,7 +309,9 @@ def _set_alas_permission_sync(request: Request, admin: dict, payload: dict):
         if config_name:
             storage.delete_user_alas_binding(username, config_name)
             detail = f"{username}:{config_name}"
+            removed_names = [config_name]
         elif delete_all:
+            removed_names = [row["config_name"] for row in storage.list_user_alas_bindings(username)]
             storage.delete_user_alas_config(username)
             detail = username
         else:
@@ -330,7 +333,8 @@ def _set_alas_permission_sync(request: Request, admin: dict, payload: dict):
             detail=config_name or "全部配置",
             revoked=True,
         )
-        return {"ok": True, **admin_alas_permissions_payload()}
+        push_cleanup = clear_unbound_configs(removed_names)
+        return {"ok": True, "push_cleanup": push_cleanup, **admin_alas_permissions_payload()}
     if not config_name:
         raise HTTPException(status_code=400, detail=i18n.translate("server.error.alas_config_name_required"))
     can_run = parse_bool(payload.get("can_run"), True)
@@ -442,7 +446,12 @@ def _set_alas_permission_sync(request: Request, admin: dict, payload: dict):
         detail=f"{config_name}（{'可运行' if can_run else '不可运行'}{'，可编辑' if can_edit else ''}）",
         revoked=not can_run and not can_edit,
     )
-    return {"ok": True, **admin_alas_permissions_payload()}
+    try:
+        push_setup = apply_to_binding(username, config_name)
+    except Exception as exc:
+        log.warning("ALAS_PUSH_SETUP_FAILED error_type=%s", type(exc).__name__)
+        push_setup = {"status": "error", "reason": "setup_failed"}
+    return {"ok": True, "push_setup": push_setup, **admin_alas_permissions_payload()}
 
 def feature_payload(groups: list[dict]) -> dict:
     """固定目录 + 启停状态的分组视图。"""

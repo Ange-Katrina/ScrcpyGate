@@ -10,3 +10,5 @@ cryptography==50.0.0
 maxminddb==3.2.0
 # Explicit HTTP/HTTPS download proxies, including TLS-to-proxy tunneling.
 httpx==0.28.1
+onepush==1.10.0
+PyYAML==6.0.3

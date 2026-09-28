@@ -170,6 +170,11 @@
           <input class="field-input" id="add-password" type="password" placeholder="至少 12 位" autocomplete="new-password">
           <div class="field-error" id="er-add-password"></div>
         </div>
+        <div class="field" id="f-add-qq">
+          <label class="field-label" for="add-qq"><b>QQ（可选）</b></label>
+          <input class="field-input" id="add-qq" type="text" inputmode="numeric" pattern="[0-9]{5,15}" maxlength="15" autocomplete="off" placeholder="用于定向通知">
+          <div class="field-error" id="er-add-qq"></div>
+        </div>
         <div class="field">
           <label class="field-label" for="add-role">角色</label>
           <select class="field-select" id="add-role">
@@ -223,6 +228,11 @@
       <div class="modal-head"><h3 class="modal-title" id="edit-title">编辑用户</h3><button class="modal-close" type="button" data-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <form class="modal-body" id="edit-form" novalidate>
         <div class="field"><label class="field-label"><b>用户名</b></label><div class="field-readonly" id="edit-username">—</div></div>
+        <div class="field" id="f-edit-qq">
+          <label class="field-label" for="edit-qq"><b>QQ（可选）</b></label>
+          <input class="field-input" id="edit-qq" type="text" inputmode="numeric" pattern="[0-9]{5,15}" maxlength="15" autocomplete="off" placeholder="留空则不推送">
+          <div class="field-error" id="er-edit-qq"></div>
+        </div>
         <div class="field">
           <label class="field-label" for="edit-role">角色</label>
           <select class="field-select" id="edit-role">

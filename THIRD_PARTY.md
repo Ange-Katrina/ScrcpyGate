@@ -63,6 +63,20 @@ Update the version, hash, and bundled license when replacing this file.
 Only the symbols used by the product shell are vendored. Keep the bundled ISC
 license and this attribution when updating or redistributing the sprite.
 
+## OnePush
+
+- Package: `onepush==1.10.0` (`requirements.txt`)
+- Upstream: https://github.com/y1ndan/onepush
+- Purpose: Provider formatting for optional account-scoped external notifications.
+- License: MIT; installed from PyPI during image build, not vendored in this repository.
+
+## PyYAML
+
+- Package: `PyYAML==6.0.3` (`requirements.txt`)
+- Upstream: https://github.com/yaml/pyyaml
+- Purpose: Safely update the recipient field in ALAS's native OnePush YAML configuration.
+- License: MIT; installed from PyPI during image build.
+
 ## maxminddb
 
 - Package: `maxminddb==3.2.0` (`requirements.txt`)

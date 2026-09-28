@@ -64,6 +64,7 @@
         return {
           id: u.id,
           username: u.username || u.userName || u.email || u.id || '—',
+          qq: String(u.qq || ''),
           name: u.name || u.displayName || u.username || '—',
           role: u.role || 'user',
           enabled: u.enabled !== false,
@@ -767,7 +768,11 @@
           return window.ScrcpyGateApi.configured('alas.relations.create', { method: 'POST', body: {
             userId: username, configId: alasRelation.configId, deviceId: alasRelation.deviceId,
             canRun: true, canEdit: true, isDefault: true, grantView: false
-          }}).catch(function () { report.failed++; }).then(function () { return report; });
+          }}).then(function (result) {
+            if (result.push_setup && (result.push_setup.status === 'error' || result.push_setup.reason === 'manual_config_preserved')) {
+              report.pushWarning = result.push_setup.reason === 'manual_config_preserved' ? '已有手工 ALAS 推送设置，未覆盖' : 'ALAS 推送未写入，请检查配置状态';
+            }
+          }).catch(function () { report.failed++; }).then(function () { return report; });
         });
       }
       function openAddModal() {
@@ -788,6 +793,7 @@
       function submitAdd() {
         var uName = document.getElementById('add-username').value.trim();
         var uPass = document.getElementById('add-password').value;
+        var qq = document.getElementById('add-qq').value.trim();
         var uRole = document.getElementById('add-role').value;
         var uExpiry = expiryValue('add-expiry');
         var permanent = expiryIsPermanent('add-expiry');
@@ -807,24 +813,26 @@
           if (dup) { setError('add-username', '该用户名已存在'); ok = false; }
         }
         setError('add-password', uPass ? (uPass.length >= 12 ? '' : '密码至少 12 位') : '请输入初始密码');
+        setError('add-qq', !qq || /^[0-9]{5,15}$/.test(qq) ? '' : '请输入 5–15 位 QQ 号');
         setError('add-expiry', uExpiry || permanent ? '' : '请选择到期时间或勾选「永久有效」');
         var permissionError = '';
         if (!!alasRelation.configId !== !!alasRelation.deviceId) permissionError = alasRelation.configId ? '请选择 ALAS 关联设备' : '请选择 Runtime 配置';
         document.getElementById('er-add-permissions').textContent = permissionError;
         document.getElementById('er-add-permissions').style.display = permissionError ? 'block' : 'none';
         if (!uName || !uPass || (!uExpiry && !permanent) || uPass.length < 12) { ok = false; }
+        if (qq && !/^[0-9]{5,15}$/.test(qq)) ok = false;
         if (permissionError) { ok = false; document.getElementById('add-alas-details').open = true; }
         if (!ok) { showToast('保存失败，请检查表单填写', 'error'); return; }
         var btn = document.getElementById('add-save'); btn.disabled = true;
         var accountCreated = false;
-        window.ScrcpyGateApi.configured('users.create', { method: 'POST', body: { username: uName, password: uPass, role: uRole, expiry: uExpiry, forcePasswordChange: document.getElementById('add-force').checked, alasVisible: document.getElementById('add-alas-visible').checked } }).then(function () {
+        window.ScrcpyGateApi.configured('users.create', { method: 'POST', body: { username: uName, password: uPass, qq: qq, role: uRole, expiry: uExpiry, forcePasswordChange: document.getElementById('add-force').checked, alasVisible: document.getElementById('add-alas-visible').checked } }).then(function () {
           accountCreated = true;
           return saveInitialUserPermissions(uName, devicePermissions, alasRelation);
         }).then(function (report) {
           closeModal('modal-add-user');
           return loadUsers().then(function () { return report; });
         }).then(function (report) {
-          showToast(report.failed ? '用户已创建，' + report.failed + ' 项初始权限未保存，请在权限管理中重试' : '用户及初始权限已创建', report.failed ? 'info' : 'success');
+          showToast(report.failed ? '用户已创建，' + report.failed + ' 项初始权限未保存，请在权限管理中重试' : (report.pushWarning || '用户及初始权限已创建'), report.failed || report.pushWarning ? 'info' : 'success');
         }).catch(function (error) {
           showToast(accountCreated ? '用户已创建，但初始权限保存失败：' + apiError(error) : apiError(error), accountCreated ? 'info' : 'error');
           if (accountCreated) loadUsers().catch(function () {});
@@ -899,6 +907,7 @@
       function openEditModal(u) {
         editTarget = u;
         document.getElementById('edit-username').textContent = u.username;
+        document.getElementById('edit-qq').value = u.qq || '';
         document.getElementById('edit-role').value = u.role;
         document.getElementById('edit-expiry').value = u.expiry;
         editExpiryOriginal = u.expiry || '';
@@ -928,9 +937,12 @@
         var e = expiryValue('edit-expiry');
         var permanent = expiryIsPermanent('edit-expiry');
         var enabled = document.getElementById('edit-enabled').checked;
+        var qq = document.getElementById('edit-qq').value.trim();
         var alasRelation = r === 'admin' ? { configId: '', deviceId: '' } : editAlasRelationFromForm();
         var ok = true;
         setError('edit-expiry', e || permanent ? '' : '请选择到期时间或勾选「永久有效」');
+        setError('edit-qq', !qq || /^[0-9]{5,15}$/.test(qq) ? '' : '请输入 5–15 位 QQ 号');
+        if (qq && !/^[0-9]{5,15}$/.test(qq)) ok = false;
         if (!e && !permanent) { ok = false; }
         var permissionError = '';
         if (!!alasRelation.configId !== !!alasRelation.deviceId) {
@@ -944,13 +956,24 @@
         if (permissionError) { ok = false; var details = document.getElementById('edit-alas-details'); if (details) details.open = true; }
         if (!ok) { showToast('保存失败，请检查表单填写', 'error'); return; }
         var btn = document.getElementById('edit-save'); btn.disabled = true;
-        window.ScrcpyGateApi.configured('users.update', { params: { id: u.id }, method: 'PUT', body: { role: r, expiry: e, enabled: enabled, alasVisible: document.getElementById('edit-alas-visible').checked } }).then(function () {
-          return saveEditedAlasRelation(u, alasRelation);
+        window.ScrcpyGateApi.configured('users.update', { params: { id: u.id }, method: 'PUT', body: { role: r, qq: qq, expiry: e, enabled: enabled, alasVisible: document.getElementById('edit-alas-visible').checked } }).then(function (updated) {
+          return saveEditedAlasRelation(u, alasRelation).then(function (relation) {
+            var accountPush = updated && updated.push_setup;
+            if (accountPush && (accountPush.status === 'error' || accountPush.reason === 'manual_config_preserved')) {
+              relation.push_setup = accountPush;
+            } else {
+              relation.push_setup = relation.push_setup || accountPush;
+            }
+            return relation;
+          });
         }).then(function (report) {
           closeModal('modal-edit-user');
           return loadUsers().then(function () { return report; });
         }).then(function (report) {
-          showToast(report && report.skipped ? '用户信息已更新' : '用户信息与 ALAS 关联已更新', 'success');
+          var pushSetup = report && report.push_setup;
+          var warning = pushSetup && (pushSetup.status === 'error' || pushSetup.reason === 'manual_config_preserved');
+          var warningText = !qq ? '用户信息已更新；请停用 ALAS 后检查旧收件人是否已移除' : '用户信息已更新，ALAS 推送未自动写入';
+          showToast(warning ? warningText : (report && report.skipped ? '用户信息已更新' : '用户信息与 ALAS 关联已更新'), warning ? 'info' : 'success');
         }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
@@ -965,9 +988,13 @@
         var u = delTarget;
         if (!u) return;
         var btn = document.getElementById('del-confirm'); btn.disabled = true;
-        window.ScrcpyGateApi.configured('users.delete', { params: { id: u.id }, method: 'DELETE' }).then(function () {
-          closeModal('modal-delete-user'); return loadUsers();
-        }).then(function () { showToast('用户已删除', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
+        window.ScrcpyGateApi.configured('users.delete', { params: { id: u.id }, method: 'DELETE' }).then(function (result) {
+          closeModal('modal-delete-user'); return loadUsers().then(function () { return result; });
+        }).then(function (result) {
+          var cleanup = result && result.push_cleanup;
+          var warning = cleanup && (cleanup.status === 'error' || cleanup.reason === 'manual_config_preserved');
+          showToast(warning ? '用户已删除；ALAS 推送配置需检查或停用后重试' : '用户已删除', warning ? 'info' : 'success');
+        }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
       /* ---------- 重置密码 ---------- */
@@ -1277,7 +1304,13 @@
           /* The opening snapshot preserves grants added while this dialog is open. */
           deviceIdsBaseline: u.role === 'admin' || !perm.devSnapshot ? null : Array.from(perm.devSnapshot),
           configIdsBaseline: u.role === 'admin' || !perm.cfgSnapshot ? null : Array.from(perm.cfgSnapshot)
-        } }).then(function () { closePermModal(); return loadUsers(); }).then(function () { showToast('权限变更已保存', 'success'); }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
+        } }).then(function (result) { closePermModal(); return loadUsers().then(function () { return result; }); }).then(function (result) {
+          var pushSetup = result && result.push_setup;
+          var cleanup = result && result.push_cleanup;
+          var warning = (pushSetup && (pushSetup.status === 'error' || pushSetup.reason === 'manual_config_preserved')) ||
+            (cleanup && (cleanup.status === 'error' || cleanup.reason === 'manual_config_preserved'));
+          showToast(warning ? '权限已保存，ALAS 推送未自动写入' : '权限变更已保存', warning ? 'info' : 'success');
+        }).catch(function (error) { showToast(apiError(error), 'error'); }).finally(function () { btn.disabled = false; });
       }
 
       /* ---------- 事件绑定 ---------- */

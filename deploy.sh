@@ -694,6 +694,7 @@ load_settings() {
   ENABLE_API_DOCS=${ENABLE_API_DOCS:-$(dotenv_value ENABLE_API_DOCS)}
   ALAS_ALLOWED_HOSTS=${ALAS_ALLOWED_HOSTS:-$(dotenv_value ALAS_ALLOWED_HOSTS)}
   ALAS_ALLOWED_CIDRS=${ALAS_ALLOWED_CIDRS:-$(dotenv_value ALAS_ALLOWED_CIDRS)}
+  NOTIFICATION_ALLOWED_HOSTS=${NOTIFICATION_ALLOWED_HOSTS:-$(dotenv_value NOTIFICATION_ALLOWED_HOSTS)}
   SCRCPYGATE_HEALTH_TIMEOUT=${SCRCPYGATE_HEALTH_TIMEOUT:-$(dotenv_value SCRCPYGATE_HEALTH_TIMEOUT)}
   SCRCPYGATE_WS_MAX_SIZE=${SCRCPYGATE_WS_MAX_SIZE:-$(dotenv_value SCRCPYGATE_WS_MAX_SIZE)}
   # Secrets deliberately do not fall back to .env.  The bare environment
@@ -718,6 +719,7 @@ load_settings() {
   ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
   ALAS_ALLOWED_HOSTS=${ALAS_ALLOWED_HOSTS:-}
   ALAS_ALLOWED_CIDRS=${ALAS_ALLOWED_CIDRS:-}
+  NOTIFICATION_ALLOWED_HOSTS=${NOTIFICATION_ALLOWED_HOSTS:-}
   SCRCPYGATE_HEALTH_TIMEOUT=${SCRCPYGATE_HEALTH_TIMEOUT:-90}
   SCRCPYGATE_WS_MAX_SIZE=${SCRCPYGATE_WS_MAX_SIZE:-65536}
   PYTHON_IMAGE=${PYTHON_IMAGE:-$DEFAULT_PYTHON_IMAGE}
@@ -796,6 +798,8 @@ validate_settings() {
     ''|'/'|'.'|'./') die "WEB_SCRCPY_DATA_HOST must point to a dedicated data directory" ;;
   esac
   valid_host_list "$ALLOWED_HOSTS" || die "ALLOWED_HOSTS 必须为逗号分隔的主机名或 IP,且不含空格、斜杠或 @"
+  [ -z "$NOTIFICATION_ALLOWED_HOSTS" ] || valid_host_list "$NOTIFICATION_ALLOWED_HOSTS" \
+    || die "NOTIFICATION_ALLOWED_HOSTS 必须为逗号分隔的主机名或 IP"
   if [ -n "$ALLOWED_ORIGINS" ]; then
     valid_origin_list "$ALLOWED_ORIGINS" || die "ALLOWED_ORIGINS 必须为逗号分隔的 http(s)://主机[:端口],且不能包含路径"
   fi
@@ -803,6 +807,7 @@ validate_settings() {
   export WEB_SCRCPY_BIND WEB_SCRCPY_PORT WEB_SCRCPY_DATA_HOST
   export PUBLIC_BASE_URL ALAS_EMBED_ORIGIN ALLOWED_HOSTS ALLOWED_ORIGINS ALLOW_NULL_ORIGIN
   export ALLOW_MISSING_WEBSOCKET_ORIGIN ENABLE_API_DOCS ALAS_ALLOWED_HOSTS ALAS_ALLOWED_CIDRS
+  export NOTIFICATION_ALLOWED_HOSTS
   export TRUST_PROXY TRUSTED_PROXY_IPS SESSION_COOKIE_SECURE
   export SCRCPYGATE_WS_MAX_SIZE
   export PYTHON_IMAGE SCRCPYGATE_PYTHON_IMAGE_MIRRORS SCRCPYGATE_REGISTRY_IP_FAMILY
@@ -2202,15 +2207,17 @@ existing_database_needs_alas_key() {
 import sqlite3, sys
 try:
     conn = sqlite3.connect("file:/app/data/webscrcpy.db?mode=ro", uri=True)
-    row = conn.execute("SELECT value FROM settings WHERE key=?", ("alas_token",)).fetchone()
-    needs_key = bool(row and str(row[0] or "").startswith("v1:"))
+    rows = dict(conn.execute("SELECT key,value FROM settings WHERE key IN (?,?)", ("alas_token", "push_onepush_config")).fetchall())
+    push_encrypted = str(rows.get("push_onepush_config") or "").startswith("p1:")
+    needs_key = str(rows.get("alas_token") or "").startswith("v1:")
     conn.close()
 except Exception:
     sys.exit(2)
-print("encrypted" if needs_key else "clear")
+print("push_encrypted" if push_encrypted else "encrypted" if needs_key else "clear")
 ' 2>/dev/null) || return 2
   case "$key_probe_result" in
     encrypted) return 0 ;;
+    push_encrypted) return 3 ;;
     clear) return 1 ;;
     *) return 2 ;;
   esac
@@ -2272,6 +2279,7 @@ ensure_alas_token_key() {
     existing_database_needs_alas_key || key_probe_status=$?
     case "$key_probe_status" in
       0) confirm_reset_alas_token_without_key ;;
+      3) die "数据库含加密通知配置但密钥文件缺失。请恢复配套密钥；ALAS Token 重置不会清除通知配置" ;;
       1) ;;
       *) die "无法只读检查旧数据库，未生成新密钥；请检查数据库和本地镜像后重试" ;;
     esac

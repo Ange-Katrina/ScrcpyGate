@@ -117,6 +117,13 @@ ENDPOINTS_MAP = {
     "users.delete": {"path": "/api/admin/users/:id", "method": "DELETE"},
     "users.reset-password": {"path": "/api/admin/users", "method": "PUT"},
     "users.password-reminder": {"path": "/api/admin/users/:id/password-reminder", "method": "POST"},
+    "push.config": {"path": "/api/admin/push", "method": "GET"},
+    "push.save": {"path": "/api/admin/push", "method": "PUT"},
+    "push.test": {"path": "/api/admin/push/test", "method": "POST"},
+    "push.alasTemplate": {"path": "/api/admin/push/alas-template", "method": "GET"},
+    "push.alasTemplate.save": {"path": "/api/admin/push/alas-template", "method": "PUT"},
+    "push.alasConfigs": {"path": "/api/admin/alas/configs", "method": "GET"},
+    "push.deliveries": {"path": "/api/admin/push/deliveries", "method": "GET"},
     "logs.list": {"path": "/api/admin/runtime-logs", "method": "GET"},
     "logs.audit": {"path": "/api/admin/logs", "method": "GET"},
     # 访问记录（VIS）：匿名/已认证都统计；明细与汇总都只对管理员开放。
@@ -171,6 +178,7 @@ PAGE_ROUTES = {
     "/alas": ("alas.html", True),
     "/security": ("security.html", True),
     "/logs": ("logs.html", True),
+    "/push": ("push.html", True),
 }
 
 _LEGACY_ASSET_RE = re.compile(
@@ -238,11 +246,11 @@ ADMIN_PAGE_STYLE_TAG = f'<link rel="stylesheet" href="{asset_url("css/admin-page
 ADMIN_SHELL_STYLE_TAG = f'<link rel="stylesheet" href="{asset_url("css/admin-shell.css")}">'
 PAGE_STYLE_TAGS = {
     name: f'<link rel="stylesheet" href="{asset_url(f"css/{name}-page.css")}">'
-    for name in ("alas", "devices", "logs", "mirror", "mirror-admin", "quality", "security", "users", "login")
+    for name in ("alas", "devices", "logs", "mirror", "mirror-admin", "quality", "security", "users", "login", "push")
 }
 PAGE_SCRIPT_TAGS = {
     name: f'<script defer src="{asset_url(f"shared/{name}-page.js")}"></script>'
-    for name in ("alas", "devices", "logs", "mirror", "mirror-admin", "quality", "security", "users", "login")
+    for name in ("alas", "devices", "logs", "mirror", "mirror-admin", "quality", "security", "users", "login", "push")
 }
 ACCESS_STATUS_SCRIPT_TAG = f'<script src="{asset_url("shared/access-status.js")}"></script>'
 COMMON_PAGE_ASSETS = [PAGE_RUNTIME_STYLE_TAG, PAGE_RUNTIME_SCRIPT_TAG, ACCESS_STATUS_SCRIPT_TAG, SWITCH_STYLE_TAG, SEGMENTED_STYLE_TAG]
@@ -299,10 +307,11 @@ EXTRA_SCRIPTS = {
     "mirror-admin.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["mirror-admin"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["mirror-admin"]],
     "logs.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["logs"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["logs"]],
     "login.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["login"], AUDIT_MAPPING_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, POW_SOLVER_SCRIPT_TAG, PAGE_SCRIPT_TAGS["login"]],
+    "push.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["push"], ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["push"]],
 }
 
 # Load shared administration refinements after the legacy page styles.
-for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "logs", "security"):
+for _page in ("admin", "devices", "users", "alas", "quality", "mirror-admin", "logs", "security", "push"):
     EXTRA_SCRIPTS[f"{_page}.html"].append(
         f'<link rel="stylesheet" href="{asset_url("css/admin-workspace.css")}">'
     )

@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 TOKEN_PREFIX = "v1:"
 TOKEN_AAD = b"scrcpygate:alas-token:v1"
+PUSH_PREFIX = "p1:"
+PUSH_AAD = b"scrcpygate:push-config:v1"
 TOKEN_KEY_ENV = "ALAS_TOKEN_ENCRYPTION_KEY"
 TOKEN_PREVIOUS_KEY_ENV = "ALAS_TOKEN_ENCRYPTION_KEY_PREVIOUS"
 TOKEN_KEY_FILE_ENV = "ALAS_TOKEN_ENCRYPTION_KEY_FILE"
@@ -131,10 +133,14 @@ def _check_database_before_key_creation() -> None:
         return
     try:
         with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
-            row = conn.execute("SELECT value FROM settings WHERE key='alas_token'").fetchone()
+            rows = dict(conn.execute(
+                "SELECT key,value FROM settings WHERE key IN ('alas_token','push_onepush_config')"
+            ).fetchall())
     except sqlite3.Error as exc:
         raise AlasTokenError("database cannot be checked; no key was created") from exc
-    if row and is_encrypted_token(str(row[0] or "")):
+    if str(rows.get("push_onepush_config") or "").startswith(PUSH_PREFIX):
+        raise AlasTokenError("encrypted push configuration exists; restore its matching key before provisioning")
+    if is_encrypted_token(str(rows.get("alas_token") or "")):
         raise AlasTokenError("encrypted ALAS token exists; restore its matching key before provisioning")
 
 
@@ -223,6 +229,33 @@ def encrypt_token(token: str) -> str:
     ciphertext = AESGCM(candidates[0][1]).encrypt(nonce, value.encode("utf-8"), TOKEN_AAD)
     payload = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii").rstrip("=")
     return TOKEN_PREFIX + payload
+
+
+def encrypt_push_config(value: str) -> str:
+    candidates = _key_candidates()
+    if not candidates or candidates[0][0] != TOKEN_KEY_ENV:
+        raise AlasTokenError(f"{TOKEN_KEY_ENV} is not configured")
+    nonce = secrets.token_bytes(12)
+    ciphertext = AESGCM(candidates[0][1]).encrypt(nonce, value.encode("utf-8"), PUSH_AAD)
+    return PUSH_PREFIX + base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii").rstrip("=")
+
+
+def decrypt_push_config(value: str) -> str:
+    raw = str(value or "")
+    if not raw.startswith(PUSH_PREFIX):
+        raise AlasTokenError("push configuration ciphertext is invalid")
+    try:
+        payload = _decode_urlsafe_base64(raw[len(PUSH_PREFIX):])
+    except (ValueError, UnicodeError, binascii.Error) as exc:
+        raise AlasTokenError("push configuration ciphertext is invalid") from exc
+    if len(payload) <= 12:
+        raise AlasTokenError("push configuration ciphertext is invalid")
+    for _name, key in _key_candidates():
+        try:
+            return AESGCM(key).decrypt(payload[:12], payload[12:], PUSH_AAD).decode("utf-8")
+        except (ValueError, UnicodeError):
+            continue
+    raise AlasTokenError("push configuration ciphertext cannot be authenticated")
 
 
 def is_encrypted_token(value: str) -> bool:

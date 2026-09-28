@@ -21,6 +21,7 @@ from .routers import (
     admin_alas,
     admin_audit,
     admin_overview,
+    admin_push,
     admin_settings,
     admin_video,
     admin_workbench,
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(alas.router)
     app.include_router(alas_embed.router)
     app.include_router(admin_overview.router)
+    app.include_router(admin_push.router)
     app.include_router(admin_access.router)
     app.include_router(admin_access_log.router)
     app.include_router(admin_ban.router)

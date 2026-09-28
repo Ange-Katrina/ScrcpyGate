@@ -26,6 +26,7 @@ from .logging_config import log_event
 from .mirror_manager import manager
 from .mirror_runtime import VIEWER_DISCONNECT_GRACE
 from .services.alas_expiry_guard import stop_expired_user_alas
+from .services.push_service import push_loop
 
 
 log = logging.getLogger("webscrcpy.main")
@@ -42,6 +43,7 @@ class RuntimeState:
     access_writer: AccessLogWriter | None = None
     mirror_autostop_task: asyncio.Task | None = None
     account_expiration_task: asyncio.Task | None = None
+    push_task: asyncio.Task | None = None
     alas_status_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = field(default_factory=dict)
     alas_status_cache_ttl: int = ALAS_STATUS_CACHE_TTL_SECONDS
     alas_status_cache_max_entries: int = ALAS_STATUS_CACHE_MAX_ENTRIES
@@ -296,6 +298,7 @@ async def lifespan(app: FastAPI):
         state.account_expiration_task = asyncio.create_task(
             expiration_monitor(revoke_expired, maintenance=_run_storage_maintenance)
         )
+        state.push_task = asyncio.create_task(push_loop())
         yield
     except BaseException as exc:
         primary_error = exc
@@ -305,9 +308,11 @@ async def lifespan(app: FastAPI):
         tasks = (
             ("mirror_autostop", state.mirror_autostop_task),
             ("account_expiration", state.account_expiration_task),
+            ("push", state.push_task),
         )
         state.mirror_autostop_task = None
         state.account_expiration_task = None
+        state.push_task = None
         for component, task in tasks:
             if task is None:
                 continue

@@ -352,6 +352,16 @@ CI/CD 验证 amd64 和 arm64 镜像后发布到 GHCR，服务器手动部署。
 [版本号规范](docs/contributing/versioning.zh.md)。
 全部页面的层级、标签、切换和响应式约定见 [界面布局规范](docs/contributing/ui-layout.zh.md)。
 
+管理员可在「通知推送」配置 ScrcpyGate 的 OnePush `custom` Webhook 或 go-cqhttp/NapCat 接口。
+用户详情中的 QQ 可选；留空不外推。设备从在线转离线、账户进入提前提醒窗口或到期时，
+服务端按用户定向发送，并按事件去重、失败退避重试。Webhook 正文是 JSON 模板，可用
+`{event}`、`{username}`、`{qq}`、`{device}`、`{title}`、`{message}`、`{expires_at}`、`{days}`。
+接口地址、令牌、请求头和模板加密保存，不在读取接口回显。公开地址须使用 HTTPS；
+私有地址需在 `NOTIFICATION_ALLOWED_HOSTS` 中列出准确主机名。测试发送由管理员手动触发。
+ALAS 保留自身 OnePush 推送；可在同页选择现有 ALAS 配置为模板及 QQ 字段路径，
+绑定配置时只替换该字段。修改 QQ 会同步已有托管配置，清空 QQ 会移除可修改的托管收件人。
+已有手工推送或运行中的配置不会被覆盖，写入结果会提示管理员。
+
 健康检查：`GET /healthz`；日志：stdout（JSON，`LOG_FORMAT=json`），可选写入数据目录。
 
 画面出问题（"黑一下""卡住""自己停了"）时，管理员可以在工作台侧边栏打开**投屏记录**：按时间
@@ -458,6 +468,7 @@ docker exec -e SCRCPYGATE_SHOW_GENERATED_PASSWORD=true scrcpygate python -m app.
 | 流媒体 | `SCRCPY_STREAM_MODE`、`SCRCPY_SERVER_LOG_LEVEL`、`SCRCPY_I_FRAME_INTERVAL`、`VIDEO_QUEUE_*`、`SCRCPY_RAW_*` |
 | 日志与审计 | `LOG_*`、`AUDIT_*`、`VIEWER_WATCH_RETENTION_DAYS` |
 | ALAS（可选） | `ALAS_EMBED_ORIGIN`、`ALAS_ALLOWED_HOSTS`、`ALAS_ALLOWED_CIDRS`、`ALAS_POLICY_*`、`ALAS_TOKEN_*` |
+| 通知推送（可选） | `NOTIFICATION_ALLOWED_HOSTS`（允许访问的私有主机名或 IP） |
 | 镜像与构建 | `SCRCPYGATE_IMAGE`、`PYTHON_IMAGE`、`PIP_INDEX_URL` |
 
 - `SCRCPYGATE_IMAGE` 决定跑哪个镜像：留空 = 本地构建的 `scrcpygate:local`；发布时钉不可变引用

@@ -41,6 +41,18 @@
       } catch (e) {}
       document.documentElement.setAttribute('data-sidebar-motion', 'on');
       var sidebar = document.getElementById('admin-sidebar');
+      var systemNav = document.querySelector('.admin-rail nav[aria-label="系统导航"]');
+      if (systemNav && !systemNav.querySelector('[href="/push"]')) {
+        var pushEnglish = String((window.ScrcpyGateConfig || {}).locale || '').toLowerCase().indexOf('en') === 0;
+        var pushLink = document.createElement('a');
+        pushLink.className = 'side-item' + (location.pathname === '/push' ? ' active' : '');
+        pushLink.href = '/push';
+        pushLink.title = pushEnglish ? 'Notifications' : '通知推送';
+        pushLink.innerHTML = '<i data-lucide="bell-ring"></i><span class="menu-text"><b>' + (pushEnglish ? 'Notifications' : '通知推送') + '</b><small>' + (pushEnglish ? 'OnePush and events' : 'OnePush 与事件') + '</small></span>';
+        if (location.pathname === '/push') pushLink.setAttribute('aria-current', 'page');
+        systemNav.appendChild(pushLink);
+        if (window.lucide) lucide.createIcons();
+      }
       var sToggle = document.getElementById('adminSidebarToggle');
       var railScrollbar = document.getElementById('admin-rail-scrollbar');
       if (sidebar) {

@@ -310,6 +310,18 @@ development builds, and version display.
 The [UI layout rules](docs/contributing/ui-layout.md) define page hierarchy,
 labels, segmented controls, and responsive behavior across the frontend.
 
+Administrators can configure ScrcpyGate's OnePush `custom` webhook or go-cqhttp/NapCat
+delivery on the Notifications page. Each account may have an optional QQ number; blank
+numbers receive no external push. Device-offline and account-expiry events are scoped to
+that recipient, deduplicated, and retried with backoff. JSON body templates accept
+`{event}`, `{username}`, `{qq}`, `{device}`, `{title}`, `{message}`, `{expires_at}`, and `{days}`.
+Destinations, tokens, headers, and templates are encrypted and never echoed by the read API.
+Public endpoints require HTTPS; list private destination hosts in `NOTIFICATION_ALLOWED_HOSTS`.
+ALAS retains its own OnePush sender. An existing ALAS configuration can be selected as the
+template for bound accounts, replacing only the selected recipient field while
+preserving manual settings and running configurations. Changing an account QQ updates
+its managed ALAS recipients; clearing QQ removes managed recipients when ALAS is stopped.
+
 Health endpoint `GET /healthz`; logs are JSON on stdout (`LOG_FORMAT=json`) with optional file
 logging in the data directory.
 
@@ -485,6 +497,7 @@ itself never does).
 | Streaming | `SCRCPY_STREAM_MODE`, `SCRCPY_SERVER_LOG_LEVEL`, `SCRCPY_I_FRAME_INTERVAL`, `VIDEO_QUEUE_*`, `SCRCPY_RAW_*` |
 | Logging and audit | `LOG_*`, `AUDIT_*`, `VIEWER_WATCH_RETENTION_DAYS` |
 | ALAS (optional) | `ALAS_EMBED_ORIGIN`, `ALAS_ALLOWED_HOSTS`, `ALAS_ALLOWED_CIDRS`, `ALAS_POLICY_*`, `ALAS_TOKEN_*` |
+| Notifications (optional) | `NOTIFICATION_ALLOWED_HOSTS` (exact private destination hosts or IPs) |
 | Image and build | `SCRCPYGATE_IMAGE`, `PYTHON_IMAGE`, `PIP_INDEX_URL` |
 
 - `SCRCPYGATE_IMAGE` selects the image to run: empty means the locally built `scrcpygate:local`;
