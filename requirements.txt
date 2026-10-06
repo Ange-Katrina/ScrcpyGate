@@ -2,7 +2,7 @@ fastapi==0.139.0
 starlette==1.6.0
 uvicorn==0.34.0
 jinja2==3.1.6
-Werkzeug==3.1.8
+Werkzeug==3.1.9
 websockets==13.1
 cryptography==50.0.0
 # 地域限制（GEO）读库：官方 wheel 覆盖 musllinux x86_64/aarch64，Alpine 不需要编译器。
