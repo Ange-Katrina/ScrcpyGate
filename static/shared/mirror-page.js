@@ -5860,7 +5860,8 @@ document.addEventListener('DOMContentLoaded',function(){
         reminderUrl.searchParams.delete('password_reminder');
         window.history.replaceState(null,'',reminderUrl.pathname+reminderUrl.search+reminderUrl.hash);
         window.ScrcpyGateSession.start().then(function(user){
-          if(user && user.password_reminder_pending && !user.must_change_password){
+          if(user && user.password_reminder_pending && !user.must_change_password
+              && user.expiration_state !== 'expiring' && user.expiration_state !== 'expired'){
             upReminder.hidden=false;
             upOpen();
           }

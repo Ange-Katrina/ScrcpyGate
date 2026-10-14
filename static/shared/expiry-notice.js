@@ -54,7 +54,7 @@
   }
 
   function dismissKey(user, now) {
-    return STORAGE_PREFIX + text(user && user.expires_at) + ':' + localDay(now);
+    return STORAGE_PREFIX + text(user && user.username) + ':' + text(user && user.expires_at) + ':' + localDay(now);
   }
 
   function readStore(store) {

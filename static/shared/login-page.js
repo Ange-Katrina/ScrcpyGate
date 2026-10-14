@@ -251,9 +251,11 @@
                 })
                 .then(function (login) {
                     var user = login && login.user || {};
+                    var expirationState = String(user.expiration_state || '').toLowerCase();
+                    var showExpiryNotice = expirationState === 'expiring' || expirationState === 'expired';
                     window.location.href = user.must_change_password
                         ? '/mirror?password_change=1'
-                        : (user.password_reminder_pending ? '/mirror?password_reminder=1' : '/mirror');
+                        : (user.password_reminder_pending && !showExpiryNotice ? '/mirror?password_reminder=1' : '/mirror');
                 })
                 .catch(function (err) {
                     var status = Number(err && err.detail && err.detail.status) || 0;
