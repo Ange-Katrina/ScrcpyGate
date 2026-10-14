@@ -90,12 +90,17 @@
         <div class="device-scrollbar" id="device-scrollbar" aria-hidden="true"></div>
       </section>
       <section class="sidebar-prefs" aria-label="账户与投屏偏好">
-        <div class="up-expiry" id="up-expiry" data-state="ok" data-i18n-skip aria-label="账号有效期"><span id="up-expiry-text">—</span></div>
-        <div class="ap-switch-row" id="sidebar-exit-guard">
+        <div class="sidebar-pref-row sidebar-pref-expiry">
+          <span class="sidebar-pref-icon" aria-hidden="true"><i data-lucide="calendar-days"></i></span>
+          <div class="up-expiry" id="up-expiry" data-state="ok" data-i18n-skip aria-label="账号有效期"><span id="up-expiry-text">—</span></div>
+        </div>
+        <div class="ap-switch-row sidebar-pref-row" id="sidebar-exit-guard">
+          <span class="sidebar-pref-icon" aria-hidden="true"><i data-lucide="refresh-cw"></i></span>
           <span class="ap-switch-copy"><b>退出浏览器后自动检测</b></span>
           <button class="ap-switch sg-switch" id="ap-exit-guard" type="button" role="switch" aria-checked="false" aria-label="退出浏览器后自动检测 ALAS" title="关闭浏览器后检测一次 ALAS 状态"><i></i></button>
         </div>
-        <div class="ap-switch-row" id="sidebar-auto-control">
+        <div class="ap-switch-row sidebar-pref-row" id="sidebar-auto-control">
+          <span class="sidebar-pref-icon" aria-hidden="true"><i data-lucide="mouse-pointer-2"></i></span>
           <span class="ap-switch-copy"><b>投屏自动获取控制</b></span>
           <button class="ap-switch sg-switch" id="watch-auto-control" type="button" role="switch" aria-checked="false" aria-label="投屏自动获取控制" title="开始观看时，仅在有权限且控制权空闲时尝试获取"><i></i></button>
         </div>
