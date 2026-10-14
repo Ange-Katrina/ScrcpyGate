@@ -263,6 +263,8 @@ The protocol follows the bundled scrcpy **3.1** server. See the upstream [keyboa
 
 The **Mirror management** page covers text input, automatic control on fullscreen, orientation reset, volume, power, and device screen on/off as well as the existing toolbar controls. Each role can place these actions in the toolbar, move them into **More**, or disable them. Existing layouts retain their ordering and disabled actions when upgraded. Disabling automatic control also stops its automatic acquisition behavior without changing the browser preference. These settings configure the workbench UI; device permissions and control ownership are still enforced separately.
 
+In 2.4.0, the workbench sidebar places a compact account-days-left pill, the per-user ALAS post-exit check, and a new per-browser **take control when viewing starts** switch above Sign out. The new switch is off by default and attempts acquisition once per viewing session only when the device grants control access and its control lease is free; it never takes over another user. The separate fullscreen auto-control preference remains available in **More**. ALAS post-exit settings still save per account on the server.
+
 ### Updates and ALAS scheduling
 
 Update ScrcpyGate on the deployment host with `deploy.sh --update` and a published image reference. Check the tag or digest in GHCR before updating; floating tags such as `latest`, `dev`, and `edge` can change without a version-number change. The application does not check for or install its own updates and has no Docker access.

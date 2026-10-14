@@ -248,6 +248,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var popShot=document.getElementById('cb-pop-shot');
       var popKeyboard=document.getElementById('cb-pop-keyboard');
       var popAutoControl=document.getElementById('cb-pop-auto-control');
+      var watchAutoControlBtn=document.getElementById('watch-auto-control');
       var ctrlDock=document.getElementById('ctrl-dock');
       var fullscreenDockToggle=document.getElementById('fullscreen-dock-toggle');
       var occupiedChip=document.getElementById('cb-occupied');
@@ -1268,7 +1269,7 @@ document.addEventListener('DOMContentLoaded',function(){
           else if(name==='scrcpygate:videoopen'){ if(watchState==='connecting'||watchState==='resuming') setWatchState('websocket'); }
           else if(name==='scrcpygate:videohello'){ if(watchState==='websocket'||watchState==='connecting') setWatchState('hello'); syncVideoOrientation(); }
           else if(name==='scrcpygate:videokeyframe'){ if(watchState==='hello'||watchState==='websocket'||watchState==='resuming') setWatchState('keyframe'); }
-          else if(name==='scrcpygate:videoplaying'){ if(watchState==='keyframe'||watchState==='hello'||watchState==='websocket'||watchState==='resuming') setWatchState('playing'); syncVideoOrientation(); renderControl(); autoAcquireControlOnFullscreen(); }
+          else if(name==='scrcpygate:videoplaying'){ if(watchState==='keyframe'||watchState==='hello'||watchState==='websocket'||watchState==='resuming') setWatchState('playing'); syncVideoOrientation(); renderControl(); autoAcquireControlOnWatch(); autoAcquireControlOnFullscreen(); }
           else if(name==='scrcpygate:videofailed'){ if(watchState!=='idle'&&watchState!=='fail') setWatchState('fail'); }
         });
       });
@@ -2225,6 +2226,24 @@ document.addEventListener('DOMContentLoaded',function(){
          关掉后回到「手动点获取控制」。 */
       var FULLSCREEN_AUTO_CONTROL_KEY='scrcpygate-fullscreen-auto-control';
       var fullscreenAutoControl=true;
+      var WATCH_AUTO_CONTROL_KEY='scrcpygate-watch-auto-control';
+      var watchAutoControl=false;
+      var watchAutoControlAttemptGeneration=-1;
+      function savedWatchAutoControl(){
+        try{ return localStorage.getItem(WATCH_AUTO_CONTROL_KEY)==='1'; }catch(e){ return false; }
+      }
+      function renderWatchAutoControlToggle(){
+        if(!watchAutoControlBtn) return;
+        watchAutoControlBtn.classList.toggle('is-on',watchAutoControl);
+        watchAutoControlBtn.setAttribute('aria-checked',watchAutoControl?'true':'false');
+        watchAutoControlBtn.disabled=!workbenchFeatureEnabled('auto_control');
+      }
+      function autoAcquireControlOnWatch(){
+        if(!watchAutoControl||!workbenchFeatureEnabled('auto_control')||watchAutoControlAttemptGeneration===watchRequestGeneration) return;
+        if(!watchingNow()||!currentSession||!canControlNow()||controlState!=='free'||controlBusy||!acquireBtn||acquireBtn.disabled) return;
+        watchAutoControlAttemptGeneration=watchRequestGeneration;
+        acquireBtn.click();
+      }
       function savedFullscreenAutoControl(){
         try{
           var raw=localStorage.getItem(FULLSCREEN_AUTO_CONTROL_KEY);
@@ -2892,6 +2911,13 @@ document.addEventListener('DOMContentLoaded',function(){
         showToast(fullscreenAutoControl?'全屏后默认获取控制已开启':'全屏后默认获取控制已关闭');
         if(fullscreenAutoControl) autoAcquireControlOnFullscreen();
       });
+      if(watchAutoControlBtn) watchAutoControlBtn.addEventListener('click',function(){
+        watchAutoControl=!watchAutoControl;
+        try{ localStorage.setItem(WATCH_AUTO_CONTROL_KEY,watchAutoControl?'1':'0'); }catch(e){}
+        renderWatchAutoControlToggle();
+        showToast(watchAutoControl?'投屏自动获取控制已开启':'投屏自动获取控制已关闭');
+        if(watchAutoControl) autoAcquireControlOnWatch();
+      });
       /* ---------- 截图：复制到剪贴板，不支持时回退下载 ---------- */
       function screenshotCanvas(){
         var v2=window.ScrcpyGateV2;
@@ -3458,6 +3484,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var apExitGuard=document.getElementById('ap-exit-guard');
       var apExitGuardEnabled=false;
       var apExitGuardBusy=false;
+      var apExitGuardSeq=0;
       var alasFloatWindow=document.getElementById('alas-float-window');
       var alasFloatAnimation=null;
       var alasFloatMotionEpoch=0;
@@ -3486,6 +3513,7 @@ document.addEventListener('DOMContentLoaded',function(){
         workbenchAlasVisible=visible!==false;
         var targets=[
           document.getElementById('alas-item'),
+          document.getElementById('sidebar-exit-guard'),
           document.getElementById('cb-alas'),
           document.getElementById('mirror-alas-dock-sep-before'),
           document.getElementById('mirror-alas-dock-sep-after')
@@ -3503,7 +3531,10 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         normalizeDockSeparators();
         renderAlasPill(apConfig&&apConfig.name,apStateData.state);
-        if(workbenchAlasVisible) apRefreshStatus();
+        if(workbenchAlasVisible){
+          apRefreshStatus();
+          if(window.ScrcpyGateSession&&window.ScrcpyGateSession.current()) apLoadExitGuard();
+        }
         else apStopPolling();
       }
       window.addEventListener('scrcpygate:workbench-alas-visibility',function(e){
@@ -5074,6 +5105,7 @@ document.addEventListener('DOMContentLoaded',function(){
           if(notifyBtn) notifyBtn.setAttribute('aria-expanded','false');
         }
         if(!workbenchFeatureEnabled('text_input')) textSendClose();
+        renderWatchAutoControlToggle();
         if(!workbenchFeatureEnabled('fullscreen')&&fullscreenActive) exitFullscreen();
         // 「全屏打开控制栏时画面上移」开关可能刚被改过：立刻按新值收/放位移。
         syncFullscreenDockLift();
@@ -5396,16 +5428,22 @@ document.addEventListener('DOMContentLoaded',function(){
       function apLoadExitGuard(){
         if(!apExitGuard) return Promise.resolve();
         if(!(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.exitGuard'))){ apRenderExitGuard(false); return Promise.resolve(); }
+        var requestSeq=++apExitGuardSeq;
         return window.ScrcpyGateApi.configured('alas.exitGuard').then(function(payload){
+          if(requestSeq!==apExitGuardSeq||apExitGuardBusy) return;
           var d=payload&&(payload.data&&typeof payload.data==='object'?payload.data:payload)||{};
           apExitGuardEnabled=d.enabled===true;
           apRenderExitGuard(apExitGuardEnabled);
-        }).catch(function(){ apRenderExitGuard(false); });
+        }).catch(function(error){
+          if(requestSeq!==apExitGuardSeq) return;
+          showToast('退出后检测状态获取失败 · '+apiErrorText(error));
+        });
       }
       function apToggleExitGuard(){
         if(!apExitGuard||apExitGuardBusy) return;
         if(!(window.ScrcpyGateApi&&window.ScrcpyGateApi.isConfigured('alas.exitGuard.update'))){ showToast('ALAS 服务未连接'); return; }
         var next=!apExitGuardEnabled;
+        ++apExitGuardSeq;
         apExitGuardBusy=true;
         apExitGuardEnabled=next;
         apRenderExitGuard(next);
@@ -5416,11 +5454,13 @@ document.addEventListener('DOMContentLoaded',function(){
           apExitGuardEnabled=d.enabled===true;
           apRenderExitGuard(apExitGuardEnabled);
           apSetStatus(apExitGuardEnabled?'退出后检测已开启 · 关闭浏览器后检测一次':'退出后检测已关闭');
+          showToast(apExitGuardEnabled?'退出后检测已开启 · 关闭浏览器后检测一次':'退出后检测已关闭');
         }).catch(function(error){
           apExitGuardBusy=false;
           apExitGuardEnabled=!next;
           apRenderExitGuard(apExitGuardEnabled);
           apSetStatus('设置失败 · '+apiErrorText(error),'error');
+          showToast('设置失败 · '+apiErrorText(error));
         });
       }
       function apOpen(){
@@ -5696,43 +5736,20 @@ document.addEventListener('DOMContentLoaded',function(){
         var expires=u&&u.expiresAt||'';
         var box=document.getElementById('up-expiry');
         var textEl=document.getElementById('up-expiry-text');
-        var metaEl=document.getElementById('up-expiry-meta');
-        var renewBtn=document.getElementById('up-renew');
+        var label;
         if(!expires){
           box.setAttribute('data-state','ok');
-          textEl.textContent='长期有效';
-          metaEl.textContent='无到期限制';
-          renewBtn.hidden=true;
-          renewBtn.disabled=false;
-          renewBtn.textContent='申请续期';
-          return;
+          label=tr('长期有效');
+        }else{
+          var days=Math.ceil((new Date(expires+'T00:00:00')-Date.now())/86400000);
+          var state=days<0?'expired':(days<=30?'warn':'ok');
+          box.setAttribute('data-state',state);
+          label=days<0
+            ? tr(days===-1?'已过期 1 天':'已过期 {0} 天').replace('{0}',String(Math.abs(days)))
+            : tr(days===1?'剩余 1 天':'剩余 {0} 天').replace('{0}',String(days));
         }
-        var days=Math.ceil((new Date(expires+'T00:00:00')-Date.now())/86400000);
-        var state=days<0?'expired':(days<=30?'warn':'ok');
-        box.setAttribute('data-state',state);
-        textEl.textContent=expires;
-        metaEl.textContent=days<0?('已过期 '+Math.abs(days)+' 天'):('剩余 '+days+' 天');
-        renewBtn.hidden=!(days<=30);
-        renewBtn.disabled=false;
-        renewBtn.textContent='申请续期';
-      }
-      function upRenew(){
-        if(upBusy) return;
-        upBusy=true;
-        upSetStatus('正在提交续期申请…','busy');
-        var p=(window.ScrcpyGateApi&&(window.ScrcpyGateApi.isConfigured('account.renewal.request')||window.ScrcpyGateApi.isConfigured('users.renewal.request')))
-          ? window.ScrcpyGateApi.configured(window.ScrcpyGateApi.isConfigured('account.renewal.request')?'account.renewal.request':'users.renewal.request',{ method:'POST', body:{} })
-          : Promise.reject(new Error('账户服务未连接'));
-        p.then(function(){
-          upBusy=false;
-          var btn=document.getElementById('up-renew');
-          btn.disabled=true;
-          btn.textContent='申请已提交';
-          upSetStatus('续期申请已提交,等待管理员处理');
-        }).catch(function(error){
-          upBusy=false;
-          upSetStatus('提交失败 · '+apiErrorText(error),'error');
-        });
+        textEl.textContent=label;
+        box.setAttribute('aria-label',tr('账号有效期')+'：'+label);
       }
       function upSetStatus(text,state){
         upStatus.classList.remove('busy','error');
@@ -5860,7 +5877,7 @@ document.addEventListener('DOMContentLoaded',function(){
       if(upPasswordForm){
         upPasswordForm.addEventListener('submit',function(e){ e.preventDefault(); upChangePassword(); });
       }
-      document.getElementById('up-renew').addEventListener('click',upRenew);
+      if(window.ScrcpyGateI18n&&typeof window.ScrcpyGateI18n.on==='function') window.ScrcpyGateI18n.on(upRenderExpiry);
       document.getElementById('up-logout').addEventListener('click',upLogout);
 
       /* 断点切换会同时改变面板的停靠方向与隐藏方向（>640px 为右侧抽屉、关闭时
@@ -5900,6 +5917,10 @@ document.addEventListener('DOMContentLoaded',function(){
           showForcedPasswordChange();
           return;
         }
+        if(user) upRenderExpiry();
+        watchAutoControl=savedWatchAutoControl();
+        renderWatchAutoControlToggle();
+        if(workbenchAlasVisible) apLoadExitGuard();
         loadMirrorDevices();
         mirrorRefreshTimer=window.setInterval(function(){
           if(document.visibilityState==='visible' && !document.hidden) loadMirrorDevices({silent:true});

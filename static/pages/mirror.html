@@ -89,6 +89,17 @@
         </div>
         <div class="device-scrollbar" id="device-scrollbar" aria-hidden="true"></div>
       </section>
+      <section class="sidebar-prefs" aria-label="账户与投屏偏好">
+        <div class="up-expiry" id="up-expiry" data-state="ok" data-i18n-skip aria-label="账号有效期"><span id="up-expiry-text">—</span></div>
+        <div class="ap-switch-row" id="sidebar-exit-guard">
+          <span class="ap-switch-copy"><b>退出浏览器后自动检测</b></span>
+          <button class="ap-switch sg-switch" id="ap-exit-guard" type="button" role="switch" aria-checked="false" aria-label="退出浏览器后自动检测 ALAS" title="关闭浏览器后检测一次 ALAS 状态"><i></i></button>
+        </div>
+        <div class="ap-switch-row" id="sidebar-auto-control">
+          <span class="ap-switch-copy"><b>投屏自动获取控制</b></span>
+          <button class="ap-switch sg-switch" id="watch-auto-control" type="button" role="switch" aria-checked="false" aria-label="投屏自动获取控制" title="开始观看时，仅在有权限且控制权空闲时尝试获取"><i></i></button>
+        </div>
+      </section>
       <div class="sidebar-divider logout-divider"></div>
       <nav class="sidebar-nav logout-nav" aria-label="退出">
         <a class="menu-item logout" data-logout href="/login" title="退出登录">
@@ -574,13 +585,6 @@
               <button class="ap-btn" id="ap-refresh" type="button"><i data-lucide="refresh-cw"></i>刷新状态</button>
               <a class="ap-btn disabled" id="ap-open" href="/alas/embed/" rel="noopener noreferrer" aria-haspopup="dialog" aria-controls="alas-float-window" aria-disabled="true"><i data-lucide="external-link"></i>打开 ALAS 面板</a>
             </div>
-            <div class="ap-switch-row">
-              <span class="ap-switch-copy">
-                <b>退出浏览器后自动检测</b>
-                <small>只在你关闭浏览器后检测一次：ALAS 已停止或异常时自动重启，不会持续检测</small>
-              </span>
-              <button class="ap-switch sg-switch" id="ap-exit-guard" type="button" role="switch" aria-checked="false" aria-label="退出浏览器后自动检测 ALAS"><i></i></button>
-            </div>
             <div class="vp-status" id="ap-status" role="status" aria-live="polite">
               <span class="vp-status-dot" id="ap-status-dot"><i data-lucide="check"></i></span>
               <span id="ap-status-text">ALAS 数据已同步</span>
@@ -621,15 +625,6 @@
                 <span class="up-username" id="up-username">—</span>
                 <span class="up-role" id="up-role"></span>
               </span>
-            </div>
-            <div class="up-expiry" id="up-expiry" data-state="ok">
-              <span class="up-expiry-icon" aria-hidden="true"><i data-lucide="calendar-clock"></i></span>
-              <span class="up-expiry-copy">
-                <span class="up-expiry-label">账号有效期</span>
-                <strong id="up-expiry-text">—</strong>
-                <small id="up-expiry-meta">—</small>
-              </span>
-              <button class="ap-btn" id="up-renew" type="button" hidden>申请续期</button>
             </div>
             <div class="up-last-login"><i data-lucide="clock"></i><span id="up-last-login">上次登录 —</span></div>
 
