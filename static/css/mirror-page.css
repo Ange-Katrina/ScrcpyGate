@@ -1157,6 +1157,12 @@
     .up-password { display:flex; flex-direction:column; gap:12px; }
     .up-password-reminder { display:flex; align-items:flex-start; gap:10px; padding:12px; margin-bottom:12px; border:1px solid var(--c-border); border-radius:8px; background:var(--c-surface); }
     .up-password-reminder[hidden] { display:none; }
+    .up-required-note { margin:0 0 12px; padding:12px 14px; border-radius:10px; color:var(--c-text-strong); background:var(--c-surface-hover); font-size:13px; line-height:1.5; }
+    .up-required-note[hidden] { display:none; }
+    .up-panel.password-required :is(.up-identity,.up-expiry,.up-last-login,.vp-group-title:not(.vp-group-title-extra),.vp-note,#up-close) { display:none; }
+    .up-panel.password-required .vp-group-title-extra { margin-top:0; }
+    .up-panel.password-required .up-logout { margin-top:18px; }
+    .up-panel.password-required .vp-status:not(.busy):not(.error) { display:none; }
     .up-password-reminder > svg { width:18px; height:18px; flex:none; color:var(--brand-400); }
     .up-password-reminder > div { min-width:0; }
     .up-password-reminder strong { color:var(--c-text-strong); font-size:13px; }

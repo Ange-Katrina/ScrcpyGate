@@ -4559,7 +4559,9 @@
   }
 
   // 无条件解绑当前观看:关闭视频与控制通道并清空会话/设备状态。
+  var watchBindingGeneration = 0;
   function resetWatchBinding() {
+    watchBindingGeneration++;
     state.viewerStopTerminal = true;
     resetViewerStopTracking(false);
     closeVideoSocket(true);
@@ -4647,9 +4649,10 @@
   function handlerSessionsCreate(opts) {
     var body = (opts && opts.body) || {};
     var deviceId = body.deviceId || (opts && opts.params && opts.params.deviceId);
-    // 换设备时先彻底结束上一台设备的观看与控制,避免旧设备的通道继续存活。
+    // 换设备时只解绑浏览器通道；服务端保留短暂重连宽限。
     var previousDevice = state.videoSocketDevice || state.deviceId || '';
     if (previousDevice && String(previousDevice) !== String(deviceId || '')) resetWatchBinding();
+    var generation = ++watchBindingGeneration;
     var policyRequest = state.viewerStopSettingsLoaded
       ? Promise.resolve()
       : loadViewerStopSettings().catch(function (error) {
@@ -4658,8 +4661,16 @@
         return null;
       });
     return policyRequest.then(function () {
+      if (generation !== watchBindingGeneration) return { ok: false, stale: true };
       return apiPost('/api/devices/' + encodeURIComponent(deviceId) + '/mirror/start', {});
     }).then(function (payload) {
+      if (payload && payload.stale) return payload;
+      if (generation !== watchBindingGeneration) {
+        if (!payload || !payload.viewer_token) return { ok: false, stale: true };
+        return apiPost('/api/devices/' + encodeURIComponent(deviceId) + '/mirror/stop-self', {
+          viewer_token: payload.viewer_token
+        }).catch(function () {}).then(function () { return { ok: false, stale: true }; });
+      }
       var sess = null;
       if (payload && payload.sessions) {
         var keys = Object.keys(payload.sessions);
@@ -6685,6 +6696,7 @@
     // 本浏览器的稳定设备标识（同一台设备进出记录/登录会话都用它）。
     browserDeviceId: browserDeviceId,
     deviceIdentity: { browserId: browserDeviceId },
+    suspendWatchForSwitch: resetWatchBinding,
     setVideoRotation: setVideoRotation,
     setFullscreenMode: setFullscreenMode,
     refreshVideoLayout: updateVideoRotationLayout,

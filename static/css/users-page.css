@@ -1210,6 +1210,8 @@ html, body { margin:0; height:100%; }
 #user-details-body .activity-scope-note { padding:14px 0 0; margin:0; }
 .user-details-actions { flex-wrap:wrap; }
 .user-details-actions > button { min-height:44px; }
+.user-details-actions .user-details-delete { color:var(--btn-cut); border-color:var(--btn-cut-border-hover); background:var(--btn-cut-bg); }
+.user-details-actions .user-details-delete:hover { color:var(--btn-cut); border-color:var(--btn-cut-border-hover); background:var(--btn-cut-bg-hover); }
 @media (max-width:600px) {
   .user-card-grid { grid-template-columns:minmax(0,1fr); padding:0 14px 14px; }
   .user-card .row-btn { min-height:44px; }

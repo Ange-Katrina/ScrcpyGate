@@ -251,8 +251,9 @@
                 })
                 .then(function (login) {
                     var user = login && login.user || {};
-                    window.location.href = user.password_reminder_pending && !user.must_change_password
-                        ? '/mirror?password_reminder=1' : '/mirror';
+                    window.location.href = user.must_change_password
+                        ? '/mirror?password_change=1'
+                        : (user.password_reminder_pending ? '/mirror?password_reminder=1' : '/mirror');
                 })
                 .catch(function (err) {
                     var status = Number(err && err.detail && err.detail.status) || 0;

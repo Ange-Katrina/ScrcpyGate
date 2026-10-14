@@ -608,7 +608,7 @@
       <section class="vp-panel up-panel" id="up-panel" role="dialog" aria-modal="true" aria-label="账户设置" aria-hidden="true" inert>
         <span class="vp-grabber" aria-hidden="true"></span>
         <header class="vp-head">
-          <div class="vp-head-copy"><h2>账户</h2><p>资料、偏好与安全</p></div>
+          <div class="vp-head-copy"><h2 id="up-title">账户</h2><p id="up-subtitle">资料、偏好与安全</p></div>
           <button class="vp-close" id="up-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
         </header>
         <div class="vp-body">
@@ -634,6 +634,7 @@
             <div class="up-last-login"><i data-lucide="clock"></i><span id="up-last-login">上次登录 —</span></div>
 
             <div class="vp-group-title vp-group-title-extra"><h3>修改密码</h3><span class="vp-hint">至少 12 位</span></div>
+            <p class="up-required-note" id="up-required-note" hidden>此账户需要修改密码后才能继续使用。请输入当前密码并设置新密码。</p>
             <div class="up-password-reminder" id="up-password-reminder" hidden>
               <i data-lucide="shield-check" aria-hidden="true"></i>
               <div><strong>建议修改初始密码</strong><p>为保护账户，请设置仅你知道的新密码；也可以稍后再说。</p>

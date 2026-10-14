@@ -302,6 +302,8 @@ document.addEventListener('DOMContentLoaded',function(){
       var gridView=null;
       var currentSession=null;
       var watchRequestGeneration=0;
+      var SWITCH_RECONNECT_MS=4000;
+      var recentlyWatchedDevices=Object.create(null);
       var mirrorRefreshTimer=null;
       var MIRROR_REFRESH_MS=60000;
       var notificationRefreshTimer=null;
@@ -453,6 +455,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var gridEl=document.getElementById('mirror-grid');
         var stopped=Promise.resolve();
         if(next==='grid'){
+          recentlyWatchedDevices=Object.create(null);
           var pending=watchState==='playing'||watchState==='connecting'||watchState==='waiting'||watchState==='websocket'||watchState==='hello'||watchState==='keyframe'||watchState==='resuming';
           if(pending) cancelCurrentWatch();
           viewMode='grid';
@@ -541,9 +544,10 @@ document.addEventListener('DOMContentLoaded',function(){
         if(!list) return;
         document.getElementById('device-count').textContent=deviceItems.length ? deviceItems.length + ' 台' : '—';
         if(!deviceItems.length){
+          var unbound=!deviceLoadError&&!mirrorIsAdmin();
           list.innerHTML=deviceLoadError
             ?'<div class="device-empty"><div class="device-empty-card error"><div class="dev-empty-icon"><i data-lucide="cloud-off"></i></div><b>设备数据加载失败</b><small>数据服务连接异常,请稍后重试</small><div class="dev-empty-actions"><button class="dev-empty-btn primary" type="button" data-dev-refresh>重试</button></div></div></div>'
-            :'<div class="device-empty"><div class="device-empty-card"><div class="dev-empty-icon"><i data-lucide="smartphone"></i></div><b>暂无可用设备</b><small>添加设备并授权后即可在此观看</small><div class="dev-empty-actions"><a class="dev-empty-btn primary" data-admin-only href="/devices">前往设备管理</a><button class="dev-empty-btn" type="button" data-dev-refresh>刷新</button></div></div></div>';
+            :'<div class="device-empty"><div class="device-empty-card"><div class="dev-empty-icon"><i data-lucide="smartphone"></i></div><b>'+escHtml(tr(unbound?'此账户无设备绑定':'暂无可用设备'))+'</b><small>'+escHtml(tr(unbound?'请联系管理员绑定设备后再试':'添加设备并授权后即可在此观看'))+'</small><div class="dev-empty-actions">'+(unbound?'':'<a class="dev-empty-btn primary" data-admin-only href="/devices">前往设备管理</a>')+'<button class="dev-empty-btn" type="button" data-dev-refresh>'+escHtml(tr('刷新'))+'</button></div></div></div>';
           syncAdminOnly();
           list.querySelectorAll('[data-dev-refresh]').forEach(function(btn){ btn.addEventListener('click',function(){ var el=this; el.disabled=true; el.classList.add('loading'); var orig=el.innerHTML; el.innerHTML='<i data-lucide="loader-circle"></i><span>刷新中…</span>'; lucide.createIcons(); loadMirrorDevices().then(done,done); function done(){ el.disabled=false; el.classList.remove('loading'); el.innerHTML=orig; if(window.lucide) lucide.createIcons(); } }); });
           lucide.createIcons(); return;
@@ -590,7 +594,7 @@ document.addEventListener('DOMContentLoaded',function(){
         var sameDevice=previousId!=null&&String(previousId)===String(id);
         if(!sameDevice) clearControlNotice();
         var preserveSession=options.preserveSession!==false&&sameDevice&&streamLive();
-        if(!sameDevice&&previousId!=null) cancelCurrentWatch();
+        if(!sameDevice&&previousId!=null) suspendCurrentWatchForSwitch();
         selectedDevice=deviceById(id); renderDeviceList();
         var d=selectedDevice; if(!d) return;
         document.getElementById('mirror-device-name').textContent=d.name; document.getElementById('mirror-device-status').textContent=mirrorStatusText(d);
@@ -612,8 +616,13 @@ document.addEventListener('DOMContentLoaded',function(){
           setWatchState(d.online === true && d.permission ? 'idle' : (d.permission ? (d.online === false ? 'offline' : 'idle') : 'noperm'));
         }
         if(sameDevice) apRefreshStatus(); else apOnDeviceChange();
+        if(!sameDevice&&viewMode==='single'&&d.online===true&&d.permission&&recentlyWatchedDevices[String(d.id)]>Date.now()){
+          delete recentlyWatchedDevices[String(d.id)];
+          startWatchFlow();
+        }
       }
       function clearSelectedDevice(){
+        recentlyWatchedDevices=Object.create(null);
         if(selectedDevice) cancelCurrentWatch();
         selectedDevice=null;
         controlState='unknown';
@@ -889,8 +898,10 @@ document.addEventListener('DOMContentLoaded',function(){
         var requestGeneration=++watchRequestGeneration;
         var requestDeviceId=selectedDevice.id;
         window.ScrcpyGateApi.configured('sessions.create',{method:'POST',body:{deviceId:requestDeviceId}}).then(function(payload){
+          if(payload&&payload.stale) return;
           if(requestGeneration!==watchRequestGeneration || !selectedDevice || String(selectedDevice.id)!==String(requestDeviceId)){
-            return window.ScrcpyGateApi.configured('sessions.stop',{params:{deviceId:requestDeviceId},method:'POST'}).catch(function(){});
+            if(payload&&payload.viewer_token) return window.ScrcpyGateApi.configured('sessions.viewer.stop',{body:{deviceId:requestDeviceId,viewerToken:payload.viewer_token},method:'POST'}).catch(function(){});
+            return;
           }
           currentSession=payload && (payload.session || payload.data || payload);
           // controller 是「持有者用户名 / self / other / free」的混合口径：这里统一走
@@ -911,6 +922,7 @@ document.addEventListener('DOMContentLoaded',function(){
         watchRequestGeneration++;
         if(fullscreenActive) exitFullscreen();
         var deviceId=selectedDevice&&selectedDevice.id;
+        if(deviceId) delete recentlyWatchedDevices[String(deviceId)];
         var hadSession=!!currentSession;
         currentSession=null;
         controlState='free';
@@ -920,6 +932,22 @@ document.addEventListener('DOMContentLoaded',function(){
         window.ScrcpyGateApi.configured('sessions.stop',{params:{deviceId:deviceId},method:'POST'}).catch(function(error){
           showToast(apiErrorText(error));
         });
+      }
+      function suspendCurrentWatchForSwitch(){
+        watchRequestGeneration++;
+        if(fullscreenActive) exitFullscreen();
+        var deviceId=selectedDevice&&selectedDevice.id;
+        if(deviceId&&currentSession&&streamLive()) recentlyWatchedDevices[String(deviceId)]=Date.now()+SWITCH_RECONNECT_MS;
+        if(window.ScrcpyGateV2&&typeof window.ScrcpyGateV2.suspendWatchForSwitch==='function'){
+          window.ScrcpyGateV2.suspendWatchForSwitch();
+        }else{
+          cancelCurrentWatch();
+          return;
+        }
+        currentSession=null;
+        controlState='free';
+        controlOwner='';
+        setWatchState('idle');
       }
 
       document.getElementById('start-watch').addEventListener('click',startWatchFlow);
@@ -5635,6 +5663,7 @@ document.addEventListener('DOMContentLoaded',function(){
       var upStatusText=document.getElementById('up-status-text');
       var upReminder=document.getElementById('up-password-reminder');
       var upBusy=false;
+      var forcedPasswordChange=false;
       function upUser(){
         var u=null;
         try{ u=(window.ScrcpyGateSession&&window.ScrcpyGateSession.current&&window.ScrcpyGateSession.current())||null; }catch(e){}
@@ -5733,6 +5762,7 @@ document.addEventListener('DOMContentLoaded',function(){
           upNew.value='';
           upConfirm.value='';
           upReminder.hidden=true;
+          if(forcedPasswordChange){ window.location.replace('/mirror'); return; }
           upSetStatus('密码已更新');
         }).catch(function(error){
           upBusy=false;
@@ -5764,9 +5794,11 @@ document.addEventListener('DOMContentLoaded',function(){
         upRenderIdentity();
         upRenderExpiry();
         var closeBtn=document.getElementById('up-close');
-        if(closeBtn) closeBtn.focus();
+        if(forcedPasswordChange) upCur.focus();
+        else if(closeBtn) closeBtn.focus();
       }
       function upClose(){
+        if(forcedPasswordChange) return;
         upPanel.classList.remove('open');
         upBackdrop.classList.remove('open');
         releasePanelFocus(upPanel);
@@ -5774,6 +5806,26 @@ document.addEventListener('DOMContentLoaded',function(){
         upPanel.setAttribute('inert','');
         upBackdrop.setAttribute('aria-hidden','true');
       }
+      function showForcedPasswordChange(){
+        forcedPasswordChange=true;
+        upPanel.classList.add('password-required');
+        upPanel.setAttribute('aria-label',tr('必须修改密码'));
+        document.getElementById('up-title').textContent=tr('请修改密码');
+        document.getElementById('up-subtitle').textContent=tr('修改密码后才能继续使用工作台');
+        document.getElementById('up-required-note').hidden=false;
+        upReminder.hidden=true;
+        upOpen();
+      }
+      upPanel.addEventListener('keydown',function(e){
+        if(!forcedPasswordChange||e.key!=='Tab') return;
+        var controls=Array.prototype.filter.call(upPanel.querySelectorAll('input,button'),function(el){
+          return !el.disabled && !el.hidden && el.getClientRects().length>0;
+        });
+        if(!controls.length) return;
+        var first=controls[0],last=controls[controls.length-1];
+        if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+      });
       document.getElementById('up-reminder-change').addEventListener('click',function(){
         upReminder.hidden=true;
         upCur.focus();
@@ -5839,26 +5891,32 @@ document.addEventListener('DOMContentLoaded',function(){
 
       /* ---------- 初始渲染 ---------- */
       setWatchState('idle');
-      loadMirrorDevices();
-      mirrorRefreshTimer=window.setInterval(function(){
-        if(document.visibilityState==='visible' && !document.hidden) loadMirrorDevices({silent:true});
-      },MIRROR_REFRESH_MS);
-      /* 通知中心：进入页面先拉一次（未读红点不用展开就能看到），
-         之后每分钟静默刷新一次，回到前台也补一次。 */
-      loadNotifications();
-      notificationRefreshTimer=window.setInterval(function(){
-        if(document.visibilityState==='visible' && !document.hidden) loadNotifications();
-      },MIRROR_REFRESH_MS);
-      document.addEventListener('visibilitychange',function(){
-        if(document.visibilityState==='visible') loadNotifications();
-      });
-      if(window.ScrcpyGateSession) window.ScrcpyGateSession.start().catch(function(){}).then(function(){
+      var initialSession=window.ScrcpyGateSession?window.ScrcpyGateSession.start():Promise.resolve(null);
+      initialSession.catch(function(){ return null; }).then(function(user){
+        if(user&&user.must_change_password){
+          var passwordUrl=new URL(window.location.href);
+          passwordUrl.searchParams.delete('password_change');
+          window.history.replaceState(null,'',passwordUrl.pathname+passwordUrl.search+passwordUrl.hash);
+          showForcedPasswordChange();
+          return;
+        }
+        loadMirrorDevices();
+        mirrorRefreshTimer=window.setInterval(function(){
+          if(document.visibilityState==='visible' && !document.hidden) loadMirrorDevices({silent:true});
+        },MIRROR_REFRESH_MS);
+        /* Notification requests are blocked until a required password change completes. */
+        loadNotifications();
+        notificationRefreshTimer=window.setInterval(function(){
+          if(document.visibilityState==='visible' && !document.hidden) loadNotifications();
+        },MIRROR_REFRESH_MS);
+        document.addEventListener('visibilitychange',function(){
+          if(document.visibilityState==='visible') loadNotifications();
+        });
         // 会话就绪后再判定管理员视图开关（首次设备列表渲染时可能还没有会话信息）。
         syncViewSwitch();
         restoreViewMode();
         // 全屏自动获取控制：读取本浏览器偏好并同步开关外观。
         fullscreenAutoControl=savedFullscreenAutoControl();
         renderAutoControlToggle();
-        loadNotifications();
       });
     });
