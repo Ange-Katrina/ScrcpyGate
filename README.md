@@ -267,7 +267,7 @@ In 2.4.3, the workbench sidebar gives its compact preference card and device lis
 
 In 2.4.4, an account entering the expiry reminder window opens its expiry dialog after login while remaining on the workbench. An optional password-change reminder no longer opens the account drawer over it; a mandatory password change still takes priority. Dismissing an expiry notice suppresses it for that account and expiry date until the next local calendar day.
 
-In 2.4.5, the workbench status bar shows familiar resolution tiers such as **720p** and **1080p** for standard caps, including after changing quality or starting a stream. Custom caps retain their exact pixel limit. These labels describe the configured tier; the video keeps the device's aspect ratio.
+In 2.4.5, the workbench status bar shows familiar resolution tiers such as **720p** and **1080p** for standard caps, including after changing quality or starting a stream. Custom caps retain their exact pixel limit. These labels describe the configured tier; the video keeps the device's aspect ratio. This release also updates Werkzeug to 3.1.9 to resolve PYSEC-2026-4312 and pass the runtime dependency audit.
 
 ### Updates and ALAS scheduling
 
