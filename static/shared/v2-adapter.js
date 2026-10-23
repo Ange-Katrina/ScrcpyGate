@@ -665,8 +665,14 @@
   function bpsToMbps(bps) { return Math.round((Number(bps) || 0) / 100000) / 10; }
   function profileWidth(maxSize) { return Number(maxSize) || 1280; }
   function profileHeight(maxSize) { return Math.round(profileWidth(maxSize) * 9 / 16); }
-  // Report the configured long-edge cap without assuming a 16:9 device.
-  function profileLabel(maxSize) { return '长边上限 ' + profileWidth(maxSize) + 'px'; }
+  // Tier labels describe the configured cap, not the actual encoded dimensions.
+  function profileLabel(maxSize) {
+    var edge = profileWidth(maxSize);
+    for (var i = 0; i < RESOLUTION_CAPS.length; i++) {
+      if (RESOLUTION_CAPS[i].value === edge) return RESOLUTION_CAPS[i].label;
+    }
+    return '长边上限 ' + edge + 'px';
+  }
   // 预设帧率由服务端限制在 15..240(与画质页三个输入框的 min/max 一致),所以 0 只可能
   // 来自字段缺失或早期数据。这里只在"没有帧率"时兜底为 24,不再把 0 显示成一个帧率。
   function presetFps(value) { var fps = Number(value); return isFinite(fps) && fps > 0 ? fps : 24; }
@@ -6612,6 +6618,7 @@
 
   window.ScrcpyGateV2 = {
     state: state,
+    resolutionCapLabel: profileLabel,
     fmtTs: fmtTs,
     timeRangeBounds: timeRangeBounds,
     withinTimeBounds: withinTimeBounds,

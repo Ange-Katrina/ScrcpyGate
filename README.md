@@ -267,6 +267,8 @@ In 2.4.3, the workbench sidebar gives its compact preference card and device lis
 
 In 2.4.4, an account entering the expiry reminder window opens its expiry dialog after login while remaining on the workbench. An optional password-change reminder no longer opens the account drawer over it; a mandatory password change still takes priority. Dismissing an expiry notice suppresses it for that account and expiry date until the next local calendar day.
 
+In 2.4.5, the workbench status bar shows familiar resolution tiers such as **720p** and **1080p** for standard caps, including after changing quality or starting a stream. Custom caps retain their exact pixel limit. These labels describe the configured tier; the video keeps the device's aspect ratio.
+
 ### Updates and ALAS scheduling
 
 Update ScrcpyGate on the deployment host with `deploy.sh --update` and a published image reference. Check the tag or digest in GHCR before updating; floating tags such as `latest`, `dev`, and `edge` can change without a version-number change. The application does not check for or install its own updates and has no Docker access.

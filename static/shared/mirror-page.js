@@ -3088,7 +3088,11 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       function vpParamsSpec(){
         var dims=vpParams.resMode==='custom' ? [vpParams.customW,vpParams.customH] : String(vpParams.resMode).split('x');
-        return tr('长边上限')+' '+Math.max(Number(dims[0]),Number(dims[1]))+'px · ≤'+vpParams.fps+'fps · '+vpParams.bitrate+'Mbps';
+        var edge=Math.max(Number(dims[0]),Number(dims[1]));
+        var adapter=window.ScrcpyGateV2;
+        var resolution=adapter&&typeof adapter.resolutionCapLabel==='function'
+          ? tr(adapter.resolutionCapLabel(edge)) : tr('长边上限')+' '+edge+'px';
+        return resolution+' · ≤'+vpParams.fps+'fps · '+vpParams.bitrate+'Mbps';
       }
       function vpSyncSeg(seg){
         if(!seg) return;
