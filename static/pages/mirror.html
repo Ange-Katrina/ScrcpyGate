@@ -139,9 +139,9 @@
         <div class="video-box" id="video-box">
           <div class="conn-overlay" data-cstate="idle">
             <span class="conn-icon"><i data-lucide="monitor-play"></i></span>
-            <h2>尚未开始观看</h2>
-            <p>从设备列表选择设备后，点击「开始观看」</p>
-            <div class="conn-actions"><button class="start-button" id="start-watch" disabled><i data-lucide="play"></i>开始观看</button></div>
+            <h2>等待设备数据</h2>
+            <p>正在连接数据服务…</p>
+            <div class="conn-actions"><button class="start-button" id="start-watch" hidden disabled><i data-lucide="play"></i>开始观看</button></div>
           </div>
           <div class="conn-overlay" data-cstate="connecting">
             <span class="spinner" aria-hidden="true"></span>
@@ -272,14 +272,14 @@
           <span class="dock-grip" id="dock-grip" aria-hidden="true"><i data-lucide="grip-vertical"></i></span>
           <button class="cb-btn cb-session" id="cb-watch" type="button" title="开始投屏" aria-label="开始投屏" disabled><i data-lucide="play"></i><span id="cb-watch-label">开始投屏</span></button>
           <button class="cb-btn cb-acquire" id="cb-acquire" type="button" title="获取控制" aria-label="获取控制"><i data-lucide="mouse-pointer-click"></i><span id="cb-acquire-label">获取控制</span></button>
-          <button class="cb-btn cb-keyboard" id="cb-keyboard" type="button" title="键盘输入" aria-label="开启键盘输入" aria-pressed="false" disabled><i data-lucide="keyboard"></i><span id="cb-keyboard-label">键盘</span></button>
           <span class="cb-occupied" id="cb-occupied" title="该设备正被其他用户控制"><i data-lucide="lock"></i><span id="occupied-user">其他用户占用中</span></span>
            <span class="ctrl-sep" id="mirror-alas-dock-sep-before"></span>
-           <button class="cb-btn cb-alas" id="cb-alas" type="button" title="启动 ALAS" aria-label="启动 ALAS" aria-pressed="false" disabled><i data-lucide="bot"></i><span id="cb-alas-label">ALAS</span><small id="cb-alas-state">未加载</small></button>
+           <button class="cb-btn cb-alas" id="cb-alas" aria-describedby="cb-alas-state" type="button" title="启动 ALAS" aria-label="启动 ALAS" aria-pressed="false" disabled><i data-lucide="bot"></i><span id="cb-alas-label">ALAS</span><small id="cb-alas-state">未加载</small></button>
            <span class="ctrl-sep" id="mirror-alas-dock-sep-after"></span>
           <button class="cb-btn" id="cb-back" type="button" title="返回" aria-label="返回" disabled><i data-lucide="arrow-left"></i><span>返回</span></button>
           <button class="cb-btn" id="cb-home" type="button" title="主页" aria-label="主页" disabled><i data-lucide="house"></i><span>主页</span></button>
           <button class="cb-btn" id="cb-tasks" type="button" title="多任务" aria-label="多任务" disabled><i data-lucide="square-stack"></i><span>多任务</span></button>
+          <button class="cb-btn cb-keyboard" id="cb-keyboard" type="button" title="键盘输入" aria-label="开启键盘输入" aria-pressed="false" disabled><i data-lucide="keyboard"></i><span id="cb-keyboard-label">键盘</span></button>
           <button class="cb-btn cb-fullscreen" id="cb-fullscreen" type="button" title="全屏显示" aria-label="全屏显示" aria-pressed="false" disabled><i data-lucide="maximize"></i><span>全屏</span><small id="cb-fullscreen-state">窗口</small></button>
           <button class="cb-btn cb-rotate" id="cb-rotate" type="button" title="顺时针旋转 90°" aria-label="顺时针旋转画面" disabled><i data-lucide="rotate-cw"></i><span>旋转</span><small id="cb-rotate-state">0°</small></button>
           <div class="cb-more" id="cb-more">
@@ -293,9 +293,9 @@
               <button class="cb-item" id="cb-pop-reset-view" type="button" role="menuitem" disabled><i data-lucide="scan"></i><span>恢复自动方向</span></button>
               <button class="cb-item" type="button" role="menuitem" id="cb-pop-volume-up" data-device-action="volume_up" disabled><i data-lucide="volume-2"></i><span>音量增加</span></button>
               <button class="cb-item" type="button" role="menuitem" id="cb-pop-volume-down" data-device-action="volume_down" disabled><i data-lucide="volume-1"></i><span>音量降低</span></button>
-              <button class="cb-item" type="button" role="menuitem" id="cb-pop-power" data-device-action="power" disabled><i data-lucide="power"></i><span>电源键</span></button>
-              <button class="cb-item" type="button" role="menuitem" id="cb-pop-screen-off" data-device-action="screen_off" disabled><i data-lucide="monitor-off"></i><span>关闭设备屏幕</span><small>继续投屏</small></button>
-              <button class="cb-item" type="button" role="menuitem" id="cb-pop-screen-on" data-device-action="screen_on" disabled><i data-lucide="monitor"></i><span>点亮设备屏幕</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-notification-panel" data-device-action="notification_panel" disabled><i data-lucide="bell-ring"></i><span>安卓通知栏</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-settings-panel" data-device-action="settings_panel" disabled><i data-lucide="sliders-horizontal"></i><span>快捷设置</span></button>
+              <button class="cb-item" type="button" role="menuitem" id="cb-pop-collapse-panels" data-device-action="collapse_panels" disabled><i data-lucide="chevrons-up"></i><span>收起系统面板</span></button>
             </div>
           </div>
       </div>

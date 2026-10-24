@@ -709,6 +709,14 @@
     .cb-btn.cb-acquire:disabled { background:var(--c-surface-hover); color:var(--c-text-faint); box-shadow:none; }
     .cb-btn.cb-keyboard.held { color:#187a39; background:rgba(48,209,88,.12); }
     .cb-btn.cb-alas { position:relative; gap:4px; }
+    .ctrl-dock.dock-compact > .cb-alas::after,
+    .app.is-fullscreen .ctrl-dock > .cb-alas::after { content:""; position:absolute; top:7px; right:7px; width:5px; height:5px; border-radius:50%; background:var(--c-text-sub); }
+    .ctrl-dock.dock-compact > .cb-alas.is-active::after,
+    .app.is-fullscreen .ctrl-dock > .cb-alas.is-active::after { background:#1d9b4a; }
+    .ctrl-dock.dock-compact > .cb-alas.is-error::after,
+    .app.is-fullscreen .ctrl-dock > .cb-alas.is-error::after { background:currentColor; }
+    .ctrl-dock.dock-compact > .cb-alas[aria-busy="true"]::after,
+    .app.is-fullscreen .ctrl-dock > .cb-alas[aria-busy="true"]::after { background:#b76e00; }
     .cb-btn.cb-alas.is-active { color:#1d9b4a; background:rgba(48,209,88,.12); }
     /* ALAS 异常（出错/断开/不可达/超时）：底部按钮必须和顶部的红点一样是红色的。
        这些状态里 unreachable/timeout/disconnected 会让按钮不可点，默认 .3 透明度会把
@@ -1604,7 +1612,7 @@
     .app .sidebar .device-card.selected .dev-name { color:var(--c-text-strong); font-weight:650; }
     .app .sidebar .device-list { gap:6px; padding-right:0; }
     .app .sidebar .device-empty-card { border:0; background:var(--c-surface-hover); border-radius:12px; }
-    .app.sidebar-collapsed .sidebar .collapse-btn, .app.sidebar-collapsed .sidebar .menu-item { justify-content:center; padding-inline:0; }
+    .app.sidebar-collapsed .sidebar .collapse-btn, .app.sidebar-collapsed .sidebar .menu-item { justify-content:flex-start; padding-inline:12px; }
     .app .workspace { padding:14px 18px 16px; background:var(--c-surface-soft); }
     .app:not(.is-grid):not(.is-fullscreen) .workspace { gap:10px; }
     .app:not(.is-grid):not(.is-fullscreen) .status-pill {
@@ -1701,7 +1709,8 @@
       .app .status-pill .pill-label { font-size:10px; }
       .app .status-pill #pill-device .pill-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
       .app .mirror-panel { border-radius:8px; }
-      .app:not(.is-fullscreen) .ctrl-dock { max-width:calc(100% - 68px); }
+      .app:not(.is-grid):not(.is-fullscreen) .ctrl-dock { max-width:calc(100% - 56px); margin-left:0; margin-right:auto; }
+      .app:not(.is-grid):not(.is-fullscreen) .ctrl-dock.dock-primary-tight { max-width:calc(100% - 52px); margin-left:0; margin-right:auto; }
       .app:not(.is-fullscreen) .fullscreen-dock-toggle { right:8px; bottom:calc(10px + env(safe-area-inset-bottom)); }
       .app .vp-panel { width:calc(100vw - 16px); max-height:calc(100dvh - 16px); }
       .app .mg-toolbar-actions { width:100%; }
@@ -1761,7 +1770,7 @@
       .app:not(.is-fullscreen) .video-frame-empty .conn-actions > button { min-height:44px; height:44px; margin-top:0; }
     }
     .app #ctrl-dock { border-radius:20px; gap:4px; padding-inline:6px; background:var(--c-glass-strong,var(--c-surface)); backdrop-filter:blur(14px); box-shadow:0 10px 28px var(--c-shadow); }
-    .app #ctrl-dock > .cb-btn, .app #ctrl-dock > .cb-more > .cb-btn { border-radius:8px; padding-inline:8px; }
+    .app #ctrl-dock > :is(.cb-btn,.cb-item), .app #ctrl-dock > .cb-more > .cb-btn { border-radius:var(--dock-start-radius,8px) var(--dock-end-radius,8px) var(--dock-end-radius,8px) var(--dock-start-radius,8px); padding-inline:8px; }
     .app :is(.vp-seg,.vp-tabs) { position:relative; isolation:isolate; padding:3px; }
     .app :is(.vp-seg,.vp-tabs) > button { position:relative; z-index:1; }
     .app :is(.vp-seg,.vp-tabs) > .vp-seg-thumb {

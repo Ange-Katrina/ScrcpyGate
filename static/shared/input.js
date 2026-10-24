@@ -708,6 +708,10 @@ class ScrcpyInput {
     sendDeviceAction(action) {
         const keys = { back: 4, home: 3, tasks: 187, volume_up: 24, volume_down: 25, power: 26 };
         if (Object.prototype.hasOwnProperty.call(keys, action)) return this.sendKeyCodePress(keys[action]);
+        const panels = { notification_panel: 5, settings_panel: 6, collapse_panels: 7 };
+        if (Object.prototype.hasOwnProperty.call(panels, action)) {
+            return this.sendControlData(new Uint8Array([panels[action]]).buffer);
+        }
         if (action === 'screen_off' || action === 'screen_on') {
             return this.sendControlData(this.createPowerProtocolData(action === 'screen_on' ? 1 : 0));
         }

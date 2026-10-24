@@ -13,8 +13,8 @@
 
 * 只控制**前端可见性与可用性**（底部控制栏按钮、顶部状态条与通知中心）。
   权限判定完全不看这里：接口鉴权、控制权锁、ALAS 权限一律走原有逻辑。
-* 缺省即启用 / 缺省即当前排布。键缺失、角色缺失、取值非法、JSON 损坏都退化为默认，
-  老部署升级后工作台与之前完全一致，脏数据也不会锁死界面。
+* Defaults follow the catalog; optional Android panel actions start disabled.
+  Missing or invalid settings fall back to the recommended values.
 * 未知功能 id 会被忽略（不写入存储）。
 * 状态条按**功能块**（设备连接 / 观看端 / 剩余时长 / ALAS / 画质）各一个开关，
   不做字段级拆分。
@@ -49,7 +49,7 @@ ROTATE_FEATURE_ID = "rotate"
 LEGACY_DOCK_FEATURE_IDS = (
     "watch", "acquire", "keyboard", "@alas", "nav", "fullscreen", "rotate", "shot", "alt_keyboard", "more"
 )
-DEVICE_ACTION_FEATURE_IDS = ("volume_up", "volume_down", "power", "screen_off", "screen_on")
+DEVICE_ACTION_FEATURE_IDS = ("volume_up", "volume_down", "notification_panel", "settings_panel", "collapse_panels")
 
 WORKBENCH_FEATURE_GROUPS: tuple[dict[str, str], ...] = (
     {
@@ -176,16 +176,6 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "level": 1,
     },
     {
-        "id": "keyboard",
-        "group": "dock",
-        "label": "键盘输入",
-        "hint": "把电脑键盘输入发送到设备（放到二级就是「键盘输入」菜单项）",
-        "icon": "keyboard",
-        "dock_group": "control",
-        "levels": [1, 2],
-        "level": 1,
-    },
-    {
         "id": ALAS_ANCHOR,
         "group": "dock",
         "label": "ALAS 入口",
@@ -206,6 +196,16 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "levels": [1],
         "level": 1,
         "parts": ["返回", "主页", "多任务"],
+    },
+    {
+        "id": "keyboard",
+        "group": "dock",
+        "label": "键盘输入",
+        "hint": "把电脑键盘输入发送到设备（放到二级就是「键盘输入」菜单项）",
+        "icon": "keyboard",
+        "dock_group": "control",
+        "levels": [1, 2],
+        "level": 1,
     },
     {
         "id": "fullscreen",
@@ -303,34 +303,37 @@ WORKBENCH_DOCK_FEATURES: tuple[dict[str, object], ...] = (
         "level": 2,
     },
     {
-        "id": "power",
+        "id": "notification_panel",
         "group": "dock",
-        "label": "电源键",
-        "hint": "发送设备电源按键，需要持有控制权",
-        "icon": "power",
+        "label": "安卓通知栏",
+        "hint": "展开安卓系统通知栏，需要持有控制权",
+        "icon": "bell-ring",
         "dock_group": "device",
         "levels": [1, 2],
         "level": 2,
+        "default_enabled": False,
     },
     {
-        "id": "screen_off",
+        "id": "settings_panel",
         "group": "dock",
-        "label": "关闭设备屏幕",
-        "hint": "关闭真实设备屏幕并继续投屏，需要持有控制权",
-        "icon": "monitor-off",
+        "label": "快捷设置",
+        "hint": "展开安卓系统快捷设置，需要持有控制权",
+        "icon": "sliders-horizontal",
         "dock_group": "device",
         "levels": [1, 2],
         "level": 2,
+        "default_enabled": False,
     },
     {
-        "id": "screen_on",
+        "id": "collapse_panels",
         "group": "dock",
-        "label": "点亮设备屏幕",
-        "hint": "点亮真实设备屏幕，需要持有控制权",
-        "icon": "monitor",
+        "label": "收起系统面板",
+        "hint": "收起安卓通知栏与快捷设置，需要持有控制权",
+        "icon": "chevrons-up",
         "dock_group": "device",
         "levels": [1, 2],
         "level": 2,
+        "default_enabled": False,
     },
     {
         "id": "more",
@@ -411,9 +414,10 @@ def _coerce_flag(value: object, default: bool = True) -> bool:
 
 
 def default_switches() -> dict[str, dict[str, bool]]:
-    """全部启用 —— 也是「恢复默认」的目标值。"""
+    """Return recommended switches; optional Android panel actions start disabled."""
+    defaults = {str(item["id"]): bool(item.get("default_enabled", True)) for item in WORKBENCH_FEATURES}
     return {
-        role: {feature_id: True for feature_id in SWITCH_FEATURE_IDS}
+        role: {feature_id: defaults[feature_id] for feature_id in SWITCH_FEATURE_IDS}
         for role in WORKBENCH_ROLES
     }
 
@@ -481,6 +485,8 @@ def default_layout() -> dict[str, dict[str, list[str]]]:
         level1: list[str] = []
         level2: list[str] = []
         for item in WORKBENCH_DOCK_FEATURES:
+            if not item.get("default_enabled", True):
+                continue
             feature_id = str(item["id"])
             target = level2 if int(item.get("level") or 1) == 2 else level1
             target.append(feature_id)
@@ -546,7 +552,7 @@ def normalize_layout(raw: object, *, strict: bool = False) -> dict[str, dict[str
     提交了某个角色 = 以它提交的两级列表为准（**不补回**缺失功能：没放进任何一级
     就是「未启用」，这正是拖到左侧未启用区的语义）；未提交的角色保持默认排布。
     锚点 ``@alas`` 必须恰好出现在一级一次（它没有开关，显隐由 ALAS 页控制）。
-    未知功能 id（例如已撤掉的 ``rotate``，见 ISSUE-156）会被静默丢弃。
+    Non-strict reads discard obsolete feature ids such as physical-screen actions.
     """
     layout = default_layout()
     if raw is None:

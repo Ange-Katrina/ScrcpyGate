@@ -193,378 +193,139 @@
 }
 .wb-preview-empty { color: var(--admin-muted); font-size: 11.5px; }
 
-/* ---------- 底部菜单：一级/二级预览（工作台样式） ---------- */
-.wb-dock-levels { display: flex; flex-direction: column; gap: var(--wb-space-4); padding: 0 20px var(--wb-space-2); }
-.wb-level-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--wb-space-2); }
-.wb-level-head b { color: var(--admin-text); font-size: 12.5px; font-weight: 600; }
-.wb-level-head small { color: var(--admin-muted); font-size: 11px; }
-.wb-level-shell {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--wb-space-1);
-  width: max-content;
-  max-width: 100%;
-  min-height: 40px;
-  padding: 0 var(--wb-space-2);
-  border: 1px solid var(--admin-line);
-  border-radius: var(--page-radius-pill);
-  background: var(--admin-field);
-}
-.wb-level-shell.is-level2 {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 1px;
-  min-width: 200px;
-  min-height: 0;
-  padding: 5px;
-  border-radius: var(--page-radius-md);
-  background: var(--admin-surface);
-}
-/* 一级预览和真实控制栏一样：横向不换行，超宽就滚动（否则按钮会挤出胶囊）。 */
-.wb-level-shell.is-level1 { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
-.wb-level-shell.is-level1::-webkit-scrollbar { display: none; }
-.wb-dock-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: var(--page-radius-pill);
-  background: var(--admin-surface);
-  color: var(--admin-text);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.wb-dock-item small { color: var(--admin-muted); font-size: 9px; font-weight: 500; }
-.wb-dock-item [data-lucide] { width: 13px; height: 13px; }
-.wb-dock-item.is-menu {
-  height: 30px;
-  padding: 0 var(--wb-space-2);
-  border-radius: var(--page-radius-xs);
-  background: transparent;
-  font-size: 12px;
-  font-weight: 400;
-}
-.wb-dock-item.is-menu small { margin-left: auto; color: var(--admin-muted); font-size: 10px; }
-.wb-level-shell .wb-preview-empty { padding: 0 var(--wb-space-2); color: var(--admin-muted); font-size: 11.5px; }
-/* 卡片底部的操作行（Apple 的卡片动作放底部，而不是挤在标题栏）。 */
-.wb-card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wb-space-3);
-  padding: var(--wb-space-3) 20px var(--wb-space-4);
-  border-top: 1px solid var(--admin-line);
-  color: var(--admin-muted);
-  font-size: 11.5px;
-}
-/* 预览标记：状态条胶囊与「更多」菜单是**工作台另一个界面**的仿真，保留工作台形状；
-   这里在各自小标题后统一标「预览」，避免被读成"页面自己长了几个胶囊"。 */
-.wb-preview-tag {
-  display: inline-flex;
-  align-items: center;
-  height: var(--page-h-badge);
-  margin-left: 6px;
-  padding: 0 7px;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--page-radius-pill);
-  background: var(--admin-field);
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
 
-/* ---------- 编排弹窗（sheet） ---------- */
-/* 层级与应用其它弹窗对齐：遮罩 90/100、弹窗 95/105、Toast 120；低于 82 会被移动端侧栏盖住。 */
-.wb-layout-modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: var(--wb-space-6); }
-.wb-layout-modal[hidden] { display: none; }
-.wb-layout-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .42); }
-.wb-layout-dialog {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: min(100%, 940px);
-  max-height: min(88vh, 760px);
-  overflow: hidden;
-  border: 1px solid var(--admin-elev-border);
-  border-radius: var(--page-radius-lg);
-  background: var(--admin-elev);
-  box-shadow: var(--wb-shadow-modal);
+/* Preview and live toolbar share geometry and overflow policy. */
+.wb-dock-preview { min-width:0; padding:0 20px 16px; }
+.wb-preview-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 8px; }
+.wb-preview-modes { width:auto; flex:0 0 auto; }
+.wb-preview-heading > b { flex:1; min-width:0; white-space:nowrap; }
+.wb-preview-heading b { color:var(--admin-text); font-size:12px; font-weight:600; }
+.wb-preview-heading small { color:var(--admin-muted); font-size:11px; }
+.wb-preview-modes .sg-seg { flex:0 0 auto; min-width:0; min-height:32px; padding:0 10px; font-size:12px; gap:5px; }
+.wb-preview-modes [data-lucide] { width:14px; height:14px; }
+.wb-preview-stage { display:flex; align-items:center; justify-content:center; min-height:88px; padding:12px 10px; border-radius:16px; background:var(--admin-field); box-sizing:border-box; }
+.wb-preview-stage[data-preview-stage="phone"] { width:min(100%,390px); margin-inline:auto; }
+.wb-level-shell { display:flex; flex-wrap:nowrap; align-items:center; gap:4px; width:max-content; max-width:100%; min-height:40px; padding:3px 6px; overflow:hidden; box-sizing:border-box; border:1px solid var(--admin-border); border-radius:20px; background:var(--admin-surface); }
+.wb-preview-stage[data-preview-stage="phone"] .wb-level-shell { max-width:calc(100% - 40px); }
+.wb-preview-stage .wb-level-shell.is-primary-tight { max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.wb-level-shell.is-primary-tight::-webkit-scrollbar { display:none; }
+.wb-dock-item { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; gap:5px; min-width:32px; height:32px; padding:0 8px; box-sizing:border-box; border-radius:var(--dock-start-radius,8px) var(--dock-end-radius,8px) var(--dock-end-radius,8px) var(--dock-start-radius,8px); background:var(--admin-field); color:var(--admin-text); font-size:11px; font-weight:550; white-space:nowrap; }
+.wb-dock-item[hidden] { display:none; }
+.wb-dock-item[data-dock-feature="@alas"] { background:var(--admin-brand-soft); color:var(--admin-brand); }
+.wb-dock-item [data-lucide] { flex:none; width:16px; height:16px; }
+.wb-level-shell.is-compact { min-height:58px; }
+.wb-level-shell.is-compact .wb-dock-item { min-width:44px; height:44px; padding:0 8px; }
+.wb-level-shell.is-compact .wb-dock-item > span { display:none; }
+.wb-preview-menu-heading { justify-content:flex-start; margin:10px 0 0; min-height:36px; cursor:pointer; list-style:none; }
+.wb-preview-menu-heading::-webkit-details-marker { display:none; }
+.wb-preview-menu-heading [data-lucide] { width:15px; height:15px; transition:transform 160ms var(--wb-ease); }
+.wb-preview-details[open] .wb-preview-menu-heading [data-lucide] { transform:rotate(180deg); }
+.wb-preview-details[open] .wb-preview-secondary { margin-top:8px; }
+.wb-preview-menu-heading:focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; border-radius:8px; }
+.wb-preview-secondary { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:6px; }
+.wb-preview-secondary .wb-dock-item { justify-content:flex-start; width:100%; min-width:0; overflow:hidden; border-radius:8px; }
+.wb-preview-secondary .wb-dock-item > span { overflow:hidden; text-overflow:ellipsis; }
+.wb-preview-secondary .is-overflow::after { content:"↳"; margin-left:auto; color:var(--admin-muted); }
+.wb-preview-empty { color:var(--admin-muted); padding:8px 0; font-size:12px; }
+.wb-card[data-group="dock"] .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.wb-card[data-group="dock"] .panel-header > button { flex:none; }
+.wb-card-foot { padding:0 20px 16px; color:var(--admin-muted); font-size:11.5px; line-height:1.6; }
+.wb-preview-tag { display:inline-flex; margin-left:8px; color:var(--admin-muted); font-size:10px; font-weight:400; }
+/* A single list replaces three competing drop zones. */
+.wb-layout-modal { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; }
+.wb-layout-modal[hidden] { display:none; }
+.wb-layout-scrim { position:absolute; inset:0; background:rgba(0,0,0,.42); }
+.wb-layout-dialog { position:relative; display:flex; flex-direction:column; width:min(100%,920px); max-height:min(92dvh,900px); min-height:0; overflow:hidden; border:1px solid var(--admin-elev-border); border-radius:24px; background:var(--admin-elev); box-shadow:var(--wb-shadow-modal); }
+.wb-layout-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 20px 12px; }
+.wb-layout-head h2 { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0; color:var(--admin-text); font-size:17px; font-weight:650; }
+.wb-layout-head p { margin:6px 0 0; color:var(--admin-muted); font-size:12px; line-height:1.5; }
+.wb-role-label { padding:3px 8px; border-radius:8px; background:var(--admin-field); color:var(--admin-muted); font-size:11px; font-weight:500; }
+.wb-layout-close { display:grid; place-items:center; flex:none; width:44px; height:44px; margin:-6px -6px 0 0; border:0; border-radius:12px; background:transparent; color:var(--admin-muted); cursor:pointer; }
+.wb-layout-close:hover { background:var(--admin-hover); color:var(--admin-text); }
+.wb-layout-close [data-lucide] { width:20px; height:20px; }
+.wb-layout-body { display:block; padding:0 20px 16px; min-height:0; overflow:auto; scrollbar-width:none; }
+.wb-layout-body::-webkit-scrollbar { display:none; }
+.wb-layout-body .wb-dock-preview { padding:0; }
+.wb-layout-body .wb-preview-stage { min-height:76px; }
+.wb-layout-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px 16px; background:var(--admin-elev); color:var(--admin-muted); font-size:12px; }
+.wb-editor-tools { position:sticky; top:0; z-index:1; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px 0 8px; background:var(--admin-elev); }
+.wb-editor-tabs { max-width:100%; }
+.wb-editor-tabs .sg-seg { min-height:36px; padding:0 10px; gap:6px; font-size:12px; white-space:nowrap; }
+.wb-editor-tabs small { color:var(--admin-muted); font-size:10px; font-variant-numeric:tabular-nums; }
+.wb-layout-modal .wb-search { display:flex; align-items:center; gap:6px; width:210px; max-width:100%; min-height:38px; padding:0 10px; box-sizing:border-box; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-field); color:var(--admin-muted); }
+.wb-search [data-lucide] { width:15px; height:15px; flex:none; }
+.wb-layout-modal .wb-search input { width:100%; min-width:0; height:36px; padding:0; border:0; border-radius:0; background:transparent; color:var(--admin-text); font:inherit; font-size:12px; outline:0; box-shadow:none; }
+.wb-search:focus-within { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.wb-editor-hint { margin:0 0 10px; color:var(--admin-muted); font-size:12px; line-height:1.5; }
+.wb-zone { min-width:0; }
+.wb-zone-list { display:flex; flex-direction:column; gap:6px; min-height:90px; margin:0; padding:0; list-style:none; }
+.wb-zone.is-over { outline:2px solid var(--admin-brand); outline-offset:3px; border-radius:12px; }
+.wb-zone-empty { padding:28px 12px; color:var(--admin-muted); font-size:12px; text-align:center; }
+.wb-chip { display:grid; grid-template-columns:36px 20px minmax(0,1fr) auto; align-items:center; gap:8px; min-height:58px; padding:6px; box-sizing:border-box; border:1px solid transparent; border-radius:12px; background:var(--admin-field); }
+.wb-chip:hover { border-color:var(--admin-border); }
+.wb-chip.is-dragging { opacity:.5; }
+.wb-chip-handle { display:grid; place-items:center; width:36px; height:36px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--admin-faint); cursor:grab; }
+.wb-chip[draggable="false"] .wb-chip-handle { cursor:default; }
+.wb-chip-handle:hover { background:var(--admin-hover); color:var(--admin-text); }
+.wb-chip-handle [data-lucide], .wb-order [data-lucide] { width:16px; height:16px; }
+.wb-chip-icon { display:flex; color:var(--admin-muted); }
+.wb-chip-icon [data-lucide] { width:18px; height:18px; }
+.wb-chip-copy { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.wb-chip-copy b { color:var(--admin-text); font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+.wb-chip-copy small { overflow:hidden; color:var(--admin-muted); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.wb-chip-actions { display:flex; align-items:center; gap:4px; }
+.wb-position { box-sizing:border-box; width:116px; max-width:100%; height:36px; padding:0 8px; border:1px solid var(--admin-border); border-radius:8px; color:var(--admin-text); background:var(--admin-surface); font:inherit; font-size:12px; }
+.wb-position:disabled { opacity:.65; }
+.wb-order { display:grid; place-items:center; flex:none; width:36px; height:36px; padding:0; border:0; border-radius:8px; background:var(--admin-surface); color:var(--admin-muted); cursor:pointer; }
+.wb-order:disabled { opacity:.3; cursor:default; }
+.wb-order:hover:not(:disabled) { background:var(--admin-hover); color:var(--admin-text); }
+:is(.wb-layout-close,.wb-chip-handle,.wb-order,.wb-position):focus-visible { outline:2px solid var(--admin-brand); outline-offset:2px; }
+.wb-foot { position:sticky; bottom:12px; z-index:5; }
+.admin-content { container-type:inline-size; }
+@container (min-width:1080px) {
+  .wb-head,.wb-toolbar,.wb-layout,.wb-foot { max-width:1120px; }
+  .wb-card[data-group="topbar"] .wb-body { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; }
+  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child { grid-column:1 / -1; }
+  .wb-card[data-group="topbar"] .wb-children { display:contents; }
 }
-.wb-layout-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--wb-space-4);
-  padding: 20px 20px var(--wb-space-3);
+@media (max-width:767px), (pointer:coarse) {
+  .wb-btn,.wb-preview-modes .sg-seg,.wb-editor-tabs .sg-seg { min-height:44px; height:auto; }
+  .wb-order,.wb-chip-handle { width:44px; height:44px; }
+  .wb-position { height:44px; }
+  .wb-chip { grid-template-columns:44px 20px minmax(0,1fr) auto; }
+  .wb-layout-modal .wb-search { min-height:44px; }
+  .wb-layout-modal .wb-search input { height:42px; }
 }
-.wb-layout-head h2 { margin: 0; color: var(--admin-text); font-size: 16px; font-weight: 600; }
-.wb-layout-head p { margin: 5px 0 0; max-width: 620px; color: var(--admin-muted); font-size: 12px; line-height: 18px; }
-/* 键位提示：<kbd> 做实体键的样子（1px 线 + 4px 圆角 + 字段底色 + 内侧下沿） */
-.wb-kbd-hint { margin: 6px 0 0; color: var(--admin-muted); font-size: 11.5px; }
-.wb-kbd-hint kbd {
-  display: inline-block;
-  min-width: 19px;
-  margin: 0 1px;
-  padding: 0 4px;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--page-radius-xs);
-  background: var(--admin-field);
-  box-shadow: inset 0 -1px 0 var(--admin-border);
-  color: var(--admin-text);
-  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
-  font-size: 10.5px;
-  line-height: 16px;
-  text-align: center;
+@media (max-width:767px) {
+  .wb-head { align-items:stretch; flex-direction:column; }
+  .wb-layout,.wb-head,.wb-toolbar { max-width:none; }
+  .wb-toolbar { align-items:stretch; }
+  .wb-roletabs { flex:1 1 100%; min-width:0; }
+  .wb-roletabs .sg-seg { min-width:0; }
+  .wb-roletabs .sg-seg small { overflow:hidden; text-overflow:ellipsis; }
+  .wb-hint { flex-basis:100%; }
+  .wb-card .panel-header { padding:16px 16px 10px; flex-wrap:wrap; }
+  .wb-body { padding:0 16px 10px; }
+  .wb-dock-preview { padding:0 16px 12px; }
+  .wb-card-foot { padding:0 16px 12px; }
+  .wb-layout-modal { padding:8px; }
+  .wb-layout-dialog { max-height:calc(100dvh - 16px); border-radius:20px; }
+  .wb-layout-head,.wb-layout-body,.wb-layout-foot { padding-left:14px; padding-right:14px; }
+  .wb-foot { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:12px; bottom:8px; }
+  .wb-foot .wb-status { grid-column:1 / -1; }
+  .wb-foot-spacer { display:none; }
+  .wb-foot .wb-btn { padding:0 8px; font-size:12px; }
 }
-.wb-layout-close {
-  display: grid;
-  place-items: center;
-  width: var(--page-h-touch);
-  height: var(--page-h-touch);
-  flex: 0 0 auto;
-  margin: -6px -6px 0 0;
-  border: 0;
-  border-radius: var(--page-radius-pill);
-  background: transparent;
-  color: var(--admin-muted);
-  cursor: pointer;
-}
-.wb-layout-close:hover { color: var(--admin-text); background: var(--admin-hover); }
-.wb-layout-close:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: 2px; }
-.wb-layout-body {
-  display: grid;
-  grid-template-columns: minmax(0, 268px) minmax(0, 1fr);
-  gap: var(--wb-space-4);
-  padding: 0 20px var(--wb-space-4);
-  overflow: auto;
-  /* Windows 的覆盖式滚动条不滚动就不出现：内容超出一屏时，用户会以为"少了一项"
-     （二级菜单 2 条只看到 1 条就是这么来的）。这里给滚动条留位并让它常显。 */
-  scrollbar-gutter: stable;
-}
-.wb-layout-body::-webkit-scrollbar { width: 10px; }
-.wb-layout-body::-webkit-scrollbar-thumb { background: var(--admin-border); border-radius: 999px; }
-.wb-layout-body::-webkit-scrollbar-thumb:hover { background: var(--admin-elev-border); }
-.wb-layout-body::-webkit-scrollbar-track { background: transparent; }
-.wb-layout-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wb-space-3);
-  padding: var(--wb-space-3) 20px var(--wb-space-4);
-  border-top: 1px solid var(--admin-line);
-  color: var(--admin-muted);
-  font-size: 11.5px;
-}
-.wb-zone { display: flex; flex-direction: column; gap: var(--wb-space-2); min-width: 0; }
-.wb-zone-col { display: flex; flex-direction: column; gap: var(--wb-space-4); min-width: 0; }
-.wb-zone-title { display: flex; flex-direction: column; gap: 2px; }
-.wb-zone-title b { color: var(--admin-text); font-size: 12.5px; font-weight: 600; }
-.wb-zone-title small { color: var(--admin-muted); font-size: 11px; }
-.wb-zone-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wb-space-1);
-  min-height: 150px;
-  margin: 0;
-  padding: var(--wb-space-2);
-  list-style: none;
-  border: 1px dashed var(--admin-line);
-  border-radius: var(--page-radius-md);
-  background: var(--admin-field);
-  transition: background-color 150ms var(--wb-ease), border-color 150ms var(--wb-ease);
-}
-.wb-zone-list.is-dock { min-height: 84px; border-radius: var(--page-radius-lg); }
-.wb-zone.is-over .wb-zone-list {
-  border-style: solid;
-  border-color: var(--admin-brand);
-  background: var(--admin-brand-soft);
-}
-.wb-zone-empty { margin: 0; padding: 18px var(--wb-space-2); color: var(--admin-muted); font-size: 11.5px; text-align: center; }
-
-/* ---------- 编排条目 ---------- */
-.wb-chip {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  /* 列窄时让操作区换到第二行，绝不把按钮挤出条目（否则看起来像"内容缺失"）。 */
-  flex-wrap: wrap;
-  gap: var(--wb-space-1) var(--wb-space-2);
-  min-height: var(--page-h-touch);
-  padding: 2px var(--wb-space-1) 2px 0;
-  border: 1px solid var(--admin-line);
-  border-radius: var(--page-radius-sm);
-  background: var(--admin-surface);
-  transition: box-shadow 150ms var(--wb-ease), border-color 150ms var(--wb-ease), opacity 150ms var(--wb-ease);
-}
-.wb-zone-list.is-dock .wb-chip { border-radius: var(--page-radius-pill); }
-.wb-chip:hover { border-color: var(--admin-border); box-shadow: var(--wb-shadow-hairline); }
-.wb-chip.is-dragging { opacity: .6; box-shadow: var(--wb-shadow-float); }
-.wb-chip-handle {
-  display: grid;
-  place-items: center;
-  width: var(--page-h-touch);
-  height: var(--page-h-touch);
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: var(--page-radius-sm);
-  background: transparent;
-  color: var(--admin-faint);
-  cursor: grab;
-}
-.wb-chip-handle:hover { color: var(--admin-muted); background: var(--admin-hover); }
-.wb-chip-handle:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: -2px; }
-.wb-chip-handle [data-lucide] { width: 16px; height: 16px; }
-.wb-chip-icon { display: inline-flex; flex: 0 0 auto; color: var(--admin-muted); }
-.wb-chip-icon [data-lucide] { width: 16px; height: 16px; }
-.wb-chip-copy { display: flex; flex-direction: column; gap: 1px; flex: 1 1 120px; min-width: 0; padding-right: var(--wb-space-1); }
-.wb-chip-copy b { overflow: hidden; color: var(--admin-text); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.wb-chip-copy small {
-  overflow: hidden;
-  color: var(--admin-muted);
-  font-size: 11px;
-  /* 宽屏弹窗里描述有位置放两行：截成一行会砍掉近一半信息（视觉核对指出过） */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  white-space: normal;
-}
-.wb-chip-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--wb-space-1);
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-/* 条目里的「一级/二级」是同一套分段控件的紧凑版（视觉 28pt，命中区由外层 44pt 行提供）。 */
-.wb-chip-seg { padding: 2px; border-radius: var(--page-radius-pill); }
-.wb-chip-seg .sg-seg {
-  --sg-seg-height: 28px;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: var(--page-radius-pill);
-  font-size: 11.5px;
-}
-.wb-chip-seg .sg-seg:disabled { opacity: .4; cursor: not-allowed; }
-.wb-chip-remove {
-  display: grid;
-  place-items: center;
-  width: var(--page-h-touch);
-  height: var(--page-h-touch);
-  border: 0;
-  border-radius: var(--page-radius-pill);
-  background: transparent;
-  color: var(--admin-faint);
-  cursor: pointer;
-}
-.wb-chip-remove:hover { color: var(--admin-danger); background: var(--admin-danger-soft); }
-.wb-chip-remove:focus-visible { outline: 2px solid var(--admin-brand); outline-offset: -2px; }
-.wb-chip-remove [data-lucide] { width: 15px; height: 15px; }
-.wb-chip-fixed {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  padding-right: var(--wb-space-3);
-  color: var(--admin-muted);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-.wb-chip-fixed [data-lucide] { width: 13px; height: 13px; }
-
-/* ---------- 响应式 ---------- */
-/* 本页不加载 admin-page.css（容器声明在那里），所以 .admin-content 不是容器，
-   下面的 @container 永远不会命中——这里补上，让它按可用宽度判断，
-   与 /quality、/devices 等页保持一致；也避免用视口断点去猜侧栏宽度。 */
-.admin-content { container-type: inline-size; }
-/* 宽屏（按 .admin-content 的可用宽度判定）：内容列铺开到 --wb-column-wide，
-   宽度用在卡片内部，而不是把整页挤成中间一条窄列：
-   - 状态条卡片内部左右分栏：左边是总开关/通知中心，右边是状态条内容各块；
-   - 控制栏卡片把一级/二级预览并排，一级预览因此不会被裁成横向滚动。
-   卡片高度接近（约 370 / 300），也不会出现"一张 600 一张 300"的空洞。 */
-@container (min-width: 1080px) {
-  .wb-head,
-  .wb-toolbar,
-  .wb-layout { max-width: var(--wb-column-wide); }
-  /* 状态条卡片：总开关单独占一整行（一眼看出它是这一块的总闸），下面 5 个内容块 +
-     通知中心共 6 项排成两列 3+3 —— 刚好填满，不留空格。
-     上一版是"两个顶层开关一行 + 5 个子项两列（3+2）"，视觉核对指出层级读不出来、
-     且右下角空出一整行。 */
-  .wb-card[data-group="topbar"] .wb-body {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: min-content;
-    align-items: start;
-    gap: 0 var(--wb-space-8);
-  }
-  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child { grid-column: 1 / -1; }
-  /* 总闸要一眼看出来：标题加重一档 + 图标略大（视觉核对说之前它和子项"墨量"几乎一样），
-     子项左缩进 12px 表示隶属关系；两者都不动右侧开关轨道。 */
-  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child .wb-copy-text b { font-weight: 700; }
-  .wb-card[data-group="topbar"] .wb-body > .wb-row:first-child .wb-copy-icon [data-lucide] { width: 20px; height: 20px; }
-  /* 子项（含通知中心）左缩进 12px 表示隶属关系；不动右侧开关轨道。
-     注意子行在 DOM 里包在 .wb-children 里，所以不能只写 `> *:not(:first-child)`。 */
-  .wb-card[data-group="topbar"] .wb-body > .wb-children .wb-row,
-  .wb-card[data-group="topbar"] .wb-body > .wb-row:not(:first-child) { padding-left: var(--wb-space-3); }
-  /* 子项不再嵌套成一块：直接作为网格项参与两列排布（display:contents 保留 DOM 层级） */
-  .wb-card[data-group="topbar"] .wb-body > .wb-children { display: contents; }
-  /* 控制栏卡片：一级/二级预览并排，一级预览因此不会被裁成横向滚动 */
-  .wb-dock-levels {
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: center;
-    gap: var(--wb-space-6);
-  }
-  .wb-dock-level { min-width: 0; }
-}
-@media (max-width: 900px) {
-  .wb-layout-body { grid-template-columns: minmax(0, 1fr); }
-  .wb-layout-dialog { max-height: 92vh; }
-}
-/* 宽屏把三个区并排（未启用 / 一级 / 二级）：一级菜单 8 条很高，原来把二级菜单挤到
-   折线以下，看起来像"少了一项"。并排后 1500x950 下整个弹窗不需要滚动。
-   三个投放区拉满列高：既补齐"二级菜单只有 73px、右下留一大片空白"，也让投放目标更大。 */
-@media (min-width: 1024px) {
-  .wb-layout-dialog { width: min(100%, 1180px); }
-  .wb-layout-body {
-    grid-template-columns: minmax(0, 240px) minmax(0, 1fr) minmax(0, 340px);
-    align-items: stretch;
-  }
-  .wb-zone-col { display: contents; }
-  .wb-layout-modal .wb-zone { min-height: 0; }
-  .wb-layout-modal .wb-zone-list { flex: 1 1 auto; }
-}
-@media (max-width: 767px) {
-  .wb-head { align-items: stretch; flex-direction: column; }
-  .wb-actions { justify-content: space-between; }
-  .wb-btn { height: var(--page-h-touch); font-size: 13px; }
-  .wb-layout, .wb-head, .wb-toolbar { max-width: none; }
-  .wb-toolbar { align-items: stretch; }
-  /* 手机宽度下两个角色标签并排：让摘要小字截断，而不是把分段控件撑出内容列 */
-  .wb-roletabs { flex: 1 1 100%; min-width: 0; }
-  .wb-roletabs .sg-seg { min-width: 0; }
-  .wb-roletabs .sg-seg small { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .wb-card .panel-header { padding: 16px 16px 10px; }
-  .wb-body { padding: 0 16px 10px; }
-  .wb-dock-levels { padding: 0 16px var(--wb-space-1); }
-  .wb-card-foot { padding: var(--wb-space-3) 16px var(--wb-space-4); flex-direction: column; align-items: stretch; }
-  .wb-card-foot .wb-btn { width: 100%; }
-  .wb-layout-modal { padding: var(--wb-space-3); }
-  .wb-layout-head, .wb-layout-body, .wb-layout-foot { padding-left: 16px; padding-right: 16px; }
-  .wb-level-shell.is-level2 { min-width: 0; width: 100%; }
-  .wb-chip-copy small { display: none; }
-  /* 底部保存行在手机上竖排：状态一行、按钮各占整行（44px 触控目标已由 .wb-btn 提供）。 */
-  .wb-foot { max-width: none; flex-direction: column; align-items: stretch; gap: var(--wb-space-2); padding: var(--wb-space-3) 16px; }
-  .wb-foot-spacer { display: none; }
-  .wb-foot .wb-btn { width: 100%; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .wb-btn, .wb-chip, .wb-zone-list { transition: none; }
+@media (max-width:650px) {
+  .wb-preview-stage { padding-inline:6px; }
+  .wb-editor-tools { flex-direction:column; align-items:stretch; }
+  .wb-editor-tabs { justify-content:stretch; }
+  .wb-editor-tabs .sg-seg { flex:1; min-width:0; padding:0 5px; }
+  .wb-layout-modal .wb-search { width:100%; }
+  .wb-chip { grid-template-columns:44px 20px minmax(0,1fr); gap:4px 8px; }
+  .wb-chip-actions { grid-column:2 / -1; width:100%; }
+  .wb-position { flex:1; width:auto; }
+  .wb-chip-copy small { display:none; }
+  .wb-layout-head h2 { font-size:16px; }
+  .wb-preview-modes .sg-seg { padding:0 8px; }
 }

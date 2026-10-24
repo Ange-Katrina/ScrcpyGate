@@ -187,7 +187,7 @@
   .page-users .policy-field .field-input, .page-users .policy-field .policy-switch-row,
   .page-users .policy-actions > button { min-height: 44px; height: 44px; }
   .app .tool-btn { width: 44px; height: 44px; }
-  .app .cb-btn { min-height: 44px; }
+  .app .cb-btn, .app .ctrl-dock :is(.cb-btn, .cb-item) { min-height: 44px; }
   .sg-help-trigger { width: 44px; height: 44px; }
   .sg-help-pop { max-width: min(280px, calc(100vw - 24px)); }
 }
@@ -195,3 +195,12 @@
   .admin-shell :is(.users-toolbar, .panel-tools, .dev-head-actions) > :is(button, select) { flex-shrink: 0; }
   .admin-shell :is(.vis-filter, .policy-field, .param-control) :is(input:not([type=checkbox],[type=radio]), select, textarea) { max-width: 100%; }
 }
+
+/* Outer controls follow the toolbar inset; all inner controls retain their radius. */
+.sg-dock-shape {
+  --dock-outer-radius:20px;
+  --dock-inset:6px;
+  --dock-edge-radius:max(8px,calc(var(--dock-outer-radius) - var(--dock-inset) - 1px));
+}
+.sg-dock-shape [data-dock-edge~="start"] { --dock-start-radius:var(--dock-edge-radius); }
+.sg-dock-shape [data-dock-edge~="end"] { --dock-end-radius:var(--dock-edge-radius); }

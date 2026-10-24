@@ -72,21 +72,9 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       requestAnimationFrame(function(){ if(deviceList){ deviceList.classList.add('device-list-show'); } });
       function setCollapsed(collapsed){
-        sidebar.classList.add('is-transitioning');
-        app.classList.add('sidebar-transitioning');
-        if(deviceList){ deviceList.classList.remove('device-list-show'); }
-        requestAnimationFrame(function(){
-          sidebar.classList.toggle('is-collapsed',collapsed);
-          app.classList.toggle('sidebar-collapsed',collapsed);
-        });
-        window.clearTimeout(sidebar._transitionTimer);
-        sidebar._transitionTimer=window.setTimeout(function(){
-          sidebar.classList.remove('is-transitioning');
-          app.classList.remove('sidebar-transitioning');
-          if(!collapsed&&deviceList){
-            deviceList.classList.add('device-list-show');
-          }
-        },220);
+        // Keep the icon rail stable while CSS interpolates the sidebar width.
+        sidebar.classList.toggle('is-collapsed',collapsed);
+        app.classList.toggle('sidebar-collapsed',collapsed);
         toggle.setAttribute('aria-expanded',String(!collapsed));
         toggle.setAttribute('aria-label',collapsed?'展开侧边栏':'收起侧边栏');
         toggle.title=collapsed?'展开侧边栏':'收起侧边栏';
@@ -740,7 +728,7 @@ document.addEventListener('DOMContentLoaded',function(){
         acquireBtn.setAttribute('aria-label',acquireBtn.title);
         acquireBtn.innerHTML='<i data-lucide="'+(!canControl?'eye':(self?'shield-check':'mouse-pointer-click'))+'"></i><span id="cb-acquire-label">'+label+'</span>';
         if(keyboardBtn){
-          var keyboardLabel=keyboardOn?'关闭键盘':'键盘';
+          var keyboardLabel='键盘';
           keyboardBtn.disabled=!controlMenuAllowed;
           keyboardBtn.classList.toggle('held',keyboardOn);
           keyboardBtn.title=keyboardOn?'关闭键盘':'开启键盘输入';
@@ -750,14 +738,16 @@ document.addEventListener('DOMContentLoaded',function(){
           keyboardBtn.innerHTML='<i data-lucide="keyboard"></i><span id="cb-keyboard-label">'+keyboardLabel+'</span>';
         }
         occupiedChip.classList.toggle('show',controlState==='other'&&watching);
-        if(!menuAllowed) closeMoreMenu(true);
+        if(moreActionBusy) closeMoreMenu(true);
         navBtns.forEach(function(b){ b.disabled=!controlMenuAllowed || navBusy; b.setAttribute('aria-busy',navBusy?'true':'false'); });
         deviceActionBtns.forEach(function(b){
           b.disabled=!controlMenuAllowed;
           b.setAttribute('aria-busy',moreActionBusy?'true':'false');
         });
         if(resetViewBtn) resetViewBtn.disabled=!menuAllowed;
-        moreBtn.disabled=!menuAllowed || moreActionBusy;
+        // More also contains local and start-viewing actions after responsive overflow.
+        // Each item keeps its own permission and playback requirements.
+        moreBtn.disabled=moreActionBusy;
         moreBtn.setAttribute('aria-busy',moreActionBusy?'true':'false');
         // 全屏是纯显示层操作，不依赖投屏会话，始终可用。
         if(fullscreenBtn) fullscreenBtn.disabled=false;
@@ -848,6 +838,27 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         setWatchState('expired');
       }
+      function renderIdleWatchState(){
+        var overlay=document.querySelector('.conn-overlay[data-cstate="idle"]');
+        if(!overlay) return;
+        var title='尚未开始观看';
+        var description='从设备列表选择设备后，点击「开始观看」';
+        if(!selectedDevice){
+          if(deviceLoadError){
+            title='设备数据加载失败';
+            description='数据服务连接异常,请稍后重试';
+          }else if(deviceRenderSignature===null){
+            title='等待设备数据';
+            description='正在连接数据服务…';
+          }else{
+            title=mirrorIsAdmin()?'暂无可用设备':'此账户无设备绑定';
+            description=mirrorIsAdmin()?'添加设备并授权后即可在此观看':'请联系管理员绑定设备后再试';
+          }
+        }
+        overlay.querySelector('h2').textContent=tr(title);
+        overlay.querySelector('p').textContent=tr(description);
+        document.getElementById('start-watch').hidden=!selectedDevice;
+      }
       function setWatchState(s){
         // 原始层：状态切换逐次留痕（「到底是哪一步卡住」靠它对齐）。
         if(watchState!==s) rawState('watch_state',{from:String(watchState||''),to:String(s||'')});
@@ -856,6 +867,7 @@ document.addEventListener('DOMContentLoaded',function(){
           viewerStopWarning=false;
           document.title=baseDocumentTitle;
         }
+        if(s==='idle') renderIdleWatchState();
         var overlayState=(s==='websocket'||s==='hello')?'waiting':s;
         overlays.forEach(function(o){ o.classList.toggle('show',o.getAttribute('data-cstate')===overlayState); });
         var watching=s==='playing';
@@ -2438,25 +2450,16 @@ document.addEventListener('DOMContentLoaded',function(){
       function syncDockDensity(){
         if(!ctrlDock||dockHidden||!ctrlDock.offsetWidth||(cbPop&&cbPop.classList.contains('open'))) return;
         restoreDockOverflow();
-        ctrlDock.classList.remove('dock-compact');
+        ctrlDock.classList.remove('dock-compact','dock-primary-tight');
         // Compact view keeps the live controls visible; the existing button
         // nodes move into More so their handlers and permission state persist.
-        var narrow=window.matchMedia('(max-width:767px)').matches;
-        // Android navigation is a primary control group. Keep all three
-        // actions in the first level even when the dock has to compact.
-        var fixedPrimary=['cb-back','cb-home','cb-tasks'];
-        var secondary=narrow?['cb-keyboard','cb-alas','cb-rotate']:['cb-alas','cb-rotate'];
+        var narrow=window.matchMedia('(max-width:767px), (pointer:coarse) and (max-height:500px)').matches;
         if(narrow||dockOverflow()>0) ctrlDock.classList.add('dock-compact');
-        var candidates=['cb-rotate','cb-keyboard','cb-alas','cb-fullscreen','cb-watch','cb-acquire'];
-        Array.prototype.forEach.call(ctrlDock.querySelectorAll(':scope > button'),function(el){
-          if(fixedPrimary.indexOf(el.id)>=0) return;
-          if(candidates.indexOf(el.id)<0) candidates.unshift(el.id);
-        });
-        secondary.concat(candidates).forEach(function(id){
+        var candidates=window.ScrcpyGateWorkbenchDock.overflowCandidates(ctrlDock);
+        candidates.forEach(function(el){
           // The admin page stores the level; only a real width overflow may
           // temporarily move a level-one action into More at runtime.
           if(dockOverflow()<=0) return;
-          var el=document.getElementById(id);
           if(!el||el.parentNode!==ctrlDock||!el.getBoundingClientRect().width) return;
           var anchor=document.createComment('dock action');
           el.before(anchor);
@@ -2468,8 +2471,11 @@ document.addEventListener('DOMContentLoaded',function(){
           var moreWrap=document.getElementById('cb-more');
           if(dockOverflowItems.length===1) dockMoreWasOff=moreWrap.hasAttribute('data-feature-off');
           moreWrap.removeAttribute('data-feature-off');
-          moreBtn.disabled=false;
+          moreBtn.disabled=moreActionBusy;
         });
+        // On the narrowest phones, use the spare left margin so the core
+        // buttons and the collapse handle keep separate 44px hit targets.
+        if(narrow&&dockOverflow()>0) ctrlDock.classList.add('dock-primary-tight');
         normalizeDockSeparators();
       }
       var dockOverflowItems=[];
@@ -3534,6 +3540,7 @@ document.addEventListener('DOMContentLoaded',function(){
           alasFloatClose();
         }
         normalizeDockSeparators();
+        scheduleDockDensity();
         renderAlasPill(apConfig&&apConfig.name,apStateData.state);
         if(workbenchAlasVisible){
           apRefreshStatus();
@@ -3601,6 +3608,7 @@ document.addEventListener('DOMContentLoaded',function(){
           }
           child.hidden=!(visibleBefore&&visibleAfter);
         });
+        if(window.ScrcpyGateWorkbenchDock) window.ScrcpyGateWorkbenchDock.syncEdges(dock);
       }
       // 状态条：分区内条目全关 → 分区隐藏；两侧分区都不可见 → 分隔线隐藏。
       // 这里统一用 data-feature-off（只会「加隐藏」，不会把倒计时/ALAS 逻辑
@@ -4955,9 +4963,9 @@ document.addEventListener('DOMContentLoaded',function(){
         reset_view:['cb-pop-reset-view'],
         volume_up:['cb-pop-volume-up'],
         volume_down:['cb-pop-volume-down'],
-        power:['cb-pop-power'],
-        screen_off:['cb-pop-screen-off'],
-        screen_on:['cb-pop-screen-on'],
+        notification_panel:['cb-pop-notification-panel'],
+        settings_panel:['cb-pop-settings-panel'],
+        collapse_panels:['cb-pop-collapse-panels'],
         more:['cb-more'],
         '@alas':['mirror-alas-dock-sep-before','cb-alas','mirror-alas-dock-sep-after']
       };
@@ -4975,9 +4983,9 @@ document.addEventListener('DOMContentLoaded',function(){
         reset_view:'view',
         volume_up:'device',
         volume_down:'device',
-        power:'device',
-        screen_off:'device',
-        screen_on:'device',
+        notification_panel:'device',
+        settings_panel:'device',
+        collapse_panels:'device',
         more:'more',
         '@alas':'alas'
       };
@@ -4985,8 +4993,8 @@ document.addEventListener('DOMContentLoaded',function(){
       // 画面方向默认自动摆正（跟随设备 + 可用空间），「旋转」按钮在其基础上按 90° 叠加，
       // 点满四次回到自动角度（offset 归零）。
       var DOCK_MENU_DEFAULT={
-        level1:['watch','acquire','keyboard','@alas','nav','fullscreen','rotate','more'],
-        level2:['shot','alt_keyboard','auto_control','text_input','reset_view','volume_up','volume_down','power','screen_off','screen_on']
+        level1:['watch','acquire','@alas','nav','keyboard','fullscreen','rotate','more'],
+        level2:['shot','alt_keyboard','auto_control','text_input','reset_view','volume_up','volume_down']
       };
       var dockLayout=null;
       function dockMenuLayout(){
@@ -4995,14 +5003,18 @@ document.addEventListener('DOMContentLoaded',function(){
         var level2=layout&&layout.level2?layout.level2.slice():DOCK_MENU_DEFAULT.level2.slice();
         // Navigation is a primary Android control group. Migrate older or
         // custom layouts that placed it in More before rendering the dock.
-        level2=level2.filter(function(id){ return id!=='nav'; });
+        level2=level2.filter(function(id){ return id!=='nav'&&id!=='@alas'&&DOCK_MENU_IDS[id]; });
+        if(level1.indexOf('@alas')<0){
+          var alasInsertAt=level1.indexOf('acquire');
+          level1.splice(alasInsertAt<0?0:alasInsertAt+1,0,'@alas');
+        }
         if(level1.indexOf('nav')<0){
           var navInsertAt=level1.indexOf('fullscreen');
           if(navInsertAt<0) navInsertAt=level1.indexOf('rotate');
           if(navInsertAt<0) navInsertAt=level1.length;
           level1.splice(navInsertAt,0,'nav');
         }
-        return {level1:level1,level2:level2};
+        return {level1:level1.filter(function(id){ return !!DOCK_MENU_IDS[id]; }),level2:level2};
       }
       function dockFeatureEnabled(id){
         // 锚点没有开关：@alas 的显隐由「工作台显示」控制，rotate 始终显示（只可调顺序）。
@@ -5022,9 +5034,11 @@ document.addEventListener('DOMContentLoaded',function(){
           DOCK_MENU_IDS[id].forEach(function(elementId){
             var el=document.getElementById(elementId);
             if(!el) return;
+            el.setAttribute('data-dock-feature',id);
+            if(id==='more'&&moreBtn) moreBtn.setAttribute('data-dock-feature',id);
             if(level) el.removeAttribute('data-feature-off');
             else el.setAttribute('data-feature-off','');
-            el.hidden=false;
+            el.hidden=id==='@alas'&&workbenchAlasVisible===false;
             if(el.tagName==='BUTTON'){
               var toggle=el.hasAttribute('aria-pressed')||el.hasAttribute('aria-checked');
               var pressed=el.getAttribute('aria-checked')||el.getAttribute('aria-pressed')||'false';
@@ -5164,12 +5178,13 @@ document.addEventListener('DOMContentLoaded',function(){
         var failed=alasStateIsFault(state);
         apBottomToggle.disabled=!apCanToggle();
         apBottomToggle.setAttribute('aria-busy',String(apBusy||state==='loading'));
+        apBottomToggle.setAttribute('data-state',state);
         setDockTogglePressed(apBottomToggle,state==='running');
         apBottomToggle.classList.toggle('is-active',state==='running');
         // 异常状态用红色标出来：以前这里只有「运行中」有颜色，error/unreachable 落到默认灰。
         apBottomToggle.classList.toggle('is-error',failed);
         var label=apToggleText();
-        apBottomToggle.title=tr(label);
+        apBottomToggle.title=tr(label)+' · '+tr(apStateText(state));
         apBottomToggle.setAttribute('aria-label',tr(label));
         if(apBottomLabel) apBottomLabel.textContent='ALAS';
         if(apBottomState) apBottomState.textContent=tr(apStateText(state));

@@ -269,6 +269,10 @@ In 2.4.4, an account entering the expiry reminder window opens its expiry dialog
 
 In 2.4.5, the workbench status bar shows familiar resolution tiers such as **720p** and **1080p** for standard caps, including after changing quality or starting a stream. Custom caps retain their exact pixel limit. These labels describe the configured tier; the video keeps the device's aspect ratio. This release also updates Werkzeug to 3.1.9 to resolve PYSEC-2026-4312 and pass the runtime dependency audit.
 
+In 2.4.6, the main viewing area distinguishes loading, an account with no assigned devices, and device-service failures; no-device states hide the start-viewing action. The keyboard toolbar button keeps a fixed label and tracks explicit keyboard actions rather than canvas focus. Sidebar icons retain their horizontal position throughout collapse and expansion. ALAS remains a core first-level action even when narrower screens move other actions into More; the default layout places it after viewing and control, with compact status feedback. These changes do not alter device authorization or keyboard input routing.
+
+In 2.5.0, the toolbar adapts the outer button corners to its rounded frame, including after reordering, hiding and responsive overflow. Mirror management provides desktop/phone previews and a searchable editor with location selectors, touch-friendly ordering, per-role reset drafts, undo and protected saving. Power and physical-screen actions are removed from the ARM-emulator menu. Android notifications, quick settings and collapse-panels actions are optional and start disabled; add them per role in Mirror management. They use narrowly validated scrcpy messages and the existing control-ownership checks. Previously saved layout choices are retained.
+
 ### Updates and ALAS scheduling
 
 Update ScrcpyGate on the deployment host with `deploy.sh --update` and a published image reference. Check the tag or digest in GHCR before updating; floating tags such as `latest`, `dev`, and `edge` can change without a version-number change. The application does not check for or install its own updates and has no Docker access.

@@ -273,6 +273,7 @@ READ_PREFETCH_SCRIPT_TAG = f'<script src="{asset_url("shared/read-prefetch.js")}
 EXTRA_SCRIPTS = {
     "mirror.html": COMMON_PAGE_ASSETS + [
         PAGE_STYLE_TAGS["mirror"],
+        f'<script defer src="{asset_url("shared/workbench-dock.js")}"></script>',
         f'<script src="{asset_url("vendor/jmuxer.min.js")}"></script>',
         f'<script src="{asset_url("shared/input.js")}"></script>',
         f'<script src="{asset_url("shared/mirror-notifications.js")}"></script>',
@@ -304,7 +305,7 @@ EXTRA_SCRIPTS = {
     "alas.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["alas"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["alas"]],
     "quality.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["quality"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["quality"]],
     "security.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["security"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["security"], ACCESS_LOG_SCRIPT_TAG, BAN_SCRIPT_TAG, GEO_SCRIPT_TAG, POW_SOLVER_SCRIPT_TAG],
-    "mirror-admin.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["mirror-admin"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["mirror-admin"]],
+    "mirror-admin.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["mirror-admin"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, f'<script defer src="{asset_url("shared/workbench-dock.js")}"></script>', PAGE_SCRIPT_TAGS["mirror-admin"]],
     "logs.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["logs"], ADMIN_DASHBOARD_SCRIPT_TAG, AUDIT_MAPPING_SCRIPT_TAG, DASHBOARD_STATE_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["logs"]],
     "login.html": COMMON_PAGE_ASSETS + [PAGE_STYLE_TAGS["login"], AUDIT_MAPPING_SCRIPT_TAG, V2_ADAPTER_SCRIPT_TAG, POW_SOLVER_SCRIPT_TAG, PAGE_SCRIPT_TAGS["login"]],
     "push.html": COMMON_PAGE_ASSETS + [ADMIN_SHELL_STYLE_TAG, PAGE_STYLE_TAGS["push"], V2_ADAPTER_SCRIPT_TAG, ADMIN_SHELL_SCRIPT_TAG, PAGE_SCRIPT_TAGS["push"]],

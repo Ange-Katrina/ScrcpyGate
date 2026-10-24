@@ -4149,6 +4149,7 @@
     if (state.scrcpyInput.invalidateGeometry) state.scrcpyInput.invalidateGeometry();
   }
 
+  // Input focus is transient; keyboard actions and control teardown own the toolbar mode.
   function bindScrcpyInput(deviceId) {
     var ScrcpyInputClass = window.ScrcpyInput || (typeof ScrcpyInput !== 'undefined' ? ScrcpyInput : null);
     if (!ScrcpyInputClass) return null;
@@ -4187,9 +4188,7 @@
           emitControlFailure(e && e.message ? e.message : '控制通道发送失败');
           return false;
         }
-      }, target, size.width, size.height, false, function (active) {
-        emitKeyboardState(active);
-      }, emitControlFailure);
+      }, target, size.width, size.height, false, null, emitControlFailure);
       state.scrcpyInput.setKeyboardInputMode(state.keyboardInputMode);
       if (state.scrcpyInput.setViewportRotation) state.scrcpyInput.setViewportRotation(state.videoRotation);
       if (state.scrcpyInput.setFullscreenMode) state.scrcpyInput.setFullscreenMode(state.fullscreenMode);
@@ -4706,7 +4705,7 @@
     var action = body.action;
     var deviceId = body.deviceId || params.deviceId || params.id || state.deviceId;
     var inputActions = ['keyboard', 'keyboard_input_mode', 'send_text', 'back', 'home', 'tasks',
-      'volume_up', 'volume_down', 'power', 'screen_off', 'screen_on'];
+      'volume_up', 'volume_down', 'notification_panel', 'settings_panel', 'collapse_panels'];
     if (inputActions.indexOf(action) >= 0) {
       if (!state.controlOwnership) return Promise.reject(new Error('请先获取控制权'));
       if (!deviceId || String(deviceId) !== String(state.controlSocketDevice || '')) {
@@ -4762,7 +4761,7 @@
       } catch (e) { return Promise.reject(e); }
       return Promise.resolve({ ok: true, session: state.session });
     }
-    if (['back', 'home', 'tasks', 'volume_up', 'volume_down', 'power', 'screen_off', 'screen_on'].indexOf(action) >= 0) {
+    if (['back', 'home', 'tasks', 'volume_up', 'volume_down', 'notification_panel', 'settings_panel', 'collapse_panels'].indexOf(action) >= 0) {
       var actionInput = bindScrcpyInput(deviceId);
       if (!actionInput || !actionInput.sendDeviceAction) {
         return Promise.reject(new Error('控制输入不可用'));

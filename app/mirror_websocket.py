@@ -166,12 +166,20 @@ def _validate_set_clipboard_payload(payload: bytes) -> tuple[bool, str]:
     return True, ""
 
 
+def _validate_panel_payload(payload: bytes) -> tuple[bool, str]:
+    # scrcpy expand notifications, expand settings and collapse panels have no body.
+    return (True, "") if len(payload) == 1 else (False, "invalid_length")
+
+
 _CONTROL_PAYLOAD_VALIDATORS = {
     0: _validate_keycode_payload,
     1: _validate_text_payload,
     2: _validate_touch_payload,
     3: _validate_scroll_payload,
     4: _validate_action_payload,
+    5: _validate_panel_payload,
+    6: _validate_panel_payload,
+    7: _validate_panel_payload,
     9: _validate_set_clipboard_payload,
     10: _validate_action_payload,
 }

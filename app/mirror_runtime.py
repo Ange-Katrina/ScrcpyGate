@@ -67,7 +67,7 @@ SCRCPY_CLIENT_CONTROL_MAX_BYTES = max(
 )
 SCRCPY_CLIENT_CONTROL_MAX_BASE64_CHARS = ((SCRCPY_CLIENT_CONTROL_MAX_BYTES + 2) // 3) * 4
 # type 9 = set clipboard (sequence + paste flag + UTF-8 text), see ScrcpyInput.
-SCRCPY_ALLOWED_CLIENT_CONTROL_TYPES = frozenset({0, 1, 2, 3, 4, 9, 10})
+SCRCPY_ALLOWED_CLIENT_CONTROL_TYPES = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 9, 10})
 SCRCPY_STREAM_MODE = os.environ.get("SCRCPY_STREAM_MODE", "raw").strip().lower() or "raw"
 STREAM_HEALTH_TIMEOUT = float(os.environ.get("SCRCPY_STREAM_HEALTH_TIMEOUT", "5") or "5")
 # Do not hold the HTTP start request until a video keyframe arrives.  ADB and
